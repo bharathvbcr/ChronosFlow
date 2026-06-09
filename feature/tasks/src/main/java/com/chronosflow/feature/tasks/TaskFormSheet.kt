@@ -1361,27 +1361,12 @@ internal fun TaskFormSheet(
         }
         }
 
-        if (showTaskScheduleDetails) {
-            ChronosFormSection(
-            title = "DayDial preferences",
-            subtitle = taskScheduleSectionSubtitle(
-                title = taskTitle,
-                description = description,
-                targetDate = resolvedTargetDate,
-                durationMinutes = preferredDurationMinutes,
-                preferredStartMinute = parsedPreferredStartMinute,
-                suggestions = contextualAssistSuggestions
-            )
-            ) {
-            TaskCollapsedActionCard(
-                icon = Icons.Default.EventAvailable,
-                title = "Schedule details open",
-                summary = scheduleDraftSummary,
-                actionLabel = "Hide schedule",
-                expanded = true,
-                onClick = { scheduleExpanded = false },
-                modifier = Modifier.fillMaxWidth()
-            )
+        ChronosCollapsibleSection(
+            title = "Schedule",
+            summary = scheduleDraftSummary,
+            expanded = showTaskScheduleDetails,
+            onExpandedChange = { scheduleExpanded = it }
+        ) {
             ChronosOptionChips(
                 label = "Duration",
                 options = contextualTaskDurationPickerOptions(
@@ -1742,22 +1727,6 @@ internal fun TaskFormSheet(
                         )
                     }
                 }
-            }
-        }
-        } else {
-            ChronosFormSection(
-                title = "Schedule",
-                subtitle = "Open this when the task needs DayDial placement, recurrence, or reminders."
-            ) {
-                TaskCollapsedActionCard(
-                    icon = Icons.Default.EventAvailable,
-                    title = if (hasTaskSchedulePreferences) "Schedule saved" else "Timing and recurrence",
-                    summary = scheduleDraftSummary,
-                    actionLabel = if (hasTaskSchedulePreferences) "Manage schedule" else "Add schedule",
-                    expanded = false,
-                    onClick = { scheduleExpanded = true },
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
         }
 

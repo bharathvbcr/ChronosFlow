@@ -51,6 +51,7 @@ import com.chronosflow.core.ui.components.ChronosFormBottomSheet
 import com.chronosflow.core.ui.components.ChronosModalActionLabels
 import com.chronosflow.core.ui.components.ChronosFormPreviewCard
 import com.chronosflow.core.ui.components.commandPaletteSpeechQuery
+import com.chronosflow.core.ui.components.ChronosCollapsibleSection
 import com.chronosflow.core.ui.components.ChronosFormSection
 import com.chronosflow.core.ui.components.formatDurationLabel
 import com.chronosflow.core.ui.components.ChronosFormSwitchRow
@@ -617,26 +618,14 @@ internal fun HabitFormSheet(
         val suggestedHabitTemplateLabel = contextualHabitTemplateLabels
             .firstOrNull()
             ?.takeIf { hasHabitTemplateContext(habitContextQuery, contextualAssistSuggestions) }
-        ChronosFormSection(
+        ChronosCollapsibleSection(
             title = "Templates",
-            subtitle = if (suggestedHabitTemplateLabel != null) {
-                "Ranked from the typed habit and AI suggestions above; use only if a template is faster."
-            } else {
-                "Start from a prepared rhythm when that is faster."
-            }
+            summary = selectedTemplateLabel.ifBlank {
+                suggestedHabitTemplateLabel?.let { "Suggested: $it" } ?: "No template applied"
+            },
+            expanded = templatesExpanded || selectedTemplateLabel.isNotBlank(),
+            onExpandedChange = { templatesExpanded = it }
         ) {
-            EditableSummaryCard(
-                title = "Template setup",
-                value = selectedTemplateLabel.ifBlank {
-                    suggestedHabitTemplateLabel?.let { "Suggested: $it" } ?: "No template applied"
-                },
-                actionLabel = if (templatesExpanded) "Hide templates" else "Show templates",
-                expanded = templatesExpanded,
-                onClick = { templatesExpanded = !templatesExpanded }
-            )
-            if (!templatesExpanded && selectedTemplateLabel.isBlank()) {
-                return@ChronosFormSection
-            }
             ChronosOptionChips(
                 label = "Templates",
                 options = contextualHabitTemplateLabels,
@@ -676,24 +665,13 @@ internal fun HabitFormSheet(
                 }
             val archivedTemplates = filteredHistoryTemplates.filter(HabitHistoryTemplate::isArchived)
             val savedTemplates = filteredHistoryTemplates.filterNot(HabitHistoryTemplate::isArchived)
-            ChronosFormSection(
+            ChronosCollapsibleSection(
                 title = "From history",
-                subtitle = if (suggestedHistoryTemplateLabel != null) {
-                    "Saved setups are ranked from the typed habit and AI suggestions above."
-                } else {
-                    "Reuse archived or saved setups as instant templates. Recent picks stay near the top."
-                }
+                summary = suggestedHistoryTemplateLabel?.let { "Suggested: $it" }
+                    ?: "${historyTemplates.size} saved setups available",
+                expanded = historyExpanded,
+                onExpandedChange = { historyExpanded = it }
             ) {
-                EditableSummaryCard(
-                    title = "Saved setups",
-                    value = suggestedHistoryTemplateLabel?.let { "Suggested: $it" } ?: "${historyTemplates.size} available",
-                    actionLabel = if (historyExpanded) "Hide history" else "Browse history",
-                    expanded = historyExpanded,
-                    onClick = { historyExpanded = !historyExpanded }
-                )
-                if (!historyExpanded) {
-                    return@ChronosFormSection
-                }
                 OutlinedTextField(
                     value = historyQuery,
                     onValueChange = { historyQuery = it },
@@ -810,24 +788,13 @@ internal fun HabitFormSheet(
                 }
             }
         }
-        ChronosFormSection(
+        ChronosCollapsibleSection(
             title = "Launch app",
-            subtitle = habitLaunchSectionSubtitle(
-                title = habitTitle,
-                launchTarget = normalizedLaunchTarget,
-                suggestions = contextualAssistSuggestions
-            )
+            summary = normalizedLaunchTarget?.let { "${it.label} · ${it.value}" }
+                ?: "Reminders open ChronosFlow",
+            expanded = showHabitLaunchDetails,
+            onExpandedChange = { launchAppExpanded = it }
         ) {
-            EditableSummaryCard(
-                title = normalizedLaunchTarget?.label ?: "No app linked",
-                value = normalizedLaunchTarget?.value ?: "Reminders open ChronosFlow",
-                actionLabel = if (showHabitLaunchDetails) "Hide app" else "Link app",
-                expanded = showHabitLaunchDetails,
-                onClick = { launchAppExpanded = !launchAppExpanded }
-            )
-            if (!showHabitLaunchDetails) {
-                return@ChronosFormSection
-            }
             ChronosFormSwitchRow(
                 title = "Open app from reminders",
                 subtitle = "Use the linked package or deep link when this habit reminder fires.",
@@ -864,25 +831,12 @@ internal fun HabitFormSheet(
                 )
             }
         }
-        ChronosFormSection(
+        ChronosCollapsibleSection(
             title = "Recurrence",
-            subtitle = habitRecurrenceSectionSubtitle(
-                title = habitTitle,
-                cadence = cadence,
-                selectedPreset = selectedRecurrencePreset,
-                suggestions = contextualAssistSuggestions
-            )
+            summary = recurrenceSummary,
+            expanded = showHabitRecurrenceDetails,
+            onExpandedChange = { scheduleExpanded = it }
         ) {
-            EditableSummaryCard(
-                title = "Current rhythm",
-                value = recurrenceSummary,
-                actionLabel = if (showHabitRecurrenceDetails) "Hide controls" else "Adjust recurrence",
-                expanded = showHabitRecurrenceDetails,
-                onClick = { scheduleExpanded = !scheduleExpanded }
-            )
-            if (!showHabitRecurrenceDetails) {
-                return@ChronosFormSection
-            }
             ChronosOptionChips(
                 label = "Quick picks",
                 options = contextualHabitRecurrenceOptions(
@@ -1065,26 +1019,12 @@ internal fun HabitFormSheet(
             }
         }
 
-        ChronosFormSection(
+        ChronosCollapsibleSection(
             title = "Completion window",
-            subtitle = habitWindowSectionSubtitle(
-                title = habitTitle,
-                start = start,
-                end = end,
-                selectedPreset = windowPreset,
-                suggestions = contextualAssistSuggestions
-            )
+            summary = windowLabel ?: "Set a valid start and end time",
+            expanded = showHabitWindowDetails,
+            onExpandedChange = { windowExpanded = it }
         ) {
-            EditableSummaryCard(
-                title = "Current window",
-                value = windowLabel ?: "Set a valid start and end time",
-                actionLabel = if (showHabitWindowDetails) "Hide controls" else "Adjust window",
-                expanded = showHabitWindowDetails,
-                onClick = { windowExpanded = !windowExpanded }
-            )
-            if (!showHabitWindowDetails) {
-                return@ChronosFormSection
-            }
             ChronosOptionChips(
                 label = "Preset",
                 options = contextualHabitWindowOptions(
@@ -1138,25 +1078,13 @@ internal fun HabitFormSheet(
             )
         }
 
-        ChronosFormSection(
+        ChronosCollapsibleSection(
             title = "Effort",
-            subtitle = habitEffortSectionSubtitle(
-                title = habitTitle,
-                difficulty = difficultyInt,
-                isBundled = isBundled,
-                suggestions = contextualAssistSuggestions
-            )
+            summary = "${difficultyLabel(difficultyInt)} · " +
+                if (isBundled) "Visible on Today" else "Flexible habit",
+            expanded = showHabitEffortDetails,
+            onExpandedChange = { effortExpanded = it }
         ) {
-            EditableSummaryCard(
-                title = difficultyLabel(difficultyInt),
-                value = if (isBundled) "Visible on Today" else "Flexible habit",
-                actionLabel = if (showHabitEffortDetails) "Hide controls" else "Adjust effort",
-                expanded = showHabitEffortDetails,
-                onClick = { effortExpanded = !effortExpanded }
-            )
-            if (!showHabitEffortDetails) {
-                return@ChronosFormSection
-            }
             ChronosOptionChips(
                 label = "Quick effort",
                 options = contextualHabitDifficultyOptions(habitContextQuery, contextualAssistSuggestions),
@@ -2299,87 +2227,6 @@ private fun hydrationHabitTitleOption(context: String): String {
         ?.replace(Regex("\\s+"), " ")
         ?.trim()
     return if (amount.isNullOrBlank()) "Hydrate" else "Drink $amount water"
-}
-
-@Composable
-private fun EditableSummaryCard(
-    title: String,
-    value: String,
-    actionLabel: String,
-    expanded: Boolean,
-    onClick: () -> Unit
-) {
-    val containerColor = if (expanded) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
-    } else {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.18f)
-    }
-    val borderColor = if (expanded) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-    } else {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.32f)
-    }
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(
-                onClickLabel = actionLabel,
-                role = Role.Button,
-                onClick = onClick
-            )
-            .semantics(mergeDescendants = true) {
-                contentDescription = habitEditableSummaryCardContentDescription(
-                    title = title,
-                    value = value,
-                    actionLabel = actionLabel,
-                    expanded = expanded
-                )
-            },
-        shape = MaterialTheme.shapes.medium,
-        color = containerColor,
-        border = BorderStroke(1.dp, borderColor),
-        tonalElevation = 0.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Tap to edit and more · $actionLabel",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-            Icon(
-                imageVector = Icons.Default.Edit,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Icon(
-                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = null,
-                modifier = Modifier.size(22.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
 }
 
 internal fun habitEditableSummaryCardContentDescription(

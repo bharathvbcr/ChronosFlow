@@ -44,6 +44,7 @@ import com.chronosflow.core.ui.components.ChronosFormBottomSheet
 import com.chronosflow.core.ui.components.ChronosModalActionLabels
 import com.chronosflow.core.ui.components.ChronosFormPreviewCard
 import com.chronosflow.core.ui.components.commandPaletteSpeechQuery
+import com.chronosflow.core.ui.components.ChronosCollapsibleSection
 import com.chronosflow.core.ui.components.ChronosFormSection
 import com.chronosflow.core.ui.components.ChronosFormSwitchRow
 import com.chronosflow.core.ui.components.ChronosListCard
@@ -764,26 +765,14 @@ internal fun MedicationFormSheet(
                     suggestions = contextualAssistSuggestions
                 )
             }
-        ChronosFormSection(
+        ChronosCollapsibleSection(
             title = "Quick setup",
-            subtitle = if (suggestedMedicationTemplateLabel != null) {
-                "Templates are ranked from the medication text and AI suggestions above; confirm anything clinical yourself."
-            } else {
-                "Apply a premium routine, then fine-tune the details below."
-            }
+            summary = selectedTemplateLabel.ifBlank {
+                suggestedMedicationTemplateLabel?.let { "Suggested: $it" } ?: "No template applied"
+            },
+            expanded = templatesExpanded || selectedTemplateLabel.isNotBlank(),
+            onExpandedChange = { templatesExpanded = it }
         ) {
-            EditableSummaryCard(
-                title = "Template setup",
-                value = selectedTemplateLabel.ifBlank {
-                    suggestedMedicationTemplateLabel?.let { "Suggested: $it" } ?: "No template applied"
-                },
-                actionLabel = if (templatesExpanded) "Hide templates" else "Show templates",
-                expanded = templatesExpanded,
-                onClick = { templatesExpanded = !templatesExpanded }
-            )
-            if (!templatesExpanded && selectedTemplateLabel.isBlank()) {
-                return@ChronosFormSection
-            }
             ChronosOptionChips(
                 label = "Templates",
                 options = contextualMedicationTemplateLabels,
@@ -842,24 +831,13 @@ internal fun MedicationFormSheet(
                 }
             val archivedTemplates = filteredHistoryTemplates.filter(MedicationHistoryTemplate::isArchived)
             val savedTemplates = filteredHistoryTemplates.filterNot(MedicationHistoryTemplate::isArchived)
-            ChronosFormSection(
+            ChronosCollapsibleSection(
                 title = "From history",
-                subtitle = if (suggestedHistoryTemplateLabel != null) {
-                    "Saved plans are ranked from the medication text and AI suggestions above."
-                } else {
-                    "Reuse archived or saved plans as ready-made medication setups. Recent picks stay near the top."
-                }
+                summary = suggestedHistoryTemplateLabel?.let { "Suggested: $it" }
+                    ?: "${historyTemplates.size} saved plans available",
+                expanded = historyExpanded,
+                onExpandedChange = { historyExpanded = it }
             ) {
-                EditableSummaryCard(
-                    title = "Saved plans",
-                    value = suggestedHistoryTemplateLabel?.let { "Suggested: $it" } ?: "${historyTemplates.size} available",
-                    actionLabel = if (historyExpanded) "Hide history" else "Browse history",
-                    expanded = historyExpanded,
-                    onClick = { historyExpanded = !historyExpanded }
-                )
-                if (!historyExpanded) {
-                    return@ChronosFormSection
-                }
                 OutlinedTextField(
                     value = historyQuery,
                     onValueChange = { historyQuery = it },
@@ -1066,25 +1044,12 @@ internal fun MedicationFormSheet(
                 }
             }
         }
-        ChronosFormSection(
+        ChronosCollapsibleSection(
             title = "Dose",
-            subtitle = medicationDoseSectionSubtitle(
-                name = medicationContextQuery,
-                dosage = dosage,
-                unit = unit,
-                suggestions = contextualAssistSuggestions
-            )
+            summary = if (dosage.isBlank()) "Add prescribed amount" else "$dosage $unit",
+            expanded = showMedicationDoseDetails,
+            onExpandedChange = { doseExpanded = it }
         ) {
-            EditableSummaryCard(
-                title = "Dose",
-                value = if (dosage.isBlank()) "Add prescribed amount" else "$dosage $unit",
-                actionLabel = if (showMedicationDoseDetails) "Hide controls" else "Adjust dose",
-                expanded = showMedicationDoseDetails,
-                onClick = { doseExpanded = !doseExpanded }
-            )
-            if (!showMedicationDoseDetails) {
-                return@ChronosFormSection
-            }
             Text(
                 text = "Amount",
                 style = MaterialTheme.typography.labelMedium,
@@ -1123,41 +1088,23 @@ internal fun MedicationFormSheet(
             )
         }
 
-        ChronosFormSection(
+        ChronosCollapsibleSection(
             title = "Reminder",
-            subtitle = medicationReminderSectionSubtitle(
-                name = medicationContextQuery,
+            summary = buildMedicationScheduleSummary(
+                parsedReminder = parsedReminder,
+                needsSecondary = needsSecondary,
+                parsedSecondary = parsedSecondary,
+                needsThird = needsThird,
+                parsedThird = parsedThird,
+                needsFourth = needsFourth,
+                parsedFourth = parsedFourth,
+                isAsNeeded = isAsNeeded,
                 frequency = frequency,
-                primaryMinute = parsedReminder,
-                secondaryMinute = parsedSecondary,
-                thirdMinute = parsedThird,
-                fourthMinute = parsedFourth,
-                mealTiming = mealTiming,
-                windowMinutes = normalizedReminderWindowMinutes,
-                suggestions = contextualAssistSuggestions
-            )
+                windowMinutes = normalizedReminderWindowMinutes
+            ),
+            expanded = showMedicationReminderDetails,
+            onExpandedChange = { reminderExpanded = it }
         ) {
-            EditableSummaryCard(
-                title = "Reminder rhythm",
-                value = buildMedicationScheduleSummary(
-                    parsedReminder = parsedReminder,
-                    needsSecondary = needsSecondary,
-                    parsedSecondary = parsedSecondary,
-                    needsThird = needsThird,
-                    parsedThird = parsedThird,
-                    needsFourth = needsFourth,
-                    parsedFourth = parsedFourth,
-                    isAsNeeded = isAsNeeded,
-                    frequency = frequency,
-                    windowMinutes = normalizedReminderWindowMinutes
-                ),
-                actionLabel = if (showMedicationReminderDetails) "Hide controls" else "Adjust window",
-                expanded = showMedicationReminderDetails,
-                onClick = { reminderExpanded = !reminderExpanded }
-            )
-            if (!showMedicationReminderDetails) {
-                return@ChronosFormSection
-            }
             ChronosOptionChips(
                 label = "Frequency",
                 options = contextualMedicationFrequencyOptions(
@@ -1202,7 +1149,7 @@ internal fun MedicationFormSheet(
                         takeWithFood = choice == "With food"
                     }
                 )
-                return@ChronosFormSection
+                return@ChronosCollapsibleSection
             }
             ChronosOptionChips(
                 label = "Reminder window",
@@ -1350,17 +1297,12 @@ internal fun MedicationFormSheet(
             )
         }
 
-        ChronosFormSection(title = "Safety") {
-            EditableSummaryCard(
-                title = "Safety fields",
-                value = "${medicationForm.replaceFirstChar(Char::uppercase)} · ${route.replaceFirstChar(Char::uppercase)}",
-                actionLabel = if (showMedicationSafetyDetails) "Hide fields" else "Manage safety fields",
-                expanded = showMedicationSafetyDetails,
-                onClick = { safetyExpanded = !safetyExpanded }
-            )
-            if (!showMedicationSafetyDetails) {
-                return@ChronosFormSection
-            }
+        ChronosCollapsibleSection(
+            title = "Safety",
+            summary = "${medicationForm.replaceFirstChar(Char::uppercase)} · ${route.replaceFirstChar(Char::uppercase)}",
+            expanded = showMedicationSafetyDetails,
+            onExpandedChange = { safetyExpanded = it }
+        ) {
             ChronosOptionChips(
                 label = "Dosage form",
                 options = contextualMedicationFormOptions(
@@ -1411,20 +1353,15 @@ internal fun MedicationFormSheet(
             )
         }
 
-        ChronosFormSection(title = "Refill & notes") {
-            EditableSummaryCard(
-                title = "Refill & notes",
-                value = buildString {
-                    append(if (hasRefillTracking) "Refill tracking on" else "No refill tracking")
-                    if (notes.isNotBlank()) append(" · notes added")
-                },
-                actionLabel = if (showMedicationRefillDetails) "Hide fields" else "Manage refill and notes",
-                expanded = showMedicationRefillDetails,
-                onClick = { refillExpanded = !refillExpanded }
-            )
-            if (!showMedicationRefillDetails) {
-                return@ChronosFormSection
-            }
+        ChronosCollapsibleSection(
+            title = "Refill & notes",
+            summary = buildString {
+                append(if (hasRefillTracking) "Refill tracking on" else "No refill tracking")
+                if (notes.isNotBlank()) append(" · notes added")
+            },
+            expanded = showMedicationRefillDetails,
+            onExpandedChange = { refillExpanded = it }
+        ) {
             ChronosFormSwitchRow(
                 title = "Refill tracking",
                 subtitle = "Alert when doses remaining are low.",
@@ -2708,87 +2645,6 @@ private fun String.containsAnyTemplateWord(vararg words: String): Boolean {
             normalized in this
         } else {
             Regex("""\b${Regex.escape(normalized)}\b""").containsMatchIn(this)
-        }
-    }
-}
-
-@Composable
-private fun EditableSummaryCard(
-    title: String,
-    value: String,
-    actionLabel: String,
-    expanded: Boolean,
-    onClick: () -> Unit
-) {
-    val containerColor = if (expanded) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
-    } else {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.18f)
-    }
-    val borderColor = if (expanded) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-    } else {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.32f)
-    }
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(
-                onClickLabel = actionLabel,
-                role = Role.Button,
-                onClick = onClick
-            )
-            .semantics(mergeDescendants = true) {
-                contentDescription = editableSummaryCardContentDescription(
-                    title = title,
-                    value = value,
-                    actionLabel = actionLabel,
-                    expanded = expanded
-                )
-            },
-        shape = MaterialTheme.shapes.medium,
-        color = containerColor,
-        border = BorderStroke(1.dp, borderColor),
-        tonalElevation = 0.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Tap to edit and more · $actionLabel",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-            Icon(
-                imageVector = Icons.Default.Edit,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Icon(
-                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = null,
-                modifier = Modifier.size(22.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
