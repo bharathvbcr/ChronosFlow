@@ -77,8 +77,12 @@ class ChronosDialRenderModelBuilderTest {
 
         assertEquals(24, model.hourTicks.size)
         val labeledTicks = model.hourTicks.filter { it.label != null }
-        assertEquals(listOf("24", "6", "12", "18"), labeledTicks.map { it.label })
-        labeledTicks.forEach { assertTrue(it.isMajor) }
+        assertEquals(
+            listOf("24", "3", "6", "9", "12", "15", "18", "21"),
+            labeledTicks.map { it.label }
+        )
+        val majorLabels = labeledTicks.filter { it.isMajor }.map { it.label }
+        assertEquals(listOf("24", "6", "12", "18"), majorLabels)
         assertFalse(model.hourTicks[1].isMajor)
         assertNull(model.hourTicks[1].label)
     }

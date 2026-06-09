@@ -20,6 +20,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -147,6 +148,7 @@ fun ChronosDial(
         compactMode,
         compactWindowStart
     ) {
+        val conflictIds = conflictingBlockIds(blocks)
         ChronosDialRenderModelBuilder.build(
             blocks = blocks,
             freeTimeSegments = freeTimeSegments,
@@ -155,7 +157,12 @@ fun ChronosDial(
             upcomingBlockId = upcomingBlockId,
             missedBlockIds = missedBlockIds,
             compactMode = compactMode,
-            compactWindowStart = compactWindowStart
+            compactWindowStart = compactWindowStart,
+            conflictBlockIds = conflictIds,
+            blockingConflictIds = blocks
+                .filter { it.id in conflictIds && (it.isLocked || it.isProtected) }
+                .map { it.id }
+                .toSet()
         )
     }
     val hourLabelColor = colorScheme.onSurfaceVariant.copy(alpha = 0.82f).toArgb()
@@ -169,6 +176,17 @@ fun ChronosDial(
     }.apply {
         color = hourLabelColor
         textSize = hourLabelTextSize
+    }
+    val minorHourLabelColor = colorScheme.onSurfaceVariant.copy(alpha = 0.58f).toArgb()
+    val minorHourLabelTextSize = with(density) { 9.sp.toPx() }
+    val minorHourLabelPaint = remember(minorHourLabelColor, minorHourLabelTextSize) {
+        android.graphics.Paint().apply {
+            textAlign = android.graphics.Paint.Align.CENTER
+            isAntiAlias = true
+        }
+    }.apply {
+        color = minorHourLabelColor
+        textSize = minorHourLabelTextSize
     }
 
     val liveHandMinute by produceState(initialValue = currentMinute.toFloat(), currentMinute, showNowHand) {
@@ -522,16 +540,24 @@ fun ChronosDial(
             )
         }
 
+        // Dashed stroke reads as "open space" at a glance, distinct from solid blocks.
+        val freeTimeDash = PathEffect.dashPathEffect(
+            floatArrayOf(4.dp.toPx(), 7.dp.toPx())
+        )
         renderModel.freeTimeArcs.forEach { free ->
             if (!free.startAngle.isNaN() && free.sweepAngle > 0.1f) {
                 drawArc(
-                    color = colorScheme.secondary.copy(alpha = 0.18f),
+                    color = colorScheme.secondary.copy(alpha = 0.32f),
                     startAngle = free.startAngle,
                     sweepAngle = free.sweepAngle,
                     useCenter = false,
                     topLeft = ringTopLeft,
                     size = ringSize,
-                    style = Stroke(width = ringStroke * 0.3f, cap = StrokeCap.Round)
+                    style = Stroke(
+                        width = ringStroke * 0.34f,
+                        cap = StrokeCap.Round,
+                        pathEffect = freeTimeDash
+                    )
                 )
             }
         }
@@ -559,12 +585,12 @@ fun ChronosDial(
                 arc.isSelected -> 0.62f
                 arc.isActive -> 0.46f
                 arc.isUpcoming -> 0.3f
-                else -> 0.2f
+                else -> 0.26f
             }
             val coreStroke = when {
                 arc.isSelected -> blockRingStroke * 0.82f
                 arc.isActive -> blockRingStroke * 0.76f
-                else -> blockRingStroke * 0.65f
+                else -> blockRingStroke * 0.72f
             }
 
             drawArc(
@@ -648,6 +674,36 @@ fun ChronosDial(
             }
         }
 
+        // Conflict overlays: dashed error arc over each clashing block so double-booked
+        // time is visible at a glance without opening the block.
+        if (renderModel.conflictOverlays.isNotEmpty()) {
+            val conflictDash = PathEffect.dashPathEffect(
+                floatArrayOf(5.dp.toPx(), 5.dp.toPx())
+            )
+            val conflictStroke = if (enableThreeRingMode) ringStroke * 0.42f else ringStroke
+            renderModel.conflictOverlays.forEach { overlay ->
+                if (overlay.startAngle.isNaN()) return@forEach
+                val overlayRadius = if (enableThreeRingMode) {
+                    ringRadius(outerRadius / 2f, overlay.ring)
+                } else {
+                    outerRadius / 2f
+                }
+                drawArc(
+                    color = colorScheme.error.copy(alpha = if (overlay.isBlocking) 0.85f else 0.6f),
+                    startAngle = overlay.startAngle,
+                    sweepAngle = overlay.sweepAngle,
+                    useCenter = false,
+                    topLeft = Offset(center.x - overlayRadius, center.y - overlayRadius),
+                    size = Size(overlayRadius * 2f, overlayRadius * 2f),
+                    style = Stroke(
+                        width = conflictStroke * 0.16f,
+                        cap = StrokeCap.Round,
+                        pathEffect = conflictDash
+                    )
+                )
+            }
+        }
+
         dragIndicatorMinute?.let { indicatorMinute ->
             val indicatorAngle = if (isWindowed) {
                 minuteToAngleInWindow(visibleStartInWindow(indicatorMinute), 0, windowMinutes)
@@ -695,7 +751,7 @@ fun ChronosDial(
             )
 
             drawLine(
-                color = colorScheme.primary.copy(alpha = 0.2f),
+                color = colorScheme.primary.copy(alpha = 0.32f),
                 start = center,
                 end = handEnd,
                 strokeWidth = 8.dp.toPx(),
@@ -709,16 +765,29 @@ fun ChronosDial(
                 strokeWidth = 3.dp.toPx(),
                 cap = StrokeCap.Round
             )
+
+            // Tip dot anchors the current time on the ring for instant scanning.
+            drawCircle(
+                color = colorScheme.primary.copy(alpha = 0.25f),
+                radius = 9.dp.toPx(),
+                center = handEnd
+            )
+            drawCircle(
+                color = colorScheme.primary,
+                radius = 5.dp.toPx(),
+                center = handEnd
+            )
         }
 
         renderModel.hourTicks.forEach { tick ->
             if (tick.angle.isNaN()) return@forEach
             tick.label?.let { label ->
+                val paint = if (tick.isMajor) hourLabelPaint else minorHourLabelPaint
                 val rad = Math.toRadians(tick.angle.toDouble())
                 val labelRadius = outerRadius / 2f + ringStroke / 2f + 16.dp.toPx()
                 val labelX = center.x + cos(rad).toFloat() * labelRadius
-                val labelY = center.y + sin(rad).toFloat() * labelRadius + hourLabelPaint.textSize / 3f
-                drawContext.canvas.nativeCanvas.drawText(label, labelX, labelY, hourLabelPaint)
+                val labelY = center.y + sin(rad).toFloat() * labelRadius + paint.textSize / 3f
+                drawContext.canvas.nativeCanvas.drawText(label, labelX, labelY, paint)
             }
         }
 
@@ -945,6 +1014,26 @@ private fun circularMinuteDelta(fromMinute: Int, toMinute: Int): Int {
 
 private fun circularDuration(startMinute: Int, endMinute: Int): Int {
     return ((endMinute - startMinute + 1440) % 1440).let { if (it == 0) 1440 else it }
+}
+
+/**
+ * Blocks on the same ring whose time ranges overlap. Different rings layer by design
+ * (calendar vs plan vs actions), so only same-ring overlaps count as conflicts.
+ */
+internal fun conflictingBlockIds(blocks: List<TimeBlockUiModel>): Set<String> {
+    val conflicts = mutableSetOf<String>()
+    blocks.groupBy { ringForBlock(it) }.values.forEach { ringBlocks ->
+        val sorted = ringBlocks.sortedBy { it.startMinuteOfDay }
+        for (index in 0 until sorted.size - 1) {
+            val current = sorted[index]
+            val next = sorted[index + 1]
+            if (current.startMinuteOfDay + current.durationMinutes > next.startMinuteOfDay) {
+                conflicts += current.id
+                conflicts += next.id
+            }
+        }
+    }
+    return conflicts
 }
 
 internal fun ringForBlock(block: TimeBlockUiModel): DialRing {

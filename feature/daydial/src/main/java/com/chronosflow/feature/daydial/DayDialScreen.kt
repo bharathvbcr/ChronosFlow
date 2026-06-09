@@ -309,6 +309,7 @@ private fun DayDialDataScreen(
     }
     val hasGeneratedAiPlanResult = vmState.aiPlanResult != null ||
         vmState.explainPlan != null ||
+        vmState.repairPlanResult != null ||
         vmState.suggestedBlocks.isNotEmpty()
     var aiPlanAutoDismissState by remember { mutableStateOf(AiPlanAutoDismissState()) }
 
@@ -422,6 +423,7 @@ private fun DayDialDataScreen(
             aiPlanResult = vmState.aiPlanResult,
             explainPlan = vmState.explainPlan,
             explainPlanSource = vmState.explainPlanSource,
+            repairPlanResult = vmState.repairPlanResult,
             aiPlanGoalPrefill = vmState.aiPlanGoalPrefill,
             aiPlanSuggestedGoals = vmState.aiPlanSuggestedGoals,
             focusElapsedSeconds = focusElapsedSeconds,

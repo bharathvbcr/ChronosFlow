@@ -88,6 +88,7 @@ internal fun SheetContent(
     aiPlanResult: String?,
     explainPlan: String?,
     explainPlanSource: AssistGenAiSource?,
+    repairPlanResult: String? = null,
     aiPlanGoalPrefill: String? = null,
     aiPlanSuggestedGoals: List<String> = emptyList(),
     focusElapsedSeconds: Long,
@@ -600,7 +601,7 @@ internal fun SheetContent(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(if (isGenerating) "Generating Schedule..." else "Generate Plan") }
-                if (aiPlanResult != null || explainPlan != null) {
+                if (aiPlanResult != null || explainPlan != null || repairPlanResult != null) {
                     Spacer(Modifier.height(12.dp))
                     ChronosListCard {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -618,6 +619,10 @@ internal fun SheetContent(
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
+                            }
+                            repairPlanResult?.let { repair ->
+                                Text("Conflict repair steps", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                                Text(repair, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }

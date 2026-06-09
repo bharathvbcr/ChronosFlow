@@ -99,6 +99,7 @@ internal fun PlanTab(
     onRejectAiSuggestion: (String) -> Unit,
     onRebalanceDay: () -> Unit,
     onExplainPlan: () -> Unit,
+    onRepairConflicts: (String) -> Unit = {},
     onOpenAiSheet: () -> Unit,
     onOpenTasks: () -> Unit,
     onOpenHabits: () -> Unit,
@@ -177,7 +178,12 @@ internal fun PlanTab(
                 PlanScheduleAttentionCard(
                     largeGapCount = largeGaps.size,
                     overlapCount = overlaps.size,
-                    onFillGaps = onFillGaps
+                    onFillGaps = onFillGaps,
+                    onRepairConflicts = if (overlaps.isEmpty()) {
+                        null
+                    } else {
+                        { onRepairConflicts(conflictDescription(overlaps)) }
+                    }
                 )
             }
         }
@@ -730,7 +736,8 @@ private fun PlanPlanningSurface(
 private fun PlanScheduleAttentionCard(
     largeGapCount: Int,
     overlapCount: Int,
-    onFillGaps: () -> Unit
+    onFillGaps: () -> Unit,
+    onRepairConflicts: (() -> Unit)? = null
 ) {
     val actionLabel = planScheduleAttentionActionLabel(largeGapCount, overlapCount)
     val buttonText = planScheduleAttentionButtonText(largeGapCount, overlapCount)
@@ -757,6 +764,16 @@ private fun PlanScheduleAttentionCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            if (onRepairConflicts != null) {
+                TextButton(
+                    onClick = onRepairConflicts,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Repair conflicting blocks with AI"
+                    }
+                ) {
+                    Text("Repair with AI")
+                }
+            }
             TextButton(
                 onClick = onFillGaps,
                 modifier = Modifier.semantics {
@@ -767,6 +784,16 @@ private fun PlanScheduleAttentionCard(
             }
         }
     }
+}
+
+internal fun conflictDescription(overlaps: List<TimeRangeUi>): String =
+    overlaps.joinToString(prefix = "Overlapping blocks at: ", separator = ", ") { range ->
+        "${formatDialMinute(range.startMinute)}-${formatDialMinute(range.endMinute)}"
+    }
+
+private fun formatDialMinute(minute: Int): String {
+    val normalized = ((minute % 1440) + 1440) % 1440
+    return "%02d:%02d".format(normalized / 60, normalized % 60)
 }
 
 @Composable

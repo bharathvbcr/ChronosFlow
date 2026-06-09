@@ -126,7 +126,7 @@ fun ChronosTheme(
                     colorScheme.primary
                 }
             ),
-            typography = Typography(),
+            typography = ChronosTypography,
             shapes = ChronosShapes,
             content = content
         )

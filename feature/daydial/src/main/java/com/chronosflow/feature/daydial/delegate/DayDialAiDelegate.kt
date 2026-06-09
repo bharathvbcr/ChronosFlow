@@ -64,6 +64,9 @@ class DayDialAiDelegate @Inject constructor(
     private val _explainPlanSource = MutableStateFlow<AssistGenAiSource?>(null)
     val explainPlanSource = _explainPlanSource.asStateFlow()
 
+    private val _repairPlanResult = MutableStateFlow<String?>(null)
+    val repairPlanResult = _repairPlanResult.asStateFlow()
+
     private val _aiPlanGoalPrefill = MutableStateFlow<String?>(null)
     val aiPlanGoalPrefill = _aiPlanGoalPrefill.asStateFlow()
 
@@ -153,6 +156,36 @@ class DayDialAiDelegate @Inject constructor(
             )
             _explainPlan.value = explanation.text
             _explainPlanSource.value = explanation.source
+        }
+    }
+
+    fun repairConflictingPlan(
+        scope: CoroutineScope,
+        date: LocalDate,
+        conflictDescription: String
+    ) {
+        scope.launch {
+            _repairPlanResult.value = null
+            val blocks = repository.getTimeBlocksByDate(date).first()
+            val planSummary = blocks
+                .sortedBy { it.startMinuteOfDay }
+                .joinToString("\n") { block ->
+                    buildString {
+                        append("- ${block.title} ")
+                        append(formatDisplayMinute(block.startMinuteOfDay))
+                        append("-")
+                        append(formatDisplayMinute((block.startMinuteOfDay + block.durationMinutes) % 1440))
+                        if (block.isLocked) append(" [locked]")
+                        if (block.isProtected) append(" [protected]")
+                    }
+                }
+            _repairPlanResult.value = runCatching {
+                aiPlanner.repairDayPlan(
+                    currentPlan = planSummary,
+                    conflictDescription = conflictDescription,
+                    privacyMode = _privacyMode.value
+                )
+            }.getOrElse { "Plan repair is unavailable right now. Try again in a moment." }
         }
     }
 

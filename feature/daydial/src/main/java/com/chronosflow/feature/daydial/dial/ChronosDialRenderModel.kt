@@ -43,7 +43,8 @@ data class DialConflictOverlay(
     val blockId: String,
     val startAngle: Float,
     val sweepAngle: Float,
-    val isBlocking: Boolean
+    val isBlocking: Boolean,
+    val ring: DialRing
 )
 
 data class ChronosDialRenderModel(
@@ -153,14 +154,15 @@ object ChronosDialRenderModelBuilder {
                 minuteToAngle(minute)
             }
             val isCardinalHour = hour == 0 || hour == 6 || hour == 12 || hour == 18
+            // Cardinal hours read large; intermediate 3-hour marks get small labels so
+            // times can be read at a glance without interpolating across 6-hour gaps.
             DialHourTick(
                 angle = angle,
                 isMajor = isCardinalHour,
-                label = when (hour) {
-                    0 -> "24"
-                    6 -> "6"
-                    12 -> "12"
-                    18 -> "18"
+                label = when {
+                    hour == 0 -> "24"
+                    isCardinalHour -> hour.toString()
+                    !compactMode && hour % 3 == 0 -> hour.toString()
                     else -> null
                 }
             )
@@ -195,7 +197,8 @@ object ChronosDialRenderModelBuilder {
                         blockId = block.id,
                         startAngle = startAngle,
                         sweepAngle = sweep,
-                        isBlocking = block.id in blockingConflictIds
+                        isBlocking = block.id in blockingConflictIds,
+                        ring = ringForBlock(block)
                     )
                 }
             }

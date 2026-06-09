@@ -538,6 +538,10 @@ internal fun DayDialMainContent(
                         onRejectAiSuggestion = viewModel::rejectAiSuggestion,
                         onRebalanceDay = viewModel::rebalanceDay,
                         onExplainPlan = viewModel::explainCurrentPlan,
+                        onRepairConflicts = { conflictDescription ->
+                            viewModel.repairConflictingPlan(conflictDescription)
+                            onActiveSheetChanged(SheetTarget.AiPlan)
+                        },
                         onOpenAiSheet = { onActiveSheetChanged(SheetTarget.AiPlan) },
                         onOpenTasks = onOpenTasks,
                         onOpenHabits = onOpenHabits,

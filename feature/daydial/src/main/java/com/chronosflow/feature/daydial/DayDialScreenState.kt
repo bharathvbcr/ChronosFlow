@@ -43,6 +43,7 @@ internal data class DayDialViewModelState(
     val aiPlanResult: String?,
     val explainPlan: String?,
     val explainPlanSource: AssistGenAiSource?,
+    val repairPlanResult: String?,
     val aiPlanGoalPrefill: String?,
     val aiPlanSuggestedGoals: List<String>,
     val isGenerating: Boolean,
@@ -81,6 +82,7 @@ internal fun rememberDayDialViewModelState(viewModel: DayDialViewModel): DayDial
     val aiPlanResult by viewModel.aiPlanResult.collectAsStateWithLifecycle()
     val explainPlan by viewModel.explainPlan.collectAsStateWithLifecycle()
     val explainPlanSource by viewModel.explainPlanSource.collectAsStateWithLifecycle()
+    val repairPlanResult by viewModel.repairPlanResult.collectAsStateWithLifecycle()
     val aiPlanGoalPrefill by viewModel.aiPlanGoalPrefill.collectAsStateWithLifecycle()
     val aiPlanSuggestedGoals by viewModel.aiPlanSuggestedGoals.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
@@ -117,6 +119,7 @@ internal fun rememberDayDialViewModelState(viewModel: DayDialViewModel): DayDial
         aiPlanResult = aiPlanResult,
         explainPlan = explainPlan,
         explainPlanSource = explainPlanSource,
+        repairPlanResult = repairPlanResult,
         aiPlanGoalPrefill = aiPlanGoalPrefill,
         aiPlanSuggestedGoals = aiPlanSuggestedGoals,
         isGenerating = isGenerating,

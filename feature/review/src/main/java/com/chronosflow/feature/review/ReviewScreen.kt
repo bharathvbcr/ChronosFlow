@@ -51,6 +51,7 @@ fun ReviewScreen(
 ) {
     val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
     val review by viewModel.review.collectAsStateWithLifecycle()
+    val weeklyRollup by viewModel.weeklyRollup.collectAsStateWithLifecycle()
     val bottomInset = LocalChronosShellBottomInset.current
 
     ChronosScreenScaffold(
@@ -110,6 +111,48 @@ fun ReviewScreen(
                     }
                 }
             }
+
+            weeklyRollup?.let { rollup ->
+                item {
+                    ChronosSectionHeader(
+                        title = "This week",
+                        subtitle = "${rollup.daysWithPlans} planned day${if (rollup.daysWithPlans == 1) "" else "s"}"
+                    )
+                }
+                item { WeeklyRollupCard(rollup) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeeklyRollupCard(rollup: WeeklyReviewRollup) {
+    ChronosListCard {
+        Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${rollup.executionPercent}% executed",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "${formatMinutes(rollup.actualMinutes)} of ${formatMinutes(rollup.plannedMinutes)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = "${rollup.completedBlockCount} blocks done · " +
+                    "${rollup.missedBlockCount} missed · " +
+                    "${formatMinutes(rollup.missedMinutes)} unaccounted",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

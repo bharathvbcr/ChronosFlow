@@ -203,6 +203,7 @@ class DayDialViewModel @Inject constructor(
     val isGenerating = aiDelegate.isGenerating
     val explainPlan = aiDelegate.explainPlan
     val explainPlanSource = aiDelegate.explainPlanSource
+    val repairPlanResult = aiDelegate.repairPlanResult
     val aiPlanGoalPrefill = aiDelegate.aiPlanGoalPrefill
     val aiPlanSuggestedGoals = aiDelegate.aiPlanSuggestedGoals
     val genAiRuntimeStatus = aiDelegate.genAiRuntimeStatus
@@ -787,6 +788,9 @@ class DayDialViewModel @Inject constructor(
 
     fun explainCurrentPlan() =
         aiDelegate.explainCurrentPlan(viewModelScope, coordinatorState.selectedDateValue, ::currentReviewSummary)
+
+    fun repairConflictingPlan(conflictDescription: String) =
+        aiDelegate.repairConflictingPlan(viewModelScope, coordinatorState.selectedDateValue, conflictDescription)
 
     fun clearHapticCue() = coordinatorState.clearHapticCue()
 
