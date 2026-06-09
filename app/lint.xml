@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+    <issue id="NewerVersionAvailable">
+        <ignore path="../gradle/libs.versions.toml" />
+    </issue>
+</lint>

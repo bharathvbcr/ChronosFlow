@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ChronosFlow" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@drawable/chronos_launch_window_background</item>
+        <item name="android:navigationBarDividerColor">@android:color/transparent</item>
+    </style>
+</resources>

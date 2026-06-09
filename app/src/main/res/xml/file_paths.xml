@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path
+        name="task_attachments"
+        path="task_attachments/" />
+    <files-path
+        name="data_exports"
+        path="data_exports/" />
+</paths>

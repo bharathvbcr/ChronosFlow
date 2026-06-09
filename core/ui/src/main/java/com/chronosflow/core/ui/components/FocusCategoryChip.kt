@@ -1,0 +1,41 @@
+package com.chronosflow.core.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.chronosflow.core.ui.theme.ChronosSpacing
+import com.chronosflow.core.ui.theme.categoryColor
+
+@Composable
+fun FocusCategoryChip(
+    category: String,
+    modifier: Modifier = Modifier,
+    highContrastEnabled: Boolean = false
+) {
+    val blockColor = categoryColor(category)
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(ChronosSpacing.Micro))
+            .background(
+                if (highContrastEnabled) blockColor.copy(alpha = 0.2f)
+                else blockColor.copy(alpha = 0.12f)
+            )
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = category.lowercase().replaceFirstChar { it.uppercase() },
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = blockColor
+        )
+    }
+}

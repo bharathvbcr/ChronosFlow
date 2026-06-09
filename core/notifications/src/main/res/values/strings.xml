@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="focus_notification_channel_name">Focus timer</string>
+    <string name="focus_notification_channel_description">Active focus session timer and live updates</string>
+    <string name="focus_notification_default_title">Focus session</string>
+    <string name="focus_notification_paused_text">Paused · %1$s remaining</string>
+    <string name="focus_notification_running_text">%1$s remaining</string>
+    <string name="focus_notification_redacted_text">Session in progress</string>
+    <string name="focus_notification_metric_label">Remaining</string>
+    <string name="focus_notification_action_pause">Pause</string>
+    <string name="focus_notification_action_resume">Resume</string>
+    <string name="focus_notification_action_stop">Stop</string>
+    <string name="focus_notification_action_extend">+15m</string>
+    <string name="focus_notification_completed_text">Focus session completed</string>
+    <string name="focus_completion_channel_name">Focus completion</string>
+    <string name="focus_completion_channel_description">Alerts when a focus session finishes</string>
+    <string name="notification_permission_enabled">Notifications enabled</string>
+    <string name="notification_permission_promoted_fallback">Notifications enabled; Live Updates may stay in standard notification surfaces</string>
+    <string name="notification_permission_denied">Notifications permission denied</string>
+    <string name="focus_recover_session">Restoring live focus notification…</string>
+    <string name="focus_extend_session">Extend +15m</string>
+</resources>

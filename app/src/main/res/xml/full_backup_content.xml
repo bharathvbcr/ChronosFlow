@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content xmlns:android="http://schemas.android.com/apk/res/android">
+    <include domain="sharedpref" path="." />
+    <include domain="file" path="datastore/daydial_ui_settings.preferences_pb" />
+    <include domain="file" path="android_transfer/chronosflow_portable_backup.json" />
+    <exclude domain="sharedpref" path="chronos_secure_database.xml" />
+    <exclude domain="sharedpref" path="chronos_db_migration.xml" />
+</full-backup-content>

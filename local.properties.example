@@ -1,0 +1,6 @@
+## Copy to local.properties (never commit local.properties).
+sdk.dir=C\:\\Users\\YOUR_USER\\AppData\\Local\\Android\\Sdk
+
+## Optional: enables Cloud Gemini planning when privacy mode is Cloud allowed.
+## Create a key at https://aistudio.google.com/apikey
+GEMINI_API_KEY=your_api_key_here

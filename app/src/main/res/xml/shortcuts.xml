@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="start_focus"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_start_focus_short"
+        android:shortcutLongLabel="@string/shortcut_start_focus_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.chronosflow"
+            android:targetClass="com.chronosflow.MainActivity">
+            <extra
+                android:name="com.chronosflow.extra.INITIAL_SECTION"
+                android:value="focus" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="quick_add"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_quick_add_short"
+        android:shortcutLongLabel="@string/shortcut_quick_add_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.chronosflow"
+            android:targetClass="com.chronosflow.MainActivity">
+            <extra
+                android:name="com.chronosflow.extra.INITIAL_SECTION"
+                android:value="day" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="command_palette"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_command_palette_short"
+        android:shortcutLongLabel="@string/shortcut_command_palette_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.chronosflow"
+            android:targetClass="com.chronosflow.MainActivity">
+            <extra
+                android:name="com.chronosflow.extra.INITIAL_SECTION"
+                android:value="palette" />
+        </intent>
+    </shortcut>
+
+    <capability android:name="actions.intent.CREATE_THING">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.chronosflow"
+            android:targetClass="com.chronosflow.MainActivity">
+            <parameter
+                android:name="thing.name"
+                android:key="query"/>
+        </intent>
+    </capability>
+    <capability android:name="actions.intent.OPEN_APP_FEATURE">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.chronosflow"
+            android:targetClass="com.chronosflow.MainActivity">
+            <parameter
+                android:name="feature"
+                android:key="featureName"/>
+        </intent>
+    </capability>
+</shortcuts>
