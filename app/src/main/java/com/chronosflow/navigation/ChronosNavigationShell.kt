@@ -97,6 +97,10 @@ import com.chronosflow.core.ui.settings.resolveChronosDarkTheme
 import com.chronosflow.core.ui.theme.ChronosGlassTokens
 import com.chronosflow.core.ui.theme.GlassElevation
 import com.chronosflow.core.ui.theme.GlassTone
+import com.chronosflow.core.ui.theme.LocalChronosHazeState
+import com.chronosflow.core.ui.theme.chronosFrostedGlass
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import com.chronosflow.feature.daydial.model.DayDialTab
 import androidx.window.core.layout.WindowSizeClass
 import kotlin.math.min
@@ -624,8 +628,11 @@ internal fun ChronosNavigationShell(
         onBackInvoked = closeQuickAdd
     )
 
+    val shellHazeState = rememberHazeState()
+
     CompositionLocalProvider(
-        LocalChronosShellBottomInset provides contentBottomPadding
+        LocalChronosShellBottomInset provides contentBottomPadding,
+        LocalChronosHazeState provides shellHazeState
     ) {
         ChronosBackground(
             modifier = modifier.fillMaxSize(),
@@ -649,6 +656,7 @@ internal fun ChronosNavigationShell(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(bottom = 0.dp)
+                                .hazeSource(shellHazeState)
                         )
                         AnimatedVisibility(
                             visible = isQuickAddChromeVisible,
@@ -744,7 +752,9 @@ internal fun ChronosNavigationShell(
                                         requestedPrimaryTab = requestedPrimaryTab,
                                         shellDayTarget = renderedDayTarget,
                                         onDayPrimaryTabSelected = onDayPrimaryTabSelected,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .hazeSource(shellHazeState)
                                     )
                                 }
                                 if (isQuickAddChromeVisible) {
@@ -789,55 +799,6 @@ internal fun ChronosNavigationShell(
 }
 
 @Composable
-private fun ChronosCompactNavigationPill(
-    destinations: List<ChronosRoute.ShellDestination>,
-    selectedId: String,
-    shellState: ChronosShellState,
-    highContrastEnabled: Boolean,
-    onNavigate: (ChronosRoute.ShellDestination) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val glassBar = rememberChronosUiSettings().glassSurfacesEnabled && !highContrastEnabled
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(ChronosShellDefaults.CompactPillRadius),
-        color = when {
-            highContrastEnabled -> MaterialTheme.colorScheme.surfaceContainerHigh
-            glassBar -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = GlassTone.PROMINENT.alpha)
-            else -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f)
-        },
-        border = if (glassBar) {
-            BorderStroke(
-                GlassElevation.MEDIUM.borderWidth,
-                ChronosGlassTokens.borderBrush(MaterialTheme.colorScheme.primary)
-            )
-        } else {
-            null
-        },
-        tonalElevation = if (highContrastEnabled) 0.dp else 6.dp,
-        shadowElevation = if (highContrastEnabled) 0.dp else 6.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            destinations.forEach { destination ->
-                ChronosCompactNavigationItem(
-                    destination = destination,
-                    selected = selectedId == destination.id,
-                    badgeValue = badgeValueFor(destination.id, shellState),
-                    reducedMotion = false,
-                    onClick = { onNavigate(destination) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun ChronosCompactFloatingBottomBar(
     destinations: List<ChronosRoute.ShellDestination>,
     selectedId: String,
@@ -851,17 +812,27 @@ private fun ChronosCompactFloatingBottomBar(
     onDoubleClick: (ChronosRoute.ShellDestination) -> Unit = {}
 ) {
     val glassBar = rememberChronosUiSettings().glassSurfacesEnabled && !highContrastEnabled
+    val frosted = glassBar && LocalChronosHazeState.current != null
+    val barShape = RoundedCornerShape(ChronosShellDefaults.CompactPillRadius)
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = ChronosShellDefaults.CompactFloatingBarHeight),
-        shape = RoundedCornerShape(ChronosShellDefaults.CompactPillRadius),
+            .heightIn(min = ChronosShellDefaults.CompactFloatingBarHeight)
+            .then(
+                if (frosted) {
+                    Modifier.chronosFrostedGlass(barShape, GlassTone.PROMINENT, GlassElevation.MEDIUM)
+                } else {
+                    Modifier
+                }
+            ),
+        shape = barShape,
         color = when {
+            frosted -> Color.Transparent
             highContrastEnabled -> MaterialTheme.colorScheme.surfaceContainerHigh
             glassBar -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = GlassTone.PROMINENT.alpha)
             else -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f)
         },
-        border = if (glassBar) {
+        border = if (glassBar && !frosted) {
             BorderStroke(
                 GlassElevation.MEDIUM.borderWidth,
                 ChronosGlassTokens.borderBrush(MaterialTheme.colorScheme.primary)
@@ -869,8 +840,8 @@ private fun ChronosCompactFloatingBottomBar(
         } else {
             null
         },
-        tonalElevation = if (highContrastEnabled) 0.dp else 8.dp,
-        shadowElevation = if (highContrastEnabled) 0.dp else 10.dp
+        tonalElevation = if (highContrastEnabled || frosted) 0.dp else 8.dp,
+        shadowElevation = if (highContrastEnabled || frosted) 0.dp else 10.dp
     ) {
         Row(
             modifier = Modifier
@@ -954,14 +925,25 @@ private fun ChronosQuickAddMenu(
         exit = quickAddMenuTransition.exit,
         modifier = modifier
     ) {
+        val menuShape = RoundedCornerShape(28.dp)
+        val frostedMenu = rememberChronosUiSettings().glassSurfacesEnabled &&
+            LocalChronosHazeState.current != null
         Surface(
-            modifier = Modifier.graphicsLayer {
-                translationX = size.width * backProgress
-            },
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
-            shadowElevation = 8.dp
+            modifier = Modifier
+                .graphicsLayer {
+                    translationX = size.width * backProgress
+                }
+                .then(
+                    if (frostedMenu) {
+                        Modifier.chronosFrostedGlass(menuShape, GlassTone.PROMINENT, GlassElevation.MEDIUM)
+                    } else {
+                        Modifier
+                    }
+                ),
+            shape = menuShape,
+            color = if (frostedMenu) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = if (frostedMenu) 0.dp else 6.dp,
+            shadowElevation = if (frostedMenu) 0.dp else 8.dp
         ) {
             Column(
                 modifier = Modifier

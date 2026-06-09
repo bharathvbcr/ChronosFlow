@@ -37,6 +37,7 @@ wear-protolayout = "1.4.0"
 work = "2.11.2"
 firebaseBom = "34.14.0"
 appfunctions = "1.0.0-alpha09"
+haze = "1.7.2"
 
 [libraries]
 androidx-wear-tiles = { module = "androidx.wear.tiles:tiles", version.ref = "wear-tiles" }
@@ -102,6 +103,8 @@ firebase-firestore = { module = "com.google.firebase:firebase-firestore" }
 androidx-appfunctions = { module = "androidx.appfunctions:appfunctions", version.ref = "appfunctions" }
 androidx-appfunctions-service = { module = "androidx.appfunctions:appfunctions-service", version.ref = "appfunctions" }
 androidx-appfunctions-compiler = { module = "androidx.appfunctions:appfunctions-compiler", version.ref = "appfunctions" }
+haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
+haze-materials = { module = "dev.chrisbanes.haze:haze-materials", version.ref = "haze" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
