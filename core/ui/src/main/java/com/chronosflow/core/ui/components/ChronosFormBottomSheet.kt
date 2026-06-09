@@ -1,5 +1,6 @@
 package com.chronosflow.core.ui.components
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -7,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
+import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 import com.chronosflow.core.ui.shell.ChronosModalBottomSheet
 import com.chronosflow.core.ui.theme.liquidGlass
 
@@ -63,6 +65,7 @@ fun ChronosFormBottomSheet(
             )
         }
     ) {
+        val reduceMotionEnabled = rememberChronosUiSettings().reduceMotionEnabled
         Box(
             modifier = modifier
                 .fillMaxWidth()
@@ -95,8 +98,13 @@ fun ChronosFormBottomSheet(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 520.dp)
-                        .verticalScroll(rememberScrollState()),
+                        // Size to content but yield to the footer buttons: the form area
+                        // grows with the screen instead of capping at a fixed height.
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                        .animateContentSize(
+                            animationSpec = ChronosValueAnimationFactory.stateChange(reduceMotionEnabled)
+                        ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     content()

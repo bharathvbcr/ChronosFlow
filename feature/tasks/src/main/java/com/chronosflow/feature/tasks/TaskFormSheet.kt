@@ -70,6 +70,7 @@ import com.chronosflow.core.domain.model.TaskContactSnapshot
 import com.chronosflow.core.domain.model.TaskReminderTrigger
 import com.chronosflow.core.domain.model.TaskSchedule
 import com.chronosflow.core.ui.components.GenAiAssistBanner
+import com.chronosflow.core.ui.components.ChronosCollapsibleSection
 import com.chronosflow.core.ui.components.ChronosSpeechInputButton
 import com.chronosflow.core.ui.components.ChronosDatePickerField
 import com.chronosflow.core.ui.components.ChronosModalActionLabels
@@ -325,6 +326,9 @@ internal fun TaskFormSheet(
     }
     var checklistExpanded by rememberSaveable(taskKey) {
         mutableStateOf(!initialTask?.checklist.isNullOrEmpty())
+    }
+    var recurrenceExpanded by rememberSaveable(taskKey) {
+        mutableStateOf(initialSchedule?.toRecurringConfig()?.enabled == true)
     }
     var lastAutoAssistCapture by rememberSaveable(taskKey) { mutableStateOf("") }
     val android17ContactPickerLauncher = rememberLauncherForActivityResult(
@@ -1476,9 +1480,16 @@ internal fun TaskFormSheet(
             }
         }
 
-        ChronosFormSection(
+        ChronosCollapsibleSection(
             title = "Recurrence",
-            subtitle = "Turn this into a single repeating task that advances after each completion."
+            summary = if (recurringConfig.enabled) {
+                recurringSummary(recurringConfig, parsedPreferredStartMinute)
+                    ?: "Repeats — choose a cadence to preview the schedule"
+            } else {
+                "One-time task — tap to set up repeats"
+            },
+            expanded = recurrenceExpanded,
+            onExpandedChange = { recurrenceExpanded = it }
         ) {
             ChronosOptionChips(
                 label = "Repeat suggestion",
@@ -1750,17 +1761,16 @@ internal fun TaskFormSheet(
             }
         }
 
-        if (showTaskPriorityDetails) {
-            ChronosFormSection(title = "Priority / reminder") {
-            TaskCollapsedActionCard(
-                icon = Icons.Default.PriorityHigh,
-                title = "Priority details open",
-                summary = priorityDraftSummary,
-                actionLabel = "Hide priority",
-                expanded = true,
-                onClick = { priorityReminderExpanded = false },
-                modifier = Modifier.fillMaxWidth()
-            )
+        ChronosCollapsibleSection(
+            title = "Priority / reminder",
+            summary = if (hasTaskPrioritySettings) {
+                priorityDraftSummary
+            } else {
+                "Normal priority — open for high-priority work or urgent alarms"
+            },
+            expanded = showTaskPriorityDetails,
+            onExpandedChange = { priorityReminderExpanded = it }
+        ) {
             ChronosOptionChips(
                 label = "",
                 options = contextualTaskPriorityOptions(
@@ -1792,9 +1802,8 @@ internal fun TaskFormSheet(
                     )
                 }
             }
-        }
 
-        if (isUrgent) {
+            if (isUrgent) {
             ChronosFormSection(
                 title = "Urgent alarm",
                 subtitle = "Exact alarms fire on time; without permission, ChronosFlow uses a 10-minute fallback window."
@@ -1880,45 +1889,22 @@ internal fun TaskFormSheet(
                     }
                 }
             }
-        }
-        } else {
-            ChronosFormSection(
-                title = "Priority / reminder",
-                subtitle = "Open this for high-priority tasks or urgent alarms."
-            ) {
-                TaskCollapsedActionCard(
-                    icon = Icons.Default.PriorityHigh,
-                    title = if (hasTaskPrioritySettings) "Priority saved" else "Normal priority",
-                    summary = if (hasTaskPrioritySettings) {
-                        priorityDraftSummary
-                    } else {
-                        "Open for high-priority work or urgent exact alarms."
-                    },
-                    actionLabel = if (hasTaskPrioritySettings) "Manage priority" else "Set priority",
-                    expanded = false,
-                    onClick = { priorityReminderExpanded = true },
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
         }
 
-        if (showTaskChecklistDetails) {
-            ChronosFormSection(
-                title = "Checklist",
-                subtitle = "Break the task into concrete steps you can complete in sequence."
-            ) {
-            TaskCollapsedActionCard(
-                icon = Icons.Default.CheckCircle,
-                title = "Checklist details open",
-                summary = taskChecklistSummary(
+        ChronosCollapsibleSection(
+            title = "Checklist",
+            summary = if (checklistStepCount > 0) {
+                taskChecklistSummary(
                     totalCount = checklistStepCount,
                     completedCount = completedChecklistStepCount
-                ),
-                actionLabel = "Hide checklist",
-                expanded = true,
-                onClick = { checklistExpanded = false },
-                modifier = Modifier.fillMaxWidth()
-            )
+                )
+            } else {
+                "Break the work into concrete steps when this task needs them"
+            },
+            expanded = showTaskChecklistDetails,
+            onExpandedChange = { checklistExpanded = it }
+        ) {
             checklistItems.forEachIndexed { index, item ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2010,34 +1996,6 @@ internal fun TaskFormSheet(
                         Text("Clear all")
                     }
                 }
-            }
-        }
-        } else {
-            ChronosFormSection(
-                title = "Checklist",
-                subtitle = taskChecklistSectionSubtitle(
-                    title = taskTitle,
-                    description = description,
-                    checklistStepCount = checklistStepCount,
-                    suggestions = contextualAssistSuggestions
-                )
-            ) {
-                TaskCollapsedActionCard(
-                    icon = Icons.Default.CheckCircle,
-                    title = if (checklistStepCount > 0) "Checklist saved" else "No checklist yet",
-                    summary = if (checklistStepCount > 0) {
-                        taskChecklistSummary(
-                            totalCount = checklistStepCount,
-                            completedCount = completedChecklistStepCount
-                        )
-                    } else {
-                        "Break the work into concrete steps only when this task needs them."
-                    },
-                    actionLabel = if (checklistStepCount > 0) "Manage checklist" else "Add checklist",
-                    expanded = false,
-                    onClick = { checklistExpanded = true },
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
         }
 
