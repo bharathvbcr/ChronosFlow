@@ -58,7 +58,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val DateNavHeaderFormatter = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US)
+private val DateNavHeaderFormatter = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.getDefault())
 
 @Composable
 internal fun DateNav(

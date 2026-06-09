@@ -138,6 +138,12 @@ sealed interface ChronosRoute {
         override val section: String = SECTION_REVIEW
     }
 
+    /** Standalone full review report, distinct from the in-dial insights tab. */
+    data object ReviewDetail : ChronosRoute {
+        override val route: String = "review_detail"
+        override val section: String = SECTION_REVIEW
+    }
+
     companion object {
         const val SHELL_TODAY = "today"
         const val SHELL_PLAN = "plan"

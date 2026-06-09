@@ -41,7 +41,7 @@ class ChronosWearTileProviderTest {
     }
 
     @Test
-    fun `onTileRequest returns immediate tile future and includes focus progress content`() {
+    fun `onTileRequest returns immediate tile future with resting focus state`() {
         val request: RequestBuilders.TileRequest = mockk(relaxed = true)
         val tileFuture = tileRequestMethod.invoke(provider, request) as ListenableFuture<TileBuilders.Tile>
 
@@ -49,7 +49,7 @@ class ChronosWearTileProviderTest {
         val tile = tileFuture.get() as TileBuilders.Tile
 
         assertNotNull(tile)
-        assertTrue(tile.toString().contains("68% Focus"))
+        assertTrue(tile.toString().contains(ChronosWearTileProvider.RESTING_LABEL))
     }
 
     @Test

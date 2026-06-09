@@ -79,10 +79,10 @@ private const val DAY_IN_MINUTES = 1440
 private const val LARGE_GAP_THRESHOLD_MINUTES = 45
 private const val PLAN_DATE_SCROLL_RADIUS_DAYS = 7
 private const val PLAN_DATE_SELECTED_VISIBLE_OFFSET = 2
-private val planDateChipWeekdayFormatter = DateTimeFormatter.ofPattern("EEE", Locale.US)
-private val planDateChipDateFormatter = DateTimeFormatter.ofPattern("MMM d", Locale.US)
-private val planDateChipFullFormatter = DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy", Locale.US)
-private val planCalendarMonthFormatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
+private val planDateChipWeekdayFormatter = DateTimeFormatter.ofPattern("EEE", Locale.getDefault())
+private val planDateChipDateFormatter = DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
+private val planDateChipFullFormatter = DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy", Locale.getDefault())
+private val planCalendarMonthFormatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())
 private val planCalendarWeekdayLabels = listOf("S", "M", "T", "W", "T", "F", "S")
 
 @Composable

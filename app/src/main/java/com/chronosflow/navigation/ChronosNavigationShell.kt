@@ -5,6 +5,10 @@ import androidx.activity.BackEventCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -1239,9 +1243,7 @@ private fun ChronosCompactNavigationItem(
         ) {
             BadgedBox(
                 badge = {
-                    badgeValue?.let {
-                        Badge { Text(it) }
-                    }
+                    ChronosAnimatedBadge(badgeValue = badgeValue, reducedMotion = reducedMotion)
                 }
             ) {
                 Icon(
@@ -1257,6 +1259,19 @@ private fun ChronosCompactNavigationItem(
                 maxLines = 1
             )
         }
+    }
+}
+
+@Composable
+private fun ChronosAnimatedBadge(badgeValue: String?, reducedMotion: Boolean) {
+    AnimatedVisibility(
+        visible = badgeValue != null,
+        enter = scaleIn(ChronosValueAnimationFactory.pressScale(reducedMotion)) +
+            fadeIn(ChronosValueAnimationFactory.selection(reducedMotion)),
+        exit = scaleOut(ChronosValueAnimationFactory.pressScale(reducedMotion)) +
+            fadeOut(ChronosValueAnimationFactory.selection(reducedMotion))
+    ) {
+        Badge { Text(badgeValue.orEmpty()) }
     }
 }
 

@@ -24,6 +24,7 @@ import com.chronosflow.feature.daydial.model.DayDialTab
 import com.chronosflow.feature.habits.HabitScreen
 import com.chronosflow.core.data.security.SensitiveArea
 import com.chronosflow.feature.medication.MedicationScreen
+import com.chronosflow.feature.review.ReviewScreen
 import com.chronosflow.feature.tasks.TaskScreen
 import java.net.URLDecoder
 
@@ -173,7 +174,11 @@ fun ChronosNavGraph(
                 },
                 onOpenMedication = onOpenMedication,
                 onOpenReview = {
-                    navController.navigateDayTarget(ChronosRoute.Day.TARGET_INSIGHTS)
+                    if (featureFlags.reviewEnabled) {
+                        navController.navigateSingleTop(ChronosRoute.ReviewDetail.route)
+                    } else {
+                        navController.navigateDayTarget(ChronosRoute.Day.TARGET_INSIGHTS)
+                    }
                 },
                 onSelectPrimaryTab = { tab ->
                     onDayPrimaryTabSelected(tab)
@@ -230,6 +235,17 @@ fun ChronosNavGraph(
                     )
                 } else {
                     ParkedFeatureDestination("Habits")
+                }
+            }
+        }
+        composable(ChronosRoute.ReviewDetail.route) {
+            PaddedDestination(contentPadding) {
+                if (featureFlags.reviewEnabled) {
+                    ReviewScreen(
+                        onBack = { navController.navigateBackToDay() }
+                    )
+                } else {
+                    ParkedFeatureDestination("Review")
                 }
             }
         }

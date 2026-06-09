@@ -227,7 +227,11 @@ private fun ChronosFlowApp(
             onOpenDay = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TODAY)) },
             onOpenTasks = openTasksSidebar,
             onOpenReview = {
-                navController.navigateDayTarget(ChronosRoute.Day.TARGET_REVIEW)
+                if (featureFlags.reviewEnabled) {
+                    navController.navigateSingleTop(ChronosRoute.ReviewDetail.route)
+                } else {
+                    navController.navigateDayTarget(ChronosRoute.Day.TARGET_REVIEW)
+                }
             },
             onOpenFocus = {
                 navController.navigateSingleTop(
@@ -352,7 +356,7 @@ private fun ChronosFlowApp(
                 if (featureFlags.reviewEnabled) {
                     add(
                         reviewCommandProvider {
-                            navController.navigateDayTarget(ChronosRoute.Day.TARGET_REVIEW)
+                            navController.navigateSingleTop(ChronosRoute.ReviewDetail.route)
                         }
                     )
                 }

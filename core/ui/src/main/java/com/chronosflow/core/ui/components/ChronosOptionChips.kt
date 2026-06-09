@@ -1,5 +1,6 @@
 package com.chronosflow.core.ui.components
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,11 +15,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
+import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 
 @Composable
 fun ChronosOptionChips(
@@ -29,6 +35,9 @@ fun ChronosOptionChips(
     modifier: Modifier = Modifier,
     optionLabel: (String) -> String = { it }
 ) {
+    val haptics = LocalHapticFeedback.current
+    val reduceMotionEnabled = rememberChronosUiSettings().reduceMotionEnabled
+    val selectionSpec = ChronosValueAnimationFactory.selection<Color>(reduceMotionEnabled)
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (label.isNotBlank()) {
             Text(
@@ -45,27 +54,42 @@ fun ChronosOptionChips(
         ) {
             options.forEach { option ->
                 val isSelected = selected == option
-                val baseColor = if (isSelected) {
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                } else {
-                    Color.Transparent
-                }
-                val borderCol = if (isSelected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                }
-                val textCol = if (isSelected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                }
+                val baseColor by animateColorAsState(
+                    targetValue = if (isSelected) {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                    } else {
+                        Color.Transparent
+                    },
+                    animationSpec = selectionSpec,
+                    label = "chipBackground"
+                )
+                val borderCol by animateColorAsState(
+                    targetValue = if (isSelected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                    },
+                    animationSpec = selectionSpec,
+                    label = "chipBorder"
+                )
+                val textCol by animateColorAsState(
+                    targetValue = if (isSelected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    animationSpec = selectionSpec,
+                    label = "chipText"
+                )
                 Box(
                     modifier = Modifier
                         .clip(MaterialTheme.shapes.small)
                         .background(baseColor)
                         .border(1.dp, borderCol, MaterialTheme.shapes.small)
-                        .clickable { onSelected(option) }
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onSelected(option)
+                        }
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
                     Text(
