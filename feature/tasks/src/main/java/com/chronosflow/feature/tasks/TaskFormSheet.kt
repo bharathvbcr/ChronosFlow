@@ -330,6 +330,7 @@ internal fun TaskFormSheet(
     var recurrenceExpanded by rememberSaveable(taskKey) {
         mutableStateOf(initialSchedule?.toRecurringConfig()?.enabled == true)
     }
+    var connectedFilesExpanded by rememberSaveable(taskKey) { mutableStateOf(true) }
     var lastAutoAssistCapture by rememberSaveable(taskKey) { mutableStateOf("") }
     val android17ContactPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -982,33 +983,28 @@ internal fun TaskFormSheet(
                 onApp = { prepareInlineAction(TaskActionType.APP, "Open app") }
             )
 
-            TaskCollapsedActionCard(
-                icon = Icons.Default.Person,
-                title = if (connectExpanded) "Context details open" else "Context details",
-                summary = taskContextDraftSummary(
-                    linkedContact = linkedContact,
-                    actionCount = actionDrafts.size,
-                    attachmentCount = attachmentDrafts.size,
-                    primaryActionLabel = actionDrafts
-                        .firstOrNull { it.isPrimary }
-                        ?.label
-                        ?.takeIf { it.isNotBlank() }
-                        ?: actionDrafts.firstOrNull()?.label?.takeIf { it.isNotBlank() },
-                    primaryAttachmentName = attachmentDrafts
-                        .firstOrNull { it.isFeaturedImage }
-                        ?.displayName
-                        ?.takeIf { it.isNotBlank() }
-                        ?: attachmentDrafts.firstOrNull()?.displayName?.takeIf { it.isNotBlank() }
-                ),
-                actionLabel = if (connectExpanded) "Hide context" else "Manage context",
-                expanded = connectExpanded,
-                onClick = { connectExpanded = !connectExpanded }
-            )
+        }
 
-            if (!showTaskContextDetails) {
-                return@ChronosFormSection
-            }
-
+        ChronosCollapsibleSection(
+            title = "Context details",
+            summary = taskContextDraftSummary(
+                linkedContact = linkedContact,
+                actionCount = actionDrafts.size,
+                attachmentCount = attachmentDrafts.size,
+                primaryActionLabel = actionDrafts
+                    .firstOrNull { it.isPrimary }
+                    ?.label
+                    ?.takeIf { it.isNotBlank() }
+                    ?: actionDrafts.firstOrNull()?.label?.takeIf { it.isNotBlank() },
+                primaryAttachmentName = attachmentDrafts
+                    .firstOrNull { it.isFeaturedImage }
+                    ?.displayName
+                    ?.takeIf { it.isNotBlank() }
+                    ?: attachmentDrafts.firstOrNull()?.displayName?.takeIf { it.isNotBlank() }
+            ),
+            expanded = showTaskContextDetails,
+            onExpandedChange = { connectExpanded = it }
+        ) {
             ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
@@ -1216,9 +1212,19 @@ internal fun TaskFormSheet(
         }
 
         if (showConnectedFilesSection) {
-            ChronosFormSection(
+            ChronosCollapsibleSection(
                 title = "Connected files",
-                subtitle = "Use Android's document picker to link files or import a private copy into ChronosFlow."
+                summary = if (attachmentDrafts.isEmpty()) {
+                    "No files attached yet"
+                } else {
+                    "${attachmentDrafts.size} attached" +
+                        (attachmentDrafts.firstOrNull { it.isFeaturedImage }
+                            ?.displayName
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { " · featured: $it" } ?: "")
+                },
+                expanded = connectedFilesExpanded,
+                onExpandedChange = { connectedFilesExpanded = it }
             ) {
             if (featuredAttachmentPreview != null) {
                 ChronosListCard(modifier = Modifier.fillMaxWidth()) {
@@ -1965,83 +1971,6 @@ internal fun TaskFormSheet(
                         Text("Clear all")
                     }
                 }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(ChronosSpacing.Medium))
-    }
-}
-
-@Composable
-private fun TaskCollapsedActionCard(
-    icon: ImageVector,
-    title: String,
-    summary: String,
-    actionLabel: String,
-    expanded: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(
-                onClickLabel = actionLabel,
-                role = Role.Button,
-                onClick = onClick
-            )
-            .semantics(mergeDescendants = true) {
-                contentDescription = taskCollapsedActionCardContentDescription(
-                    title = title,
-                    summary = summary,
-                    actionLabel = actionLabel,
-                    expanded = expanded
-                )
-            },
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.10f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                shape = MaterialTheme.shapes.small,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                contentColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(8.dp)
-                        .size(18.dp)
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = summary,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Tap to configure · $actionLabel",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Medium
-                )
             }
         }
 
