@@ -154,6 +154,9 @@ internal fun MedicationFormSheet(
     var name by rememberSaveable(planKey) {
         mutableStateOf(initialPlan?.name ?: prefillDraft.name ?: prefillName.orEmpty())
     }
+    var nameEverFilled by rememberSaveable(planKey) {
+        mutableStateOf((initialPlan?.name ?: prefillDraft.name ?: prefillName.orEmpty()).isNotBlank())
+    }
     var dosage by rememberSaveable(planKey) { mutableStateOf(initialPlan?.dosage.orEmpty()) }
     var unit by rememberSaveable(planKey) { mutableStateOf(initialPlan?.unit ?: "dose") }
     var medicationForm by rememberSaveable(planKey) {
@@ -600,11 +603,20 @@ internal fun MedicationFormSheet(
         ) {
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it },
+                onValueChange = {
+                    name = it
+                    if (it.isNotBlank()) nameEverFilled = true
+                },
                 label = { Text("Name") },
                 placeholder = { Text("e.g. Lisinopril") },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                isError = nameEverFilled && name.isBlank(),
+                supportingText = if (name.isBlank()) {
+                    { Text("Required") }
+                } else {
+                    null
+                }
             )
             ChronosOptionChips(
                 label = "Context names",
@@ -1070,7 +1082,12 @@ internal fun MedicationFormSheet(
                 onValueChange = { dosage = it },
                 label = { Text("Custom amount") },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                supportingText = if (dosage.isBlank()) {
+                    { Text("Required — type an amount or pick a preset") }
+                } else {
+                    null
+                }
             )
             ChronosOptionChips(
                 label = "Unit",
@@ -1383,6 +1400,11 @@ internal fun MedicationFormSheet(
                     onValueChange = { refillDoses = it.filter { char -> char.isDigit() } },
                     label = { Text("Custom count") },
                     isError = isRefillError,
+                    supportingText = if (isRefillError) {
+                        { Text("Must be a positive number") }
+                    } else {
+                        null
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )

@@ -331,6 +331,7 @@ internal fun TaskFormSheet(
         mutableStateOf(initialSchedule?.toRecurringConfig()?.enabled == true)
     }
     var connectedFilesExpanded by rememberSaveable(taskKey) { mutableStateOf(true) }
+    var titleEverFilled by rememberSaveable(taskKey) { mutableStateOf(initialTask?.title?.isNotBlank() == true) }
     var lastAutoAssistCapture by rememberSaveable(taskKey) { mutableStateOf("") }
     val android17ContactPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -787,10 +788,19 @@ internal fun TaskFormSheet(
 
             OutlinedTextField(
                 value = taskTitle,
-                onValueChange = { taskTitle = it },
+                onValueChange = {
+                    taskTitle = it
+                    if (it.isNotBlank()) titleEverFilled = true
+                },
                 label = { Text("Title") },
                 placeholder = { Text("What needs to get done?") },
                 singleLine = true,
+                isError = titleEverFilled && taskTitle.isBlank(),
+                supportingText = if (taskTitle.isBlank()) {
+                    { Text("Required") }
+                } else {
+                    null
+                },
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -955,416 +965,6 @@ internal fun TaskFormSheet(
                     onSuggestion = ::applyAssistSuggestion
                 )
             }
-        }
-
-        ChronosFormSection(
-            title = "Connect",
-            subtitle = taskConnectSectionSubtitle(
-                contextText = taskContextQuery,
-                suggestions = contextualAssistSuggestions
-            )
-        ) {
-            TaskConnectQuickChips(
-                contextText = taskContextQuery,
-                suggestions = contextualAssistSuggestions,
-                onContact = ::launchContactPicker,
-                onPhoto = {
-                    photoPickerLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
-                },
-                onFile = {
-                    attachmentPickerLauncher.launch(arrayOf("*/*"))
-                },
-                onLink = { prepareInlineAction(TaskActionType.WEBSITE, "Link") },
-                onCall = { prepareInlineAction(TaskActionType.PHONE, "Call") },
-                onEmail = { prepareInlineAction(TaskActionType.EMAIL, "Email") },
-                onMap = { prepareInlineAction(TaskActionType.MAP, "Map") },
-                onApp = { prepareInlineAction(TaskActionType.APP, "Open app") }
-            )
-
-        }
-
-        ChronosCollapsibleSection(
-            title = "Context details",
-            summary = taskContextDraftSummary(
-                linkedContact = linkedContact,
-                actionCount = actionDrafts.size,
-                attachmentCount = attachmentDrafts.size,
-                primaryActionLabel = actionDrafts
-                    .firstOrNull { it.isPrimary }
-                    ?.label
-                    ?.takeIf { it.isNotBlank() }
-                    ?: actionDrafts.firstOrNull()?.label?.takeIf { it.isNotBlank() },
-                primaryAttachmentName = attachmentDrafts
-                    .firstOrNull { it.isFeaturedImage }
-                    ?.displayName
-                    ?.takeIf { it.isNotBlank() }
-                    ?: attachmentDrafts.firstOrNull()?.displayName?.takeIf { it.isNotBlank() }
-            ),
-            expanded = showTaskContextDetails,
-            onExpandedChange = { connectExpanded = it }
-        ) {
-            ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = linkedContact?.displayName ?: "No linked contact yet",
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    if (linkedContact == null) {
-                        Text(
-                            text = "Pick a contact to snapshot their saved phone numbers and email addresses into this task.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        linkedContact?.methods?.forEach { method ->
-                            Text(
-                                text = buildString {
-                                    append(
-                                        method.kind.name.lowercase().replaceFirstChar { char ->
-                                            if (char.isLowerCase()) char.titlecase() else char.toString()
-                                        }
-                                    )
-                                    method.label?.takeIf { it.isNotBlank() }?.let { append(" ($it)") }
-                                    append(": ${method.value}")
-                                    if (method.isPrimary) append(" • primary")
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        if (linkedContact?.methods.isNullOrEmpty()) {
-                            Text(
-                                text = "This contact did not expose any phone or email entries through the picker.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilledTonalButton(
-                            onClick = ::launchContactPicker,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(if (linkedContact == null) "Pick contact" else "Change contact")
-                        }
-                        if (linkedContact != null) {
-                            TextButton(
-                                onClick = { linkedContact = null },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Remove contact")
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (actionDrafts.isNotEmpty()) {
-                actionDrafts.forEachIndexed { index, draft ->
-                    val actionTypeLabel = taskActionTypeLabel(draft.type)
-                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                text = actionTypeLabel,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            OutlinedTextField(
-                                value = draft.label,
-                                onValueChange = { value -> actionDrafts[index] = draft.copy(label = value) },
-                                label = { Text("Action label") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
-                            OutlinedTextField(
-                                value = draft.value,
-                                onValueChange = { value -> actionDrafts[index] = draft.copy(value = value) },
-                                label = { Text("Destination") },
-                                placeholder = { Text(taskActionValuePlaceholder(draft.type)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                isError = normalizeTaskActionDraft(draft) == null
-                            )
-                            if (draft.type == TaskActionType.APP) {
-                                ChronosLauncherAppPicker(
-                                    selectedLaunchValue = draft.value,
-                                    onAppSelected = { option ->
-                                        actionDrafts[index] = draft.copy(
-                                            label = draft.label
-                                                .takeUnless { it.isBlank() || it == "Open app" }
-                                                ?: "Open ${option.label}",
-                                            value = option.launchValue
-                                        )
-                                    }
-                                )
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                FilledTonalButton(
-                                    onClick = {
-                                        actionDrafts.indices.forEach { actionIndex ->
-                                            actionDrafts[actionIndex] = actionDrafts[actionIndex].copy(
-                                                isPrimary = actionIndex == index
-                                            )
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .semantics {
-                                            contentDescription = taskActionPrimaryControlLabel(
-                                                label = draft.label,
-                                                typeLabel = actionTypeLabel,
-                                                isPrimary = draft.isPrimary
-                                            )
-                                        }
-                                ) {
-                                    Text(if (draft.isPrimary) "Primary action" else "Make primary")
-                                }
-                                TextButton(
-                                    onClick = { actionDrafts.removeAt(index) },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .semantics {
-                                            contentDescription = taskActionRemoveControlLabel(
-                                                label = draft.label,
-                                                typeLabel = actionTypeLabel
-                                            )
-                                        }
-                                ) {
-                                    Text("Remove")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            ChronosOptionChips(
-                label = "New action type",
-                options = contextualTaskActionTypeOptions(
-                    contextText = "$taskContextQuery $newActionLabel $newActionValue",
-                    selectedTypeName = newActionTypeName,
-                    suggestions = contextualAssistSuggestions
-                ),
-                selected = newActionTypeName,
-                onSelected = { newActionTypeName = it },
-                optionLabel = { typeName -> taskActionTypeLabel(TaskActionType.valueOf(typeName)) }
-            )
-            OutlinedTextField(
-                value = newActionLabel,
-                onValueChange = { newActionLabel = it },
-                label = { Text("New action label") },
-                placeholder = { Text("Client website") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            OutlinedTextField(
-                value = newActionValue,
-                onValueChange = { newActionValue = it },
-                label = { Text("New action destination") },
-                placeholder = { Text(taskActionValuePlaceholder(TaskActionType.valueOf(newActionTypeName))) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                isError = pendingActionInvalid
-            )
-            if (TaskActionType.valueOf(newActionTypeName) == TaskActionType.APP) {
-                ChronosLauncherAppPicker(
-                    selectedLaunchValue = newActionValue,
-                    onAppSelected = { option ->
-                        newActionLabel = newActionLabel
-                            .takeUnless { it.isBlank() || it == "Open app" }
-                            ?: "Open ${option.label}"
-                        newActionValue = option.launchValue
-                    }
-                )
-            }
-            FilledTonalButton(
-                onClick = {
-                    val newDraft = TaskActionDraft(
-                        id = UUID.randomUUID().toString(),
-                        type = TaskActionType.valueOf(newActionTypeName),
-                        label = newActionLabel,
-                        value = newActionValue,
-                        isPrimary = actionDrafts.none { it.isPrimary }
-                    )
-                    if (normalizeTaskActionDraft(newDraft) != null) {
-                        if (newDraft.isPrimary) {
-                            actionDrafts.indices.forEach { index ->
-                                actionDrafts[index] = actionDrafts[index].copy(isPrimary = false)
-                            }
-                        }
-                        actionDrafts.add(newDraft)
-                        newActionLabel = ""
-                        newActionValue = ""
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Add action")
-            }
-        }
-
-        if (showConnectedFilesSection) {
-            ChronosCollapsibleSection(
-                title = "Connected files",
-                summary = if (attachmentDrafts.isEmpty()) {
-                    "No files attached yet"
-                } else {
-                    "${attachmentDrafts.size} attached" +
-                        (attachmentDrafts.firstOrNull { it.isFeaturedImage }
-                            ?.displayName
-                            ?.takeIf { it.isNotBlank() }
-                            ?.let { " · featured: $it" } ?: "")
-                },
-                expanded = connectedFilesExpanded,
-                onExpandedChange = { connectedFilesExpanded = it }
-            ) {
-            if (featuredAttachmentPreview != null) {
-                ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "Featured image",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        TaskAttachmentPreview(
-                            attachment = featuredAttachmentPreview,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(180.dp)
-                        )
-                    }
-                }
-            }
-
-            if (attachmentDrafts.isEmpty()) {
-                ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "No files or images attached yet",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            text = "Link documents with the Storage Access Framework, or import a private copy when you want the task to keep its own file.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            } else {
-                attachmentDrafts.forEachIndexed { index, draft ->
-                    val previewAttachment = draft.toPreviewAttachment()
-                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                text = draft.displayName,
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            Text(
-                                text = buildString {
-                                    append(if (draft.kind == TaskAttachmentKind.IMAGE) "Image" else "File")
-                                    append(" • ")
-                                    append(if (draft.storageMode == TaskAttachmentStorageMode.LINKED) "Linked" else "Imported")
-                                    draft.mimeType?.takeIf { it.isNotBlank() }?.let {
-                                        append(" • ")
-                                        append(it)
-                                    }
-                                    draft.sizeBytes?.let {
-                                        append(" • ")
-                                        append(formatAttachmentSize(it))
-                                    }
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (!draft.modeLocked) {
-                                ChronosOptionChips(
-                                    label = "Storage mode",
-                                    options = listOf(
-                                        TaskAttachmentStorageMode.LINKED.name,
-                                        TaskAttachmentStorageMode.IMPORTED.name
-                                    ),
-                                    selected = draft.storageMode.name,
-                                    onSelected = { modeName ->
-                                        attachmentDrafts[index] = draft.copy(
-                                            storageMode = TaskAttachmentStorageMode.valueOf(modeName)
-                                        )
-                                    },
-                                    optionLabel = { modeName ->
-                                        if (modeName == TaskAttachmentStorageMode.LINKED.name) "Link" else "Import copy"
-                                    }
-                                )
-                            }
-                            if (draft.kind == TaskAttachmentKind.IMAGE) {
-                                FilledTonalButton(
-                                    onClick = {
-                                        val updated = attachmentDrafts.toList().map { item ->
-                                            item.copy(isFeaturedImage = item.id == draft.id)
-                                        }
-                                        attachmentDrafts.clear()
-                                        attachmentDrafts.addAll(normalizeTaskAttachmentDrafts(updated))
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .semantics {
-                                            contentDescription = taskAttachmentFeaturedActionLabel(draft)
-                                        }
-                                ) {
-                                    Text(if (draft.isFeaturedImage) "Featured image" else "Set as featured image")
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                FilledTonalButton(
-                                    onClick = {
-                                        if (previewAttachment != null) {
-                                            openTaskAttachment(context, previewAttachment)
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .semantics {
-                                            contentDescription = taskAttachmentOpenActionLabel(draft)
-                                        }
-                                ) {
-                                    Text("Open")
-                                }
-                                TextButton(
-                                    onClick = {
-                                        val updated = attachmentDrafts.toMutableList().apply { removeAt(index) }
-                                        attachmentDrafts.clear()
-                                        attachmentDrafts.addAll(normalizeTaskAttachmentDrafts(updated))
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .semantics {
-                                            contentDescription = taskAttachmentRemoveActionLabel(draft)
-                                        }
-                                ) {
-                                    Text("Remove")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            FilledTonalButton(
-                onClick = { attachmentPickerLauncher.launch(arrayOf("*/*")) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Add files or images")
-            }
-        }
         }
 
         ChronosCollapsibleSection(
@@ -1972,6 +1572,416 @@ internal fun TaskFormSheet(
                     }
                 }
             }
+        }
+
+        ChronosFormSection(
+            title = "Connect",
+            subtitle = taskConnectSectionSubtitle(
+                contextText = taskContextQuery,
+                suggestions = contextualAssistSuggestions
+            )
+        ) {
+            TaskConnectQuickChips(
+                contextText = taskContextQuery,
+                suggestions = contextualAssistSuggestions,
+                onContact = ::launchContactPicker,
+                onPhoto = {
+                    photoPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+                onFile = {
+                    attachmentPickerLauncher.launch(arrayOf("*/*"))
+                },
+                onLink = { prepareInlineAction(TaskActionType.WEBSITE, "Link") },
+                onCall = { prepareInlineAction(TaskActionType.PHONE, "Call") },
+                onEmail = { prepareInlineAction(TaskActionType.EMAIL, "Email") },
+                onMap = { prepareInlineAction(TaskActionType.MAP, "Map") },
+                onApp = { prepareInlineAction(TaskActionType.APP, "Open app") }
+            )
+
+        }
+
+        ChronosCollapsibleSection(
+            title = "Context details",
+            summary = taskContextDraftSummary(
+                linkedContact = linkedContact,
+                actionCount = actionDrafts.size,
+                attachmentCount = attachmentDrafts.size,
+                primaryActionLabel = actionDrafts
+                    .firstOrNull { it.isPrimary }
+                    ?.label
+                    ?.takeIf { it.isNotBlank() }
+                    ?: actionDrafts.firstOrNull()?.label?.takeIf { it.isNotBlank() },
+                primaryAttachmentName = attachmentDrafts
+                    .firstOrNull { it.isFeaturedImage }
+                    ?.displayName
+                    ?.takeIf { it.isNotBlank() }
+                    ?: attachmentDrafts.firstOrNull()?.displayName?.takeIf { it.isNotBlank() }
+            ),
+            expanded = showTaskContextDetails,
+            onExpandedChange = { connectExpanded = it }
+        ) {
+            ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = linkedContact?.displayName ?: "No linked contact yet",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    if (linkedContact == null) {
+                        Text(
+                            text = "Pick a contact to snapshot their saved phone numbers and email addresses into this task.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        linkedContact?.methods?.forEach { method ->
+                            Text(
+                                text = buildString {
+                                    append(
+                                        method.kind.name.lowercase().replaceFirstChar { char ->
+                                            if (char.isLowerCase()) char.titlecase() else char.toString()
+                                        }
+                                    )
+                                    method.label?.takeIf { it.isNotBlank() }?.let { append(" ($it)") }
+                                    append(": ${method.value}")
+                                    if (method.isPrimary) append(" • primary")
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (linkedContact?.methods.isNullOrEmpty()) {
+                            Text(
+                                text = "This contact did not expose any phone or email entries through the picker.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = ::launchContactPicker,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (linkedContact == null) "Pick contact" else "Change contact")
+                        }
+                        if (linkedContact != null) {
+                            TextButton(
+                                onClick = { linkedContact = null },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Remove contact")
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (actionDrafts.isNotEmpty()) {
+                actionDrafts.forEachIndexed { index, draft ->
+                    val actionTypeLabel = taskActionTypeLabel(draft.type)
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = actionTypeLabel,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedTextField(
+                                value = draft.label,
+                                onValueChange = { value -> actionDrafts[index] = draft.copy(label = value) },
+                                label = { Text("Action label") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = draft.value,
+                                onValueChange = { value -> actionDrafts[index] = draft.copy(value = value) },
+                                label = { Text("Destination") },
+                                placeholder = { Text(taskActionValuePlaceholder(draft.type)) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                isError = normalizeTaskActionDraft(draft) == null
+                            )
+                            if (draft.type == TaskActionType.APP) {
+                                ChronosLauncherAppPicker(
+                                    selectedLaunchValue = draft.value,
+                                    onAppSelected = { option ->
+                                        actionDrafts[index] = draft.copy(
+                                            label = draft.label
+                                                .takeUnless { it.isBlank() || it == "Open app" }
+                                                ?: "Open ${option.label}",
+                                            value = option.launchValue
+                                        )
+                                    }
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        actionDrafts.indices.forEach { actionIndex ->
+                                            actionDrafts[actionIndex] = actionDrafts[actionIndex].copy(
+                                                isPrimary = actionIndex == index
+                                            )
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .semantics {
+                                            contentDescription = taskActionPrimaryControlLabel(
+                                                label = draft.label,
+                                                typeLabel = actionTypeLabel,
+                                                isPrimary = draft.isPrimary
+                                            )
+                                        }
+                                ) {
+                                    Text(if (draft.isPrimary) "Primary action" else "Make primary")
+                                }
+                                TextButton(
+                                    onClick = { actionDrafts.removeAt(index) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .semantics {
+                                            contentDescription = taskActionRemoveControlLabel(
+                                                label = draft.label,
+                                                typeLabel = actionTypeLabel
+                                            )
+                                        }
+                                ) {
+                                    Text("Remove")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            ChronosOptionChips(
+                label = "New action type",
+                options = contextualTaskActionTypeOptions(
+                    contextText = "$taskContextQuery $newActionLabel $newActionValue",
+                    selectedTypeName = newActionTypeName,
+                    suggestions = contextualAssistSuggestions
+                ),
+                selected = newActionTypeName,
+                onSelected = { newActionTypeName = it },
+                optionLabel = { typeName -> taskActionTypeLabel(TaskActionType.valueOf(typeName)) }
+            )
+            OutlinedTextField(
+                value = newActionLabel,
+                onValueChange = { newActionLabel = it },
+                label = { Text("New action label") },
+                placeholder = { Text("Client website") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = newActionValue,
+                onValueChange = { newActionValue = it },
+                label = { Text("New action destination") },
+                placeholder = { Text(taskActionValuePlaceholder(TaskActionType.valueOf(newActionTypeName))) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                isError = pendingActionInvalid
+            )
+            if (TaskActionType.valueOf(newActionTypeName) == TaskActionType.APP) {
+                ChronosLauncherAppPicker(
+                    selectedLaunchValue = newActionValue,
+                    onAppSelected = { option ->
+                        newActionLabel = newActionLabel
+                            .takeUnless { it.isBlank() || it == "Open app" }
+                            ?: "Open ${option.label}"
+                        newActionValue = option.launchValue
+                    }
+                )
+            }
+            FilledTonalButton(
+                onClick = {
+                    val newDraft = TaskActionDraft(
+                        id = UUID.randomUUID().toString(),
+                        type = TaskActionType.valueOf(newActionTypeName),
+                        label = newActionLabel,
+                        value = newActionValue,
+                        isPrimary = actionDrafts.none { it.isPrimary }
+                    )
+                    if (normalizeTaskActionDraft(newDraft) != null) {
+                        if (newDraft.isPrimary) {
+                            actionDrafts.indices.forEach { index ->
+                                actionDrafts[index] = actionDrafts[index].copy(isPrimary = false)
+                            }
+                        }
+                        actionDrafts.add(newDraft)
+                        newActionLabel = ""
+                        newActionValue = ""
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Add action")
+            }
+        }
+
+        if (showConnectedFilesSection) {
+            ChronosCollapsibleSection(
+                title = "Connected files",
+                summary = if (attachmentDrafts.isEmpty()) {
+                    "No files attached yet"
+                } else {
+                    "${attachmentDrafts.size} attached" +
+                        (attachmentDrafts.firstOrNull { it.isFeaturedImage }
+                            ?.displayName
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { " · featured: $it" } ?: "")
+                },
+                expanded = connectedFilesExpanded,
+                onExpandedChange = { connectedFilesExpanded = it }
+            ) {
+            if (featuredAttachmentPreview != null) {
+                ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Featured image",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TaskAttachmentPreview(
+                            attachment = featuredAttachmentPreview,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(180.dp)
+                        )
+                    }
+                }
+            }
+
+            if (attachmentDrafts.isEmpty()) {
+                ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "No files or images attached yet",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            text = "Link documents with the Storage Access Framework, or import a private copy when you want the task to keep its own file.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                attachmentDrafts.forEachIndexed { index, draft ->
+                    val previewAttachment = draft.toPreviewAttachment()
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = draft.displayName,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                text = buildString {
+                                    append(if (draft.kind == TaskAttachmentKind.IMAGE) "Image" else "File")
+                                    append(" • ")
+                                    append(if (draft.storageMode == TaskAttachmentStorageMode.LINKED) "Linked" else "Imported")
+                                    draft.mimeType?.takeIf { it.isNotBlank() }?.let {
+                                        append(" • ")
+                                        append(it)
+                                    }
+                                    draft.sizeBytes?.let {
+                                        append(" • ")
+                                        append(formatAttachmentSize(it))
+                                    }
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (!draft.modeLocked) {
+                                ChronosOptionChips(
+                                    label = "Storage mode",
+                                    options = listOf(
+                                        TaskAttachmentStorageMode.LINKED.name,
+                                        TaskAttachmentStorageMode.IMPORTED.name
+                                    ),
+                                    selected = draft.storageMode.name,
+                                    onSelected = { modeName ->
+                                        attachmentDrafts[index] = draft.copy(
+                                            storageMode = TaskAttachmentStorageMode.valueOf(modeName)
+                                        )
+                                    },
+                                    optionLabel = { modeName ->
+                                        if (modeName == TaskAttachmentStorageMode.LINKED.name) "Link" else "Import copy"
+                                    }
+                                )
+                            }
+                            if (draft.kind == TaskAttachmentKind.IMAGE) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        val updated = attachmentDrafts.toList().map { item ->
+                                            item.copy(isFeaturedImage = item.id == draft.id)
+                                        }
+                                        attachmentDrafts.clear()
+                                        attachmentDrafts.addAll(normalizeTaskAttachmentDrafts(updated))
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .semantics {
+                                            contentDescription = taskAttachmentFeaturedActionLabel(draft)
+                                        }
+                                ) {
+                                    Text(if (draft.isFeaturedImage) "Featured image" else "Set as featured image")
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        if (previewAttachment != null) {
+                                            openTaskAttachment(context, previewAttachment)
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .semantics {
+                                            contentDescription = taskAttachmentOpenActionLabel(draft)
+                                        }
+                                ) {
+                                    Text("Open")
+                                }
+                                TextButton(
+                                    onClick = {
+                                        val updated = attachmentDrafts.toMutableList().apply { removeAt(index) }
+                                        attachmentDrafts.clear()
+                                        attachmentDrafts.addAll(normalizeTaskAttachmentDrafts(updated))
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .semantics {
+                                            contentDescription = taskAttachmentRemoveActionLabel(draft)
+                                        }
+                                ) {
+                                    Text("Remove")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            FilledTonalButton(
+                onClick = { attachmentPickerLauncher.launch(arrayOf("*/*")) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Add files or images")
+            }
+        }
         }
 
         Spacer(modifier = Modifier.height(ChronosSpacing.Medium))

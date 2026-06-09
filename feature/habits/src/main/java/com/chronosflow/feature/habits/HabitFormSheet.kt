@@ -178,6 +178,9 @@ internal fun HabitFormSheet(
     var habitTitle by rememberSaveable(habitKey) {
         mutableStateOf(initialHabit?.title ?: prefillDraft.title ?: prefillTitle.orEmpty())
     }
+    var nameEverFilled by rememberSaveable(habitKey) {
+        mutableStateOf((initialHabit?.title ?: prefillDraft.title ?: prefillTitle.orEmpty()).isNotBlank())
+    }
     var habitCaptureContext by rememberSaveable(habitKey) {
         mutableStateOf(prefillTitle.orEmpty())
     }
@@ -480,11 +483,20 @@ internal fun HabitFormSheet(
         ) {
             OutlinedTextField(
                 value = habitTitle,
-                onValueChange = { habitTitle = it },
+                onValueChange = {
+                    habitTitle = it
+                    if (it.isNotBlank()) nameEverFilled = true
+                },
                 label = { Text("Habit name") },
                 placeholder = { Text("e.g. Morning walk") },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                isError = nameEverFilled && habitTitle.isBlank(),
+                supportingText = if (habitTitle.isBlank()) {
+                    { Text("Required") }
+                } else {
+                    null
+                }
             )
             ChronosOptionChips(
                 label = "Context titles",
