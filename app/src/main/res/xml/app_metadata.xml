@@ -1,3 +1,13 @@
-<AppFunctionAppMetadata 
+<AppFunctionAppMetadata
     xmlns:appfn="http://schemas.android.com/apk/androidx.appfunctions"
-    appfn:description="ChronosFlow task and focus on-device tools." />
+    appfn:description="ChronosFlow is a personal time-planning app: a circular day planner (Chronos Dial), tasks, habits, medications, focus sessions, and mood/energy check-ins.
+
+Operational Patterns:
+- Resolve ids before logging: call listHabits to obtain a habitId before logHabitCompleted or logHabitSkipped, and listMedications to obtain a medicationPlanId before logMedicationTaken or logMedicationSkipped.
+- Call getTodaySchedule to read the current day plan before adding overlapping blocks with addTimeBlock.
+- Times are expressed as minute-of-day (0 to 1439, where 0 is midnight, 480 is 8:00 AM, 720 is noon); dates are YYYY-MM-DD and default to today when omitted.
+
+Constraints:
+- Mood, energy, stress, and focus scores are 1 to 10; task priority is 0 to 5; durations are 1 to 1440 minutes.
+- startFocusSession persists the session immediately, but the live countdown notification only appears once the app may run a foreground service.
+- This app holds personal health-related data (medications, mood). Confirm with the user before logging medication or mood entries on their behalf." />

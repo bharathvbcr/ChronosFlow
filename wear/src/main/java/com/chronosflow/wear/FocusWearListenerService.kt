@@ -1,0 +1,126 @@
+package com.chronosflow.wear
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
+import android.os.SystemClock
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.wear.ongoing.OngoingActivity
+import androidx.wear.ongoing.Status
+import com.chronosflow.core.domain.wear.WearFocusContract
+import com.google.android.gms.wearable.DataEvent
+import com.google.android.gms.wearable.DataEventBuffer
+import com.google.android.gms.wearable.DataMapItem
+import com.google.android.gms.wearable.WearableListenerService
+
+/**
+ * Mirrors the phone's active focus session onto the watch as an [OngoingActivity] live update.
+ *
+ * The phone publishes a single Data Layer item at [WearFocusContract.FOCUS_PATH]; this service
+ * reacts to changes by showing/refreshing a countdown ongoing activity and removes it when the
+ * item is deleted or the session is no longer active.
+ */
+class FocusWearListenerService : WearableListenerService() {
+
+    override fun onDataChanged(dataEvents: DataEventBuffer) {
+        for (event in dataEvents) {
+            if (event.dataItem.uri.path != WearFocusContract.FOCUS_PATH) continue
+            when (event.type) {
+                DataEvent.TYPE_DELETED -> cancelFocusOngoingActivity()
+                DataEvent.TYPE_CHANGED -> {
+                    val map = DataMapItem.fromDataItem(event.dataItem).dataMap
+                    if (!map.getBoolean(WearFocusContract.KEY_ACTIVE, false)) {
+                        cancelFocusOngoingActivity()
+                    } else {
+                        showFocusOngoingActivity(
+                            paused = map.getBoolean(WearFocusContract.KEY_PAUSED, false),
+                            title = map.getString(WearFocusContract.KEY_TITLE)
+                                ?.takeIf { it.isNotBlank() } ?: DEFAULT_TITLE,
+                            plannedEndAtMillis = map.getLong(WearFocusContract.KEY_PLANNED_END_AT_MILLIS, 0L),
+                            pausedTimeLeftSeconds = map.getInt(WearFocusContract.KEY_PAUSED_TIME_LEFT_SECONDS, 0)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun showFocusOngoingActivity(
+        paused: Boolean,
+        title: String,
+        plannedEndAtMillis: Long,
+        pausedTimeLeftSeconds: Int
+    ) {
+        ensureChannel()
+
+        val touchIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val status = if (paused) {
+            Status.Builder()
+                .addTemplate("Paused #left#")
+                .addPart("left", Status.TextPart(formatMmSs(pausedTimeLeftSeconds)))
+                .build()
+        } else {
+            // Convert the phone's wall-clock end time into this device's elapsed-realtime base.
+            val remainingMs = (plannedEndAtMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+            Status.Builder()
+                .addTemplate("#focusTimer#")
+                .addPart("focusTimer", Status.TimerPart(SystemClock.elapsedRealtime() + remainingMs))
+                .build()
+        }
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_focus_wear)
+            .setContentTitle(title)
+            .setContentText(if (paused) "Focus paused" else "Focus in progress")
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
+            .setContentIntent(touchIntent)
+
+        val ongoingActivity = OngoingActivity.Builder(applicationContext, NOTIFICATION_ID, builder)
+            .setStaticIcon(R.drawable.ic_focus_wear)
+            .setTouchIntent(touchIntent)
+            .setStatus(status)
+            .build()
+        ongoingActivity.apply(applicationContext)
+
+        runCatching {
+            NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, builder.build())
+        }
+    }
+
+    private fun cancelFocusOngoingActivity() {
+        NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID)
+    }
+
+    private fun ensureChannel() {
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                "Focus session",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "Live focus-session timer mirrored from your phone." }
+        )
+    }
+
+    private fun formatMmSs(totalSeconds: Int): String {
+        val safe = totalSeconds.coerceAtLeast(0)
+        return "%02d:%02d".format(safe / 60, safe % 60)
+    }
+
+    private companion object {
+        const val CHANNEL_ID = "chronos_focus_wear"
+        const val NOTIFICATION_ID = 4201
+        const val DEFAULT_TITLE = "Focus session"
+    }
+}

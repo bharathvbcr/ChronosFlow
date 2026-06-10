@@ -34,6 +34,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.hilt.android)
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.play.services.wearable)
     ksp(libs.hilt.compiler)
 
     testImplementation(project(":core:ai"))

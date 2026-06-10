@@ -54,6 +54,7 @@ class FocusService : Service() {
     @Inject lateinit var logActualTimeUseCase: LogActualTimeUseCase
     @Inject lateinit var privacyPreferences: PrivacyPreferences
     @Inject lateinit var manualMissedBlockRegistry: ManualMissedBlockRegistry
+    @Inject lateinit var wearFocusBridge: WearFocusBridge
 
     private val notificationManager: NotificationManager by lazy {
         getSystemService(NotificationManager::class.java)
@@ -81,7 +82,19 @@ class FocusService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         serviceScope.launch {
             commandMutex.withLock {
-                handleStartCommand(intent)
+                try {
+                    handleStartCommand(intent)
+                } catch (e: Exception) {
+                    // The service could not be promoted to the foreground. This happens when
+                    // the start is requested while the app is in the background (e.g. headlessly
+                    // by an AppFunction/agent), which Android disallows for a specialUse FGS and
+                    // surfaces as ForegroundServiceStartNotAllowedException here in the coroutine.
+                    // Without this guard the exception is uncaught and the OS kills the process.
+                    // Stop cleanly instead of crashing.
+                    stopTicker()
+                    runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                    stopSelf()
+                }
             }
         }
         return START_STICKY
@@ -167,6 +180,7 @@ class FocusService : Service() {
                 if (intent.getBooleanExtra(EXTRA_ARCHIVE_ON_STOP, true)) {
                     persistSession(runtime.archive().state)
                 }
+                wearFocusBridge.clear()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -387,6 +401,24 @@ class FocusService : Service() {
                 0
             }
         )
+        publishWearState(snapshot)
+    }
+
+    private fun publishWearState(snapshot: FocusSessionSnapshot) {
+        if (!snapshot.isRunning && !snapshot.isPaused) return
+        val defaultTitle = getString(com.chronosflow.core.notifications.R.string.focus_notification_default_title)
+        val title = if (privacyPreferences.redactSensitiveNotifications()) {
+            defaultTitle
+        } else {
+            currentBlockTitle ?: defaultTitle
+        }
+        if (snapshot.isPaused) {
+            wearFocusBridge.publishPaused(title, snapshot.timeLeftSeconds, snapshot.totalSeconds)
+        } else {
+            val plannedEndAtMillis = snapshot.plannedEndAt?.toEpochMilli()
+                ?: (System.currentTimeMillis() + snapshot.timeLeftSeconds * 1_000L)
+            wearFocusBridge.publishRunning(title, plannedEndAtMillis, snapshot.totalSeconds)
+        }
     }
 
     private fun startTicker() {
@@ -418,6 +450,7 @@ class FocusService : Service() {
                         blockTitle = currentBlockTitle,
                         redactSensitiveTitles = privacyPreferences.redactSensitiveNotifications()
                     )
+                    wearFocusBridge.clear()
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     break

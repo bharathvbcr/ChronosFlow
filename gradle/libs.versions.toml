@@ -34,6 +34,8 @@ generativeai = "0.9.0"
 orgJson = "20260522"
 wear-tiles = "1.6.0"
 wear-protolayout = "1.4.0"
+wear-ongoing = "1.0.0"
+playServicesWearable = "18.2.0"
 work = "2.11.2"
 firebaseBom = "34.14.0"
 appfunctions = "1.0.0-alpha09"
@@ -43,6 +45,8 @@ haze = "1.7.2"
 androidx-wear-tiles = { module = "androidx.wear.tiles:tiles", version.ref = "wear-tiles" }
 androidx-wear-protolayout = { module = "androidx.wear.protolayout:protolayout", version.ref = "wear-protolayout" }
 androidx-wear-protolayout-material = { module = "androidx.wear.protolayout:protolayout-material", version.ref = "wear-protolayout" }
+androidx-wear-ongoing = { module = "androidx.wear:wear-ongoing", version.ref = "wear-ongoing" }
+play-services-wearable = { module = "com.google.android.gms:play-services-wearable", version.ref = "playServicesWearable" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
