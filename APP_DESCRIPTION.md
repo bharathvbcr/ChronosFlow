@@ -2,17 +2,15 @@
 
 ## Short Description
 
-ChronosFlow is a daily planning app that turns the shape of your day into a clear 24-hour visual plan.
+ChronosFlow is a daily planning app that turns your schedule, tasks, habits, medication reminders, focus sessions, and routines into a clear 24-hour visual plan.
 
 ## Full Description
 
-ChronosFlow is built around the Chronos Dial, a 24-hour circular planner that shows the shape of your day at a glance.
+ChronosFlow is a productivity suite built around the Chronos Dial, a 24-hour circular planner that shows the shape of your day at a glance.
 
-The current app direction is intentionally focused: Today, Plan, Focus, and a global command palette. Tasks, habits, medication reminders, and review data are treated as inputs to the day plan first, not as competing standalone destinations.
+Instead of scattering your tasks, calendar events, habits, focus sessions, medication reminders, and routines across separate tools, ChronosFlow brings them into one calm daily operating system.
 
-Stand-alone feature screens are included in the codebase and remain parked from the primary loop until they are promoted through dependable dial handoff paths.
-
-Plan your day, protect your focus, review what actually happened, and improve tomorrow.
+Plan your day, protect your focus, track habits, remember important medication times, review what actually happened, and improve tomorrow.
 
 ## Key Features
 
@@ -129,3 +127,4 @@ ChronosFlow is designed for modern Android:
 - Keyboard, mouse, trackpad, stylus, and touch-friendly interaction
 - Android 16 production readiness
 - Android 17 compatibility testing
+

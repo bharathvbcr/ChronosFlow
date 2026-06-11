@@ -1,18 +1,8 @@
 # ChronosFlow
 
-ChronosFlow is an Android day-planning app built around a simple idea: your day should be visible, adjustable, and learn from how you actually spend your time.
+ChronosFlow is an Android productivity suite built around a simple idea: your day should be visible, adjustable, and learn from how you actually spend your time.
 
-The active product direction is dial-first. The app now treats the 24-hour Chronos Dial, day planning, focus execution, and the global command palette as the primary experience. Standalone task, habit, medication, and review screens remain compiled as parked work, but they are no longer primary navigation targets until their wiring is promoted back into the dial flow.
-
-## Current Direction
-
-ChronosFlow is not being shaped as a pile of feature tabs. The goal is a daily operating surface where every task, reminder, routine, and focus session becomes one of three things:
-
-- an intent waiting to be scheduled,
-- a visible arc on the Chronos Dial,
-- an actual-time trace for daily review.
-
-The first app layout is therefore intentionally narrow: Today, Plan, Focus, and command palette.
+The app combines a 24-hour radial planner, task management, habit tracking, medication reminders, focus sessions, calendar overlays, mood and energy check-ins, and AI-assisted day planning into one calm daily operating system.
 
 ## Product Positioning
 
@@ -146,15 +136,6 @@ Supported planning flows:
 
 AI suggestions are shown in a review sheet before they modify the user's day.
 
-The current Android implementation already follows Google's official on-device stack:
-
-- `ML Kit GenAI Prompt API`
-- `AICore` for Gemini Nano model delivery and execution
-- explicit cloud Gemini fallback when enabled
-- local heuristics when neither model path is available
-
-On-device Gemini Nano support follows the Android ML Kit-on-AICore path documented in [`docs/gemini-nano-support.md`](docs/gemini-nano-support.md). Device support is not universal, so the app must surface readiness clearly and fall back to local heuristics when Gemini Nano is unavailable.
-
 ## Android Platform Direction
 
 ChronosFlow is designed for modern Android surfaces:
@@ -211,15 +192,10 @@ Current module direction:
 :benchmark
 :core:ai
 :core:data
-:core:domain
 :core:notifications
 :feature:daydial
 :feature:focus
-:feature:habits
-:feature:medication
-:feature:review
 :feature:tasks
-:wear
 ```
 
 Planned domain cleanup:
@@ -238,9 +214,12 @@ Planned domain cleanup:
   - entity/domain mappers
 ```
 
-## Parked Or Future Feature Areas
+## Planned Feature Modules
 
 ```text
+:feature:habits
+:feature:medication
+:feature:review
 :feature:routines
 :feature:calendar
 :feature:insights
@@ -248,25 +227,34 @@ Planned domain cleanup:
 
 ## Development Status
 
-ChronosFlow is now in an active alpha implementation phase with a dial-first primary surface.
+ChronosFlow is currently in early implementation.
 
-Implemented and actively stabilized:
+Implemented or scaffolded:
 
-- Gradle project baseline with modular structure
-- Core DayDial and Focus flows
-- AI planner with user-reviewed suggestion staging
-- Command palette command-provider coverage in the app shell
-- Alarm and notification scaffolding
-- Room data foundation and core domain/service boundaries
-- Habits, medication, and review modules wired as gated or command-accessible surfaces
-- Baseline profile and macrobenchmark test path (`chronosCiCheck`)
+- Gradle project structure
+- Compose BOM baseline
+- Room data layer
+- Task scaffold
+- Chronos Dial scaffold
+- Focus timer scaffold
+- Alarm scheduler scaffold
+- Android manifest permission posture
+- Baseline profile and macrobenchmark scaffold
+- AI planner scaffold
 
-In progress:
+Still needed:
 
-- Domain/data consistency and module-boundary verification
-- Command palette and Android 16/17 polish pass for interaction and accessibility
-- Reliability hardening for focus state, reminders, and conflict handling
-- Feature promotion planning for future routines, calendar, and insights modules once dial handoff is complete
+- Gradle wrapper
+- Build verification
+- Domain/data boundary cleanup
+- `DayPlanEntity`
+- Chronos Dial editor sheet
+- Conflict detection
+- Habit module
+- Medication module
+- Daily review module
+- Runtime notification and exact-alarm permission flows
+- Android 17 compatibility lane
 
 ## Build Notes
 
@@ -297,3 +285,4 @@ Benchmark verification:
 - Treat habits, medication, focus, sleep, and tasks as parts of one day.
 - Support large screens and non-touch input from the start.
 - Use exact alarms and Live Updates only where they are justified.
+
