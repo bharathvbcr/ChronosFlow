@@ -62,6 +62,9 @@ fun ChronosBackdrop(
             darkTheme = darkTheme,
             reduceMotionEnabled = reduceMotionEnabled
         )
+        // Plain background: the base chronosBackgroundBrush underneath shows through.
+        // Doubles as the zero-render-cost option for older devices.
+        ChronosBackdropTheme.MINIMAL -> Unit
     }
 }
 
@@ -232,7 +235,7 @@ private fun LiquidBackdropBlobLayer(
             }
             .drawWithCache {
                 val brush = Brush.radialGradient(
-                    colors = listOf(color, Color.Transparent),
+                    *liquidBackdropGlowStops(color),
                     center = Offset(size.width / 2f, size.height / 2f),
                     radius = size.width * radiusFraction
                 )
@@ -245,6 +248,40 @@ private fun LiquidBackdropBlobLayer(
 
 internal fun liquidBackdropLayerTranslationFraction(centerFraction: Float): Float =
     centerFraction - 0.5f
+
+/**
+ * Multi-stop falloff for a blob: a slightly brighter core gives the glow depth while
+ * the extra mid stops and long, gentle tail soften the edge and cut the banding a flat
+ * two-stop `color -> Transparent` gradient produces. [color] already carries its theme
+ * alpha, so the stops scale that baseline rather than introducing new opacity.
+ */
+internal fun liquidBackdropGlowStops(color: Color): Array<Pair<Float, Color>> {
+    val baseAlpha = color.alpha
+    return arrayOf(
+        0.0f to color.copy(alpha = (baseAlpha * 1.2f).coerceAtMost(1f)),
+        0.28f to color,
+        0.52f to color.copy(alpha = baseAlpha * 0.55f),
+        0.74f to color.copy(alpha = baseAlpha * 0.22f),
+        1.0f to Color.Transparent
+    )
+}
+
+/**
+ * Symmetric vertical-curtain falloff for the Aurora bands. The extra mid stops feather
+ * the top and bottom of each streak more gently than a hard
+ * `Transparent -> color -> Transparent` ramp, cutting the banding and giving the
+ * curtain a soft glow. [color] already carries its theme alpha.
+ */
+internal fun liquidBackdropCurtainStops(color: Color): Array<Pair<Float, Color>> {
+    val baseAlpha = color.alpha
+    return arrayOf(
+        0.0f to Color.Transparent,
+        0.28f to color.copy(alpha = baseAlpha * 0.45f),
+        0.5f to color,
+        0.72f to color.copy(alpha = baseAlpha * 0.45f),
+        1.0f to Color.Transparent
+    )
+}
 
 @Composable
 private fun SmokeBackdrop(
@@ -295,7 +332,7 @@ private fun SmokeBackdrop(
                             scale(scaleX = 1.6f, scaleY = 0.8f, pivot = center) {
                                 drawCircle(
                                     brush = Brush.radialGradient(
-                                        colors = listOf(puffColor, Color.Transparent),
+                                        *liquidBackdropGlowStops(puffColor),
                                         center = center,
                                         radius = radius
                                     ),
@@ -422,7 +459,7 @@ private fun DrawScope.drawGlassDroplet(
     // 2. Refracted highlight inside (offset gradient toward bottom-right)
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(refractionColor, Color.Transparent),
+            *liquidBackdropGlowStops(refractionColor),
             center = Offset(center.x + radius * 0.25f, center.y + radius * 0.25f),
             radius = radius * 0.95f
         ),
@@ -505,7 +542,7 @@ private fun AuroraBackdrop(
                             
                             // Vertical fade gradient brush for the curtain line
                             val brush = Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, streakColor, Color.Transparent),
+                                *liquidBackdropCurtainStops(streakColor),
                                 startY = startY,
                                 endY = endY
                             )
@@ -572,7 +609,7 @@ private fun SunsetGlowBackdrop(
                     val r1 = shortestSide * (0.7f + 0.1f * wave1)
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(color1, Color.Transparent),
+                            *liquidBackdropGlowStops(color1),
                             center = center1,
                             radius = r1
                         ),
@@ -589,7 +626,7 @@ private fun SunsetGlowBackdrop(
                     val r2 = shortestSide * (0.8f + 0.12f * wave2)
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(color2, Color.Transparent),
+                            *liquidBackdropGlowStops(color2),
                             center = center2,
                             radius = r2
                         ),
@@ -606,7 +643,7 @@ private fun SunsetGlowBackdrop(
                     val r3 = shortestSide * (0.6f + 0.08f * wave3)
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(color3, Color.Transparent),
+                            *liquidBackdropGlowStops(color3),
                             center = center3,
                             radius = r3
                         ),
@@ -662,7 +699,7 @@ private fun NebulaBackdrop(
                     val r1 = shortestSide * (0.8f + 0.1f * sin((phase * 0.3f).toDouble()).toFloat())
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(color1, Color.Transparent),
+                            *liquidBackdropGlowStops(color1),
                             center = center1,
                             radius = r1
                         ),
@@ -678,7 +715,7 @@ private fun NebulaBackdrop(
                     val r2 = shortestSide * (0.7f + 0.12f * cos((phase * 0.4f).toDouble()).toFloat())
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(color2, Color.Transparent),
+                            *liquidBackdropGlowStops(color2),
                             center = center2,
                             radius = r2
                         ),
@@ -694,7 +731,7 @@ private fun NebulaBackdrop(
                     val r3 = shortestSide * (0.6f + 0.08f * sin((phase * 0.5f).toDouble()).toFloat())
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(color3, Color.Transparent),
+                            *liquidBackdropGlowStops(color3),
                             center = center3,
                             radius = r3
                         ),

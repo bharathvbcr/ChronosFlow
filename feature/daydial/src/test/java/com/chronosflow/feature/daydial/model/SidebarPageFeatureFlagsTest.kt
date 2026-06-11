@@ -6,13 +6,14 @@ import org.junit.Test
 
 class SidebarPageFeatureFlagsTest {
     @Test
-    fun `root sidebar pages include habits and meds by default while review stays gated`() {
+    fun `root sidebar pages include habits meds and review by default while review can be disabled`() {
         assertEquals(
             listOf(
                 SidebarPage.DAY_TOOLS,
                 SidebarPage.TASKS,
                 SidebarPage.HABITS,
-                SidebarPage.MEDICATION
+                SidebarPage.MEDICATION,
+                SidebarPage.REVIEW
             ),
             SidebarPage.rootPages(ChronosFeatureFlags())
         )
@@ -22,11 +23,10 @@ class SidebarPageFeatureFlagsTest {
                 SidebarPage.DAY_TOOLS,
                 SidebarPage.TASKS,
                 SidebarPage.HABITS,
-                SidebarPage.MEDICATION,
-                SidebarPage.REVIEW
+                SidebarPage.MEDICATION
             ),
             SidebarPage.rootPages(
-                ChronosFeatureFlags(reviewEnabled = true)
+                ChronosFeatureFlags(reviewEnabled = false)
             )
         )
     }

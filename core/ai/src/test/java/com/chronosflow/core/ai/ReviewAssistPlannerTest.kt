@@ -3,6 +3,7 @@ package com.chronosflow.core.ai
 import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.AssistTextGeneration
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
+import com.chronosflow.core.ai.genai.SummaryStyle
 import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.ReviewInsight
 import com.chronosflow.core.domain.model.ReviewInsightSeverity
@@ -69,6 +70,55 @@ class ReviewAssistPlannerTest {
         assertEquals(AssistGenAiSource.LOCAL, narrative.source)
         assertEquals("High drift today: 120 minutes moved off-plan.", narrative.headline)
     }
+
+    @Test
+    fun `suggestDigest summarizes insights with on-device summarizer`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.summarize(any(), SummaryStyle.THREE_BULLETS) } returns AssistTextGeneration(
+            text = "• Energy held in the morning\n• Afternoon drifted",
+            source = AssistGenAiSource.GEMINI_NANO
+        )
+        val planner = ReviewAssistPlanner(coordinator)
+
+        val digest = planner.suggestDigest(twoInsights())
+
+        assertEquals(AssistGenAiSource.GEMINI_NANO, digest.source)
+        assertTrue(digest.text.contains("morning", ignoreCase = true))
+    }
+
+    @Test
+    fun `suggestDigest falls back to local digest when summarizer empty`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.summarize(any(), SummaryStyle.THREE_BULLETS) } returns AssistTextGeneration(
+            text = null,
+            source = AssistGenAiSource.LOCAL
+        )
+        val planner = ReviewAssistPlanner(coordinator)
+
+        val digest = planner.suggestDigest(twoInsights())
+
+        assertEquals(AssistGenAiSource.LOCAL, digest.source)
+        assertTrue(digest.text.contains("Energy peak"))
+    }
+
+    private fun twoInsights() = listOf(
+        ReviewInsight(
+            id = "insight-1",
+            type = ReviewInsightType.ENERGY_PEAK,
+            title = "Energy peak",
+            detail = "Morning energy held steady.",
+            relatedBlockId = null,
+            severity = ReviewInsightSeverity.INFO
+        ),
+        ReviewInsight(
+            id = "insight-2",
+            type = ReviewInsightType.HABIT_WINDOW,
+            title = "Habit window missed",
+            detail = "Evening habit slipped.",
+            relatedBlockId = null,
+            severity = ReviewInsightSeverity.WARNING
+        )
+    )
 
     private fun sampleSummary(driftMinutes: Int) = DailyReviewSummary(
         date = LocalDate.of(2026, 5, 25),

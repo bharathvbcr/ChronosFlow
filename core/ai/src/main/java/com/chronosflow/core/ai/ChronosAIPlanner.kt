@@ -11,6 +11,7 @@ import com.chronosflow.core.ai.genai.PlanningPromptBuilder
 import com.chronosflow.core.domain.model.BlockFlexibility
 import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.DailyReviewSummary
+import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TimeBlock
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
@@ -120,7 +121,9 @@ class ChronosAIPlanner @Inject constructor(
         review: DailyReviewSummary,
         existingBlocks: List<TimeBlock>,
         currentTimeZone: String,
-        privacyMode: PrivacyMode
+        privacyMode: PrivacyMode,
+        pendingTasks: List<Task> = emptyList(),
+        dueHabitTitles: List<String> = emptyList()
     ): StructuredDayPlanSuggestion {
         if (privacyMode == PrivacyMode.DISABLED) {
             return StructuredDayPlanSuggestion(
@@ -137,7 +140,9 @@ class ChronosAIPlanner @Inject constructor(
             date = review.date,
             timezone = currentTimeZone,
             review = review,
-            existingBlocks = existingBlocks
+            existingBlocks = existingBlocks,
+            pendingTasks = pendingTasks,
+            dueHabitTitles = dueHabitTitles
         )
 
         val generated = when (privacyMode) {
@@ -147,7 +152,8 @@ class ChronosAIPlanner @Inject constructor(
                 date = review.date,
                 userPreferences = userPreferences,
                 review = review,
-                existingBlocks = existingBlocks
+                existingBlocks = existingBlocks,
+                pendingTasks = pendingTasks
             )
             PrivacyMode.CLOUD_ALLOWED -> generateWithCloudOrFallback(
                 prompt = prompt,
@@ -155,7 +161,8 @@ class ChronosAIPlanner @Inject constructor(
                 date = review.date,
                 userPreferences = userPreferences,
                 review = review,
-                existingBlocks = existingBlocks
+                existingBlocks = existingBlocks,
+                pendingTasks = pendingTasks
             )
             PrivacyMode.DISABLED -> return StructuredDayPlanSuggestion(
                 proposedBlocks = emptyList(),
@@ -214,7 +221,8 @@ class ChronosAIPlanner @Inject constructor(
         date: LocalDate,
         userPreferences: String,
         review: DailyReviewSummary?,
-        existingBlocks: List<TimeBlock>
+        existingBlocks: List<TimeBlock>,
+        pendingTasks: List<Task> = emptyList()
     ): StructuredDayPlanSuggestion {
         return generateFromAssistText(
             prompt = prompt,
@@ -223,7 +231,8 @@ class ChronosAIPlanner @Inject constructor(
             userPreferences = userPreferences,
             review = review,
             existingBlocks = existingBlocks,
-            privacyMode = PrivacyMode.ON_DEVICE_ONLY
+            privacyMode = PrivacyMode.ON_DEVICE_ONLY,
+            pendingTasks = pendingTasks
         )
     }
 
@@ -233,7 +242,8 @@ class ChronosAIPlanner @Inject constructor(
         date: LocalDate,
         userPreferences: String,
         review: DailyReviewSummary?,
-        existingBlocks: List<TimeBlock>
+        existingBlocks: List<TimeBlock>,
+        pendingTasks: List<Task> = emptyList()
     ): StructuredDayPlanSuggestion {
         return generateFromAssistText(
             prompt = prompt,
@@ -242,7 +252,8 @@ class ChronosAIPlanner @Inject constructor(
             userPreferences = userPreferences,
             review = review,
             existingBlocks = existingBlocks,
-            privacyMode = PrivacyMode.CLOUD_ALLOWED
+            privacyMode = PrivacyMode.CLOUD_ALLOWED,
+            pendingTasks = pendingTasks
         )
     }
 
@@ -253,7 +264,8 @@ class ChronosAIPlanner @Inject constructor(
         userPreferences: String,
         review: DailyReviewSummary?,
         existingBlocks: List<TimeBlock>,
-        privacyMode: PrivacyMode
+        privacyMode: PrivacyMode,
+        pendingTasks: List<Task> = emptyList()
     ): StructuredDayPlanSuggestion {
         val generation = genAiAssistCoordinator.generateAssistText(prompt, privacyMode)
         generation.text?.let { raw ->
@@ -280,7 +292,8 @@ class ChronosAIPlanner @Inject constructor(
             packageName = context.packageName,
             userPreferences = userPreferences,
             date = date,
-            currentTimeZone = timezone
+            currentTimeZone = timezone,
+            pendingTasks = pendingTasks
         )
         val fallbackExplanation = when (generation.source) {
             AssistGenAiSource.CLOUD_GEMINI ->

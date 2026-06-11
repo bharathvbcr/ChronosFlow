@@ -10,7 +10,9 @@ import com.chronosflow.feature.daydial.model.DayQuickItemsUiState
 import com.chronosflow.feature.daydial.model.TimeBlockUiModel
 import com.chronosflow.feature.daydial.model.TemplateBlueprint
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 
@@ -259,9 +261,22 @@ class DayDialNavigationStateTest {
     }
 
     @Test
+    fun `dial zoom window label spans twelve hours and wraps midnight`() {
+        assertEquals("6:00 AM – 6:00 PM", dialZoomWindowLabel(6 * 60))
+        assertEquals("8:00 PM – 8:00 AM", dialZoomWindowLabel(20 * 60))
+    }
+
+    @Test
+    fun `dial zoom now shortcut appears only when now leaves the window`() {
+        assertTrue(dialZoomMinuteInWindow(minute = 9 * 60, windowStart = 6 * 60))
+        assertFalse(dialZoomMinuteInWindow(minute = 19 * 60, windowStart = 6 * 60))
+        assertTrue(dialZoomMinuteInWindow(minute = 2 * 60, windowStart = 20 * 60))
+    }
+
+    @Test
     fun `today open time summary names rest of day without a next block`() {
         assertEquals(
-            "Free for the rest of the day · 225m",
+            "Free for the rest of the day · 3h 45m",
             todayOpenTimeSummaryLabel(
                 nextStartMinute = null,
                 currentMinute = 20 * 60 + 15,

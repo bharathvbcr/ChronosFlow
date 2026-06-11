@@ -20,7 +20,7 @@ class FocusWidgetAction : ActionCallback {
             context = context,
             widgetAction = parameters[ActionParameters.Key<String>(ACTION_KEY)]
         )
-        ChronosGlanceWidgetReceiver.refreshAll(context)
+        ChronosWidgetHub.refreshAll(context)
     }
 
     companion object {

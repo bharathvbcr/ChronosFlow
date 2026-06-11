@@ -8,6 +8,7 @@ import com.chronosflow.core.ai.EnergyInsight
 import com.chronosflow.core.ai.InsightRecommendation
 import com.chronosflow.core.ai.DeepWorkAssistPlanner
 import com.chronosflow.core.ai.InsightsRecommendationsPlanner
+import com.chronosflow.core.ai.ReviewAssistPlanner
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
 import com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot
 import com.chronosflow.core.ai.genai.refreshAssistUiSnapshot
@@ -37,6 +38,9 @@ import com.chronosflow.core.domain.usecase.SyncRecurringTaskAlarmsUseCase
 import com.chronosflow.core.notifications.AlarmScheduleResult
 import com.chronosflow.core.notifications.AlarmScheduler
 import com.chronosflow.feature.daydial.DailyReview
+import com.chronosflow.feature.daydial.model.InsightsPeriod
+import com.chronosflow.feature.daydial.model.InsightsPeriodSummary
+import com.chronosflow.feature.daydial.ui.insightCategoryBreakdownRowsFromBlocks
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -45,12 +49,15 @@ import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -74,6 +81,7 @@ class DayDialReviewDelegate @Inject constructor(
     private val insightsRecommendationsPlanner: InsightsRecommendationsPlanner,
     private val deepWorkAssistPlanner: DeepWorkAssistPlanner,
     private val genAiAssistCoordinator: GenAiAssistCoordinator,
+    private val reviewAssistPlanner: ReviewAssistPlanner,
     private val manualMissedBlockRegistry: ManualMissedBlockRegistry,
     private val plannerService: PlannerService = PlannerService(repository),
     private val dailyReviewCalculator: DailyReviewCalculator = DailyReviewCalculator()
@@ -133,10 +141,12 @@ class DayDialReviewDelegate @Inject constructor(
             summary = summary,
             insights = summary.insights
         )
+        val digest = runCatching { reviewAssistPlanner.suggestDigest(summary.insights) }.getOrNull()
         return InsightsTabRefreshResult(
             reviewInsights = summary.insights,
             recommendations = recommendations,
-            assistSnapshot = snapshot
+            assistSnapshot = snapshot,
+            digest = digest
         )
     }
 
@@ -144,6 +154,82 @@ class DayDialReviewDelegate @Inject constructor(
         summary: DailyReviewSummary?,
         insights: List<ReviewInsight>
     ): List<InsightRecommendation> = insightsRecommendationsPlanner.localRecommendations(summary, insights)
+
+    /**
+     * Live execution metrics across the trailing window of [period] ending at the selected date.
+     * Each day in the window is scored with the same [DailyReviewCalculator] the day view uses and
+     * re-aggregated whenever any day's blocks or actual-time segments change, so weekly/monthly
+     * rollups update in real time and stay consistent with the per-day numbers. Emits null for the
+     * DAY period (callers fall back to the live selected-day data) and a loading summary while a
+     * freshly selected window is first read.
+     */
+    fun observePeriodInsights(
+        scope: CoroutineScope,
+        selectedDate: StateFlow<LocalDate>,
+        period: StateFlow<InsightsPeriod>
+    ): StateFlow<InsightsPeriodSummary?> =
+        combine(selectedDate, period) { date, activePeriod -> date to activePeriod }
+            .flatMapLatest { (date, activePeriod) ->
+                if (activePeriod == InsightsPeriod.DAY) {
+                    flowOf<InsightsPeriodSummary?>(null)
+                } else {
+                    periodSummaryFlow(date, activePeriod)
+                }
+            }
+            .stateIn(scope, SharingStarted.WhileSubscribed(5000), null)
+
+    private fun periodSummaryFlow(
+        date: LocalDate,
+        period: InsightsPeriod
+    ): Flow<InsightsPeriodSummary> {
+        val dayFlows = period.dateRange(date).map { day ->
+            combine(
+                repository.getTimeBlocksByDate(day),
+                reviewRepository.observeActualTimeSegments(day)
+            ) { blocks, segments ->
+                val effectiveSegments = segments
+                    .ifEmpty { blocks.mapNotNull { toLegacyActualSegmentOrNull(it) } }
+                PeriodDayAggregate(
+                    summary = dailyReviewCalculator.calculate(
+                        date = day,
+                        plannedBlocks = blocks,
+                        actualSegments = effectiveSegments
+                    ),
+                    blocks = blocks
+                )
+            }
+        }
+        return combine(dayFlows) { days -> aggregatePeriod(days.toList()) }
+            .onStart { emit(InsightsPeriodSummary.Loading) }
+    }
+
+    private fun aggregatePeriod(days: List<PeriodDayAggregate>): InsightsPeriodSummary {
+        var planned = 0
+        var actual = 0
+        var missed = 0
+        var missedCount = 0
+        var completed = 0
+        val allBlocks = mutableListOf<TimeBlock>()
+        days.forEach { day ->
+            planned += day.summary.plannedMinutes
+            actual += day.summary.actualMinutes
+            missed += day.summary.missedMinutes
+            missedCount += day.summary.missedBlockCount
+            completed += day.summary.completedBlockCount
+            allBlocks += day.blocks
+        }
+        return InsightsPeriodSummary(
+            review = DailyReview(
+                plannedMinutes = planned,
+                actualMinutes = actual,
+                missedMinutes = missed,
+                completedBlocks = completed
+            ),
+            missedCount = missedCount,
+            categoryRows = insightCategoryBreakdownRowsFromBlocks(allBlocks),
+            isLoading = false
+        )
+    }
 
     private suspend fun persistRefreshedInsights(date: LocalDate) {
         val blocks = repository.getTimeBlocksByDate(date).first()
@@ -489,6 +575,11 @@ class DayDialReviewDelegate @Inject constructor(
         )
     }
 }
+
+private data class PeriodDayAggregate(
+    val summary: DailyReviewSummary,
+    val blocks: List<TimeBlock>
+)
 
 private data class PlannerReviewSignals(
     val habitCompletionRate: Float,

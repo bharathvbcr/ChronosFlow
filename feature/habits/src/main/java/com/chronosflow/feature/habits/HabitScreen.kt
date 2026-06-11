@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -52,9 +53,9 @@ import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosMetricTile
 import com.chronosflow.core.ui.components.ChronosConfirmBottomSheet
 import com.chronosflow.core.ui.components.ChronosQuickAddChips
-import com.chronosflow.core.ui.components.ChronosScreenBackdrop
+import com.chronosflow.core.ui.components.ChronosCommandPaletteAction
+import com.chronosflow.core.ui.components.ChronosPageHeader
 import com.chronosflow.core.ui.components.ChronosScreenScaffold
-import com.chronosflow.core.ui.components.ChronosSectionHeader
 import com.chronosflow.core.ui.components.formatDisplayMinute
 import com.chronosflow.core.ui.shell.LocalChronosShellBottomInset
 import com.chronosflow.core.ui.theme.ChronosSpacing
@@ -66,6 +67,7 @@ import java.time.LocalTime
 fun HabitScreen(
     viewModel: HabitViewModel = hiltViewModel(),
     onBack: (() -> Unit)? = null,
+    onOpenCommandPalette: (() -> Unit)? = null,
     openAddSheet: Boolean = false,
     initialAddCapture: String? = null
 ) {
@@ -106,89 +108,88 @@ fun HabitScreen(
 
     ChronosScreenScaffold(
         title = "Habits",
-        onBack = onBack
+        onBack = onBack,
+        actions = { ChronosCommandPaletteAction(onOpenCommandPalette) }
     ) { padding ->
-        ChronosScreenBackdrop(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 16.dp,
+                bottom = padding.calculateBottomPadding() + shellBottomInset + ChronosSpacing.Medium + 16.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                contentPadding = PaddingValues(bottom = shellBottomInset + ChronosSpacing.Medium),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
+            item {
+                ChronosPageHeader(
+                    title = "Habit tracking",
+                    subtitle = "Track repeatable windows and keep streaks visible on the day plan.",
+                    icon = Icons.Default.Favorite
+                )
+            }
+            item {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    ChronosMetricTile("Active", activeHabits.size.toString(), Modifier.weight(1f))
+                    ChronosMetricTile(
+                        "Best streak",
+                        (streaks.maxOfOrNull { it.streakCount } ?: 0).toString(),
+                        Modifier.weight(1f)
+                    )
+                }
+            }
+            item {
+                FilledTonalButton(
+                    onClick = { sheetTarget = HabitSheetTarget.Add() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Add habit", fontWeight = FontWeight.SemiBold)
+                }
+            }
+            item { HabitStreakChart(streaks = streaks) }
+            if (repairSuggestions.isNotEmpty()) {
                 item {
-                    ChronosSectionHeader(
-                        title = "Habit tracking",
-                        subtitle = "Track repeatable windows and keep streaks visible on the day plan."
+                    HabitRepairPanel(
+                        suggestions = repairSuggestions,
+                        assistSnapshot = repairAssistSnapshot,
+                        onComplete = { suggestion -> viewModel.completeHabit(suggestion.habit) }
+                    )
+                }
+            }
+            if (activeHabits.isEmpty()) {
+                item {
+                    ChronosEmptyState(
+                        title = "No active habits",
+                        message = "Add one habit to start building a daily streak."
                     )
                 }
                 item {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        ChronosMetricTile("Active", activeHabits.size.toString(), Modifier.weight(1f))
-                        ChronosMetricTile(
-                            "Best streak",
-                            (streaks.maxOfOrNull { it.streakCount } ?: 0).toString(),
-                            Modifier.weight(1f)
-                        )
-                    }
+                    ChronosQuickAddChips(
+                        label = "Start quickly",
+                        options = listOf("Morning walk", "Meditation", "Read 20 min", "Hydrate"),
+                        onSelect = { title ->
+                            sheetTarget = HabitSheetTarget.Add(prefillTitle = title)
+                        }
+                    )
                 }
-                item {
-                    FilledTonalButton(
-                        onClick = { sheetTarget = HabitSheetTarget.Add() },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Add habit", fontWeight = FontWeight.SemiBold)
-                    }
-                }
-                item { HabitStreakChart(streaks = streaks) }
-                if (repairSuggestions.isNotEmpty()) {
-                    item {
-                        HabitRepairPanel(
-                            suggestions = repairSuggestions,
-                            assistSnapshot = repairAssistSnapshot,
-                            onComplete = { suggestion -> viewModel.completeHabit(suggestion.habit) }
-                        )
-                    }
-                }
-                if (activeHabits.isEmpty()) {
-                    item {
-                        ChronosEmptyState(
-                            title = "No active habits",
-                            message = "Add one habit to start building a daily streak."
-                        )
-                    }
-                    item {
-                        ChronosQuickAddChips(
-                            label = "Start quickly",
-                            options = listOf("Morning walk", "Meditation", "Read 20 min", "Hydrate"),
-                            onSelect = { title ->
-                                sheetTarget = HabitSheetTarget.Add(prefillTitle = title)
-                            }
-                        )
-                    }
-                } else {
-                    items(activeHabits, key = { it.id }) { habit ->
-                        HabitRow(
-                            modifier = Modifier.animateItem(),
-                            habit = habit,
-                            nowMinute = nowMinute,
-                            onComplete = { viewModel.completeHabit(habit) },
-                            onPause = { viewModel.pauseHabit(habit, days = 1) },
-                            onResume = { viewModel.resumeHabit(habit) },
-                            onSkip = { viewModel.skipHabitToday(habit) },
-                            onDefer = { viewModel.deferHabit(habit, minutes = 60) },
-                            onEdit = { sheetTarget = HabitSheetTarget.Edit(habit) },
-                            onArchive = { habitToArchive = habit },
-                            onOpenContext = { habitContextTarget = habit }
-                        )
-                    }
+            } else {
+                items(activeHabits, key = { it.id }) { habit ->
+                    HabitRow(
+                        modifier = Modifier.animateItem(),
+                        habit = habit,
+                        nowMinute = nowMinute,
+                        onComplete = { viewModel.completeHabit(habit) },
+                        onPause = { viewModel.pauseHabit(habit, days = 1) },
+                        onResume = { viewModel.resumeHabit(habit) },
+                        onSkip = { viewModel.skipHabitToday(habit) },
+                        onDefer = { viewModel.deferHabit(habit, minutes = 60) },
+                        onEdit = { sheetTarget = HabitSheetTarget.Edit(habit) },
+                        onArchive = { habitToArchive = habit },
+                        onOpenContext = { habitContextTarget = habit }
+                    )
                 }
             }
         }
@@ -319,7 +320,8 @@ private fun HabitRepairPanel(
             assistSnapshot?.let { snapshot ->
                 com.chronosflow.core.ui.components.GenAiAssistBanner(
                     title = snapshot.bannerTitle,
-                    message = snapshot.bannerMessage
+                    message = snapshot.bannerMessage,
+                    ready = snapshot.isReady
                 )
             }
             suggestions.take(3).forEach { suggestion ->

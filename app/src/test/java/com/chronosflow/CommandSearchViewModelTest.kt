@@ -1,6 +1,14 @@
 package com.chronosflow
 
+import com.chronosflow.core.ai.CaptureIntentType
 import com.chronosflow.core.ai.CommandAssistPlanner
+import com.chronosflow.core.ai.ConversationalAssistant
+import com.chronosflow.core.ai.ProactiveAssistContent
+import com.chronosflow.core.ai.ProactiveAssistGenerator
+import com.chronosflow.core.data.datastore.ChronosPreferencesDataSource
+import com.chronosflow.core.ai.genai.AssistGenAiSource
+import com.chronosflow.core.ai.genai.AssistTextGeneration
+import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
 import com.chronosflow.core.ai.SemanticAppSearchBridge
 import com.chronosflow.core.ai.SemanticPlanningCorpusRefresher
 import com.chronosflow.core.ai.SemanticPlanningIndex
@@ -10,10 +18,13 @@ import com.chronosflow.core.ui.components.CommandPaletteGroups
 import com.chronosflow.core.ui.components.CommandPaletteItem
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import java.time.Clock
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -32,6 +43,14 @@ class CommandSearchViewModelTest {
     private val commandAssistPlanner = CommandAssistPlanner(mockk(relaxed = true), mockk(relaxed = true))
     private val appSearchBridge: SemanticAppSearchBridge = mockk(relaxed = true)
     private val corpusRefresher: SemanticPlanningCorpusRefresher = mockk(relaxed = true)
+    private val proactiveAssistGenerator: ProactiveAssistGenerator = mockk {
+        every { cachedCopy(any(), any(), any()) } returns null
+    }
+    private val preferenceValues = mutableMapOf<String, String>()
+    private val preferences: ChronosPreferencesDataSource = mockk {
+        every { getString(any(), any()) } answers { preferenceValues[firstArg()] ?: secondArg() }
+        every { putString(any(), any()) } answers { preferenceValues[firstArg()] = secondArg() }
+    }
 
     private val testDispatcher = UnconfinedTestDispatcher()
 
@@ -85,7 +104,10 @@ class CommandSearchViewModelTest {
             semanticIndex = semanticIndex,
             appSearchBridge = appSearchBridge,
             commandAssistPlanner = commandAssistPlanner,
-            corpusRefresher = corpusRefresher
+            conversationalAssistant = mockk(relaxed = true),
+            corpusRefresher = corpusRefresher,
+            proactiveAssistGenerator = proactiveAssistGenerator,
+            preferences = preferences
         )
         viewModel.rebuildIndex(redactMedicationNames = false)
 
@@ -273,6 +295,142 @@ class CommandSearchViewModelTest {
     }
 
     @Test
+    fun `palette open surfaces the cached daily digest`() = runTest {
+        every { proactiveAssistGenerator.cachedCopy(any(), any(), any()) } returns ProactiveAssistContent(
+            text = "2 block(s) done; 3 task(s) still open for today.",
+            source = AssistGenAiSource.GEMINI_NANO,
+            generatedAtEpochMs = 0L,
+            forDateIso = "2026-06-10"
+        )
+        val viewModel = createViewModel()
+        var openedReview = false
+        val actions = AssistantCommandActions(onOpenReview = { openedReview = true })
+
+        viewModel.dispatch(LauncherAction.OnOpen, actions = actions)
+
+        val digest = viewModel.uiState.value.results.first { it.id == ASSISTANT_DIGEST_COMMAND_ID }
+        assertEquals("Today at a glance", digest.title)
+        assertEquals("2 block(s) done; 3 task(s) still open for today.", digest.subtitle)
+
+        viewModel.dispatch(LauncherAction.OnExecute(digest.id), actions = actions)
+
+        assertTrue(openedReview)
+    }
+
+    @Test
+    fun `palette open shows no digest row without a fresh cached copy`() = runTest {
+        val viewModel = createViewModel()
+
+        viewModel.dispatch(LauncherAction.OnOpen)
+
+        assertTrue(viewModel.uiState.value.results.none { it.id == ASSISTANT_DIGEST_COMMAND_ID })
+    }
+
+    @Test
+    fun `question queries surface an ask row that converses in place`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        every { coordinator.generateAssistTextStream(any()) } returns flowOf("You have room after lunch.")
+        val viewModel = CommandSearchViewModel(
+            semanticIndex = semanticIndex,
+            appSearchBridge = appSearchBridge,
+            commandAssistPlanner = commandAssistPlanner,
+            conversationalAssistant = ConversationalAssistant(coordinator, commandAssistPlanner),
+            corpusRefresher = corpusRefresher,
+            proactiveAssistGenerator = proactiveAssistGenerator,
+            preferences = preferences
+        )
+        val commands = listOf(command(id = "tasks.open", title = "Open tasks"))
+
+        viewModel.dispatch(LauncherAction.OnOpen, paletteCommands = commands)
+        viewModel.dispatch(LauncherAction.OnQueryChanged("what should i do next?"), paletteCommands = commands)
+
+        val ask = viewModel.uiState.value.results.first { it.id == ASSISTANT_ASK_COMMAND_ID }
+
+        viewModel.dispatch(LauncherAction.OnExecute(ask.id), paletteCommands = commands)
+
+        assertTrue(viewModel.uiState.value.isOpen)
+        assertEquals("what should i do next?", viewModel.assistantPanel.value.reply?.question)
+        assertEquals("You have room after lunch.", viewModel.assistantPanel.value.reply?.reply)
+    }
+
+    @Test
+    fun `question detection matches questions but not captures`() {
+        assertTrue(isAssistantQuestionQuery("what should I do next"))
+        assertTrue(isAssistantQuestionQuery("plan my morning"))
+        assertTrue(isAssistantQuestionQuery("is my afternoon free?"))
+        assertFalse(isAssistantQuestionQuery("call mom tomorrow"))
+        assertFalse(isAssistantQuestionQuery("vitamin d 1000 iu morning"))
+        assertFalse(isAssistantQuestionQuery("gym?"))
+    }
+
+    @Test
+    fun `capture subtitle leads with confidence phrasing and prefill markers`() = runTest {
+        val viewModel = createViewModel()
+        val actions = AssistantCommandActions(onCaptureMedication = {})
+
+        viewModel.dispatch(LauncherAction.OnOpen, actions = actions)
+        viewModel.dispatch(
+            LauncherAction.OnQueryChanged("vitamin d 1000 iu morning"),
+            actions = actions
+        )
+
+        val subtitle = viewModel.uiState.value.results.first { it.id == "capture.create.medication" }.subtitle
+        assertTrue(subtitle.startsWith("Looks like") || subtitle.startsWith("Could be"))
+        assertTrue(subtitle.contains("Prefills 1000 iu · morning."))
+    }
+
+    @Test
+    fun `capture prefill preview extracts concrete markers per type`() {
+        assertEquals(
+            "Prefills tomorrow · 2pm · 45m.",
+            capturePrefillPreview(CaptureIntentType.TASK, "call mom tomorrow at 2pm for 45 minutes")
+        )
+        assertEquals(
+            "Prefills 1000 iu · morning.",
+            capturePrefillPreview(CaptureIntentType.MEDICATION, "vitamin d 1000 iu morning")
+        )
+        assertEquals(
+            "Prefills 3x week · evening.",
+            capturePrefillPreview(CaptureIntentType.HABIT, "gym 3x week evening")
+        )
+        assertEquals(
+            "Prefills 45m.",
+            capturePrefillPreview(CaptureIntentType.FOCUS, "focus 45 minutes on launch brief")
+        )
+        assertEquals(null, capturePrefillPreview(CaptureIntentType.TASK, "review launch brief"))
+    }
+
+    @Test
+    fun `searchCommandsAsync boosts the AI-confirmed capture command`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+            text = "capture.create.medication",
+            source = AssistGenAiSource.GEMINI_NANO
+        )
+        val planner = CommandAssistPlanner(coordinator, mockk(relaxed = true))
+        val viewModel = CommandSearchViewModel(
+            semanticIndex = semanticIndex,
+            appSearchBridge = appSearchBridge,
+            commandAssistPlanner = planner,
+            conversationalAssistant = mockk(relaxed = true),
+            corpusRefresher = corpusRefresher,
+            proactiveAssistGenerator = proactiveAssistGenerator,
+            preferences = preferences
+        )
+        val actions = AssistantCommandActions(onCaptureMedication = {})
+        var results: List<CommandPaletteItem> = emptyList()
+
+        viewModel.searchCommandsAsync(
+            query = "vitamin d 1000 iu morning",
+            actions = actions,
+            paletteCommands = listOf(command(id = "medication.open", title = "Open medication"))
+        ) { results = it }
+
+        val capture = results.first { it.id == "capture.create.medication" }
+        assertEquals(320, capture.priority)
+    }
+
+    @Test
     fun `quick capture preview exposes the inferred create kind`() = runTest {
         val viewModel = createViewModel()
 
@@ -412,11 +570,252 @@ class CommandSearchViewModelTest {
         assertEquals(6, actions.size)
     }
 
+    @Test
+    fun `askAssistant resolves a proposed action to a runnable command`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        every { coordinator.generateAssistTextStream(any()) } returns flowOf(
+            "Starting",
+            "Starting a focus session.\nACTION: focus.start"
+        )
+        val viewModel = CommandSearchViewModel(
+            semanticIndex = semanticIndex,
+            appSearchBridge = appSearchBridge,
+            commandAssistPlanner = commandAssistPlanner,
+            conversationalAssistant = ConversationalAssistant(coordinator, commandAssistPlanner),
+            corpusRefresher = corpusRefresher,
+            proactiveAssistGenerator = proactiveAssistGenerator,
+            preferences = preferences
+        )
+        val commands = listOf(
+            command(id = "focus.start", title = "Start focus session"),
+            command(id = "task.add", title = "Add task")
+        )
+
+        viewModel.askAssistant("help me focus", commands)
+
+        val panel = viewModel.assistantPanel.value
+        assertEquals("focus.start", panel.reply?.proposedCommand?.id)
+        assertEquals("help me focus", panel.reply?.question)
+        assertFalse(panel.reply?.reply?.contains("ACTION:") ?: true)
+        assertFalse(panel.isAsking)
+        assertEquals(null, panel.streamingReply)
+    }
+
+    @Test
+    fun `askAssistant falls back to the non-streaming path when the stream is empty`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        every { coordinator.generateAssistTextStream(any()) } returns emptyFlow()
+        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+            text = "Starting a focus session.\nACTION: focus.start",
+            source = AssistGenAiSource.CLOUD_GEMINI
+        )
+        val viewModel = CommandSearchViewModel(
+            semanticIndex = semanticIndex,
+            appSearchBridge = appSearchBridge,
+            commandAssistPlanner = commandAssistPlanner,
+            conversationalAssistant = ConversationalAssistant(coordinator, commandAssistPlanner),
+            corpusRefresher = corpusRefresher,
+            proactiveAssistGenerator = proactiveAssistGenerator,
+            preferences = preferences
+        )
+        val commands = listOf(command(id = "focus.start", title = "Start focus session"))
+
+        viewModel.askAssistant("help me focus", commands)
+
+        val panel = viewModel.assistantPanel.value
+        assertEquals("focus.start", panel.reply?.proposedCommand?.id)
+        assertEquals(AssistGenAiSource.CLOUD_GEMINI, panel.reply?.source)
+    }
+
+    @Test
+    fun `askAssistant keeps conversation history across follow-up questions`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        val prompts = mutableListOf<String>()
+        every { coordinator.generateAssistTextStream(capture(prompts)) } answers {
+            flowOf("Sure — a focus session helps.\nACTION: focus.start")
+        }
+        val viewModel = CommandSearchViewModel(
+            semanticIndex = semanticIndex,
+            appSearchBridge = appSearchBridge,
+            commandAssistPlanner = commandAssistPlanner,
+            conversationalAssistant = ConversationalAssistant(coordinator, commandAssistPlanner),
+            corpusRefresher = corpusRefresher,
+            proactiveAssistGenerator = proactiveAssistGenerator,
+            preferences = preferences
+        )
+        val commands = listOf(command(id = "focus.start", title = "Start focus session"))
+
+        viewModel.askAssistant("help me focus", commands)
+        assertEquals(2, viewModel.assistantPanel.value.history.size)
+
+        viewModel.askAssistant("make it 25 minutes", commands)
+
+        assertEquals(4, viewModel.assistantPanel.value.history.size)
+        assertTrue(prompts.last().contains("help me focus"))
+        assertTrue(prompts.last().contains("Sure — a focus session helps."))
+    }
+
+    @Test
+    fun `askAssistant proposes a quick-capture create command for capture-shaped queries`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        every { coordinator.generateAssistTextStream(any()) } returns flowOf(
+            "I can draft that task for you.\nACTION: capture.create.task"
+        )
+        val viewModel = CommandSearchViewModel(
+            semanticIndex = semanticIndex,
+            appSearchBridge = appSearchBridge,
+            commandAssistPlanner = commandAssistPlanner,
+            conversationalAssistant = ConversationalAssistant(coordinator, commandAssistPlanner),
+            corpusRefresher = corpusRefresher,
+            proactiveAssistGenerator = proactiveAssistGenerator,
+            preferences = preferences
+        )
+        var capturedTask: String? = null
+        val actions = AssistantCommandActions(onCaptureTask = { capturedTask = it })
+
+        viewModel.askAssistant(
+            query = "add task call mom tomorrow",
+            paletteCommands = listOf(command(id = "tasks.open", title = "Open tasks")),
+            actions = actions
+        )
+
+        val proposed = viewModel.assistantPanel.value.reply?.proposedCommand
+        assertEquals("capture.create.task", proposed?.id)
+
+        viewModel.runAssistantProposal(proposed!!)
+
+        assertEquals("add task call mom tomorrow", capturedTask)
+        assertEquals(AssistantPanelState(), viewModel.assistantPanel.value)
+        assertEquals(CommandUiState(), viewModel.uiState.value)
+    }
+
+    @Test
+    fun `askAssistant rebuilds capture proposals from the conversation payload`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        every { coordinator.generateAssistTextStream(any()) } returns flowOf(
+            "I'll fold that in.\nACTION: capture.create.task | call mom tomorrow at 2pm"
+        )
+        val viewModel = CommandSearchViewModel(
+            semanticIndex = semanticIndex,
+            appSearchBridge = appSearchBridge,
+            commandAssistPlanner = commandAssistPlanner,
+            conversationalAssistant = ConversationalAssistant(coordinator, commandAssistPlanner),
+            corpusRefresher = corpusRefresher,
+            proactiveAssistGenerator = proactiveAssistGenerator,
+            preferences = preferences
+        )
+        var capturedTask: String? = null
+        val actions = AssistantCommandActions(onCaptureTask = { capturedTask = it })
+
+        // The latest query alone ("make it tomorrow at 2pm") would capture the wrong text; the
+        // payload composed from the whole conversation should win.
+        viewModel.askAssistant(
+            query = "make it tomorrow at 2pm",
+            paletteCommands = listOf(command(id = "tasks.open", title = "Open tasks")),
+            actions = actions
+        )
+
+        val proposed = viewModel.assistantPanel.value.reply?.proposedCommand
+        assertEquals("capture.create.task", proposed?.id)
+        assertTrue(proposed?.title.orEmpty().contains("call mom tomorrow at 2pm"))
+
+        viewModel.runAssistantProposal(proposed!!)
+
+        assertEquals("call mom tomorrow at 2pm", capturedTask)
+    }
+
+    @Test
+    fun `askAssistant resolves multiple proposals into runnable commands`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        every { coordinator.generateAssistTextStream(any()) } returns flowOf(
+            "Two good options.\nACTION: focus.start\nACTION: tasks.open"
+        )
+        val viewModel = CommandSearchViewModel(
+            semanticIndex = semanticIndex,
+            appSearchBridge = appSearchBridge,
+            commandAssistPlanner = commandAssistPlanner,
+            conversationalAssistant = ConversationalAssistant(coordinator, commandAssistPlanner),
+            corpusRefresher = corpusRefresher,
+            proactiveAssistGenerator = proactiveAssistGenerator,
+            preferences = preferences
+        )
+        var openedTasks = false
+        val commands = listOf(
+            command(id = "focus.start", title = "Start focus session"),
+            command(id = "tasks.open", title = "Open tasks", onRun = { openedTasks = true })
+        )
+
+        viewModel.askAssistant("what should i do next?", commands)
+
+        val proposed = viewModel.assistantPanel.value.reply?.proposedCommands.orEmpty()
+        assertEquals(listOf("focus.start", "tasks.open"), proposed.map { it.id })
+
+        viewModel.runAssistantProposal(proposed[1])
+
+        assertTrue(openedTasks)
+    }
+
+    @Test
+    fun `recently executed commands are boosted when the palette reopens`() = runTest {
+        val viewModel = createViewModel()
+        val commands = listOf(
+            command(id = "daydial.open", title = "Open today", group = CommandPaletteGroups.DAY),
+            command(id = "tasks.open", title = "Search tasks", group = CommandPaletteGroups.DAY)
+        )
+
+        viewModel.dispatch(LauncherAction.OnOpen, paletteCommands = commands)
+        viewModel.dispatch(LauncherAction.OnExecute("tasks.open"), paletteCommands = commands)
+        viewModel.dispatch(LauncherAction.OnOpen, paletteCommands = commands)
+
+        val results = viewModel.uiState.value.results
+        val boosted = results.first { it.id == "tasks.open" }
+        val plain = results.first { it.id == "daydial.open" }
+        assertTrue(boosted.priority > plain.priority)
+        assertEquals(200, boosted.priority)
+    }
+
+    @Test
+    fun `per-query rows are never recorded as recent commands`() = runTest {
+        val viewModel = createViewModel()
+        var captured = ""
+        val actions = AssistantCommandActions(onCaptureTask = { captured = it })
+
+        viewModel.dispatch(LauncherAction.OnOpen, actions = actions)
+        viewModel.dispatch(LauncherAction.OnQueryChanged("call mom tomorrow"), actions = actions)
+        viewModel.dispatch(LauncherAction.OnExecute("capture.create.task"), actions = actions)
+
+        assertEquals("call mom tomorrow", captured)
+        assertEquals(null, preferenceValues["command_palette_recent_ids"])
+    }
+
+    @Test
+    fun `clearAssistant resets the conversation`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        every { coordinator.generateAssistTextStream(any()) } returns flowOf("Hello there.")
+        val viewModel = CommandSearchViewModel(
+            semanticIndex = semanticIndex,
+            appSearchBridge = appSearchBridge,
+            commandAssistPlanner = commandAssistPlanner,
+            conversationalAssistant = ConversationalAssistant(coordinator, commandAssistPlanner),
+            corpusRefresher = corpusRefresher,
+            proactiveAssistGenerator = proactiveAssistGenerator,
+            preferences = preferences
+        )
+
+        viewModel.askAssistant("hi", listOf(command(id = "focus.start", title = "Start focus session")))
+        viewModel.clearAssistant()
+
+        assertEquals(AssistantPanelState(), viewModel.assistantPanel.value)
+    }
+
     private fun createViewModel(): CommandSearchViewModel = CommandSearchViewModel(
         semanticIndex = semanticIndex,
         appSearchBridge = appSearchBridge,
         commandAssistPlanner = commandAssistPlanner,
-        corpusRefresher = corpusRefresher
+        conversationalAssistant = mockk(relaxed = true),
+        corpusRefresher = corpusRefresher,
+        proactiveAssistGenerator = proactiveAssistGenerator,
+        preferences = preferences
     )
 
     private fun command(

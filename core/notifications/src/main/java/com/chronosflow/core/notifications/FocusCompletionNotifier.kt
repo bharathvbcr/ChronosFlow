@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 
 object FocusCompletionNotifier {
     private const val CHANNEL_ID = "chronos_focus_completion"
@@ -24,7 +25,8 @@ object FocusCompletionNotifier {
         manager.notify(
             NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_focus_session)
+                .setSmallIcon(R.drawable.ic_chronosflow_notification)
+                .setColor(ContextCompat.getColor(context, R.color.chronosflow_brand_accent))
                 .setContentTitle(title)
                 .setContentText(text)
                 .setAutoCancel(true)

@@ -2,10 +2,12 @@ package com.chronosflow.feature.daydial.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,11 +16,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,10 +29,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,18 +41,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.chronosflow.core.ai.PrivacyMode
-import com.chronosflow.core.ui.components.ChronosFlowLogo
 import com.chronosflow.core.ui.components.ChronosTooltipIconButton
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import com.chronosflow.core.ui.settings.ChronosFeatureFlags
 import com.chronosflow.core.ui.settings.rememberChronosUiSettings
+import com.chronosflow.core.ui.theme.ChronosGlassTokens
+import com.chronosflow.core.ui.theme.GlassElevation
 import com.chronosflow.feature.daydial.model.SidebarPage
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -65,7 +67,9 @@ internal fun DateNav(
     selectedDate: LocalDate,
     onPrev: () -> Unit,
     onNext: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isViewingToday: Boolean = true,
+    onToday: (() -> Unit)? = null
 ) {
     val previousDayLabel = dayNavigationActionLabel(selectedDate, dayOffset = -1)
     val nextDayLabel = dayNavigationActionLabel(selectedDate, dayOffset = 1)
@@ -92,6 +96,11 @@ internal fun DateNav(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
+                color = if (isViewingToday) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.tertiary
+                },
                 modifier = Modifier.widthIn(min = 98.dp)
             )
             CompactDateButton(
@@ -101,9 +110,24 @@ internal fun DateNav(
             ) {
                 Icon(Icons.Filled.ChevronRight, contentDescription = null)
             }
+            if (!isViewingToday && onToday != null) {
+                CompactDateButton(
+                    onClick = onToday,
+                    tooltip = DateNavJumpToTodayLabel,
+                    contentDescription = DateNavJumpToTodayLabel
+                ) {
+                    Icon(
+                        Icons.Filled.Today,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.tertiary
+                    )
+                }
+            }
         }
     }
 }
+
+internal const val DateNavJumpToTodayLabel = "Jump to today"
 
 internal fun dateNavHeaderLabel(selectedDate: LocalDate): String =
     selectedDate.format(DateNavHeaderFormatter)
@@ -140,69 +164,57 @@ private fun CompactDateButton(
 @Composable
 internal fun DayDialSidebar(
     activePage: SidebarPage?,
-    privacyMode: PrivacyMode,
-    compactMode: Boolean,
-    onPrivacyModeSelected: (PrivacyMode) -> Unit,
-    onCompactModeToggled: () -> Unit,
     dark: Boolean,
     glassSurfacesEnabled: Boolean,
     featureFlags: ChronosFeatureFlags,
     versionLabel: String = "0.1.0",
-    onPageSelected: (SidebarPage) -> Unit
+    onPageSelected: (SidebarPage) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    ModalDrawerSheet(
-        drawerContainerColor = if (glassSurfacesEnabled) {
-            MaterialTheme.colorScheme.surface.copy(alpha = if (dark) 0.85f else 0.92f)
+    val containerColor = if (glassSurfacesEnabled) {
+        MaterialTheme.colorScheme.surface.copy(alpha = if (dark) 0.88f else 0.94f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    Surface(
+        modifier = modifier.widthIn(min = 280.dp, max = 320.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = containerColor,
+        border = if (glassSurfacesEnabled) {
+            BorderStroke(
+                GlassElevation.MEDIUM.borderWidth,
+                ChronosGlassTokens.borderBrush(MaterialTheme.colorScheme.primary)
+            )
         } else {
-            MaterialTheme.colorScheme.surface
-        }
+            null
+        },
+        tonalElevation = 6.dp,
+        shadowElevation = 12.dp
     ) {
         Column(
             modifier = Modifier
-                .fillMaxHeight()
-                .navigationBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 10.dp)
                 .fillMaxWidth()
         ) {
+            val scrollState = rememberScrollState()
+            val reduceMotionEnabled = rememberChronosUiSettings().reduceMotionEnabled
+            Box(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .fillMaxWidth()
+            ) {
             Column(
                 modifier = Modifier
-                    .weight(1f)
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
             ) {
-                // Header Logo and Branding Row
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 16.dp)
-                ) {
-                    ChronosFlowLogo(modifier = Modifier.size(32.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "ChronosFlow",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Time Architecture",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        )
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-
                 // SECTION 1: YOUR DAY
                 Text(
                     text = "Your day",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
                         .semantics { heading() }
                 )
                 SidebarPage.rootPages(featureFlags).forEach { page ->
@@ -214,7 +226,7 @@ internal fun DayDialSidebar(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // SECTION 2: TOOLS
                 Text(
@@ -222,7 +234,7 @@ internal fun DayDialSidebar(
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
                         .semantics { heading() }
                 )
                 SidebarPage.morePages.forEach { page ->
@@ -234,7 +246,7 @@ internal fun DayDialSidebar(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // SECTION 3: SETTINGS
                 Text(
@@ -242,7 +254,7 @@ internal fun DayDialSidebar(
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
                         .semantics { heading() }
                 )
                 SidebarPage.settingsPages.forEach { page ->
@@ -254,7 +266,27 @@ internal fun DayDialSidebar(
                     )
                 }
             }
-            
+
+            // Bottom fade cue so a height-capped panel reads as scrollable.
+            val scrollFadeAlpha by animateFloatAsState(
+                targetValue = if (scrollState.canScrollForward) 1f else 0f,
+                animationSpec = ChronosValueAnimationFactory.selection(reduceMotionEnabled),
+                label = "sidebarScrollFade"
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(28.dp)
+                    .graphicsLayer { alpha = scrollFadeAlpha }
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(containerColor.copy(alpha = 0f), containerColor)
+                        )
+                    )
+            )
+            }
+
             // Footer Version Tag
             Box(
                 modifier = Modifier
@@ -310,8 +342,8 @@ private fun DrawerPillItem(
             .padding(vertical = 3.dp, horizontal = 8.dp)
             .clip(MaterialTheme.shapes.small)
             .background(animatedBg)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .chronosHapticClick(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

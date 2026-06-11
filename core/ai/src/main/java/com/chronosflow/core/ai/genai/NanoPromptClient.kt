@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.runningReduce
 
 sealed interface NanoDownloadEvent {
     data object Started : NanoDownloadEvent
@@ -58,6 +59,9 @@ interface NanoModelHandle {
     fun download(): Flow<NanoDownloadEvent>
 
     suspend fun generateText(prompt: String): String
+
+    /** Streams the response as a growing cumulative string, one emission per model chunk. */
+    fun generateTextStream(prompt: String): Flow<String>
 }
 
 interface NanoModelClientFactory {
@@ -70,6 +74,8 @@ interface NanoPromptClient {
     fun download(): Flow<NanoDownloadEvent>
 
     suspend fun generateText(prompt: String): String
+
+    fun generateTextStream(prompt: String): Flow<String>
 
     fun selectionState(): NanoModelSelectionState
 }
@@ -99,6 +105,11 @@ class MlKitNanoPromptClient @Inject constructor(
     override suspend fun generateText(prompt: String): String {
         val resolved = ensureActiveHandle()
         return resolved.handle.generateText(prompt)
+    }
+
+    override fun generateTextStream(prompt: String): Flow<String> = flow {
+        val resolved = ensureActiveHandle()
+        emitAll(resolved.handle.generateTextStream(prompt))
     }
 
     override fun selectionState(): NanoModelSelectionState = currentSelectionState
@@ -207,6 +218,18 @@ class MlKitNanoModelClientFactory @Inject constructor() : NanoModelClientFactory
                     }
                 )
                 return response.candidates.firstOrNull()?.text?.trim().orEmpty()
+            }
+
+            override fun generateTextStream(prompt: String): Flow<String> {
+                val request = generateContentRequest(TextPart(prompt)) {
+                    temperature = 0.35f
+                    topK = 16
+                    candidateCount = 1
+                }
+                return model.generateContentStream(request)
+                    .map { response -> response.candidates.firstOrNull()?.text.orEmpty() }
+                    .runningReduce { accumulated, delta -> accumulated + delta }
+                    .map { it.trim() }
             }
         }
     }

@@ -1,32 +1,35 @@
 package com.chronosflow.feature.daydial
 
 import androidx.activity.BackEventCompat
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import com.chronosflow.core.ui.shell.ChronosShellChromeSuppression
 import com.chronosflow.core.ui.shell.LocalChronosShellBottomInset
 import com.chronosflow.core.ui.shell.ChronosSnackbarHost
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -38,6 +41,10 @@ import com.chronosflow.core.data.security.AppLockAuthResult
 import com.chronosflow.core.data.security.SensitiveArea
 import com.chronosflow.core.ui.components.ChronosBackdrop
 import com.chronosflow.core.ui.components.ChronosPredictiveBackHandlerWithProgress
+import com.chronosflow.core.ui.motion.ChronosMotionDefaults
+import com.chronosflow.core.ui.motion.ChronosTransitionDirection
+import com.chronosflow.core.ui.motion.ChronosTransitionFactory
+import com.chronosflow.core.ui.motion.ChronosTransitionSet
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.feature.daydial.model.AppearanceMode
 import com.chronosflow.feature.daydial.model.DayDialTab
@@ -45,7 +52,6 @@ import com.chronosflow.feature.daydial.model.SheetTarget
 import com.chronosflow.feature.daydial.model.SidebarPage
 import com.chronosflow.feature.daydial.ui.DayDialSidebar
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal fun dayDialContentBottomPadding(
@@ -73,11 +79,64 @@ internal fun sidebarBackTargetTab(currentTab: DayDialTab): DayDialTab {
 }
 
 internal fun shouldSuppressDayDialShellChrome(
-    drawerOpen: Boolean,
     activeSidebarPage: SidebarPage?
-): Boolean = drawerOpen || activeSidebarPage != null
+): Boolean = activeSidebarPage != null
 
-internal fun sidebarPageForDrawerSelection(page: SidebarPage): SidebarPage = page
+/**
+ * Pages whose menu entry opens the full feature screen directly instead of an
+ * in-dial sidebar page. Their stub hub pages were removed.
+ */
+internal fun sidebarPageOpensFullScreen(page: SidebarPage): Boolean =
+    when (page) {
+        SidebarPage.TASKS,
+        SidebarPage.FOCUS_TIMER,
+        SidebarPage.HABITS,
+        SidebarPage.MEDICATION -> true
+        else -> false
+    }
+
+internal fun sidebarPageForDrawerSelection(page: SidebarPage): SidebarPage? =
+    if (sidebarPageOpensFullScreen(page)) null else page
+
+/**
+ * Bottom clearance for the floating sidebar menu so it hovers just above the
+ * shell bottom bar; falls back to standard spacing when no bar is shown.
+ */
+internal fun sidebarMenuBottomPadding(shellBottomInset: Dp): Dp =
+    if (shellBottomInset > 0.dp) shellBottomInset else ChronosSpacing.Standard
+
+internal fun sidebarMenuMaxHeight(availableHeight: Dp): Dp = availableHeight * 0.72f
+
+private fun sidebarMenuTransition(reducedMotion: Boolean): ChronosTransitionSet =
+    if (reducedMotion) {
+        ChronosTransitionFactory.fadeScale(
+            durationMillis = ChronosMotionDefaults.ReducedDurationMillis,
+            easing = ChronosMotionDefaults.MaterialStandardEasing,
+            direction = ChronosTransitionDirection.Neutral,
+            enterScale = 1f,
+            exitScale = 1f
+        )
+    } else {
+        ChronosTransitionFactory.materialSharedAxisY(
+            durationMillis = ChronosMotionDefaults.DefaultDurationMillis,
+            easing = ChronosMotionDefaults.MaterialStandardEasing,
+            direction = ChronosTransitionDirection.Forward,
+            slideFraction = 0.5f
+        )
+    }
+
+private fun sidebarMenuScrimTransition(reducedMotion: Boolean): ChronosTransitionSet =
+    ChronosTransitionFactory.fadeScale(
+        durationMillis = if (reducedMotion) {
+            ChronosMotionDefaults.ReducedDurationMillis
+        } else {
+            ChronosMotionDefaults.DefaultDurationMillis
+        },
+        easing = ChronosMotionDefaults.MaterialStandardEasing,
+        direction = ChronosTransitionDirection.Neutral,
+        enterScale = 1f,
+        exitScale = 1f
+    )
 
 @Suppress("UNUSED_PARAMETER")
 internal fun shouldShowDayDialBackdrop(
@@ -144,8 +203,7 @@ internal fun DayDialScreenChrome(
     onSelectPrimaryTab: (DayDialTab) -> Unit,
     onOpenCommandPalette: (() -> Unit)?
 ) {
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
+    var sidebarMenuExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     val appLockSettings by viewModel.appLockSettings.collectAsStateWithLifecycle()
@@ -183,9 +241,8 @@ internal fun DayDialScreenChrome(
     }
 
     ChronosShellChromeSuppression(
-        "day-drawer",
+        "day-sidebar-page",
         shouldSuppressDayDialShellChrome(
-            drawerOpen = drawerState.isOpen,
             activeSidebarPage = renderedActiveSidebarPage
         )
     )
@@ -195,11 +252,20 @@ internal fun DayDialScreenChrome(
         onSelectPrimaryTab(sidebarBackTargetTab(renderedCurrentTab))
     }
 
+    // Close the floating sidebar menu when the user switches primary tabs
+    // (e.g. via the shell bottom bar) while it is open.
+    LaunchedEffect(renderedCurrentTab) {
+        sidebarMenuExpanded = false
+    }
+    BackHandler(enabled = sidebarMenuExpanded) {
+        sidebarMenuExpanded = false
+    }
+
     // Track swipe-back progress for the sidebar-page predictive back preview.
     // A value of 0f means no gesture in progress; the signed -1f..1f value drives
     // horizontal translation so content follows the swipe edge in the same coordinate space.
     var sidebarBackProgress by remember { mutableFloatStateOf(0f) }
-    val sidebarBackEnabled = renderedActiveSidebarPage != null && drawerState.currentValue == DrawerValue.Closed
+    val sidebarBackEnabled = renderedActiveSidebarPage != null && !sidebarMenuExpanded
     ChronosPredictiveBackHandlerWithProgress(
         enabled = sidebarBackEnabled,
         onBackStarted = { backEvent -> sidebarBackProgress = signedSidebarBackProgress(backEvent) },
@@ -237,26 +303,6 @@ internal fun DayDialScreenChrome(
 
             Row(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f).fillMaxSize()) {
-            ModalNavigationDrawer(
-                drawerState = drawerState,
-                drawerContent = {
-                    DayDialSidebar(
-                        activePage = renderedActiveSidebarPage,
-                        privacyMode = vmState.privacyMode,
-                        compactMode = vmState.compactMode,
-                        onPrivacyModeSelected = viewModel::setPrivacyMode,
-                        onCompactModeToggled = viewModel::onCompactModeToggled,
-                        dark = darkTheme,
-                        glassSurfacesEnabled = settings.glassSurfacesEnabled,
-                        featureFlags = featureFlags,
-                        versionLabel = appVersionLabel,
-                        onPageSelected = { page ->
-                            scope.launch { drawerState.close() }
-                            uiState.activeSidebarPage = sidebarPageForDrawerSelection(page)
-                        }
-                    )
-                }
-            ) {
                 Scaffold(
                     snackbarHost = { ChronosSnackbarHost(snackbarHostState) },
                     modifier = Modifier.fillMaxSize(),
@@ -272,8 +318,9 @@ internal fun DayDialScreenChrome(
                             darkTheme = darkTheme,
                         glassSurfacesEnabled = settings.glassSurfacesEnabled,
                         highContrastEnabled = settings.highContrastEnabled,
+                        menuExpanded = sidebarMenuExpanded,
                         onSelectDate = viewModel::selectDate,
-                            onMenuClick = { scope.launch { drawerState.open() } },
+                            onMenuClick = { sidebarMenuExpanded = !sidebarMenuExpanded },
                             onBackClick = onSidebarBack,
                             onUndo = viewModel::undo,
                             onRedo = viewModel::redo,
@@ -285,13 +332,13 @@ internal fun DayDialScreenChrome(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(paddingValues)
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                         ) {
                             DayDialMainContent(
+                                scaffoldPadding = paddingValues,
                                 viewModel = viewModel,
                                 selectedDate = vmState.selectedDate,
                                 sortedBlocks = sortedBlocks,
@@ -318,6 +365,8 @@ internal fun DayDialScreenChrome(
                                 focusRestoredMessage = vmState.focusRestoredMessage,
                                 moodEnergyCheckIns = vmState.moodEnergyCheckIns,
                                 moodCheckInCoaching = vmState.moodCheckInCoaching,
+                                nextFocusSuggestion = vmState.nextFocusSuggestion,
+                                focusGuidance = vmState.focusGuidance,
                                 genAiRuntimeStatus = vmState.genAiRuntimeStatus,
                                 insightsTabState = vmState.insightsTabState,
                                 manualMissedBlockIds = vmState.manualMissedIds,
@@ -350,7 +399,6 @@ internal fun DayDialScreenChrome(
                                 onAiAdvisorFeatureEnabledChanged = { settings.aiAdvisorFeatureEnabled = it },
                                 onPlanningStyleSelected = { settings.planningStyle = it },
                                 onPreviewOnDeviceModelChanged = viewModel::setPreviewOnDeviceModel,
-                                onShowRingGuideChanged = { settings.showRingGuide = it },
                                 onProtectFocusChanged = { settings.protectFocusBlocks = it },
                                 onAddBreaksAutomaticallyChanged = { settings.addBreaksAutomatically = it },
                                 onPreserveManualBlocksChanged = { settings.preserveManualBlocks = it },
@@ -369,7 +417,10 @@ internal fun DayDialScreenChrome(
                                 onBackdropThemeSelected = { settings.backdropThemeValue = it.name },
                                 onReduceMotionChanged = { settings.reduceMotionEnabled = it },
                                 onHighContrastChanged = { settings.highContrastEnabled = it },
-                                onActiveSheetChanged = { uiState.activeSheet = it },
+                                onActiveSheetChanged = { target ->
+                                    uiState.activeSheet = target
+                                    sheetOpenLogLabel(target)?.let(viewModel::recordSheetOpened)
+                                },
                                 onRequestNotificationPermission = requestNotificationPermission,
                                 calendarPermissionStatus = calendarPermissionStatus,
                                 showCalendarPermissionRationale = showCalendarPermissionRationale,
@@ -426,11 +477,99 @@ internal fun DayDialScreenChrome(
                         }
                     }
                 }
+                }
             }
+
+            val sidebarMenuScrim = sidebarMenuScrimTransition(settings.reduceMotionEnabled)
+            AnimatedVisibility(
+                visible = sidebarMenuExpanded,
+                enter = sidebarMenuScrim.enter,
+                exit = sidebarMenuScrim.exit
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.28f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClickLabel = "Close menu",
+                            onClick = { sidebarMenuExpanded = false }
+                        )
+                )
             }
+
+            val sidebarMenuMotion = sidebarMenuTransition(settings.reduceMotionEnabled)
+            val shellBottomInset = LocalChronosShellBottomInset.current
+            AnimatedVisibility(
+                visible = sidebarMenuExpanded,
+                enter = sidebarMenuMotion.enter,
+                exit = sidebarMenuMotion.exit,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .then(
+                        if (shellBottomInset > 0.dp) Modifier else Modifier.navigationBarsPadding()
+                    )
+                    .padding(
+                        start = ChronosSpacing.Standard,
+                        bottom = sidebarMenuBottomPadding(shellBottomInset)
+                    )
+            ) {
+                DayDialSidebar(
+                    activePage = renderedActiveSidebarPage,
+                    dark = darkTheme,
+                    glassSurfacesEnabled = settings.glassSurfacesEnabled,
+                    featureFlags = featureFlags,
+                    versionLabel = appVersionLabel,
+                    onPageSelected = { page ->
+                        sidebarMenuExpanded = false
+                        when (page) {
+                            // Review resolves to the Review tab — the same destination as
+                            // the bottom nav and command palette — instead of the retired
+                            // in-shell stub page. The detailed planned/actual/missed sheet
+                            // is opened from within that tab.
+                            SidebarPage.REVIEW -> onSelectPrimaryTab(DayDialTab.INSIGHTS)
+                            else -> {
+                                val inShellPage = sidebarPageForDrawerSelection(page)
+                                if (inShellPage != null) {
+                                    uiState.activeSidebarPage = inShellPage
+                                } else {
+                                    when (page) {
+                                        SidebarPage.TASKS -> onOpenTasks()
+                                        SidebarPage.FOCUS_TIMER -> onOpenFocusScreen()
+                                        SidebarPage.HABITS -> onOpenHabits()
+                                        SidebarPage.MEDICATION -> onOpenMedication()
+                                        else -> Unit
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.heightIn(max = sidebarMenuMaxHeight(maxHeight))
+                )
             }
         }
     }
+}
+
+/**
+ * Human label for the developer log when a sheet opens, or null for high-frequency
+ * transient sheets (block editor) that would otherwise flood the recent-events feed.
+ */
+private fun sheetOpenLogLabel(target: SheetTarget?): String? = when (target) {
+    null, is SheetTarget.BlockEditor -> null
+    is SheetTarget.NewBlock -> "new block"
+    SheetTarget.QuickAdd -> "quick add"
+    SheetTarget.AiPlan -> "AI planning"
+    SheetTarget.MissedBlocks -> "missed blocks"
+    SheetTarget.EndOfDayReview -> "day review"
+    SheetTarget.FocusSettings -> "focus settings"
+    SheetTarget.ExportData -> "export data"
+    SheetTarget.ImportBackup -> "import backup"
+    SheetTarget.WeeklySummary -> "weekly summary"
+    SheetTarget.Diagnostics -> "diagnostics"
+    SheetTarget.Logs -> "logs"
+    is SheetTarget.ReviewDetails -> "review details"
 }
 
 private fun signedSidebarBackProgress(backEvent: BackEventCompat): Float =

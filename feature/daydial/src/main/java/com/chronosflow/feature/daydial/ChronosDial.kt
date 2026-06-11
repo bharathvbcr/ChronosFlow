@@ -63,6 +63,10 @@ private const val DIAL_OUTER_DIAMETER_DIVISOR = 1.5f
 private const val DIAL_HIT_RADIUS_DIVISOR = 3f
 private const val OUTER_RING_TAP_HALO_CANVAS_FRACTION = 0.06f
 private const val MIN_DIAL_RADIUS_SCALE = 0.1f
+// Night band tint. A mid-tone indigo (not a black scrim) so the band stays visible on every
+// surface — the near-black dark panel, a light surface, and pure-black/white high-contrast
+// modes alike — while reading unmistakably as "night".
+private val DialNightBandColor = Color(0xFF302A5E)
 
 internal fun scaledDialOuterDiameter(canvasSize: Float, dialRadiusScale: Float): Float =
     canvasSize / DIAL_OUTER_DIAMETER_DIVISOR * dialRadiusScale.coerceAtLeast(MIN_DIAL_RADIUS_SCALE)
@@ -76,6 +80,13 @@ internal fun scaledOuterRingTapRadius(canvasSize: Float, dialRadiusScale: Float)
 internal fun shouldDrawRingGuides(enableThreeRingMode: Boolean, showRingGuide: Boolean): Boolean {
     return enableThreeRingMode && showRingGuide
 }
+
+internal fun shouldDrawOffWindowNowMarker(
+    showNowHand: Boolean,
+    isWindowed: Boolean,
+    relativeMinute: Int,
+    windowMinutes: Int
+): Boolean = showNowHand && isWindowed && relativeMinute >= windowMinutes
 
 internal fun shouldTriggerAddFromTap(hit: DialHit): Boolean {
     return hit is DialHit.Ring && hit.ring == DialRing.OUTER
@@ -120,6 +131,8 @@ fun ChronosDial(
     glassSurfacesEnabled: Boolean = true,
     canvasInset: Dp = 16.dp,
     dialRadiusScale: Float = 1f,
+    nightStartMinute: Int = 21 * 60,
+    nightEndMinute: Int = 7 * 60,
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
@@ -146,7 +159,9 @@ fun ChronosDial(
         upcomingBlockId,
         missedBlockIds,
         compactMode,
-        compactWindowStart
+        compactWindowStart,
+        nightStartMinute,
+        nightEndMinute
     ) {
         val conflictIds = conflictingBlockIds(blocks)
         ChronosDialRenderModelBuilder.build(
@@ -162,7 +177,9 @@ fun ChronosDial(
             blockingConflictIds = blocks
                 .filter { it.id in conflictIds && (it.isLocked || it.isProtected) }
                 .map { it.id }
-                .toSet()
+                .toSet(),
+            nightStartMinute = nightStartMinute,
+            nightEndMinute = nightEndMinute
         )
     }
     val hourLabelColor = colorScheme.onSurfaceVariant.copy(alpha = 0.82f).toArgb()
@@ -249,21 +266,16 @@ fun ChronosDial(
                     y = cachedCenter.y - cachedOuterRadius / 2f
                 )
                 val ringAlpha = if (glassSurfacesEnabled) ChronosGlassTokens.BaseOpacity else 1f
-                val dialBrush = Brush.sweepGradient(
-                    colors = listOf(
-                        colorScheme.surface.copy(alpha = ringAlpha),
-                        colorScheme.surfaceVariant.copy(alpha = if (glassSurfacesEnabled) 0.4f else 0.85f),
-                        colorScheme.surface.copy(alpha = ringAlpha)
-                    ),
-                    center = cachedCenter
-                )
+                // Flat track: the night band (drawn in the Canvas body) is now the only
+                // intentional dark region, so the ring base stays uniform and non-directional.
+                val dialTrackColor = colorScheme.surface.copy(alpha = ringAlpha)
                 val dialStroke = Stroke(width = cachedRingStroke)
                 val dialOutlineStroke = Stroke(width = 0.5.dp.toPx())
                 val guideRingStroke = Stroke(width = cachedRingStroke * 0.1f)
                 onDrawBehind {
                     val solidDial = !glassSurfacesEnabled
                     drawCircle(
-                        brush = dialBrush,
+                        color = dialTrackColor,
                         radius = cachedOuterRadius / 2f,
                         center = cachedCenter,
                         style = dialStroke
@@ -528,6 +540,24 @@ fun ChronosDial(
             y = center.y - outerRadius / 2f
         )
 
+        // Night band: an indigo tint over the track for the sleep window. Drawn first so it
+        // reads as part of the dial face, beneath blocks and the now-hand. Butt caps keep the
+        // window edges crisp at the exact start/end times. Glass mode runs lighter so the band
+        // sits behind translucent blocks; the opaque (incl. high-contrast) path runs stronger.
+        val nightBandColor = DialNightBandColor.copy(alpha = if (glassSurfacesEnabled) 0.45f else 0.7f)
+        renderModel.nightArcs.forEach { night ->
+            if (night.startAngle.isNaN() || night.sweepAngle <= 0.1f) return@forEach
+            drawArc(
+                color = nightBandColor,
+                startAngle = night.startAngle,
+                sweepAngle = night.sweepAngle,
+                useCenter = false,
+                topLeft = ringTopLeft,
+                size = ringSize,
+                style = Stroke(width = ringStroke, cap = StrokeCap.Butt)
+            )
+        }
+
         if (glassSurfacesEnabled) {
             drawArc(
                 brush = glassGlowBrush,
@@ -776,6 +806,29 @@ fun ChronosDial(
                 color = colorScheme.primary,
                 radius = 5.dp.toPx(),
                 center = handEnd
+            )
+        } else if (shouldDrawOffWindowNowMarker(
+                showNowHand = showNowHand,
+                isWindowed = isWindowed,
+                relativeMinute = visibleStartInWindow(animatedMinute.toInt()),
+                windowMinutes = windowMinutes
+            )
+        ) {
+            // "Now" is outside the 12h window; both window edges meet at the seam
+            // (top of the dial), so a hollow marker there says "now is off-screen".
+            val seamRadians = Math.toRadians(
+                minuteToAngleInWindow(0, 0, windowMinutes).toDouble()
+            )
+            val seamRadius = outerRadius / 2f + ringStroke / 2f
+            val seamCenter = Offset(
+                x = center.x + cos(seamRadians).toFloat() * seamRadius,
+                y = center.y + sin(seamRadians).toFloat() * seamRadius
+            )
+            drawCircle(
+                color = colorScheme.primary.copy(alpha = 0.65f),
+                radius = 5.dp.toPx(),
+                center = seamCenter,
+                style = Stroke(width = 2.dp.toPx())
             )
         }
 

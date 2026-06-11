@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="focus_progress_accent">#7257B8</color>
+    <!-- ChronosFlow brand accent; tints the dial small icon across all notifications. -->
+    <color name="chronosflow_brand_accent">#6C63FF</color>
 </resources>

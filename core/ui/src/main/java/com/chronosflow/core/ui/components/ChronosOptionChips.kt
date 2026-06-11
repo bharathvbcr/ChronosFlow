@@ -26,6 +26,13 @@ import androidx.compose.ui.unit.dp
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
 import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 
+/**
+ * Keeps the currently selected value visible in option rows that truncate to a
+ * contextual shortlist, so a prior choice never silently loses its chip.
+ */
+fun List<String>.withSelectedOption(selected: String?): List<String> =
+    if (selected.isNullOrBlank() || selected in this) this else this + selected
+
 @Composable
 fun ChronosOptionChips(
     label: String,

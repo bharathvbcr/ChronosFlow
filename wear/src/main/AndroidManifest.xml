@@ -41,9 +41,47 @@
             </intent-filter>
         </service>
 
+        <!-- Receives the mirrored day summary (schedule, tasks, habits) for the tiles. -->
         <service
-            android:name=".ChronosWearTileProvider"
-            android:label="ChronosFlow Dial"
+            android:name=".DaySummaryWearListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/chronos/day_summary" />
+            </intent-filter>
+        </service>
+
+        <!-- Receives the phone's mirrored Material You palette for the app theme and tiles. -->
+        <service
+            android:name=".ThemeWearListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/chronos/theme" />
+            </intent-filter>
+        </service>
+
+        <!-- "Now" glance: schedule + counts, or the live focus ring while a session runs. -->
+        <service
+            android:name=".ChronosTodayTileProvider"
+            android:label="ChronosFlow Now"
+            android:icon="@drawable/ic_chronosflow_tile"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".ChronosHabitsTileProvider"
+            android:label="ChronosFlow Habits"
             android:icon="@drawable/ic_chronosflow_tile"
             android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER"
             android:exported="true">

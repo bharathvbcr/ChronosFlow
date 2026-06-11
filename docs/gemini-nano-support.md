@@ -89,3 +89,31 @@ All user-facing assist flows route through `GenAiAssistCoordinator` in `core:ai`
 Command palette search combines AppSearch/BM25 semantic hits with `CommandAssistPlanner` (local keyword rank + optional GenAI command-id routing). It does not replace indexed search with a standalone LLM retrieval stack.
 
 Semantic planning index and local heuristics remain the fallback whenever GenAI is disabled, unavailable, or returns no parseable output.
+
+## Purpose-built ML Kit GenAI feature APIs
+
+In addition to the Prompt API, ChronosFlow now uses the dedicated on-device ML Kit GenAI feature APIs (all `1.0.0-beta1`, on top of the same AICore / Gemini Nano stack):
+
+| Feature API | Gateway | Coordinator entry point | Used by |
+|-------------|---------|-------------------------|---------|
+| Summarization (`genai-summarization`) | `MlKitTextToolsGateway` | `GenAiAssistCoordinator.summarize` | `ReviewAssistPlanner.suggestDigest` (review insight digest) |
+| Proofreading (`genai-proofreading`) | `MlKitTextToolsGateway` | `GenAiAssistCoordinator.proofread` | `TaskAssistPlanner.refineTitle`, `HabitAssistPlanner.refineTitle`, `MedicationAssistPlanner.refineName` — tidy captured task/habit titles and medication names, surfaced through each form's existing "Suggest" action |
+| Rewriting (`genai-rewriting`) | `MlKitTextToolsGateway` | `GenAiAssistCoordinator.rewrite` | `TaskAssistPlanner.rewriteText` (tone/length rewrite of task text) |
+
+These are **on-device only** (no cloud equivalent is wired). They respect `PrivacyMode` (`DISABLED` returns the original text untouched) and the same foreground gate as the Prompt API. A failed `Result` means "keep the original text," not an error to surface.
+
+## Streaming output
+
+`OnDeviceGeminiGateway.generateTextStream` and `GenAiAssistCoordinator.generateAssistTextStream` expose Gemini Nano's `generateContentStream` as a cumulative `Flow<String>` for longer outputs (perceived-latency win). The flow is empty when AI is disabled or Nano is not ready, so callers fall back to the one-shot path or local copy. Cloud streaming is not wired; streaming always uses the on-device path. The conversational assistant is the primary consumer.
+
+## Proactive (pre-generated, cached) AI
+
+Because Nano inference is foreground-only, `ProactiveAssistGenerator` pre-generates a short daily digest **while the app is foregrounded** (`ProactiveAssistForegroundRefresher`, on ProcessLifecycle `ON_START`) and caches it via `ProactiveAssistStore` (`PreferencesProactiveAssistStore`). Background surfaces read the cache with no live inference; the cache always holds at least a deterministic local digest, and stale / wrong-day entries are rejected.
+
+The **end-of-day review reminder** (`AlarmRequestType.DAILY_REVIEW`) consumes it: `AlarmDeliveryCoordinator.dailyReviewDigestOverride` reads the cached digest at delivery and shows it as the notification body (falling back to the static copy when there is no fresh same-day digest). The cache coordinates live in `core:domain` (`ProactiveDigestKeys`) so the `core:ai` writer and the `core:notifications` reader share one source of truth without a module dependency.
+
+## Conversational assistant
+
+`ConversationalAssistant` is a free-text, multi-turn surface. It converses with Gemini Nano (streaming) and, when the user wants to *do* something, maps the request onto one of the supplied `CommandAssistCandidate`s — the same command catalog the command palette / AppFunctions use — surfacing it as an `AssistantActionProposal` that **always requires explicit user confirmation** (the assistant never executes anything itself). It falls back to deterministic local command-routing (`CommandAssistPlanner`) whenever on-device AI is disabled or unavailable.
+
+It is reachable from the **command palette**: an "Ask the assistant" button (`CommandSearchViewModel.askAssistant` → `assistantPanel` state) runs the current query through the assistant and renders the reply with a **"Run: <command>"** confirm button (which dispatches the resolved `CommandPaletteItem`) plus a Dismiss. The palette component (`core:ui`) stays generic — it takes only primitive params/callbacks; the app layer (`CommandPaletteHost`) owns the AI wiring.

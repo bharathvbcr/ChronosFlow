@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosSectionTitle
+import com.chronosflow.core.ui.components.formatDurationLabel
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.core.ui.theme.categoryColor
 import com.chronosflow.feature.daydial.TimeBlockUiModel
@@ -117,6 +118,7 @@ internal fun PlanTab(
     onDuplicateBlock: (String) -> Unit,
     onApplyTemplate: (TemplateBlueprint) -> Unit,
     onFillGaps: () -> Unit,
+    contentTopPadding: Dp = 0.dp,
     contentBottomPadding: Dp = 0.dp
 ) {
     val sortedBlocks = remember(timeBlocks) { timeBlocks.sortedBy { it.startMinuteOfDay } }
@@ -132,7 +134,7 @@ internal fun PlanTab(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = ChronosSpacing.Standard,
-            top = ChronosSpacing.Standard,
+            top = contentTopPadding + ChronosSpacing.Standard,
             end = ChronosSpacing.Standard,
             bottom = timelineBottomPadding
         ),
@@ -1084,7 +1086,7 @@ internal fun planScheduleAttentionActionLabel(largeGapCount: Int, overlapCount: 
 
 internal fun planScheduleAttentionButtonText(largeGapCount: Int, overlapCount: Int): String =
     if (largeGapCount > 0 && overlapCount == 0) {
-        "Fix gaps"
+        "Fill gaps with tasks"
     } else {
         "Fix schedule"
     }
@@ -1101,7 +1103,7 @@ internal fun planSuggestionRejectActionLabel(suggestion: TimeBlockUiModel): Stri
 internal fun planSuggestionTimeText(suggestion: TimeBlockUiModel): String =
     "${formatMinute(suggestion.startMinuteOfDay)} - ${
         formatMinute(suggestion.startMinuteOfDay + suggestion.durationMinutes)
-    } · ${suggestion.durationMinutes}m"
+    } · ${formatDurationLabel(suggestion.durationMinutes)}"
 
 private fun planSuggestionTimeDetail(suggestion: TimeBlockUiModel): String =
     "from ${formatMinute(suggestion.startMinuteOfDay)} for ${formatDurationMinutes(suggestion.durationMinutes)}"

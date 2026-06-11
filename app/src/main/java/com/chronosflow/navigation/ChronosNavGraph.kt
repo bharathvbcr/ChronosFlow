@@ -18,13 +18,13 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.chronosflow.core.ui.components.ChronosScreenScaffold
 import com.chronosflow.core.ui.settings.ChronosFeatureFlags
 import com.chronosflow.feature.daydial.DayDialScreen
 import com.chronosflow.feature.daydial.model.DayDialTab
 import com.chronosflow.feature.habits.HabitScreen
 import com.chronosflow.core.data.security.SensitiveArea
 import com.chronosflow.feature.medication.MedicationScreen
-import com.chronosflow.feature.review.ReviewScreen
 import com.chronosflow.feature.tasks.TaskScreen
 import java.net.URLDecoder
 
@@ -67,7 +67,6 @@ private val daySidebarLaunchTargets = setOf(
     ChronosRoute.Day.TARGET_TASKS,
     ChronosRoute.Day.TARGET_HABITS,
     ChronosRoute.Day.TARGET_MEDICATION,
-    ChronosRoute.Day.TARGET_REVIEW,
     ChronosRoute.Day.TARGET_TEMPLATES,
     ChronosRoute.Day.TARGET_AI_SETTINGS,
     ChronosRoute.Day.TARGET_PRIVACY_SYNC,
@@ -95,6 +94,7 @@ fun ChronosNavGraph(
     reducedMotion: Boolean = false,
     requestedPrimaryTab: DayDialTab? = null,
     shellDayTarget: String? = null,
+    dayLaunchTargetGeneration: Int = 0,
     onDayPrimaryTabSelected: (DayDialTab) -> Unit = {}
 ) {
     NavHost(
@@ -156,6 +156,7 @@ fun ChronosNavGraph(
             val capture = decodeCaptureArgument(it.arguments?.getString("capture"))
             DayDialScreen(
                 launchTarget = launchTarget,
+                launchTargetGeneration = dayLaunchTargetGeneration,
                 initialFocusCapture = capture,
                 requestedPrimaryTab = requestedPrimaryTab,
                 contentPadding = contentPadding,
@@ -174,11 +175,9 @@ fun ChronosNavGraph(
                 },
                 onOpenMedication = onOpenMedication,
                 onOpenReview = {
-                    if (featureFlags.reviewEnabled) {
-                        navController.navigateSingleTop(ChronosRoute.ReviewDetail.route)
-                    } else {
-                        navController.navigateDayTarget(ChronosRoute.Day.TARGET_INSIGHTS)
-                    }
+                    navController.navigateSingleTop(
+                        ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS)
+                    )
                 },
                 onSelectPrimaryTab = { tab ->
                     onDayPrimaryTabSelected(tab)
@@ -190,7 +189,8 @@ fun ChronosNavGraph(
             PaddedDestination(contentPadding) {
                 TaskScreen(
                     onBack = { navController.navigateBackToDay() },
-                    onOpenDayDial = { navController.navigateSingleTop(taskScreenDayDialRoute()) }
+                    onOpenDayDial = { navController.navigateSingleTop(taskScreenDayDialRoute()) },
+                    onOpenCommandPalette = onOpenCommandPalette
                 )
             }
         }
@@ -220,6 +220,7 @@ fun ChronosNavGraph(
                 TaskScreen(
                     onBack = { navController.navigateBackToDay() },
                     onOpenDayDial = { navController.navigateSingleTop(taskScreenDayDialRoute()) },
+                    onOpenCommandPalette = onOpenCommandPalette,
                     initialContextTaskId = it.arguments?.getString("taskId")?.takeIf { taskId -> taskId.isNotBlank() },
                     openInitialContextSheet = target == "context",
                     openAddSheet = target == ChronosRoute.TARGET_ADD,
@@ -231,21 +232,11 @@ fun ChronosNavGraph(
             PaddedDestination(contentPadding) {
                 if (featureFlags.habitsEnabled) {
                     HabitScreen(
-                        onBack = { navController.navigateBackToDay() }
+                        onBack = { navController.navigateBackToDay() },
+                        onOpenCommandPalette = onOpenCommandPalette
                     )
                 } else {
-                    ParkedFeatureDestination("Habits")
-                }
-            }
-        }
-        composable(ChronosRoute.ReviewDetail.route) {
-            PaddedDestination(contentPadding) {
-                if (featureFlags.reviewEnabled) {
-                    ReviewScreen(
-                        onBack = { navController.navigateBackToDay() }
-                    )
-                } else {
-                    ParkedFeatureDestination("Review")
+                    ParkedFeatureDestination("Habits", onBack = { navController.navigateBackToDay() })
                 }
             }
         }
@@ -270,11 +261,12 @@ fun ChronosNavGraph(
                 if (featureFlags.habitsEnabled) {
                     HabitScreen(
                         onBack = { navController.navigateBackToDay() },
+                        onOpenCommandPalette = onOpenCommandPalette,
                         openAddSheet = target == ChronosRoute.TARGET_ADD,
                         initialAddCapture = capture
                     )
                 } else {
-                    ParkedFeatureDestination("Habits")
+                    ParkedFeatureDestination("Habits", onBack = { navController.navigateBackToDay() })
                 }
             }
         }
@@ -287,11 +279,12 @@ fun ChronosNavGraph(
                         message = "Unlock to view and manage your medication plans and dose history."
                     ) {
                         MedicationScreen(
-                            onBack = { navController.navigateBackToDay() }
+                            onBack = { navController.navigateBackToDay() },
+                            onOpenCommandPalette = onOpenCommandPalette
                         )
                     }
                 } else {
-                    ParkedFeatureDestination("Medications")
+                    ParkedFeatureDestination("Medications", onBack = { navController.navigateBackToDay() })
                 }
             }
         }
@@ -321,12 +314,13 @@ fun ChronosNavGraph(
                     ) {
                         MedicationScreen(
                             onBack = { navController.navigateBackToDay() },
+                            onOpenCommandPalette = onOpenCommandPalette,
                             openAddSheet = target == ChronosRoute.TARGET_ADD,
                             initialAddCapture = capture
                         )
                     }
                 } else {
-                    ParkedFeatureDestination("Medications")
+                    ParkedFeatureDestination("Medications", onBack = { navController.navigateBackToDay() })
                 }
             }
         }
@@ -348,22 +342,29 @@ private fun PaddedDestination(
 }
 
 @Composable
-private fun ParkedFeatureDestination(name: String) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = disabledFeatureTitle(name),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            text = disabledFeatureMessage(),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+private fun ParkedFeatureDestination(name: String, onBack: (() -> Unit)? = null) {
+    ChronosScreenScaffold(
+        title = name,
+        onBack = onBack
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = disabledFeatureTitle(name),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = disabledFeatureMessage(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -420,6 +421,10 @@ private fun String.isDayPrimaryTabRoute(): Boolean =
     this == ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TODAY) ||
         this == ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_PLAN) ||
         this == ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_FOCUS_PLANNER) ||
+        // "today-reset" (Today tab double-tap → jump to the current date) must NOT
+        // restore a previously saved Day back stack: a stale saved entry would carry
+        // the old target/ViewModel and clobber the reset so the date never changes.
+        this == ChronosRoute.Day.createRoute("today-reset") ||
         startsWith("${ChronosRoute.Day.section}?target=${ChronosRoute.Day.TARGET_FOCUS_PLANNER}&capture=")
 
 private fun String.isBackStackedDayTargetRoute(): Boolean =

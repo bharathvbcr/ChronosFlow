@@ -9,9 +9,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chronosflow.core.ai.AssistNarrative
+import com.chronosflow.core.ai.FocusNextBlockSuggestion
 import com.chronosflow.core.ai.PrivacyMode
 import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
+import com.chronosflow.core.domain.diagnostics.AppEventLogEntry
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.core.domain.model.SleepSchedule
 import com.chronosflow.core.ui.settings.ChronosBackdropTheme
@@ -59,7 +61,10 @@ internal data class DayDialViewModelState(
     val missedFromFocusMessage: String?,
     val moodEnergyCheckIns: List<MoodEnergyCheckIn>,
     val moodCheckInCoaching: AssistNarrative?,
-    val insightsTabState: InsightsTabUiState
+    val nextFocusSuggestion: FocusNextBlockSuggestion?,
+    val focusGuidance: AssistNarrative?,
+    val insightsTabState: InsightsTabUiState,
+    val appEventLog: List<AppEventLogEntry>
 )
 
 @Composable
@@ -98,7 +103,10 @@ internal fun rememberDayDialViewModelState(viewModel: DayDialViewModel): DayDial
     val missedFromFocusMessage by viewModel.missedFromFocusMessage.collectAsStateWithLifecycle()
     val moodEnergyCheckIns by viewModel.moodEnergyCheckIns.collectAsStateWithLifecycle()
     val moodCheckInCoaching by viewModel.moodCheckInCoaching.collectAsStateWithLifecycle()
+    val nextFocusSuggestion by viewModel.nextFocusSuggestion.collectAsStateWithLifecycle()
+    val focusGuidance by viewModel.focusGuidance.collectAsStateWithLifecycle()
     val insightsTabState by viewModel.insightsTabState.collectAsStateWithLifecycle()
+    val appEventLog by viewModel.appEventLogEntries.collectAsStateWithLifecycle()
 
     return DayDialViewModelState(
         timeBlocks = timeBlocks,
@@ -135,7 +143,10 @@ internal fun rememberDayDialViewModelState(viewModel: DayDialViewModel): DayDial
         missedFromFocusMessage = missedFromFocusMessage,
         moodEnergyCheckIns = moodEnergyCheckIns,
         moodCheckInCoaching = moodCheckInCoaching,
-        insightsTabState = insightsTabState
+        nextFocusSuggestion = nextFocusSuggestion,
+        focusGuidance = focusGuidance,
+        insightsTabState = insightsTabState,
+        appEventLog = appEventLog
     )
 }
 
@@ -282,11 +293,11 @@ internal fun rememberDayDialSettingsState(): DayDialSettingsState {
         ),
         reviewFeatureEnabledState = rememberPersistentBoolean(
             ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED,
-            false
+            true
         ),
         aiAdvisorFeatureEnabledState = rememberPersistentBoolean(
             ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED,
-            false
+            true
         ),
         syncStatusState = rememberPersistentString("sync_status", "No checkpoint this session")
     )

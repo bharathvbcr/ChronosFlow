@@ -23,7 +23,7 @@ class HabitMarkAction : ActionCallback {
         withContext(Dispatchers.IO) {
             entryPoint.completeHabitByIdUseCase()(habitId, LocalDate.now())
         }
-        ChronosGlanceWidgetReceiver.refreshAll(context)
+        ChronosWidgetHub.refreshAll(context)
     }
 
     companion object {

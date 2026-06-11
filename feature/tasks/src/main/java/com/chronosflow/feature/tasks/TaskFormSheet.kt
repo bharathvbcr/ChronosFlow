@@ -59,6 +59,8 @@ import androidx.core.content.ContextCompat
 import com.chronosflow.core.ai.TaskAssistRequest
 import com.chronosflow.core.ai.TaskAssistSuggestion
 import com.chronosflow.core.ai.genai.GenAiAssistCopy
+import com.chronosflow.core.ai.genai.RewriteAssistUiState
+import com.chronosflow.core.ai.genai.RewriteStyle
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TaskAttachment
 import com.chronosflow.core.domain.model.TaskAttachmentKind
@@ -70,6 +72,8 @@ import com.chronosflow.core.domain.model.TaskContactSnapshot
 import com.chronosflow.core.domain.model.TaskReminderTrigger
 import com.chronosflow.core.domain.model.TaskSchedule
 import com.chronosflow.core.ui.components.GenAiAssistBanner
+import com.chronosflow.core.ui.components.ChronosAssistSuggestionChips
+import com.chronosflow.core.ui.components.ChronosTextRewriteRow
 import com.chronosflow.core.ui.components.ChronosCollapsibleSection
 import com.chronosflow.core.ui.components.ChronosSpeechInputButton
 import com.chronosflow.core.ui.components.ChronosDatePickerField
@@ -80,10 +84,14 @@ import com.chronosflow.core.ui.components.ChronosFormSection
 import com.chronosflow.core.ui.components.ChronosFormSwitchRow
 import com.chronosflow.core.ui.components.ChronosLauncherAppPicker
 import com.chronosflow.core.ui.components.ChronosListCard
+import com.chronosflow.core.ui.components.ChronosDurationSlider
 import com.chronosflow.core.ui.components.ChronosOptionChips
 import com.chronosflow.core.ui.components.ChronosQuickAddChips
 import com.chronosflow.core.ui.components.ChronosTimePickerField
 import com.chronosflow.core.ui.components.formatDisplayMinute
+import com.chronosflow.core.ui.components.withSelectedOption
+import com.chronosflow.core.ui.settings.ChronosUiSettingsKeys
+import com.chronosflow.core.ui.settings.rememberChronosUiBooleanSetting
 import com.chronosflow.core.ui.components.formatChronosPickerDate
 import com.chronosflow.core.ui.components.nudgeMinuteText
 import com.chronosflow.core.ui.components.parseFlexibleMinute
@@ -127,6 +135,8 @@ private val urgentReminderPresets = mapOf(
 
 private val durationPresets = listOf(15, 30, 45, 60, 90, 120)
 private const val anyDurationOption = "Any length"
+internal const val TaskDurationMinMinutes = 5
+internal const val TaskDurationMaxMinutes = 240
 
 private val scheduleDateOptions = listOf("Any day", "Today", "Tomorrow", "Custom")
 
@@ -190,7 +200,10 @@ internal fun TaskFormSheet(
     onOpenExactAlarmSettings: (() -> Unit)? = null,
     assistState: TaskAssistUiState = TaskAssistUiState(),
     onRequestAssist: ((TaskAssistRequest) -> Unit)? = null,
-    onClearAssist: (() -> Unit)? = null
+    onClearAssist: (() -> Unit)? = null,
+    rewriteState: RewriteAssistUiState = RewriteAssistUiState(),
+    onRequestRewrite: ((text: String, style: RewriteStyle, styleLabel: String) -> Unit)? = null,
+    onClearRewrite: (() -> Unit)? = null
 ) {
     if (target == null) return
 
@@ -303,7 +316,15 @@ internal fun TaskFormSheet(
     val appliedSuggestionIds = remember(taskKey, assistState.suggestions) {
         mutableStateListOf<String>()
     }
-    var newActionTypeName by rememberSaveable(taskKey) { mutableStateOf(TaskActionType.WEBSITE.name) }
+    // Blank = no explicit choice yet; the pending action type then follows the task
+    // context (e.g. "Email follow-up" defaults the editor to EMAIL, not WEBSITE).
+    var newActionTypeOverride by rememberSaveable(taskKey) { mutableStateOf("") }
+    val newActionTypeName = newActionTypeOverride.ifBlank {
+        contextualTaskDefaultActionTypeName(
+            contextText = "$taskTitle $description $taskCaptureContext",
+            suggestions = assistState.suggestions
+        )
+    }
     var newActionLabel by rememberSaveable(taskKey) { mutableStateOf("") }
     var newActionValue by rememberSaveable(taskKey) { mutableStateOf("") }
     var connectExpanded by rememberSaveable(taskKey) {
@@ -333,6 +354,9 @@ internal fun TaskFormSheet(
     var connectedFilesExpanded by rememberSaveable(taskKey) { mutableStateOf(true) }
     var titleEverFilled by rememberSaveable(taskKey) { mutableStateOf(initialTask?.title?.isNotBlank() == true) }
     var lastAutoAssistCapture by rememberSaveable(taskKey) { mutableStateOf("") }
+    LaunchedEffect(taskKey) {
+        onClearRewrite?.invoke()
+    }
     val android17ContactPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -408,7 +432,7 @@ internal fun TaskFormSheet(
     }
 
     fun prepareInlineAction(type: TaskActionType, label: String) {
-        newActionTypeName = type.name
+        newActionTypeOverride = type.name
         newActionLabel = label
         newActionValue = ""
         connectExpanded = true
@@ -431,11 +455,11 @@ internal fun TaskFormSheet(
                         }
                     }
                     actionDrafts.add(draft)
-                    newActionTypeName = suggestion.payload.type.name
+                    newActionTypeOverride = suggestion.payload.type.name
                     newActionLabel = ""
                     newActionValue = ""
                 } else {
-                    newActionTypeName = suggestion.payload.type.name
+                    newActionTypeOverride = suggestion.payload.type.name
                     newActionLabel = suggestion.payload.label
                     newActionValue = suggestion.payload.value
                 }
@@ -477,11 +501,21 @@ internal fun TaskFormSheet(
                 priorityReminderExpanded = true
             }
         }
-        if (suggestion.id !in appliedSuggestionIds) {
-            appliedSuggestionIds.add(suggestion.id)
+        supersededTaskAssistSuggestionIds(suggestion, assistState.suggestions).forEach { id ->
+            if (id !in appliedSuggestionIds) {
+                appliedSuggestionIds.add(id)
+            }
         }
         if (assistState.suggestions.all { it.id in appliedSuggestionIds }) {
             onClearAssist?.invoke()
+        }
+    }
+
+    fun applyAllAssistSuggestions() {
+        assistState.suggestions.forEach { suggestion ->
+            if (suggestion.id !in appliedSuggestionIds) {
+                applyAssistSuggestion(suggestion)
+            }
         }
     }
 
@@ -634,12 +668,12 @@ internal fun TaskFormSheet(
                 ) {
                     actionDrafts.add(prefillActionDraft)
                 }
-                newActionTypeName = prefillActionDraft.type.name
+                newActionTypeOverride = prefillActionDraft.type.name
                 newActionLabel = ""
                 newActionValue = ""
                 connectExpanded = true
             } else if (prefillActionType != null) {
-                newActionTypeName = prefillActionType.name
+                newActionTypeOverride = prefillActionType.name
                 newActionLabel = ""
                 newActionValue = ""
                 connectExpanded = true
@@ -647,7 +681,38 @@ internal fun TaskFormSheet(
         }
     }
 
-    val visibleAssistSuggestions = assistState.suggestions.filterNot { it.id in appliedSuggestionIds }
+    val redundantAssistSuggestionIds = redundantTaskAssistSuggestionIds(
+        suggestions = assistState.suggestions,
+        currentTitle = taskTitle,
+        currentPriority = priority,
+        currentTargetDate = resolvedTargetDate,
+        currentDurationMinutes = preferredDurationMinutes,
+        currentStartMinuteOfDay = parsedPreferredStartMinute,
+        currentChecklistLabels = checklistItems.map { it.label },
+        currentActionKeys = actionDrafts.map { taskActionRedundancyKey(it.type, it.value) }.toSet()
+    )
+    val visibleAssistSuggestions = assistState.suggestions.filterNot {
+        it.id in appliedSuggestionIds || it.id in redundantAssistSuggestionIds
+    }
+    val autoApplyAssistEnabled = rememberChronosUiBooleanSetting(
+        ChronosUiSettingsKeys.KEY_ASSIST_AUTO_APPLY,
+        false
+    )
+    LaunchedEffect(assistState.suggestions, autoApplyAssistEnabled) {
+        if (!autoApplyAssistEnabled || target !is TaskSheetTarget.Add) return@LaunchedEffect
+        val autoApplicableIds = autoApplicableTaskAssistSuggestionIds(
+            suggestions = visibleAssistSuggestions,
+            titleBlank = taskTitle.isBlank(),
+            priorityUnset = priority == 0,
+            scheduleUnset = resolvedTargetDate == null &&
+                preferredDurationMinutes == null &&
+                parsedPreferredStartMinute == null,
+            checklistEmpty = checklistItems.none { it.label.isNotBlank() }
+        )
+        assistState.suggestions
+            .filter { it.id in autoApplicableIds }
+            .forEach(::applyAssistSuggestion)
+    }
     val contextualAssistSuggestions = assistState.suggestions
     val adaptiveTaskHints = taskModalAdaptiveHints(
         title = taskContextQuery,
@@ -783,7 +848,8 @@ internal fun TaskFormSheet(
             ChronosQuickAddChips(
                 label = "Context titles",
                 options = contextualTaskTitleOptions,
-                onSelect = { suggestion -> taskTitle = suggestion }
+                onSelect = { suggestion -> taskTitle = suggestion },
+                selected = taskTitle
             )
 
             OutlinedTextField(
@@ -812,6 +878,20 @@ internal fun TaskFormSheet(
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 2
             )
+
+            if (onRequestRewrite != null) {
+                ChronosTextRewriteRow(
+                    text = description,
+                    rewriteState = rewriteState,
+                    onRequestRewrite = onRequestRewrite,
+                    onApplyRewrite = { rewritten ->
+                        description = rewritten
+                        onClearRewrite?.invoke()
+                    },
+                    onDismissRewrite = { onClearRewrite?.invoke() },
+                    fieldName = "description"
+                )
+            }
 
             ChronosSpeechInputButton(
                 prompt = "Describe the task, including time, date, duration, contact, file, or link.",
@@ -875,12 +955,12 @@ internal fun TaskFormSheet(
                         ) {
                             actionDrafts.add(transcriptActionDraft)
                         }
-                        newActionTypeName = transcriptActionDraft.type.name
+                        newActionTypeOverride = transcriptActionDraft.type.name
                         newActionLabel = ""
                         newActionValue = ""
                         connectExpanded = true
                     } else if (transcriptActionType != null) {
-                        newActionTypeName = transcriptActionType.name
+                        newActionTypeOverride = transcriptActionType.name
                         newActionLabel = ""
                         newActionValue = ""
                         connectExpanded = true
@@ -934,9 +1014,9 @@ internal fun TaskFormSheet(
                 ) {
                     Text(
                         when {
-                            assistState.isLoading -> "Parsing task..."
-                            visibleAssistSuggestions.isNotEmpty() -> "Refresh AI suggestions"
-                            else -> "Parse task with AI"
+                            assistState.isLoading -> "Drafting suggestions…"
+                            visibleAssistSuggestions.isNotEmpty() -> "Refresh suggestions"
+                            else -> "Suggest details with AI"
                         }
                     )
                 }
@@ -946,7 +1026,8 @@ internal fun TaskFormSheet(
                 GenAiAssistBanner(
                     title = snapshot.bannerTitle,
                     message = snapshot.bannerMessage +
-                        " Typed or Android speech input becomes editable suggestions for the title, time, contact, links, and duration. Gemini Nano is enough for this structured parsing; you apply each suggestion yourself."
+                        " Type or dictate the task and AI drafts editable suggestions — title, timing, contacts, links, and checklist. Nothing changes until you tap a suggestion.",
+                    ready = snapshot.isReady
                 )
             }
 
@@ -958,11 +1039,16 @@ internal fun TaskFormSheet(
                 )
             }
 
-            val visibleSuggestions = assistState.suggestions.filterNot { it.id in appliedSuggestionIds }
-            if (visibleSuggestions.isNotEmpty()) {
-                TaskAssistSuggestionChips(
-                    suggestions = visibleSuggestions,
-                    onSuggestion = ::applyAssistSuggestion
+            if (visibleAssistSuggestions.isNotEmpty() || assistState.isLoading) {
+                ChronosAssistSuggestionChips(
+                    suggestions = visibleAssistSuggestions,
+                    isLoading = assistState.isLoading,
+                    onApply = ::applyAssistSuggestion,
+                    label = { it.label },
+                    reason = { it.reason },
+                    sourceLabel = { GenAiAssistCopy.taskAssistSourceLabel(it.source) },
+                    loadingLabel = "Drafting AI suggestions…",
+                    onApplyAll = ::applyAllAssistSuggestions
                 )
             }
         }
@@ -979,20 +1065,28 @@ internal fun TaskFormSheet(
                     title = taskContextQuery,
                     description = description,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(taskDurationPickerLabel(preferredDurationMinutes)),
                 selected = taskDurationPickerLabel(preferredDurationMinutes),
                 onSelected = { label ->
                     preferredDurationMinutes = taskDurationPickerMinutes(label)
                 },
                 optionLabel = { it }
             )
+            preferredDurationMinutes?.let { estimatedMinutes ->
+                ChronosDurationSlider(
+                    durationMinutes = estimatedMinutes,
+                    onDurationChange = { preferredDurationMinutes = it },
+                    range = TaskDurationMinMinutes..TaskDurationMaxMinutes,
+                    label = "Estimated duration"
+                )
+            }
             ChronosOptionChips(
                 label = "Target day",
                 options = contextualTaskScheduleDateOptions(
                     title = taskContextQuery,
                     description = description,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(scheduleDateOption),
                 selected = scheduleDateOption,
                 onSelected = { option -> scheduleDateOption = option },
                 optionLabel = { it }
@@ -1014,7 +1108,7 @@ internal fun TaskFormSheet(
                     title = taskContextQuery,
                     description = description,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(scheduleTimeOption),
                 selected = scheduleTimeOption,
                 onSelected = { option ->
                     scheduleTimeOption = option
@@ -1087,7 +1181,7 @@ internal fun TaskFormSheet(
                 options = contextualTaskRepeatOptions(
                     contextText = taskContextQuery,
                     recurringConfig = recurringConfig
-                ),
+                ).withSelectedOption(taskRepeatOptionValue(recurringConfig)),
                 selected = taskRepeatOptionValue(recurringConfig),
                 onSelected = { option ->
                     val selectedCadence = taskRepeatOptionCadence(option) ?: recurringConfig.cadence
@@ -1128,7 +1222,7 @@ internal fun TaskFormSheet(
                     options = contextualTaskRecurringCadenceOptions(
                         contextText = taskContextQuery,
                         selectedCadence = recurringConfig.cadence
-                    ),
+                    ).withSelectedOption(recurringConfig.cadence.name),
                     selected = recurringConfig.cadence.name,
                     onSelected = { selected ->
                         val selectedCadence = TaskRecurringCadence.valueOf(selected)
@@ -1353,7 +1447,7 @@ internal fun TaskFormSheet(
                     description = description,
                     selectedPriority = priority,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(priorityOptions.first { it.first == priority }.second),
                 selected = priorityOptions.first { it.first == priority }.second,
                 onSelected = { label ->
                     priority = priorityOptions.first { it.second == label }.first
@@ -1512,10 +1606,13 @@ internal fun TaskFormSheet(
             }
             ChronosQuickAddChips(
                 label = "Suggested steps",
-                options = contextualTaskChecklistStepOptions(
-                    title = taskContextQuery,
-                    description = description,
-                    suggestions = contextualAssistSuggestions
+                options = availableTaskChecklistStepOptions(
+                    options = contextualTaskChecklistStepOptions(
+                        title = taskContextQuery,
+                        description = description,
+                        suggestions = contextualAssistSuggestions
+                    ),
+                    existingLabels = checklistItems.map { it.label }
                 ),
                 onSelect = { label ->
                     val normalizedLabel = label.trim()
@@ -1769,16 +1866,16 @@ internal fun TaskFormSheet(
                     contextText = "$taskContextQuery $newActionLabel $newActionValue",
                     selectedTypeName = newActionTypeName,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(newActionTypeName),
                 selected = newActionTypeName,
-                onSelected = { newActionTypeName = it },
+                onSelected = { newActionTypeOverride = it },
                 optionLabel = { typeName -> taskActionTypeLabel(TaskActionType.valueOf(typeName)) }
             )
             OutlinedTextField(
                 value = newActionLabel,
                 onValueChange = { newActionLabel = it },
                 label = { Text("New action label") },
-                placeholder = { Text("Client website") },
+                placeholder = { Text(taskActionLabelPlaceholder(TaskActionType.valueOf(newActionTypeName))) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -2216,7 +2313,12 @@ internal fun taskDurationPickerLabel(durationMinutes: Int?): String {
 
 internal fun taskDurationPickerMinutes(label: String): Int? {
     if (label == anyDurationOption) return null
-    return durationPresets.firstOrNull { formatTaskDurationBlock(it) == label }
+    durationPresets.firstOrNull { formatTaskDurationBlock(it) == label }?.let { return it }
+    // Slider-tuned estimates surface as custom "1h 20m"-style chips; parse them back.
+    val match = Regex("""^(?:(\d+)h)?\s*(?:(\d+)m)?$""").matchEntire(label.trim()) ?: return null
+    val hours = match.groupValues[1].toIntOrNull() ?: 0
+    val minutes = match.groupValues[2].toIntOrNull() ?: 0
+    return (hours * 60 + minutes).takeIf { it > 0 }
 }
 
 private fun taskRecurrenceDraftSummary(config: TaskRecurringConfig): String? {
@@ -2414,9 +2516,21 @@ internal fun contextualTaskChecklistStepOptions(
         .take(6)
 }
 
-internal fun contextualTaskActionTypeOptions(
+// Suggested-step chips disappear once their step is in the checklist, mirroring how
+// applied/redundant assist pills leave the row.
+internal fun availableTaskChecklistStepOptions(
+    options: List<String>,
+    existingLabels: List<String>
+): List<String> {
+    val known = existingLabels
+        .map { it.trim().lowercase() }
+        .filter { it.isNotBlank() }
+        .toSet()
+    return options.filterNot { it.trim().lowercase() in known }
+}
+
+internal fun contextualTaskActionTypeSignals(
     contextText: String,
-    selectedTypeName: String,
     suggestions: List<TaskAssistSuggestion>
 ): List<String> {
     val normalized = contextText.lowercase()
@@ -2449,8 +2563,23 @@ internal fun contextualTaskActionTypeOptions(
         }
         if (Regex("""\b(deep link|deeplink)\b""").containsMatchIn(normalized)) add(TaskActionType.CUSTOM_DEEP_LINK.name)
     }
+    return suggestedTypes + contextTypes
+}
 
-    val contextualTypes = suggestedTypes + contextTypes
+// The pending Connect action defaults to the type the task context implies — AI
+// action suggestions win over keyword cues; WEBSITE only as the no-signal fallback.
+internal fun contextualTaskDefaultActionTypeName(
+    contextText: String,
+    suggestions: List<TaskAssistSuggestion>
+): String = contextualTaskActionTypeSignals(contextText, suggestions).firstOrNull()
+    ?: TaskActionType.WEBSITE.name
+
+internal fun contextualTaskActionTypeOptions(
+    contextText: String,
+    selectedTypeName: String,
+    suggestions: List<TaskAssistSuggestion>
+): List<String> {
+    val contextualTypes = contextualTaskActionTypeSignals(contextText, suggestions)
     val optionLimit = if (contextualTypes.isNotEmpty()) 4 else TaskActionType.entries.size
     return (
         contextualTypes +
@@ -3586,48 +3715,102 @@ private val TASK_PRIORITY_WORDS = listOf(
 private val TASK_QUICK_DURATION_WORDS = listOf("call", "text", "reply", "quick", "pay", "pick up", "drop off")
 private val TASK_LONG_DURATION_WORDS = listOf("deep work", "write", "draft", "review", "prepare", "plan", "research", "study")
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun TaskAssistSuggestionChips(
+// Title and Priority suggestions replace a single field value, so applying one makes the
+// remaining same-kind alternatives stale. Schedule suggestions can each fill different
+// fields and Checklist/ActionDraft are additive, so those siblings stay offered.
+internal fun supersededTaskAssistSuggestionIds(
+    applied: TaskAssistSuggestion,
+    suggestions: List<TaskAssistSuggestion>
+): Set<String> {
+    val replacesSameKind = applied is TaskAssistSuggestion.Title || applied is TaskAssistSuggestion.Priority
+    if (!replacesSameKind) return setOf(applied.id)
+    return suggestions
+        .filter { it::class == applied::class }
+        .map { it.id }
+        .toSet() + applied.id
+}
+
+// With the auto-apply setting on, a fresh Add form fills itself from the first
+// suggestion of each kind — but only into fields the user has not set, so manual
+// input always wins. Action drafts stay manual; they link external targets.
+internal fun autoApplicableTaskAssistSuggestionIds(
     suggestions: List<TaskAssistSuggestion>,
-    onSuggestion: (TaskAssistSuggestion) -> Unit
-) {
-    FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        suggestions.forEach { suggestion ->
-            val sourceLabel = GenAiAssistCopy.taskAssistSourceLabel(suggestion.source)
-            FilterChip(
-                modifier = Modifier.semantics(mergeDescendants = true) {
-                    contentDescription = "Apply suggestion: ${suggestion.label}. $sourceLabel. ${suggestion.reason}"
-                },
-                selected = false,
-                onClick = { onSuggestion(suggestion) },
-                label = {
-                    Column {
-                        Text(suggestion.label)
-                        Text(
-                            text = "Tap to apply",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = sourceLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = suggestion.reason,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            )
+    titleBlank: Boolean,
+    priorityUnset: Boolean,
+    scheduleUnset: Boolean,
+    checklistEmpty: Boolean
+): Set<String> {
+    var titleOpen = titleBlank
+    var priorityOpen = priorityUnset
+    var scheduleOpen = scheduleUnset
+    var checklistOpen = checklistEmpty
+    val ids = mutableSetOf<String>()
+    suggestions.forEach { suggestion ->
+        when (suggestion) {
+            is TaskAssistSuggestion.Title -> if (titleOpen) {
+                ids += suggestion.id
+                titleOpen = false
+            }
+            is TaskAssistSuggestion.Priority -> if (priorityOpen) {
+                ids += suggestion.id
+                priorityOpen = false
+            }
+            is TaskAssistSuggestion.Schedule -> if (scheduleOpen) {
+                ids += suggestion.id
+                scheduleOpen = false
+            }
+            is TaskAssistSuggestion.Checklist -> if (checklistOpen) {
+                ids += suggestion.id
+                checklistOpen = false
+            }
+            is TaskAssistSuggestion.ActionDraft -> Unit
         }
     }
+    return ids
+}
+
+internal fun taskActionRedundancyKey(type: TaskActionType, value: String): String =
+    "${type.name}:${value.trim().lowercase()}"
+
+// A suggestion the form already satisfies is a no-op pill — hide it so the row only
+// offers changes. Keeps pills honest after a sibling is applied or a field is edited
+// by hand, without an extra Gemini round-trip.
+internal fun redundantTaskAssistSuggestionIds(
+    suggestions: List<TaskAssistSuggestion>,
+    currentTitle: String,
+    currentPriority: Int,
+    currentTargetDate: LocalDate?,
+    currentDurationMinutes: Int?,
+    currentStartMinuteOfDay: Int?,
+    currentChecklistLabels: List<String>,
+    currentActionKeys: Set<String>
+): Set<String> {
+    fun String.normalized() = trim().lowercase()
+    val knownChecklistLabels = currentChecklistLabels
+        .map { it.normalized() }
+        .filter { it.isNotBlank() }
+        .toSet()
+    return suggestions.filter { suggestion ->
+        when (suggestion) {
+            is TaskAssistSuggestion.Title ->
+                suggestion.title.normalized() == currentTitle.normalized()
+            is TaskAssistSuggestion.Priority ->
+                suggestion.priority.coerceIn(0, 2) == currentPriority
+            is TaskAssistSuggestion.Schedule -> with(suggestion.payload) {
+                (targetDate == null || targetDate == currentTargetDate) &&
+                    (preferredDurationMinutes == null || preferredDurationMinutes == currentDurationMinutes) &&
+                    (preferredStartMinuteOfDay == null || preferredStartMinuteOfDay == currentStartMinuteOfDay)
+            }
+            is TaskAssistSuggestion.Checklist -> suggestion.items
+                .map { it.normalized() }
+                .filter { it.isNotBlank() }
+                .all { it in knownChecklistLabels }
+            is TaskAssistSuggestion.ActionDraft -> {
+                val value = suggestion.payload.value.normalized()
+                value.isNotBlank() && taskActionRedundancyKey(suggestion.payload.type, value) in currentActionKeys
+            }
+        }
+    }.map { it.id }.toSet()
 }
 
 private fun buildAndroid17ContactPickerIntent(): Intent {
@@ -3885,6 +4068,16 @@ private fun taskActionTypeLabel(type: TaskActionType): String = when (type) {
     TaskActionType.MAP -> "Map"
     TaskActionType.APP -> "App"
     TaskActionType.CUSTOM_DEEP_LINK -> "Deep link"
+}
+
+internal fun taskActionLabelPlaceholder(type: TaskActionType): String = when (type) {
+    TaskActionType.WEBSITE -> "Client website"
+    TaskActionType.DOCUMENT -> "Project brief"
+    TaskActionType.PHONE -> "Call Alex"
+    TaskActionType.EMAIL -> "Email Alex"
+    TaskActionType.MAP -> "Office address"
+    TaskActionType.APP -> "Open journal app"
+    TaskActionType.CUSTOM_DEEP_LINK -> "Open order details"
 }
 
 private fun taskActionValuePlaceholder(type: TaskActionType): String = when (type) {

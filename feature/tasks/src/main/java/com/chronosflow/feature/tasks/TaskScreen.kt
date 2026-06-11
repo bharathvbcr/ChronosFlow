@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -46,7 +47,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -87,11 +87,12 @@ import com.chronosflow.core.notifications.launchTaskContextCommand
 import com.chronosflow.core.ui.components.ChronosEmptyState
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosMetricTile
-import com.chronosflow.core.ui.components.ChronosScreenBackdrop
 import com.chronosflow.core.ui.shell.ChronosModalBottomSheet
+import com.chronosflow.core.ui.components.ChronosCommandPaletteAction
+import com.chronosflow.core.ui.components.ChronosPageHeader
 import com.chronosflow.core.ui.components.ChronosScreenScaffold
-import com.chronosflow.core.ui.components.ChronosSectionHeader
 import com.chronosflow.core.ui.components.formatDisplayMinute
+import com.chronosflow.core.ui.shell.ChronosSnackbarHost
 import com.chronosflow.core.ui.shell.LocalChronosShellBottomInset
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import kotlinx.coroutines.launch
@@ -109,6 +110,7 @@ fun TaskScreen(
     viewModel: TaskViewModel = hiltViewModel(),
     onBack: (() -> Unit)? = null,
     onOpenDayDial: (() -> Unit)? = null,
+    onOpenCommandPalette: (() -> Unit)? = null,
     initialContextTaskId: String? = null,
     openInitialContextSheet: Boolean = false,
     openAddSheet: Boolean = false,
@@ -126,6 +128,7 @@ fun TaskScreen(
     val exactAlarmPermissionGranted by viewModel.exactAlarmPermissionGranted.collectAsStateWithLifecycle()
     val alarmStates by viewModel.urgentTaskAlarmStates.collectAsStateWithLifecycle()
     val assistState by viewModel.assistState.collectAsStateWithLifecycle()
+    val rewriteState by viewModel.rewriteState.collectAsStateWithLifecycle()
     var sheetTarget by remember { mutableStateOf<TaskSheetTarget?>(null) }
     var commandSheetTask by remember { mutableStateOf<Task?>(null) }
     var initialContextConsumed by rememberSaveable(initialContextTaskId, openInitialContextSheet) {
@@ -229,150 +232,149 @@ fun TaskScreen(
     ChronosScreenScaffold(
         title = "Tasks",
         onBack = onBack,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        actions = { ChronosCommandPaletteAction(onOpenCommandPalette) },
+        snackbarHost = { ChronosSnackbarHost(snackbarHostState) },
     ) { padding ->
-        ChronosScreenBackdrop(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 4.dp,
+                bottom = padding.calculateBottomPadding() + shellBottomInset + ChronosSpacing.Medium
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                contentPadding = PaddingValues(top = 4.dp, bottom = shellBottomInset + ChronosSpacing.Medium),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                item {
-                    ChronosSectionHeader(
-                        title = "Task command center",
-                        subtitle = "Capture commitments, schedule priority work, and arm urgent tasks with exact alarms."
+            item {
+                ChronosPageHeader(
+                    title = "Task command center",
+                    subtitle = "Capture commitments, schedule priority work, and arm urgent tasks with exact alarms.",
+                    icon = Icons.Default.Checklist
+                )
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    ChronosMetricTile(label = "Open", value = openCount.toString(), modifier = Modifier.weight(1f))
+                    ChronosMetricTile(
+                        label = "Urgent",
+                        value = urgentCount.toString(),
+                        modifier = Modifier.weight(1f),
+                        accent = MaterialTheme.colorScheme.error
+                    )
+                    ChronosMetricTile(
+                        label = "Done",
+                        value = doneCount.toString(),
+                        modifier = Modifier.weight(1f),
+                        accent = MaterialTheme.colorScheme.secondary
                     )
                 }
+            }
+            item {
+                FilledTonalButton(
+                    onClick = { sheetTarget = TaskSheetTarget.Add() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Add task", fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            if (showNotificationPermissionAction || (!notificationPermissionGranted && urgentCount > 0)) {
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        ChronosMetricTile(label = "Open", value = openCount.toString(), modifier = Modifier.weight(1f))
-                        ChronosMetricTile(
-                            label = "Urgent",
-                            value = urgentCount.toString(),
-                            modifier = Modifier.weight(1f),
-                            accent = MaterialTheme.colorScheme.error
-                        )
-                        ChronosMetricTile(
-                            label = "Done",
-                            value = doneCount.toString(),
-                            modifier = Modifier.weight(1f),
-                            accent = MaterialTheme.colorScheme.secondary
-                        )
-                    }
+                    TaskAttentionCard(
+                        title = "Notifications are off",
+                        message = "Urgent task alarms need notification access.",
+                        actionLabel = "Enable",
+                        onAction = requestNotificationPermission,
+                        onDismiss = viewModel::dismissNotificationPermissionAction
+                    )
                 }
+            }
+
+            if (showExactAlarmPermissionAction || (!exactAlarmPermissionGranted && urgentCount > 0)) {
                 item {
-                    FilledTonalButton(
-                        onClick = { sheetTarget = TaskSheetTarget.Add() },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Add task", fontWeight = FontWeight.SemiBold)
-                    }
+                    TaskAttentionCard(
+                        title = "Exact alarms are off",
+                        message = "Urgent tasks use a 10-minute fallback until exact alarms are enabled.",
+                        actionLabel = "Settings",
+                        onAction = viewModel::openExactAlarmSettings,
+                        onDismiss = viewModel::dismissExactAlarmPermissionAction
+                    )
                 }
+            }
 
-                if (showNotificationPermissionAction || (!notificationPermissionGranted && urgentCount > 0)) {
-                    item {
-                        TaskAttentionCard(
-                            title = "Notifications are off",
-                            message = "Urgent task alarms need notification access.",
-                            actionLabel = "Enable",
-                            onAction = requestNotificationPermission,
-                            onDismiss = viewModel::dismissNotificationPermissionAction
-                        )
-                    }
-                }
-
-                if (showExactAlarmPermissionAction || (!exactAlarmPermissionGranted && urgentCount > 0)) {
-                    item {
-                        TaskAttentionCard(
-                            title = "Exact alarms are off",
-                            message = "Urgent tasks use a 10-minute fallback until exact alarms are enabled.",
-                            actionLabel = "Settings",
-                            onAction = viewModel::openExactAlarmSettings,
-                            onDismiss = viewModel::dismissExactAlarmPermissionAction
-                        )
-                    }
-                }
-
-                scheduleStatus?.let { statusMessage ->
-                    item {
-                        TaskAttentionCard(
-                            title = "Scheduling update",
-                            message = statusMessage,
-                            actionLabel = "OK",
-                            onAction = viewModel::clearScheduleStatus
-                        )
-                    }
-                }
-
+            scheduleStatus?.let { statusMessage ->
                 item {
-                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                text = "Assistant triage",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = assistantSummary.headline,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Text(
-                                text = assistantSummary.nextStep,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                    TaskAttentionCard(
+                        title = "Scheduling update",
+                        message = statusMessage,
+                        actionLabel = "OK",
+                        onAction = viewModel::clearScheduleStatus
+                    )
+                }
+            }
+
+            item {
+                ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Assistant triage",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = assistantSummary.headline,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            text = assistantSummary.nextStep,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            item {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                        TaskFilter.entries.forEach { option ->
+                            FilterChip(
+                                selected = filter == option,
+                                onClick = { filter = option },
+                                label = { Text(option.label) }
                             )
                         }
                     }
+                    if (onOpenDayDial != null) {
+                        OutlinedButton(onClick = onOpenDayDial) {
+                            Icon(Icons.Default.Today, contentDescription = null)
+                            Text("DayDial")
+                        }
+                    }
                 }
+            }
 
+            if (visibleTasks.isEmpty()) {
                 item {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-                            TaskFilter.entries.forEach { option ->
-                                FilterChip(
-                                    selected = filter == option,
-                                    onClick = { filter = option },
-                                    label = { Text(option.label) }
-                                )
-                            }
-                        }
-                        if (onOpenDayDial != null) {
-                            OutlinedButton(onClick = onOpenDayDial) {
-                                Icon(Icons.Default.Today, contentDescription = null)
-                                Text("DayDial")
-                            }
-                        }
-                    }
+                    EmptyTasks(filter = filter, onAdd = { sheetTarget = TaskSheetTarget.Add() })
                 }
-
-                if (visibleTasks.isEmpty()) {
-                    item {
-                        EmptyTasks(filter = filter, onAdd = { sheetTarget = TaskSheetTarget.Add() })
-                    }
-                } else {
-                    items(visibleTasks, key = { it.id }) { task ->
-                        TaskItem(
-                            modifier = Modifier.animateItem(),
-                            task = task,
-                            schedule = taskSchedulesByTaskId[task.id],
-                            alarmState = alarmStates[task.id],
-                            onToggle = { viewModel.toggleTask(task.id) },
-                            onEdit = { sheetTarget = TaskSheetTarget.Edit(task, taskSchedulesByTaskId[task.id]) },
-                            onDelete = { viewModel.deleteTask(task) },
-                            onSchedule = { viewModel.scheduleTaskToday(task.id) },
-                            onDuplicate = { viewModel.duplicateTask(task) },
-                            onOpenContext = { openTaskContext(task) }
-                        )
-                    }
+            } else {
+                items(visibleTasks, key = { it.id }) { task ->
+                    TaskItem(
+                        modifier = Modifier.animateItem(),
+                        task = task,
+                        schedule = taskSchedulesByTaskId[task.id],
+                        alarmState = alarmStates[task.id],
+                        onToggle = { viewModel.toggleTask(task.id) },
+                        onEdit = { sheetTarget = TaskSheetTarget.Edit(task, taskSchedulesByTaskId[task.id]) },
+                        onDelete = { viewModel.deleteTask(task) },
+                        onSchedule = { viewModel.scheduleTaskToday(task.id) },
+                        onDuplicate = { viewModel.duplicateTask(task) },
+                        onOpenContext = { openTaskContext(task) }
+                    )
                 }
             }
         }
@@ -433,7 +435,10 @@ fun TaskScreen(
         onOpenExactAlarmSettings = viewModel::openExactAlarmSettings,
         assistState = assistState,
         onRequestAssist = viewModel::requestTaskAssist,
-        onClearAssist = viewModel::clearTaskAssist
+        onClearAssist = viewModel::clearTaskAssist,
+        rewriteState = rewriteState,
+        onRequestRewrite = viewModel::rewriteTaskDescription,
+        onClearRewrite = viewModel::clearTaskRewrite
     )
 
     commandSheetTask?.let { task ->

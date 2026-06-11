@@ -4,11 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,15 +28,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.chronosflow.core.domain.planner.DialRing
 import com.chronosflow.core.ui.components.ChronosListCard
+import com.chronosflow.core.ui.components.formatDurationLabel
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.core.ui.theme.categoryColor
 import com.chronosflow.feature.daydial.DailyReview
+import com.chronosflow.feature.daydial.TimeRangeUi
 import com.chronosflow.feature.daydial.model.TimeBlockUiModel
 import java.util.Locale
 
 private const val DAY_IN_MINUTES = 1440
 private const val RING_GUIDE_DESCRIPTION =
-    "Outer is fixed time, middle is your plan, inner is action-oriented routines. Tap any lane to add in context."
+    "Outer is fixed time, middle is your plan, inner is action-oriented routines. Tap any lane to add in context. The shaded indigo band marks your sleep window."
 
 internal data class DailyDialCenterState(
     val title: String,
@@ -46,7 +47,9 @@ internal data class DailyDialCenterState(
     val supporting: String,
     val actionHint: String,
     val categoryLabel: String,
-    val accentColor: Color
+    val accentColor: Color,
+    /** At-a-glance day progress, e.g. "3 of 7 done · 2h 10m free"; null when a block is selected. */
+    val progressLine: String? = null
 )
 
 internal data class DailyDialLegendItem(
@@ -57,20 +60,27 @@ internal data class DailyDialLegendItem(
     val accentColor: Color
 )
 
-internal data class DailyDialRingLegendState(
-    val title: String,
-    val description: String?,
-    val actionLabel: String,
-    val isExpanded: Boolean
-)
-
 internal fun buildDailyDialCenterState(
     currentMinute: Int,
     selectedBlock: TimeBlockUiModel?,
     activeBlock: TimeBlockUiModel?,
     nextBlock: TimeBlockUiModel?,
-    isViewingToday: Boolean = true
+    isViewingToday: Boolean = true,
+    review: DailyReview? = null,
+    totalBlocks: Int = 0,
+    freeTime: List<TimeRangeUi> = emptyList()
 ): DailyDialCenterState {
+    val progressLine = if (selectedBlock == null && isViewingToday && review != null && totalBlocks > 0) {
+        val freeRemaining = remainingFreeMinutes(freeTime, currentMinute)
+        buildString {
+            append("${review.completedBlocks} of $totalBlocks done")
+            if (freeRemaining > 0) {
+                append(" · ${formatReviewMinutes(freeRemaining)} free")
+            }
+        }
+    } else {
+        null
+    }
     val focusedBlock = selectedBlock ?: activeBlock
     if (focusedBlock != null) {
         val startMinute = focusedBlock.startMinuteOfDay
@@ -80,10 +90,10 @@ internal fun buildDailyDialCenterState(
         val categoryLabel = categoryDisplayLabel(focusedBlock.category)
         val status = when {
             selectedBlock != null && !isActive && isUpcomingBlock(focusedBlock, currentMinute) ->
-                "Starts in $minutesUntilStart min"
+                "Starts in ${formatReviewMinutes(minutesUntilStart)}"
             selectedBlock != null && !isActive ->
-                "Ended ${minutesSince(endMinute, currentMinute)} min ago"
-            isActive -> "Ends in ${minutesUntil(currentMinute, endMinute)} min"
+                "Ended ${formatReviewMinutes(minutesSince(endMinute, currentMinute))} ago"
+            isActive -> "Ends in ${formatReviewMinutes(minutesUntil(currentMinute, endMinute))}"
             else -> "Scheduled today"
         }
         val supporting = when {
@@ -104,7 +114,8 @@ internal fun buildDailyDialCenterState(
                 "Tap block for details"
             },
             categoryLabel = categoryLabel,
-            accentColor = categoryColor(focusedBlock.category)
+            accentColor = categoryColor(focusedBlock.category),
+            progressLine = progressLine
         )
     }
 
@@ -113,7 +124,7 @@ internal fun buildDailyDialCenterState(
     return DailyDialCenterState(
         title = "Open time",
         timeWindow = formatDialClockMinute(currentMinute),
-        status = if (nextStart != null) "Free for $freeMinutes min" else "Day is open",
+        status = if (nextStart != null) "Free for ${formatReviewMinutes(freeMinutes)}" else "Day is open",
         supporting = if (nextBlock != null) {
             "Next: ${nextBlock.title} at ${formatDialClockMinute(nextBlock.startMinuteOfDay)}"
         } else {
@@ -125,9 +136,15 @@ internal fun buildDailyDialCenterState(
             "Tap a ring to schedule this day"
         },
         categoryLabel = "Open window",
-        accentColor = Color(0xFF4DB6AC)
+        accentColor = Color(0xFF4DB6AC),
+        progressLine = progressLine
     )
 }
+
+internal fun remainingFreeMinutes(freeTime: List<TimeRangeUi>, currentMinute: Int): Int =
+    freeTime.sumOf { segment ->
+        (segment.endMinute - maxOf(segment.startMinute, currentMinute)).coerceAtLeast(0)
+    }
 
 internal fun dailyDialLegendItems(): List<DailyDialLegendItem> {
     return listOf(
@@ -152,15 +169,6 @@ internal fun dailyDialLegendItems(): List<DailyDialLegendItem> {
             quickCreateLabel = "Routine checkpoint",
             accentColor = Color(0xFFFF9800)
         )
-    )
-}
-
-internal fun buildDailyDialRingLegendState(isExpanded: Boolean): DailyDialRingLegendState {
-    return DailyDialRingLegendState(
-        title = "Ring guide",
-        description = RING_GUIDE_DESCRIPTION.takeIf { isExpanded },
-        actionLabel = if (isExpanded) "Minimize" else "Show",
-        isExpanded = isExpanded
     )
 }
 
@@ -230,8 +238,9 @@ internal fun DailyDialCenterOverlay(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            // Day progress reads better at a glance than the static tap hint.
             Text(
-                text = state.actionHint,
+                text = state.progressLine ?: state.actionHint,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -243,146 +252,58 @@ internal fun DailyDialCenterOverlay(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * One-line legend naming the three dial rings. Replaces the expandable
+ * "Ring guide" card; ring meaning is also described for accessibility.
+ */
 @Composable
-internal fun DailyDialRingLegend(
-    review: DailyReview,
-    isExpanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val items = dailyDialLegendItems()
-    val state = buildDailyDialRingLegendState(isExpanded = isExpanded)
-    ChronosListCard(modifier = modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
+internal fun DailyDialInlineLegend(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = RING_GUIDE_DESCRIPTION },
+        horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Standard, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        dailyDialLegendItems().forEach { item ->
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = state.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(item.accentColor, CircleShape)
                 )
-                TextButton(
-                    onClick = { onExpandedChange(!state.isExpanded) },
-                    modifier = Modifier.semantics {
-                        contentDescription = dailyDialRingLegendToggleActionLabel(state.isExpanded)
-                    }
-                ) {
-                    Text(state.actionLabel)
-                }
-            }
-            state.description?.let { description ->
                 Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
+                    text = item.title,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-            if (state.isExpanded) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
-                    verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
-                ) {
-                    items.forEach { item ->
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .background(item.accentColor, CircleShape)
-                                            .padding(5.dp)
-                                    )
-                                    Text(
-                                        text = item.title,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                                Text(
-                                    text = item.description,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = "Long-press: ${item.quickCreateLabel}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = item.accentColor,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
-                ) {
-                    DailyDialReviewBadge(
-                        label = "Planned",
-                        value = formatReviewMinutes(review.plannedMinutes),
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f)
-                    )
-                    DailyDialReviewBadge(
-                        label = "Actual",
-                        value = formatReviewMinutes(review.actualMinutes),
-                        color = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.weight(1f)
-                    )
-                    DailyDialReviewBadge(
-                        label = "Missed",
-                        value = formatReviewMinutes(review.missedMinutes),
-                        color = if (review.missedMinutes > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
             }
         }
     }
 }
 
+/** One-time dismissible explanation of the rings, shown until acknowledged. */
 @Composable
-private fun DailyDialReviewBadge(
-    label: String,
-    value: String,
-    color: Color,
+internal fun DailyDialLegendTip(
+    onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
-        color = color.copy(alpha = 0.12f)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
+    ChronosListCard(modifier = modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
             Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
+                text = RING_GUIDE_DESCRIPTION,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.labelLarge,
-                color = color,
-                fontWeight = FontWeight.SemiBold
-            )
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.semantics { contentDescription = "Dismiss ring guide tip" }
+            ) {
+                Text("Got it")
+            }
         }
     }
 }
@@ -404,9 +325,6 @@ internal fun remainingMinutesInBlock(block: TimeBlockUiModel, currentMinute: Int
     val endMinute = block.startMinuteOfDay + block.durationMinutes
     return ((endMinute - currentMinute + DAY_IN_MINUTES) % DAY_IN_MINUTES)
 }
-
-internal fun dailyDialRingLegendToggleActionLabel(isExpanded: Boolean): String =
-    if (isExpanded) "Minimize ring guide details" else "Show ring guide details"
 
 private fun minutesSince(targetMinute: Int, currentMinute: Int): Int {
     return ((currentMinute - targetMinute + DAY_IN_MINUTES) % DAY_IN_MINUTES)
@@ -437,9 +355,5 @@ private fun formatDialClockMinute(minute: Int): String {
     return String.format(Locale.getDefault(), "%d:%02d %s", displayHour, minutes, suffix)
 }
 
-private fun formatReviewMinutes(minutes: Int): String {
-    if (minutes <= 0) return "0m"
-    val hours = minutes / 60
-    val remainingMinutes = minutes % 60
-    return if (hours > 0) "${hours}h ${remainingMinutes}m" else "${remainingMinutes}m"
-}
+private fun formatReviewMinutes(minutes: Int): String =
+    formatDurationLabel(minutes.coerceAtLeast(0))

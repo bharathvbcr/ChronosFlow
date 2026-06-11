@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import com.chronosflow.core.ai.PrivacyMode
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosSettingsRow
+import com.chronosflow.core.ui.components.formatDurationLabel
 import com.chronosflow.feature.daydial.DailyReview
 
 @Composable
@@ -191,9 +192,5 @@ internal fun reviewMetricActionLabel(label: String): String = when (label) {
     else -> "Open $label details"
 }
 
-private fun formatReviewMinutes(minutes: Int): String {
-    if (minutes <= 0) return "0m"
-    val h = minutes / 60
-    val m = minutes % 60
-    return if (h > 0) "${h}h ${m}m" else "${m}m"
-}
+private fun formatReviewMinutes(minutes: Int): String =
+    formatDurationLabel(minutes.coerceAtLeast(0))

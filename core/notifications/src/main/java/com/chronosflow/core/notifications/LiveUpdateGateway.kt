@@ -74,7 +74,8 @@ class LiveUpdateGateway @Inject constructor(
     ): Notification {
         val (max, progress) = focusNotificationProgress(totalSeconds, timeLeftSeconds)
         val builder = Notification.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_focus_session)
+            .setSmallIcon(R.drawable.ic_chronosflow_notification)
+            .setColor(ContextCompat.getColor(context, R.color.chronosflow_brand_accent))
             .setContentTitle(decision.redactedTitle)
             .setContentText(decision.redactedText)
             .setContentIntent(contentIntent)
@@ -85,6 +86,11 @@ class LiveUpdateGateway @Inject constructor(
 
         if (decision.canUsePromotedOngoing && Build.VERSION.SDK_INT >= 37) {
             builder.setRequestPromotedOngoing(true)
+        }
+
+        if (Build.VERSION.SDK_INT >= 36) {
+            // Surfaces remaining time in the status-bar chip for promoted live updates.
+            builder.setShortCriticalText(liveUpdateShortCriticalText(timeLeftSeconds))
         }
 
         when (decision.style) {
@@ -235,6 +241,11 @@ internal fun resolveLiveUpdateDecision(
         redactedTitle = displayTitle,
         redactedText = displayText
     )
+}
+
+internal fun liveUpdateShortCriticalText(timeLeftSeconds: Int): String {
+    val minutes = (timeLeftSeconds.coerceAtLeast(0) + 59) / 60
+    return if (minutes < 1) "<1m" else "${minutes}m"
 }
 
 internal fun canRenderLiveUpdatesForSdk(sdkInt: Int): Boolean = sdkInt >= 36

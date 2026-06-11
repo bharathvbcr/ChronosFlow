@@ -3,6 +3,7 @@ package com.chronosflow.feature.daydial
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.chronosflow.feature.daydial.model.DayDialTab
@@ -74,28 +75,34 @@ class DayDialScreenChromePaddingTest {
     fun `active sidebar pages suppress shell bottom chrome`() {
         assertFalse(
             shouldSuppressDayDialShellChrome(
-                drawerOpen = false,
                 activeSidebarPage = null
             )
         )
         assertTrue(
             shouldSuppressDayDialShellChrome(
-                drawerOpen = true,
-                activeSidebarPage = null
-            )
-        )
-        assertTrue(
-            shouldSuppressDayDialShellChrome(
-                drawerOpen = false,
                 activeSidebarPage = SidebarPage.DATA_EXPORT
             )
         )
         assertTrue(
             shouldSuppressDayDialShellChrome(
-                drawerOpen = false,
                 activeSidebarPage = SidebarPage.APPEARANCE
             )
         )
+    }
+
+    @Test
+    fun `sidebar menu hovers above shell bottom bar`() {
+        assertEquals(108.dp, sidebarMenuBottomPadding(shellBottomInset = 108.dp))
+    }
+
+    @Test
+    fun `sidebar menu keeps standard clearance without shell bottom bar`() {
+        assertEquals(16.dp, sidebarMenuBottomPadding(shellBottomInset = 0.dp))
+    }
+
+    @Test
+    fun `sidebar menu height stays a compact fraction of the screen`() {
+        assertEquals(720.dp, sidebarMenuMaxHeight(availableHeight = 1000.dp))
     }
 
     @Test
@@ -174,9 +181,24 @@ class DayDialScreenChromePaddingTest {
     }
 
     @Test
-    fun `drawer selections keep every sidebar page in day shell`() {
-        SidebarPage.entries.forEach { page ->
-            assertEquals(page, sidebarPageForDrawerSelection(page))
+    fun `full feature sidebar pages open their screens instead of in-dial pages`() {
+        listOf(
+            SidebarPage.TASKS,
+            SidebarPage.FOCUS_TIMER,
+            SidebarPage.HABITS,
+            SidebarPage.MEDICATION
+        ).forEach { page ->
+            assertTrue(sidebarPageOpensFullScreen(page))
+            assertNull(sidebarPageForDrawerSelection(page))
         }
+    }
+
+    @Test
+    fun `remaining sidebar pages stay in the day shell`() {
+        SidebarPage.entries
+            .filterNot { sidebarPageOpensFullScreen(it) }
+            .forEach { page ->
+                assertEquals(page, sidebarPageForDrawerSelection(page))
+            }
     }
 }

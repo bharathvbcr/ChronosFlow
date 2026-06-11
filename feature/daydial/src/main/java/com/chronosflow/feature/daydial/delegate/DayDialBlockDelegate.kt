@@ -332,40 +332,6 @@ class DayDialBlockDelegate @Inject constructor(
         }
     }
 
-    fun fillEmptyTime(
-        scope: CoroutineScope,
-        date: LocalDate,
-        onResult: (PlannerOperationResult, Boolean) -> Unit
-    ) {
-        scope.launch {
-            val blocks = repository.getTimeBlocksByDate(date).first()
-            val gap = freeTimeCalculator.calculate(blocks).firstOrNull { candidate ->
-                val plannedDuration = (candidate.endMinute - candidate.startMinute).coerceAtLeast(1).coerceAtMost(30)
-                sleepWindowResult("", candidate.startMinute, plannedDuration) == null
-            }
-            if (gap != null) {
-                val duration = (gap.endMinute - gap.startMinute).coerceAtLeast(1)
-                val planned = duration.coerceAtMost(30)
-                val command = CreateTimeBlockCommand(
-                    id = UUID.randomUUID().toString(),
-                    block = buildUserTimeBlock(
-                        date = date,
-                        title = "Recovered Focus",
-                        startMinute = gap.startMinute,
-                        durationMinutes = planned,
-                        category = "RECOVERY"
-                    )
-                )
-                executeCommand(command, onResult)
-            } else {
-                onResult(
-                    PlannerOperationResult.Rejected("No daytime gap is available outside your sleep schedule", ""),
-                    false
-                )
-            }
-        }
-    }
-
     fun updateBlockTitle(scope: CoroutineScope, blockId: String, title: String) {
         scope.launch {
             val source = repository.getTimeBlockById(blockId) ?: return@launch
@@ -513,6 +479,11 @@ class DayDialBlockDelegate @Inject constructor(
 
     private suspend fun syncLinkedCalendarExport(blockId: String) {
         val updatedBlock = repository.getTimeBlockById(blockId) ?: return
+        // Imported blocks link to the user's original device event, not to an
+        // export we own — never write back to it.
+        if (updatedBlock.provenance == BlockProvenance.CALENDAR_IMPORTED) {
+            return
+        }
         if (updatedBlock.calendarEventId != null) {
             calendarEventRepository.updateExportedTimeBlock(updatedBlock)
         }

@@ -1,22 +1,10 @@
 package com.chronosflow.feature.daydial.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.unit.dp
-import com.chronosflow.core.ui.components.ChronosSectionTitle
-import com.chronosflow.core.ui.theme.ChronosSpacing
+import com.chronosflow.core.ui.components.ChronosPageHeader
 import com.chronosflow.feature.daydial.model.DayDialTab
 import com.chronosflow.feature.daydial.model.SidebarPage
 
@@ -28,31 +16,13 @@ internal fun DayDialPageHeader(
     modifier: Modifier = Modifier,
     trailing: @Composable RowScope.() -> Unit = {}
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Standard)
-    ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(40.dp)
-                    .padding(10.dp)
-            )
-        }
-        ChronosSectionTitle(
-            title = title,
-            subtitle = subtitle,
-            modifier = Modifier.weight(1f)
-        )
-        trailing()
-    }
+    ChronosPageHeader(
+        title = title,
+        subtitle = subtitle,
+        icon = icon,
+        modifier = modifier,
+        trailing = trailing
+    )
 }
 
 internal fun dayDialPrimaryPageSubtitle(tab: DayDialTab): String =

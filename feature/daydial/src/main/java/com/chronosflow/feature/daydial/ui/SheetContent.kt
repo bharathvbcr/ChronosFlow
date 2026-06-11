@@ -1,6 +1,5 @@
 package com.chronosflow.feature.daydial
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,21 +7,34 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,8 +46,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -44,8 +58,13 @@ import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.GenAiAssistCopy
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
 import com.chronosflow.core.ai.genai.NanoModelStatus
+import com.chronosflow.core.domain.diagnostics.AppEventCategory
+import com.chronosflow.core.domain.diagnostics.AppEventLogEntry
+import com.chronosflow.core.ui.components.ChronosCollapsibleSection
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosWarningBanner
+import com.chronosflow.core.ui.components.GenAiAssistBanner
+import com.chronosflow.core.ui.components.formatDurationLabel
 import com.chronosflow.feature.daydial.model.AppearanceMode
 import com.chronosflow.feature.daydial.model.ReviewDetailSection
 import com.chronosflow.feature.daydial.model.SheetTarget
@@ -55,22 +74,19 @@ import com.chronosflow.feature.daydial.ui.AiReviewSheet
 import com.chronosflow.feature.daydial.ui.CheckboxSetting
 import com.chronosflow.feature.daydial.ui.DailyReviewHeader
 import com.chronosflow.feature.daydial.ui.PrivacyModeSelector
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import com.chronosflow.core.ui.theme.ChronosSpacing
-import com.chronosflow.core.ui.theme.categoryColor
 import com.chronosflow.feature.daydial.CalendarConnectionState
 import com.chronosflow.feature.daydial.CalendarPermissionStatus
+import java.time.Instant
+import kotlin.math.roundToInt
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+/** Shared minimum height so every pinned editor action renders at the same size. */
+private val BlockEditorActionHeight = 44.dp
 
 @Composable
 internal fun SheetContent(
@@ -92,6 +108,8 @@ internal fun SheetContent(
     aiPlanGoalPrefill: String? = null,
     aiPlanSuggestedGoals: List<String> = emptyList(),
     focusElapsedSeconds: Long,
+    focusRemainingSeconds: Long = 0L,
+    focusSessionActive: Boolean = false,
     syncStatus: String,
     blockStartReminders: Boolean,
     breakReminders: Boolean,
@@ -104,6 +122,8 @@ internal fun SheetContent(
     appearanceMode: AppearanceMode,
     reduceMotionEnabled: Boolean,
     highContrastEnabled: Boolean,
+    appEventLog: List<AppEventLogEntry> = emptyList(),
+    onClearLogs: () -> Unit = {},
     calendarPermissionStatus: CalendarPermissionStatus,
     showCalendarPermissionRationale: Boolean,
     calendarConnectionState: CalendarConnectionState,
@@ -136,10 +156,11 @@ internal fun SheetContent(
     onEndDay: () -> Unit,
     showMessage: (String) -> Unit
 ) {
-    Column(modifier = Modifier.padding(16.dp).navigationBarsPadding()) {
-        when (target) {
-            is SheetTarget.BlockEditor -> {
-                selectedBlock?.let { block ->
+    // Block editor renders its own scaffold: scrollable fields with the action
+    // rows pinned below, so buttons stay reachable on short screens.
+    @Composable
+    fun BlockEditorBody(block: TimeBlockUiModel) {
+        Column(modifier = Modifier.padding(16.dp)) {
                     val allDayCalendarImport = block.isAllDayCalendarImport()
                     var title by rememberSaveable(block.id) { mutableStateOf(block.title) }
                     var start by rememberSaveable(block.id) { mutableStateOf(formatMinute(block.startMinuteOfDay)) }
@@ -175,6 +196,14 @@ internal fun SheetContent(
                             Text(sheetBlockDeleteActionLabel(block), fontWeight = FontWeight.SemiBold)
                         }
                     } else {
+                    var calendarExpanded by rememberSaveable(block.id, showCalendarPermissionRationale) {
+                        mutableStateOf(showCalendarPermissionRationale && !calendarPermissionStatus.allGranted)
+                    }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                    ) {
                     DayDialBlockEditorFields(
                         title = title,
                         onTitleChange = { title = it },
@@ -191,22 +220,12 @@ internal fun SheetContent(
                     CheckboxSetting("Protected focus", protectedBlock, onCheckedChange = { protectedBlock = it })
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    Text(
-                        text = "Calendar export",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = calendarConnectionStatusMessage(calendarPermissionStatus, calendarConnectionState),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (calendarConnectionState.isWorking) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    ChronosCollapsibleSection(
+                        title = "Calendar export",
+                        summary = calendarConnectionStatusMessage(calendarPermissionStatus, calendarConnectionState),
+                        expanded = calendarExpanded,
+                        onExpandedChange = { calendarExpanded = it }
+                    ) {
                     when {
                         calendarPermissionStatus.permanentlyDenied -> {
                             ChronosWarningBanner(
@@ -327,67 +346,92 @@ internal fun SheetContent(
                             Spacer(modifier = Modifier.height(12.dp))
                         }
                     }
+                    }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Premium Action Buttons Row (Start Focus, Complete, Missed)
+                    // Two calm rows of equal-size actions: short visible labels keep
+                    // the pills scannable; the verbose per-block strings stay on the
+                    // semantics so accessibility and tests keep their context.
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Button(
+                        FilledTonalButton(
                             onClick = { onStartFocus(block.id) },
                             modifier = Modifier
-                                .weight(1.2f)
+                                .weight(1f)
+                                .heightIn(min = BlockEditorActionHeight)
                                 .semantics { contentDescription = sheetBlockStartFocusActionLabel(block) }
                         ) {
-                            Text(sheetBlockStartFocusActionLabel(block), fontWeight = FontWeight.SemiBold)
+                            Text("Focus", maxLines = 1, fontWeight = FontWeight.SemiBold)
                         }
                         FilledTonalButton(
                             onClick = { onMarkComplete(block.id) },
                             modifier = Modifier
                                 .weight(1f)
+                                .heightIn(min = BlockEditorActionHeight)
                                 .semantics { contentDescription = sheetBlockCompleteActionLabel(block) }
                         ) {
-                            Text(sheetBlockCompleteActionLabel(block), fontWeight = FontWeight.SemiBold)
+                            Text("Complete", maxLines = 1, fontWeight = FontWeight.SemiBold)
                         }
                         if (block.id in manualMissedBlockIds) {
-                            OutlinedButton(
+                            FilledTonalButton(
                                 onClick = {
                                     onUndoMissed(block.id)
                                     showMessage("Missed mark cleared")
                                 },
                                 modifier = Modifier
                                     .weight(1f)
+                                    .heightIn(min = BlockEditorActionHeight)
                                     .semantics { contentDescription = sheetBlockUndoMissedActionLabel(block) }
                             ) {
-                                Text(sheetBlockUndoMissedActionLabel(block), fontWeight = FontWeight.SemiBold)
+                                Text("Undo", maxLines = 1, fontWeight = FontWeight.SemiBold)
                             }
                         } else {
-                            OutlinedButton(
+                            FilledTonalButton(
                                 onClick = { onMarkMissed(block.id) },
                                 modifier = Modifier
                                     .weight(1f)
+                                    .heightIn(min = BlockEditorActionHeight)
                                     .semantics { contentDescription = sheetBlockMissedActionLabel(block) },
-                                colors = ButtonDefaults.outlinedButtonColors(
+                                colors = ButtonDefaults.filledTonalButtonColors(
                                     contentColor = MaterialTheme.colorScheme.error
                                 )
                             ) {
-                                Text(sheetBlockMissedActionLabel(block), fontWeight = FontWeight.SemiBold)
+                                Text("Missed", maxLines = 1, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    // Save is the primary commit action so it fills the row; the
+                    // destructive/secondary Duplicate and Delete collapse to compact
+                    // icon buttons to cut clutter while keeping one consistent shape.
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
-                        modifier = Modifier.fillMaxWidth()
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().imePadding()
                     ) {
-                        OutlinedButton(
+                        FilledTonalIconButton(
                             onClick = { onDuplicateBlock(block.id) },
                             modifier = Modifier
-                                .weight(1f)
+                                .size(BlockEditorActionHeight)
                                 .semantics { contentDescription = sheetBlockDuplicateActionLabel(block) }
                         ) {
-                            Text(sheetBlockDuplicateActionLabel(block), fontWeight = FontWeight.SemiBold)
+                            Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                        }
+
+                        FilledTonalIconButton(
+                            onClick = onDeleteBlock,
+                            modifier = Modifier
+                                .size(BlockEditorActionHeight)
+                                .semantics { contentDescription = sheetBlockDeleteActionLabel(block) },
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Icon(Icons.Filled.Delete, contentDescription = null)
                         }
 
                         Button(
@@ -404,27 +448,190 @@ internal fun SheetContent(
                             },
                             modifier = Modifier
                                 .weight(1f)
+                                .heightIn(min = BlockEditorActionHeight)
                                 .semantics { contentDescription = sheetBlockSaveActionLabel(block) }
                         ) {
-                            Text(sheetBlockSaveActionLabel(block), fontWeight = FontWeight.SemiBold)
+                            Text("Save changes", maxLines = 1, fontWeight = FontWeight.SemiBold)
                         }
+                    }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .semantics { contentDescription = sheetCloseActionLabel(target, block) }
+                    ) { Text(sheetCloseActionLabel(target, block)) }
+        }
+    }
 
-                        Button(
-                            onClick = onDeleteBlock,
-                            modifier = Modifier
-                                .weight(1f)
-                                .semantics { contentDescription = sheetBlockDeleteActionLabel(block) },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error,
-                                contentColor = MaterialTheme.colorScheme.onError
-                            )
-                        ) {
-                            Text(sheetBlockDeleteActionLabel(block), fontWeight = FontWeight.SemiBold)
+    // One review surface for both the end-of-day recap and the per-section
+    // drilldowns: the same sheet body, with the requested section pre-expanded.
+    @Composable
+    fun ReviewSheetBody(initialSection: ReviewDetailSection?) {
+        val sorted = timeBlocks.sortedBy { it.startMinuteOfDay }
+        Text(
+            "Day Review",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.height(12.dp))
+        // Already inside the review sheet — hide the redundant "Review" action that
+        // would otherwise render here as a dead button.
+        DailyReviewHeader(review, showReviewAction = false)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            reviewSheetExecutionLine(review, timeBlocks.size),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+
+        var plannedExpanded by rememberSaveable(initialSection) {
+            mutableStateOf(initialSection == ReviewDetailSection.PLANNED)
+        }
+        ChronosCollapsibleSection(
+            title = "Planned",
+            summary = "Planned total: ${formatDurationLabel(review.plannedMinutes)}",
+            expanded = plannedExpanded,
+            onExpandedChange = { plannedExpanded = it }
+        ) {
+            if (sorted.isEmpty()) {
+                Text("No planned blocks yet.")
+            } else {
+                sorted.forEach { block ->
+                    ListItem(
+                        headlineContent = {
+                            Text(block.title, color = MaterialTheme.colorScheme.onSurface)
+                        },
+                        supportingContent = {
+                            Text("${formatMinute(block.startMinuteOfDay)} - ${formatDurationLabel(block.durationMinutes)} - ${inferCategory(block)}")
+                        },
+                        trailingContent = {
+                            TextButton(
+                                onClick = { onDuplicateBlock(block.id) },
+                                modifier = Modifier.semantics {
+                                    contentDescription = sheetReviewCopyActionLabel(block)
+                                }
+                            ) { Text("Copy") }
                         }
-                    }
-                    }
+                    )
                 }
             }
+        }
+        Spacer(Modifier.height(8.dp))
+
+        var actualExpanded by rememberSaveable(initialSection) {
+            mutableStateOf(initialSection == ReviewDetailSection.ACTUAL)
+        }
+        ChronosCollapsibleSection(
+            title = "Actual",
+            summary = "Actual total: ${formatDurationLabel(review.actualMinutes)}",
+            expanded = actualExpanded,
+            onExpandedChange = { actualExpanded = it }
+        ) {
+            if (review.actualMinutes <= 0) {
+                Text("No completed focus time yet.")
+            } else {
+                sorted.forEach { block ->
+                    ListItem(
+                        headlineContent = {
+                            Text(block.title, color = MaterialTheme.colorScheme.onSurface)
+                        },
+                        supportingContent = {
+                            Text("${formatMinute(block.startMinuteOfDay)} - ${formatDurationLabel(block.durationMinutes)}")
+                        },
+                        trailingContent = { Text("Logged") }
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+
+        var missedExpanded by rememberSaveable(initialSection) {
+            mutableStateOf(initialSection == ReviewDetailSection.MISSED)
+        }
+        ChronosCollapsibleSection(
+            title = "Missed",
+            summary = "Missed total: ${formatDurationLabel(review.missedMinutes)}",
+            expanded = missedExpanded,
+            onExpandedChange = { missedExpanded = it }
+        ) {
+            if (missedBlocks.isEmpty()) {
+                Text("No missed blocks.")
+            } else {
+                missedBlocks.forEach { block ->
+                    ListItem(
+                        headlineContent = {
+                            Text(block.title, color = MaterialTheme.colorScheme.onSurface)
+                        },
+                        supportingContent = {
+                            Text("${formatMinute(block.startMinuteOfDay)} - ${formatDurationLabel(block.durationMinutes)}")
+                        },
+                        trailingContent = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(
+                                    onClick = {
+                                        onUndoMissed(block.id)
+                                        showMessage("Missed mark cleared")
+                                    },
+                                    modifier = Modifier.semantics {
+                                        contentDescription = sheetMissedListUndoActionLabel(block)
+                                    }
+                                ) { Text("Undo") }
+                                TextButton(
+                                    onClick = {
+                                        onDuplicateBlock(block.id)
+                                        showMessage("Copied for recovery")
+                                    },
+                                    modifier = Modifier.semantics {
+                                        contentDescription = sheetReviewRecoverActionLabel(block)
+                                    }
+                                ) { Text("Recover") }
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+
+        var weeklyExpanded by rememberSaveable { mutableStateOf(false) }
+        ChronosCollapsibleSection(
+            title = "This week",
+            summary = "Week ending $selectedDate",
+            expanded = weeklyExpanded,
+            onExpandedChange = { weeklyExpanded = it }
+        ) {
+            Text(
+                buildWeeklySummary(
+                    selectedDate = selectedDate,
+                    blocks = timeBlocks,
+                    missedBlocks = missedBlocks,
+                    review = review
+                )
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onEndDay, modifier = Modifier.fillMaxWidth()) {
+            Text("Carry missed to tomorrow")
+        }
+    }
+
+    if (target is SheetTarget.BlockEditor) {
+        selectedBlock?.let { block -> BlockEditorBody(block) }
+        return
+    }
+
+    Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .verticalScroll(rememberScrollState())
+        ) {
+        when (target) {
+            is SheetTarget.BlockEditor -> Unit // rendered via BlockEditorBody above
             is SheetTarget.NewBlock -> {
                 val defaultStartMinute = DialUtils.snapToIncrement(
                     target.startMinute
@@ -450,7 +657,9 @@ internal fun SheetContent(
                 }
 
                 val startMin = parseMinute(start) ?: defaultStartMinute
-                val durMin = duration.toIntOrNull()?.coerceIn(5, 240) ?: 25
+                val durMin = duration.toIntOrNull()
+                    ?.coerceIn(BlockEditorMinDurationMinutes, BlockEditorMaxDurationMinutes)
+                    ?: 25
 
                 Text(
                     "New Block",
@@ -472,15 +681,24 @@ internal fun SheetContent(
                 )
                 Spacer(Modifier.height(16.dp))
 
+                // One equal-size Cancel/Create pair; the shared pinned Close is
+                // skipped for this target so the sheet has a single dismiss action.
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .imePadding(),
                     horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
                 ) {
                     OutlinedButton(
                         onClick = onDismiss,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = BlockEditorActionHeight)
+                            .semantics {
+                                contentDescription = sheetNewBlockCancelActionLabel(title, category)
+                            }
                     ) {
-                        Text(sheetNewBlockCancelActionLabel(title, category), fontWeight = FontWeight.SemiBold)
+                        Text("Cancel", maxLines = 1, fontWeight = FontWeight.SemiBold)
                     }
                     Button(
                         onClick = {
@@ -491,9 +709,14 @@ internal fun SheetContent(
                                 category.uppercase(Locale.getDefault())
                             )
                         },
-                        modifier = Modifier.weight(1.2f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = BlockEditorActionHeight)
+                            .semantics {
+                                contentDescription = sheetNewBlockSaveActionLabel(title, category)
+                            }
                     ) {
-                        Text(sheetNewBlockSaveActionLabel(title, category), fontWeight = FontWeight.SemiBold)
+                        Text("Create", maxLines = 1, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -517,7 +740,7 @@ internal fun SheetContent(
                 var goal by rememberSaveable { mutableStateOf("") }
                 var hours by rememberSaveable { mutableStateOf("8") }
                 var breakFreq by remember { mutableFloatStateOf(0.5f) }
-                var focusPref by remember { mutableFloatStateOf(0.7f) }
+                var focusPref by remember { mutableFloatStateOf(0.75f) }
 
                 LaunchedEffect(aiPlanGoalPrefill) {
                     val prefill = aiPlanGoalPrefill?.trim().orEmpty()
@@ -526,16 +749,31 @@ internal fun SheetContent(
                     }
                 }
 
-                Text(
-                    "AI Planning",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "AI Planning",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    TextButton(
+                        onClick = {
+                            goal = aiPlanGoalPrefill?.trim().orEmpty()
+                            hours = "8"
+                            breakFreq = 0.5f
+                            focusPref = 0.75f
+                        }
+                    ) { Text("Reset") }
+                }
                 Spacer(Modifier.height(8.dp))
-                ChronosWarningBanner(
+                GenAiAssistBanner(
                     title = GenAiAssistCopy.bannerTitle(privacyMode, genAiRuntimeStatus),
-                    message = GenAiAssistCopy.bannerMessage(privacyMode, genAiRuntimeStatus)
+                    message = GenAiAssistCopy.bannerMessage(privacyMode, genAiRuntimeStatus),
+                    ready = GenAiAssistCopy.isReady(privacyMode, genAiRuntimeStatus)
                 )
                 if (aiPlanSuggestedGoals.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
@@ -564,43 +802,91 @@ internal fun SheetContent(
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                OutlinedTextField(goal, { goal = it }, label = { Text("Goal for the day") }, placeholder = { Text("e.g. Finish project X, go for a run") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(hours, { hours = it }, label = { Text("Available Work Hours") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    goal,
+                    { goal = it },
+                    label = { Text("Goal for the day") },
+                    placeholder = { Text("e.g. Finish project X, go for a run") },
+                    trailingIcon = {
+                        if (goal.isNotEmpty()) {
+                            IconButton(onClick = { goal = "" }) {
+                                Icon(
+                                    Icons.Filled.Clear,
+                                    contentDescription = "Clear goal",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    hours,
+                    { input ->
+                        // Keep only digits, cap at a realistic 24h day so the planner gets a clean value.
+                        val digits = input.filter { it.isDigit() }.take(2)
+                        hours = when {
+                            digits.isEmpty() -> ""
+                            (digits.toIntOrNull() ?: 0) > 24 -> "24"
+                            else -> digits
+                        }
+                    },
+                    label = { Text("Available work hours") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Spacer(Modifier.height(16.dp))
-                Text("Break Frequency", style = MaterialTheme.typography.labelMedium)
-                Slider(value = breakFreq, onValueChange = { breakFreq = it })
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Rare", style = MaterialTheme.typography.labelSmall)
-                    Text("Often", style = MaterialTheme.typography.labelSmall)
-                }
+                PlanningPreferenceSlider(
+                    label = "Break frequency",
+                    value = breakFreq,
+                    onValueChange = { breakFreq = it },
+                    stops = listOf("Rare", "Occasional", "Balanced", "Frequent", "Often")
+                )
 
                 Spacer(Modifier.height(16.dp))
-                Text("Focus Preference", style = MaterialTheme.typography.labelMedium)
-                Slider(value = focusPref, onValueChange = { focusPref = it })
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Admin", style = MaterialTheme.typography.labelSmall)
-                    Text("Deep Work", style = MaterialTheme.typography.labelSmall)
-                }
+                PlanningPreferenceSlider(
+                    label = "Focus preference",
+                    value = focusPref,
+                    onValueChange = { focusPref = it },
+                    stops = listOf("Admin", "Light focus", "Balanced", "Deep focus", "Deep work")
+                )
 
                 Spacer(Modifier.height(12.dp))
                 PrivacyModeSelector(privacyMode, onSetPrivacyMode)
 
                 Spacer(Modifier.height(16.dp))
+                val canGenerate = !isGenerating &&
+                    (goal.isNotBlank() || aiPlanSuggestedGoals.isNotEmpty())
                 Button(
                     onClick = {
                         onGeneratePlan(
                             buildList {
                                 add("Goal:$goal")
                                 aiPlanSuggestedGoals.forEach { add(it) }
-                                add("Hours:$hours")
+                                add("Hours:${hours.ifBlank { "8" }}")
                                 add("BreakFreq:${(breakFreq * 100).toInt()}%")
                                 add("FocusPref:${(focusPref * 100).toInt()}%")
                             }
                         )
                     },
+                    enabled = canGenerate,
                     modifier = Modifier.fillMaxWidth()
-                ) { Text(if (isGenerating) "Generating Schedule..." else "Generate Plan") }
+                ) {
+                    if (isGenerating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = LocalContentColor.current
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Generating schedule…")
+                    } else {
+                        Text("Generate Plan")
+                    }
+                }
                 if (aiPlanResult != null || explainPlan != null || repairPlanResult != null) {
                     Spacer(Modifier.height(12.dp))
                     ChronosListCard {
@@ -624,6 +910,17 @@ internal fun SheetContent(
                                 Text("Conflict repair steps", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                                 Text(repair, style = MaterialTheme.typography.bodySmall)
                             }
+                            val resultClipboardText = listOfNotNull(
+                                aiPlanResult?.let { "Latest suggestion\n$it" },
+                                explainPlan?.let { "Plan explanation\n$it" },
+                                repairPlanResult?.let { "Conflict repair steps\n$it" }
+                            ).joinToString("\n\n")
+                            CopyToClipboardButton(
+                                label = "Copy plan",
+                                clipLabel = "ChronosFlow plan",
+                                text = resultClipboardText,
+                                showMessage = showMessage
+                            )
                         }
                     }
                 }
@@ -674,7 +971,7 @@ internal fun SheetContent(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             },
-                            supportingContent = { Text("${formatMinute(block.startMinuteOfDay)} - ${block.durationMinutes}m") },
+                            supportingContent = { Text("${formatMinute(block.startMinuteOfDay)} - ${formatDurationLabel(block.durationMinutes)}") },
                             trailingContent = {
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     TextButton(
@@ -701,110 +998,7 @@ internal fun SheetContent(
                     }
                 }
             }
-            is SheetTarget.ReviewDetails -> {
-                val sorted = timeBlocks.sortedBy { it.startMinuteOfDay }
-                val title = when (target.section) {
-                    ReviewDetailSection.PLANNED -> "Planned Breakdown"
-                    ReviewDetailSection.ACTUAL -> "Actual Log"
-                    ReviewDetailSection.MISSED -> "Missed Recovery"
-                }
-                Text(
-                    title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(Modifier.height(12.dp))
-                when (target.section) {
-                    ReviewDetailSection.PLANNED -> {
-                        Text("Planned total: ${formatMinutesToLabel(review.plannedMinutes)}")
-                        Spacer(Modifier.height(8.dp))
-                        if (sorted.isEmpty()) {
-                            Text("No planned blocks yet.")
-                        } else {
-                            sorted.forEach { block ->
-                                ListItem(
-                                    headlineContent = {
-                                        Text(
-                                            block.title,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    },
-                                    supportingContent = { Text("${formatMinute(block.startMinuteOfDay)} - ${block.durationMinutes}m - ${inferCategory(block)}") },
-                                    trailingContent = {
-                                        TextButton(
-                                            onClick = { onDuplicateBlock(block.id) },
-                                            modifier = Modifier.semantics {
-                                                contentDescription = sheetReviewCopyActionLabel(block)
-                                            }
-                                        ) { Text("Copy") }
-                                    }
-                                )
-                            }
-                        }
-                    }
-                    ReviewDetailSection.ACTUAL -> {
-                        Text("Actual total: ${formatMinutesToLabel(review.actualMinutes)}")
-                        Spacer(Modifier.height(8.dp))
-                        if (review.actualMinutes <= 0) {
-                            Text("No completed focus time yet.")
-                        } else {
-                            sorted.forEach { block ->
-                                ListItem(
-                                    headlineContent = {
-                                        Text(
-                                            block.title,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    },
-                                    supportingContent = { Text("${formatMinute(block.startMinuteOfDay)} - ${block.durationMinutes}m") },
-                                    trailingContent = { Text("Logged") }
-                                )
-                            }
-                        }
-                    }
-                    ReviewDetailSection.MISSED -> {
-                        Text("Missed total: ${formatMinutesToLabel(review.missedMinutes)}")
-                        Spacer(Modifier.height(8.dp))
-                        if (missedBlocks.isEmpty()) {
-                            Text("No missed blocks.")
-                        } else {
-                            missedBlocks.forEach { block ->
-                                ListItem(
-                                    headlineContent = {
-                                        Text(
-                                            block.title,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    },
-                                    supportingContent = { Text("${formatMinute(block.startMinuteOfDay)} - ${block.durationMinutes}m") },
-                                    trailingContent = {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            TextButton(
-                                                onClick = {
-                                                    onUndoMissed(block.id)
-                                                    showMessage("Missed mark cleared")
-                                                },
-                                                modifier = Modifier.semantics {
-                                                    contentDescription = sheetMissedListUndoActionLabel(block)
-                                                }
-                                            ) { Text("Undo") }
-                                            TextButton(
-                                                onClick = {
-                                                    onDuplicateBlock(block.id)
-                                                    showMessage("Copied for recovery")
-                                                },
-                                                modifier = Modifier.semantics {
-                                                    contentDescription = sheetReviewRecoverActionLabel(block)
-                                                }
-                                            ) { Text("Recover") }
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            is SheetTarget.ReviewDetails -> ReviewSheetBody(initialSection = target.section)
             SheetTarget.ExportData -> {
                 DataExportPanel(
                     state = dataExportState,
@@ -845,94 +1039,160 @@ internal fun SheetContent(
                 Text(buildWeeklySummary(selectedDate = selectedDate, blocks = timeBlocks, missedBlocks = missedBlocks, review = review))
             }
             SheetTarget.Diagnostics -> {
+                val diagnosticsText = buildDiagnostics(
+                    selectedDate,
+                    timeBlocks,
+                    missedBlocks,
+                    privacyMode,
+                    syncStatus,
+                    blockStartReminders,
+                    breakReminders,
+                    missedAlerts,
+                    endDayReviewReminder,
+                    dynamicColorEnabled,
+                    glassSurfacesEnabled,
+                    appearanceMode,
+                    reduceMotionEnabled,
+                    highContrastEnabled
+                )
                 Text(
                     "Diagnostics",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(12.dp))
-                Text(
-                    buildDiagnostics(
-                        selectedDate,
-                        timeBlocks,
-                        missedBlocks,
-                        privacyMode,
-                        syncStatus,
-                        blockStartReminders,
-                        breakReminders,
-                        missedAlerts,
-                        endDayReviewReminder,
-                        dynamicColorEnabled,
-                        glassSurfacesEnabled,
-                        appearanceMode,
-                        reduceMotionEnabled,
-                        highContrastEnabled
-                    )
-                )
-            }
-            SheetTarget.EndOfDayReview -> {
-                Text(
-                    "Day Review",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Text(diagnosticsText)
                 Spacer(Modifier.height(12.dp))
-                DailyReviewHeader(review)
-                Text("Blocks: ${timeBlocks.size}")
-                Text("Missed: ${missedBlocks.size}")
-                Button(onClick = onEndDay, modifier = Modifier.fillMaxWidth()) { Text("Carry missed to tomorrow") }
+                CopyToClipboardButton(
+                    label = "Copy diagnostics",
+                    clipLabel = "ChronosFlow diagnostics",
+                    text = diagnosticsText,
+                    showMessage = showMessage
+                )
             }
+            SheetTarget.Logs -> LogsSheetBody(
+                entries = appEventLog,
+                onClearLogs = onClearLogs,
+                showMessage = showMessage
+            )
+            SheetTarget.EndOfDayReview -> ReviewSheetBody(initialSection = null)
             SheetTarget.FocusSettings -> {
                 Text(
                     "Focus Settings",
                     style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(12.dp))
-                Text("Actual focus time: ${formatSeconds(focusElapsedSeconds)}")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    AssistChip(
-                        onClick = { onAdjustFocus(5) },
-                        label = { Text("+5m") },
-                        modifier = Modifier.semantics { contentDescription = sheetFocusAdjustmentActionLabel(5) }
-                    )
-                    AssistChip(
-                        onClick = { onAdjustFocus(10) },
-                        label = { Text("+10m") },
-                        modifier = Modifier.semantics { contentDescription = sheetFocusAdjustmentActionLabel(10) }
-                    )
-                    AssistChip(
-                        onClick = { onAdjustFocus(15) },
-                        label = { Text("+15m") },
-                        modifier = Modifier.semantics { contentDescription = sheetFocusAdjustmentActionLabel(15) }
-                    )
-                    AssistChip(
-                        onClick = { onAdjustFocus(-5) },
-                        label = { Text("-5m") },
-                        modifier = Modifier.semantics { contentDescription = sheetFocusAdjustmentActionLabel(-5) }
-                    )
-                    AssistChip(
-                        onClick = { onAdjustFocus(-10) },
-                        label = { Text("-10m") },
-                        modifier = Modifier.semantics { contentDescription = sheetFocusAdjustmentActionLabel(-10) }
+                ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // The +/- buttons extend or shorten the running session's
+                        // planned length, so the headline tracks the remaining time
+                        // they actually move — not the fixed elapsed total.
+                        Text(
+                            if (focusSessionActive) "Time remaining" else "Actual focus time",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            formatSeconds(if (focusSessionActive) focusRemainingSeconds else focusElapsedSeconds),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (focusSessionActive) {
+                            Text(
+                                "Elapsed ${formatSeconds(focusElapsedSeconds)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Text(
+                                "Start a focus session to extend or shorten its length.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf(5, 10, 15).forEach { minutes ->
+                                FilledTonalButton(
+                                    onClick = { onAdjustFocus(minutes) },
+                                    enabled = focusSessionActive,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .semantics { contentDescription = sheetFocusAdjustmentActionLabel(minutes) }
+                                ) { Text("+${minutes}m") }
+                            }
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf(-5, -10).forEach { minutes ->
+                                OutlinedButton(
+                                    onClick = { onAdjustFocus(minutes) },
+                                    enabled = focusSessionActive,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .semantics { contentDescription = sheetFocusAdjustmentActionLabel(minutes) }
+                                ) { Text("${minutes}m") }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                var privacyExpanded by rememberSaveable { mutableStateOf(false) }
+                ChronosCollapsibleSection(
+                    title = "Privacy",
+                    summary = GenAiAssistCopy.privacyModeLabel(privacyMode),
+                    expanded = privacyExpanded,
+                    onExpandedChange = { privacyExpanded = it }
+                ) {
+                    PrivacyModeSelector(privacyMode, onSetPrivacyMode)
+                }
+                Spacer(Modifier.height(12.dp))
+                var remindersExpanded by rememberSaveable { mutableStateOf(false) }
+                ChronosCollapsibleSection(
+                    title = "Reminders",
+                    summary = focusSettingsReminderSummary(
+                        blockStartReminders,
+                        breakReminders,
+                        missedAlerts,
+                        endDayReviewReminder
+                    ),
+                    expanded = remindersExpanded,
+                    onExpandedChange = { remindersExpanded = it }
+                ) {
+                    Text("Block starts: ${if (blockStartReminders) "on" else "off"}", style = MaterialTheme.typography.bodySmall)
+                    Text("Breaks: ${if (breakReminders) "on" else "off"}", style = MaterialTheme.typography.bodySmall)
+                    Text("Missed alerts: ${if (missedAlerts) "on" else "off"}", style = MaterialTheme.typography.bodySmall)
+                    Text("End-of-day review: ${if (endDayReviewReminder) "on" else "off"}", style = MaterialTheme.typography.bodySmall)
+                    Text(reminderScheduleStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(medicationReliabilityStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "Edit these on the Notifications page in the sidebar.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                PrivacyModeSelector(privacyMode, onSetPrivacyMode)
-                Text(reminderScheduleStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(medicationReliabilityStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Block starts: ${if (blockStartReminders) "on" else "off"}")
-                Text("Breaks: ${if (breakReminders) "on" else "off"}")
-                Text("Missed alerts: ${if (missedAlerts) "on" else "off"}")
-                Text("End-of-day review: ${if (endDayReviewReminder) "on" else "off"}")
             }
         }
-        Spacer(modifier = Modifier.height(16.dp))
-        TextButton(
-            onClick = onDismiss,
-            modifier = Modifier
-                .align(androidx.compose.ui.Alignment.CenterHorizontally)
-                .semantics { contentDescription = sheetCloseActionLabel(target, selectedBlock) }
-        ) { Text(sheetCloseActionLabel(target, selectedBlock)) }
+        }
+        // The New Block body carries its own Cancel action; a pinned Close on top
+        // of it would duplicate the dismiss affordance.
+        if (target !is SheetTarget.NewBlock) {
+            Spacer(modifier = Modifier.height(16.dp))
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(androidx.compose.ui.Alignment.CenterHorizontally)
+                    .imePadding()
+                    .semantics { contentDescription = sheetCloseActionLabel(target, selectedBlock) }
+            ) { Text(sheetCloseActionLabel(target, selectedBlock)) }
+        }
     }
 }
 
@@ -994,6 +1254,25 @@ internal fun sheetReviewCopyActionLabel(block: TimeBlockUiModel): String =
 internal fun sheetReviewRecoverActionLabel(block: TimeBlockUiModel): String =
     "Recover ${sheetBlockActionTarget(block)} from missed recovery"
 
+internal fun reviewSheetExecutionLine(review: DailyReview, blockCount: Int): String {
+    val completion = if (review.plannedMinutes <= 0) {
+        0
+    } else {
+        ((review.actualMinutes * 100f) / review.plannedMinutes).toInt().coerceIn(0, 100)
+    }
+    return "Execution $completion% · ${review.completedBlocks} of $blockCount block${if (blockCount == 1) "" else "s"} done"
+}
+
+internal fun focusSettingsReminderSummary(
+    blockStartReminders: Boolean,
+    breakReminders: Boolean,
+    missedAlerts: Boolean,
+    endDayReviewReminder: Boolean
+): String {
+    val enabled = listOf(blockStartReminders, breakReminders, missedAlerts, endDayReviewReminder).count { it }
+    return "$enabled of 4 reminders on"
+}
+
 internal fun sheetFocusAdjustmentActionLabel(minutes: Int): String = when {
     minutes > 0 -> "Add $minutes minutes to focus time"
     minutes < 0 -> "Remove ${-minutes} minutes from focus time"
@@ -1012,6 +1291,7 @@ internal fun sheetCloseActionLabel(target: SheetTarget, selectedBlock: TimeBlock
     is SheetTarget.ImportBackup -> "Close import backup"
     is SheetTarget.WeeklySummary -> "Close weekly summary"
     is SheetTarget.Diagnostics -> "Close diagnostics"
+    is SheetTarget.Logs -> "Close logs"
     is SheetTarget.ReviewDetails -> "Close ${target.section.name.lowercase().replaceFirstChar { it.uppercase() }} review"
 }
 
@@ -1025,7 +1305,7 @@ internal fun sheetNewBlockCancelActionLabel(title: String, category: String): St
 }
 
 internal fun newBlockSheetInitialDurationText(target: SheetTarget.NewBlock): String =
-    (target.durationMinutes?.coerceIn(5, 240) ?: 25).toString()
+    (target.durationMinutes?.coerceIn(BlockEditorMinDurationMinutes, BlockEditorMaxDurationMinutes) ?: 25).toString()
 
 internal fun sheetNewBlockSaveActionLabel(title: String, category: String): String {
     val chip = category.trim()
@@ -1053,12 +1333,6 @@ private fun parseMinute(value: String): Int? {
     val minute = parts[1].toIntOrNull() ?: return null
     if (hour !in 0..23 || minute !in 0..59) return null
     return hour * 60 + minute
-}
-
-private fun formatMinutesToLabel(minutes: Int): String {
-    val h = minutes / 60
-    val m = minutes % 60
-    return if (h > 0) "${h}h ${m}m" else "${m}m"
 }
 
 @Composable
@@ -1105,6 +1379,7 @@ internal fun DataExportPanel(
         ) {
             Text(if (state.isExporting) "Preparing Export" else "Export ChronosFlow Data")
         }
+        AutoBackupCard()
     }
 }
 
@@ -1119,9 +1394,9 @@ private fun buildWeeklySummary(
 ): String = buildString {
     val focusBlocks = blocks.count { inferCategory(it).equals("Work", ignoreCase = true) }
     appendLine("Week ending $selectedDate")
-    appendLine("Planned: ${formatMinutesToLabel(review.plannedMinutes)}")
-    appendLine("Actual: ${formatMinutesToLabel(review.actualMinutes)}")
-    appendLine("Missed: ${formatMinutesToLabel(review.missedMinutes)}")
+    appendLine("Planned: ${formatDurationLabel(review.plannedMinutes)}")
+    appendLine("Actual: ${formatDurationLabel(review.actualMinutes)}")
+    appendLine("Missed: ${formatDurationLabel(review.missedMinutes)}")
     val completionRate = if (review.plannedMinutes == 0) 0 else ((review.actualMinutes.toFloat() / review.plannedMinutes.toFloat()) * 100).toInt()
     appendLine("Completion: $completionRate%")
     appendLine("Focus blocks: $focusBlocks")
@@ -1130,6 +1405,155 @@ private fun buildWeeklySummary(
         appendLine("Top recovery:")
         missedBlocks.take(3).forEach { appendLine("- ${it.title} at ${formatMinute(it.startMinuteOfDay)}") }
     }
+}
+
+private val LogTimeFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("HH:mm:ss", Locale.getDefault())
+
+@Composable
+private fun LogsSheetBody(
+    entries: List<AppEventLogEntry>,
+    onClearLogs: () -> Unit,
+    showMessage: (String) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            "Logs",
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            "Recent app events from this session (newest first). Not persisted across restarts.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        if (entries.isEmpty()) {
+            Text(
+                "No events recorded yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            return@Column
+        }
+        ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                entries.forEach { entry ->
+                    LogEventRow(entry)
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            CopyToClipboardButton(
+                label = "Copy",
+                clipLabel = "ChronosFlow logs",
+                text = formatLogEntriesForCopy(entries),
+                showMessage = showMessage,
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedButton(
+                onClick = {
+                    onClearLogs()
+                    showMessage("Logs cleared")
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Clear")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CopyToClipboardButton(
+    label: String,
+    clipLabel: String,
+    text: String,
+    showMessage: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    OutlinedButton(
+        onClick = {
+            copyToClipboard(context, clipLabel, text)
+            showMessage("Copied to clipboard")
+        },
+        modifier = modifier
+    ) {
+        Icon(
+            Icons.Filled.ContentCopy,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(label)
+    }
+}
+
+private fun copyToClipboard(context: Context, label: String, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+}
+
+private fun formatLogEntriesForCopy(entries: List<AppEventLogEntry>): String =
+    entries.joinToString("\n") { entry ->
+        val time = Instant.ofEpochMilli(entry.timestampMillis)
+            .atZone(ZoneId.systemDefault())
+            .toLocalTime()
+            .format(LogTimeFormatter)
+        "$time ${entry.category.name} ${entry.message}"
+    }
+
+@Composable
+private fun LogEventRow(entry: AppEventLogEntry) {
+    val time = remember(entry.timestampMillis) {
+        Instant.ofEpochMilli(entry.timestampMillis)
+            .atZone(ZoneId.systemDefault())
+            .toLocalTime()
+            .format(LogTimeFormatter)
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            time,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            entry.category.name,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = logCategoryColor(entry.category)
+        )
+        Text(
+            entry.message,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+@Composable
+private fun logCategoryColor(category: AppEventCategory) = when (category) {
+    AppEventCategory.ERROR -> MaterialTheme.colorScheme.error
+    AppEventCategory.SYNC -> MaterialTheme.colorScheme.tertiary
+    AppEventCategory.FOCUS -> MaterialTheme.colorScheme.primary
+    AppEventCategory.EXPORT -> MaterialTheme.colorScheme.secondary
+    AppEventCategory.SESSION -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 private fun buildDiagnostics(
@@ -1214,93 +1638,51 @@ private fun inferCategory(block: TimeBlockUiModel): String = when {
     else -> "Plan"
 }
 
+/**
+ * Discrete planning slider that snaps to [stops] and shows the selected stop as a label, so the
+ * AI plan request carries clean, human-readable preference values instead of arbitrary fractions.
+ */
 @Composable
-private fun BlockTimeRangeSummary(
-    start: String,
-    endTimeStr: String,
-    durMin: Int
+private fun PlanningPreferenceSlider(
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    stops: List<String>
 ) {
-    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "Time range",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "$start - $endTimeStr",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.primaryContainer
-            ) {
-                Text(
-                    text = "${durMin}m",
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryChipSelector(
-    selectedCategory: String,
-    onCategorySelected: (String) -> Unit
-) {
-    val categories = listOf("WORK", "BREAK", "MEETING", "ROUTINE", "MEDICATION")
+    val index = (value * (stops.size - 1)).roundToInt().coerceIn(0, stops.size - 1)
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        categories.forEach { cat ->
-            val color = categoryColor(cat)
-            val isSelected = selectedCategory.uppercase(Locale.getDefault()) == cat
-            val baseColor = if (isSelected) color.copy(alpha = 0.18f) else Color.Transparent
-            val borderCol = if (isSelected) color else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-            val textCol = if (isSelected) color else MaterialTheme.colorScheme.onSurfaceVariant
-            
-            Box(
-                modifier = Modifier
-                    .clip(MaterialTheme.shapes.small)
-                    .background(baseColor)
-                    .border(
-                        width = 1.dp,
-                        color = borderCol,
-                        shape = MaterialTheme.shapes.small
-                    )
-                    .clickable { onCategorySelected(cat) }
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .background(color, RoundedCornerShape(100))
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = cat.lowercase(Locale.getDefault()).replaceFirstChar { it.uppercase() },
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = textCol
-                    )
-                }
-            }
+        Text(label, style = MaterialTheme.typography.labelMedium)
+        Text(
+            stops[index],
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+    Slider(
+        value = value,
+        onValueChange = onValueChange,
+        valueRange = 0f..1f,
+        steps = (stops.size - 2).coerceAtLeast(0),
+        modifier = Modifier.semantics {
+            contentDescription = label
+            stateDescription = stops[index]
         }
+    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(
+            stops.first(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            stops.last(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

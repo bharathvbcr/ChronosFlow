@@ -25,6 +25,7 @@ class ReminderBootReceiver : BroadcastReceiver() {
     @Inject lateinit var alarmScheduler: AlarmScheduler
     @Inject lateinit var alarmRequestRepository: AlarmRequestRepository
     @Inject lateinit var focusSessionRepository: FocusSessionRepository
+    @Inject lateinit var currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
@@ -63,6 +64,11 @@ class ReminderBootReceiver : BroadcastReceiver() {
                 val results = restoreDatabaseBackedAlarms()
                 val legacyResults = alarmScheduler.restoreScheduledAlarmsAfterReboot(skipIds = results.keys)
                 ReminderReconcileScheduler.enqueue(context.applicationContext)
+                try {
+                    currentBlockNotificationCoordinator.refresh()
+                } catch (ex: Exception) {
+                    Log.w("ReminderBootReceiver", "Failed to refresh current-block notification", ex)
+                }
                 Log.i(
                     "ReminderBootReceiver",
                     "Reminder restore complete: ${results.size} DB result(s), ${legacyResults.size} legacy result(s)."

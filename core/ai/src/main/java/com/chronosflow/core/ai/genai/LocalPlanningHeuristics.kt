@@ -8,6 +8,7 @@ import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.EnergyIntensity
 import com.chronosflow.core.domain.model.ReviewInsightSeverity
 import com.chronosflow.core.domain.model.ReviewInsightType
+import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TimeBlock
 import java.time.LocalDate
 import java.time.LocalTime
@@ -20,13 +21,18 @@ internal object LocalPlanningHeuristics {
         packageName: String,
         userPreferences: String,
         date: LocalDate,
-        currentTimeZone: String
+        currentTimeZone: String,
+        pendingTasks: List<Task> = emptyList()
     ): StructuredDayPlanSuggestion {
         val todayLabel = date.format(DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault()))
         val normalizedPreferences = userPreferences.lowercase(Locale.getDefault())
         val wantsRecovery = listOf("recovery", "break", "low energy", "tired").any { it in normalizedPreferences }
         val wantsStudy = listOf("study", "read", "exam", "learn").any { it in normalizedPreferences }
         val wantsExercise = listOf("workout", "exercise", "walk", "run").any { it in normalizedPreferences }
+        val topTasks = pendingTasks
+            .filterNot(Task::isCompleted)
+            .sortedByDescending(Task::priority)
+            .take(2)
 
         val start = LocalTime.of(if (wantsRecovery) 9 else 8, 0)
         val blocks = buildList {
@@ -40,12 +46,16 @@ internal object LocalPlanningHeuristics {
                     timezone = currentTimeZone
                 )
             )
+            // The user's own work beats canned placeholders: the deep-work and
+            // admin slots take the top pending tasks when any exist.
             add(
                 suggestion(
-                    title = if (wantsStudy) "Deep study block" else "Deep work block",
+                    title = topTasks.getOrNull(0)?.title
+                        ?: if (wantsStudy) "Deep study block" else "Deep work block",
                     category = if (wantsStudy) "STUDY" else "WORK",
                     startMinuteOfDay = start.hour * 60 + if (wantsRecovery) 60 else 45,
-                    durationMinutes = if (wantsRecovery) 75 else 110,
+                    durationMinutes = topTasks.getOrNull(0)?.preferredDurationMinutes
+                        ?: if (wantsRecovery) 75 else 110,
                     flexibility = BlockFlexibility.RESIZABLE,
                     timezone = currentTimeZone
                 )
@@ -62,10 +72,12 @@ internal object LocalPlanningHeuristics {
             )
             add(
                 suggestion(
-                    title = if (wantsExercise) "Workout window" else "Admin and communication",
-                    category = if (wantsExercise) "WORKOUT" else "ADMIN",
+                    title = topTasks.getOrNull(1)?.title
+                        ?: if (wantsExercise) "Workout window" else "Admin and communication",
+                    category = if (wantsExercise && topTasks.getOrNull(1) == null) "WORKOUT" else "ADMIN",
                     startMinuteOfDay = 14 * 60,
-                    durationMinutes = if (wantsExercise) 60 else 45,
+                    durationMinutes = topTasks.getOrNull(1)?.preferredDurationMinutes
+                        ?: if (wantsExercise) 60 else 45,
                     flexibility = BlockFlexibility.MOVABLE,
                     timezone = currentTimeZone
                 )

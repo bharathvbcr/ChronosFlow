@@ -506,14 +506,15 @@ class AlarmScheduler @Inject constructor(
     }
 
     private fun setBootReceiverEnabled(isEnabled: Boolean) {
+        // Never disable once enabled: alarms persisted in the AlarmRequest database
+        // (not just the legacy SharedPreferences set) still need BOOT_COMPLETED,
+        // TIME_SET, TIMEZONE_CHANGED, and SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
+        // handling after the legacy reminder set drains.
+        if (!isEnabled) return
         try {
             context.packageManager.setComponentEnabledSetting(
                 bootReceiverComponent,
-                if (isEnabled) {
-                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-                } else {
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-                },
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                 PackageManager.DONT_KILL_APP
             )
         } catch (ex: Exception) {

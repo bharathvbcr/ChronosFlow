@@ -10,11 +10,14 @@ import android.util.Log
 import androidx.appfunctions.service.AppFunctionConfiguration
 import androidx.work.Configuration
 import com.chronosflow.appfunctions.ChronosAppFunctions
+import com.chronosflow.assist.ProactiveAssistForegroundRefresher
+import com.chronosflow.core.data.backup.ChronosAutoBackupManager
 import com.chronosflow.core.data.backup.ChronosPortableBackupInitializer
 import com.chronosflow.core.notifications.AlarmCapabilityRefresher
 import com.chronosflow.core.notifications.FocusNotificationManager
 import com.chronosflow.core.notifications.ReminderNotificationChannels
 import com.chronosflow.core.notifications.ReminderReconcileScheduler
+import com.chronosflow.widget.WidgetBackgroundSync
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 import javax.inject.Provider
@@ -27,6 +30,8 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
     @Inject lateinit var alarmCapabilityRefresher: AlarmCapabilityRefresher
     @Inject lateinit var chronosAppFunctions: Provider<ChronosAppFunctions>
     @Inject lateinit var portableBackupInitializer: Provider<ChronosPortableBackupInitializer>
+    @Inject lateinit var autoBackupManager: Provider<ChronosAutoBackupManager>
+    @Inject lateinit var proactiveAssistForegroundRefresher: Provider<ProactiveAssistForegroundRefresher>
 
     private val startupHandler = Handler(Looper.getMainLooper())
 
@@ -42,6 +47,7 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
 
     override fun onCreate() {
         super.onCreate()
+        WidgetBackgroundSync.register(this)
         scheduleDeferredNotificationChannelSetup()
         scheduleDeferredStartupWork()
     }
@@ -67,6 +73,8 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
                 alarmCapabilityRefresher.register()
                 ReminderReconcileScheduler.enqueue(this)
                 portableBackupInitializer.get().start()
+                autoBackupManager.get().ensureScheduled()
+                proactiveAssistForegroundRefresher.get().register()
                 setupProfiling()
                 monitorProcessExitHealth()
             },

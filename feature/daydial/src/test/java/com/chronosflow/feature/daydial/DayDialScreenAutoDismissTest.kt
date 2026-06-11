@@ -80,11 +80,12 @@ class DayDialScreenAutoDismissTest {
             "day-tools" to SidebarPage.DAY_TOOLS,
             "tasks" to SidebarPage.TASKS,
             "habits" to SidebarPage.HABITS,
-            "medication" to SidebarPage.MEDICATION,
-            "review" to SidebarPage.REVIEW
+            "medication" to SidebarPage.MEDICATION
         ).forEach { (target, page) ->
             assertEquals(page, sidebarPageForLaunchTarget(target))
         }
+        // "review" routes to the unified review sheet instead of a sidebar page.
+        assertNull(sidebarPageForLaunchTarget("review"))
     }
 
     @Test
@@ -94,7 +95,6 @@ class DayDialScreenAutoDismissTest {
             "tasks",
             "habits",
             "medication",
-            "review",
             "templates",
             "ai-settings",
             "privacy-sync",

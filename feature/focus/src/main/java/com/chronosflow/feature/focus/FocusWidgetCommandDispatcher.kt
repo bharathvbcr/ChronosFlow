@@ -29,4 +29,22 @@ class FocusWidgetCommandDispatcher @Inject constructor() {
             archiveOnStop = widgetAction == FocusWidgetCommand.ACTION_STOP
         )
     }
+
+    /**
+     * Starts a fresh focus session of an explicit length (used by the watch's duration picker).
+     * Passing [totalSeconds] as the hint makes [FocusService] honour it instead of falling back
+     * to the default; a non-positive value defers to the standard [dispatch] start.
+     */
+    fun start(context: Context, totalSeconds: Int) {
+        if (totalSeconds <= 0) {
+            dispatch(context, FocusWidgetCommand.ACTION_START)
+            return
+        }
+        context.sendFocusServiceCommand(
+            action = FocusService.ACTION_START,
+            timeLeft = 0,
+            totalSeconds = totalSeconds,
+            sessionId = null
+        )
+    }
 }

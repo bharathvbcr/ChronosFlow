@@ -45,13 +45,14 @@ sealed interface ChronosRoute {
         const val TARGET_TASKS = "tasks"
         const val TARGET_HABITS = "habits"
         const val TARGET_MEDICATION = "medication"
-        const val TARGET_REVIEW = "review"
         const val TARGET_TEMPLATES = "templates"
         const val TARGET_AI_SETTINGS = "ai-settings"
         const val TARGET_PRIVACY_SYNC = "privacy-sync"
         const val TARGET_NOTIFICATIONS = "notifications"
         const val TARGET_APPEARANCE = "appearance"
         const val TARGET_ADD_BLOCK = "add-block"
+
+        /** The Review page (execution score, planned vs actual, insights, recommendations). */
         const val TARGET_INSIGHTS = "insights"
 
         fun createRoute(target: String? = null, capture: String? = null): String {
@@ -138,12 +139,6 @@ sealed interface ChronosRoute {
         override val section: String = SECTION_REVIEW
     }
 
-    /** Standalone full review report, distinct from the in-dial insights tab. */
-    data object ReviewDetail : ChronosRoute {
-        override val route: String = "review_detail"
-        override val section: String = SECTION_REVIEW
-    }
-
     companion object {
         const val SHELL_TODAY = "today"
         const val SHELL_PLAN = "plan"
@@ -184,36 +179,38 @@ sealed interface ChronosRoute {
                 id = SHELL_TASKS,
                 label = "Tasks",
                 icon = Icons.Default.Checklist,
-                route = Day.createRoute(Day.TARGET_TASKS),
+                route = Tasks.route,
                 section = Tasks.section,
-                dayTarget = Day.TARGET_TASKS,
                 showInCompact = false
             ),
             ShellDestination(
                 id = SHELL_HABITS,
                 label = "Habits",
                 icon = Icons.Default.Favorite,
-                route = Day.createRoute(Day.TARGET_HABITS),
+                route = Habits.route,
                 section = Habits.section,
-                dayTarget = Day.TARGET_HABITS,
                 showInCompact = false
             ),
             ShellDestination(
                 id = SHELL_MEDICATION,
                 label = "Meds",
                 icon = Icons.Default.Medication,
-                route = Day.createRoute(Day.TARGET_MEDICATION),
+                route = Medication.route,
                 section = Medication.section,
-                dayTarget = Day.TARGET_MEDICATION,
                 showInCompact = false
             ),
             ShellDestination(
                 id = SHELL_REVIEW,
                 label = "Review",
                 icon = Icons.Default.Assessment,
-                route = Day.createRoute(Day.TARGET_REVIEW),
+                // Review resolves to the Insights tab — a real, persistent page — rather
+                // than the transient review sheet. Routing a sheet through a sticky shell
+                // day-target left the destination "selected" after dismissal and no-op'd on
+                // a repeat tap; a normal tab navigates reliably every time. The detailed
+                // planned/actual/missed sheet is reachable from within that page.
+                route = Day.createRoute(Day.TARGET_INSIGHTS),
                 section = Review.section,
-                dayTarget = Day.TARGET_REVIEW,
+                dayTarget = Day.TARGET_INSIGHTS,
                 showInCompact = false
             )
         )
@@ -245,8 +242,7 @@ sealed interface ChronosRoute {
                                 Day.TARGET_INSIGHTS,
                                 Day.TARGET_TASKS,
                                 Day.TARGET_HABITS,
-                                Day.TARGET_MEDICATION,
-                                Day.TARGET_REVIEW
+                                Day.TARGET_MEDICATION
                             )
                         )
                     SHELL_PLAN -> section == Day.section && dayTarget == Day.TARGET_PLAN
@@ -263,7 +259,7 @@ sealed interface ChronosRoute {
                         section == Day.section && dayTarget == Day.TARGET_MEDICATION
                         )
                     SHELL_REVIEW -> section == Review.section || (
-                        section == Day.section && dayTarget in setOf(Day.TARGET_INSIGHTS, Day.TARGET_REVIEW)
+                        section == Day.section && dayTarget == Day.TARGET_INSIGHTS
                         )
                     else -> destination.section == section
                 }
@@ -285,10 +281,10 @@ sealed interface ChronosRoute {
 
         fun topLevelRouteFor(section: String): String =
             when (section) {
-                Tasks.section -> Day.createRoute(Day.TARGET_TASKS)
-                Habits.section -> Day.createRoute(Day.TARGET_HABITS)
-                Medication.section -> Day.createRoute(Day.TARGET_MEDICATION)
-                Review.section -> Day.createRoute(Day.TARGET_REVIEW)
+                Tasks.section -> Tasks.route
+                Habits.section -> Habits.route
+                Medication.section -> Medication.route
+                Review.section -> Day.createRoute(Day.TARGET_INSIGHTS)
                 else -> routeForNotificationLaunch(NotificationLaunch(section = section))
             }
     }

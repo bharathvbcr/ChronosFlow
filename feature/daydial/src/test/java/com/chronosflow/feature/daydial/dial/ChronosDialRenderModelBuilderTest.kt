@@ -2,7 +2,9 @@ package com.chronosflow.feature.daydial.dial
 
 import androidx.compose.ui.graphics.Color
 import com.chronosflow.core.domain.planner.DialRing
+import com.chronosflow.feature.daydial.DialUtils.durationToSweep
 import com.chronosflow.feature.daydial.DialUtils.durationToSweepInWindow
+import com.chronosflow.feature.daydial.DialUtils.minuteToAngle
 import com.chronosflow.feature.daydial.model.TimeBlockUiModel
 import com.chronosflow.feature.daydial.model.TimeRangeUi
 import org.junit.Assert.assertEquals
@@ -88,6 +90,25 @@ class ChronosDialRenderModelBuilderTest {
     }
 
     @Test
+    fun `builder only keeps hour ticks inside the compact window`() {
+        val model = ChronosDialRenderModelBuilder.build(
+            blocks = emptyList(),
+            freeTimeSegments = emptyList(),
+            selectedBlockId = null,
+            compactMode = true,
+            compactWindowStart = 8 * 60
+        )
+
+        // 12h window from 08:00 covers 08..20 at 2h steps; 20:00 is the seam (excluded),
+        // so the zoomed dial must show six hour labels, not a wrapped full day.
+        // Labels use 12-hour clock numbering: the zoomed face reads like a clock.
+        assertEquals(
+            listOf("8", "10", "12", "2", "4", "6"),
+            model.hourTicks.map { it.label }
+        )
+    }
+
+    @Test
     fun `builder clips compact mode blocks to the visible window`() {
         val model = ChronosDialRenderModelBuilder.build(
             blocks = listOf(
@@ -150,6 +171,104 @@ class ChronosDialRenderModelBuilderTest {
         assertEquals(2, arcs.size)
         assertEquals(durationToSweepInWindow(60, 720), arcs[0].sweepAngle)
         assertEquals(durationToSweepInWindow(60, 720), arcs[1].sweepAngle)
+    }
+
+    @Test
+    fun `night band is one arc anchored to clock time on the 24 hour dial`() {
+        val model = ChronosDialRenderModelBuilder.build(
+            blocks = emptyList(),
+            freeTimeSegments = emptyList(),
+            selectedBlockId = null,
+            compactMode = false,
+            compactWindowStart = 0,
+            nightStartMinute = 21 * 60,
+            nightEndMinute = 7 * 60
+        )
+
+        val night = model.nightArcs.single()
+        // 21:00 start, wrapping 10h to 07:00 — a single arc across the midnight seam.
+        assertEquals(minuteToAngle(21 * 60), night.startAngle, 0.001f)
+        assertEquals(durationToSweep(10 * 60), night.sweepAngle, 0.001f)
+    }
+
+    @Test
+    fun `night band is omitted when the sleep window is empty`() {
+        val model = ChronosDialRenderModelBuilder.build(
+            blocks = emptyList(),
+            freeTimeSegments = emptyList(),
+            selectedBlockId = null,
+            compactMode = false,
+            compactWindowStart = 0,
+            nightStartMinute = 6 * 60,
+            nightEndMinute = 6 * 60
+        )
+
+        assertTrue(model.nightArcs.isEmpty())
+    }
+
+    @Test
+    fun `night band clips out of a daytime compact window`() {
+        // 12h window 08:00..20:00 contains none of a 21:00..07:00 night, so no band shows.
+        val model = ChronosDialRenderModelBuilder.build(
+            blocks = emptyList(),
+            freeTimeSegments = emptyList(),
+            selectedBlockId = null,
+            compactMode = true,
+            compactWindowStart = 8 * 60,
+            nightStartMinute = 21 * 60,
+            nightEndMinute = 7 * 60
+        )
+
+        assertTrue(model.nightArcs.isEmpty())
+    }
+
+    @Test
+    fun `night band clips to the visible part of an evening compact window`() {
+        // 12h window 18:00..06:00 sees 21:00 through its 06:00 edge: a 9h slice.
+        val model = ChronosDialRenderModelBuilder.build(
+            blocks = emptyList(),
+            freeTimeSegments = emptyList(),
+            selectedBlockId = null,
+            compactMode = true,
+            compactWindowStart = 18 * 60,
+            nightStartMinute = 21 * 60,
+            nightEndMinute = 7 * 60
+        )
+
+        val night = model.nightArcs.single()
+        assertEquals(durationToSweepInWindow(9 * 60, 720), night.sweepAngle, 0.001f)
+    }
+
+    @Test
+    fun `free time is clipped out of the night window`() {
+        // 08:00-23:00 open, night 21:00-07:00 -> only 08:00-21:00 stays schedulable.
+        val clipped = ChronosDialRenderModelBuilder.subtractNightFromFreeSegments(
+            segments = listOf(TimeRangeUi(8 * 60, 23 * 60)),
+            nightStartMinute = 21 * 60,
+            nightEndMinute = 7 * 60
+        )
+        assertEquals(listOf(TimeRangeUi(8 * 60, 21 * 60)), clipped)
+    }
+
+    @Test
+    fun `free time fully inside the night window drops out`() {
+        val clipped = ChronosDialRenderModelBuilder.subtractNightFromFreeSegments(
+            segments = listOf(TimeRangeUi(22 * 60, 23 * 60)),
+            nightStartMinute = 21 * 60,
+            nightEndMinute = 7 * 60
+        )
+        assertTrue(clipped.isEmpty())
+    }
+
+    @Test
+    fun `full open day keeps only its daytime remainder`() {
+        // TimeRangeUi(0,0) reads as the whole day; night 21:00-07:00 leaves 07:00-21:00.
+        val clipped = ChronosDialRenderModelBuilder.subtractNightFromFreeSegments(
+            segments = listOf(TimeRangeUi(0, 0)),
+            nightStartMinute = 21 * 60,
+            nightEndMinute = 7 * 60
+        )
+        assertEquals(listOf(TimeRangeUi(7 * 60, 21 * 60)), clipped)
     }
 
     private fun block(

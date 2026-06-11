@@ -388,6 +388,54 @@ class ChronosDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migrate16To17RecreatesCalendarEventsWithCompositeKey() {
+        helper.createDatabase(TEST_DB, 16).apply {
+            insert(
+                "calendar_events",
+                SQLiteDatabase.CONFLICT_NONE,
+                ContentValues().apply {
+                    put("id", 42L)
+                    put("title", "Planning review")
+                    putNull("description")
+                    put("startAt", 1_700_000_000_000L)
+                    put("endAt", 1_700_003_600_000L)
+                    put("timezone", "UTC")
+                    putNull("location")
+                    put("externalId", "device_event_42")
+                    put("isAllDay", 0)
+                }
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            17,
+            true,
+            ChronosDatabase.MIGRATION_16_17
+        ).apply {
+            // Snapshot table is dropped and recreated; two instances of the same
+            // event id must now coexist.
+            query("SELECT COUNT(*) FROM calendar_events").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals(0, cursor.getInt(0))
+            }
+            execSQL(
+                "INSERT INTO calendar_events (id, title, description, startAt, endAt, timezone, location, externalId, isAllDay) " +
+                    "VALUES (42, 'Standup', NULL, 1, 2, 'UTC', NULL, 'device_event_42', 0)"
+            )
+            execSQL(
+                "INSERT INTO calendar_events (id, title, description, startAt, endAt, timezone, location, externalId, isAllDay) " +
+                    "VALUES (42, 'Standup', NULL, 3, 4, 'UTC', NULL, 'device_event_42', 0)"
+            )
+            query("SELECT COUNT(*) FROM calendar_events WHERE id = 42").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals(2, cursor.getInt(0))
+            }
+        }
+    }
+
     private companion object {
         const val TEST_DB = "chronos-migration-test"
         val AVAILABLE_SCHEMA_MIGRATIONS: Array<Migration> = arrayOf(
@@ -399,7 +447,8 @@ class ChronosDatabaseMigrationTest {
             ChronosDatabase.MIGRATION_12_13,
             ChronosDatabase.MIGRATION_13_14,
             ChronosDatabase.MIGRATION_14_15,
-            ChronosDatabase.MIGRATION_15_16
+            ChronosDatabase.MIGRATION_15_16,
+            ChronosDatabase.MIGRATION_16_17
         )
     }
 }

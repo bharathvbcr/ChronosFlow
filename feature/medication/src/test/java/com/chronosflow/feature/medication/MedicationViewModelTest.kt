@@ -19,6 +19,8 @@ import com.chronosflow.core.ai.RoutineAssistSource
 import com.chronosflow.core.ai.MedicationAssistPlanner
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
 import com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot
+import com.chronosflow.core.ai.genai.RewriteAssistUiState
+import com.chronosflow.core.ai.genai.RewriteStyle
 import com.chronosflow.core.ai.genai.refreshAssistUiSnapshot
 import com.chronosflow.core.notifications.AlarmScheduleResult
 import com.chronosflow.core.notifications.AlarmCapabilityRefresher
@@ -433,6 +435,49 @@ class MedicationViewModelTest {
 
         assertEquals("planner down", viewModel.assistState.value.message)
         assertEquals(emptyList<MedicationAssistSuggestion>(), viewModel.assistState.value.suggestions)
+    }
+
+    @Test
+    fun `rewriteMedicationNotes publishes a preview the form applies explicitly`() = runTest {
+        coEvery {
+            medicationAssistPlanner.rewriteNotes("take with a full glass of water in the morning", RewriteStyle.SHORTEN)
+        } returns "Take with water in the morning"
+
+        viewModel.rewriteMedicationNotes(
+            text = "take with a full glass of water in the morning",
+            style = RewriteStyle.SHORTEN,
+            styleLabel = "Shorten"
+        )
+        advanceUntilIdle()
+
+        val state = viewModel.rewriteState.value
+        assertEquals(false, state.isLoading)
+        assertEquals("Shorten", state.styleLabel)
+        assertEquals("take with a full glass of water in the morning", state.original)
+        assertEquals("Take with water in the morning", state.rewritten)
+    }
+
+    @Test
+    fun `rewriteMedicationNotes reports when the rewrite tool is unavailable`() = runTest {
+        coEvery { medicationAssistPlanner.rewriteNotes(any(), any()) } returns null
+
+        viewModel.rewriteMedicationNotes(
+            text = "take with a full glass of water in the morning",
+            style = RewriteStyle.PROFESSIONAL,
+            styleLabel = "Polish"
+        )
+        advanceUntilIdle()
+
+        val state = viewModel.rewriteState.value
+        assertNull(state.rewritten)
+        assertEquals(
+            "Rewrite is unavailable on this device right now — your wording is unchanged.",
+            state.message
+        )
+
+        viewModel.clearMedicationRewrite()
+
+        assertEquals(RewriteAssistUiState(), viewModel.rewriteState.value)
     }
 
     private fun medicationPlan(

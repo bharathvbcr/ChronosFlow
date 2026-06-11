@@ -435,6 +435,174 @@ class TaskFormSheetStateTest {
         assertEquals(true, shouldAutoRequestAssistForCapture("urgent bill"))
     }
 
+    @Test
+    fun `applying a title suggestion supersedes the sibling title alternatives only`() {
+        val titleA = taskTitleSuggestion(id = "title:a", title = "Call back Alex")
+        val titleB = taskTitleSuggestion(id = "title:b", title = "Phone Alex")
+        val checklist = taskChecklistSuggestion("Prep notes")
+        val suggestions = listOf(titleA, titleB, checklist)
+
+        assertEquals(
+            setOf("title:a", "title:b"),
+            supersededTaskAssistSuggestionIds(titleA, suggestions)
+        )
+    }
+
+    @Test
+    fun `applying schedule or additive suggestions keeps their siblings offered`() {
+        val scheduleA = taskScheduleSuggestion(preferredDurationMinutes = 30).copy(id = "schedule:a")
+        val scheduleB = taskScheduleSuggestion(preferredStartMinuteOfDay = 9 * 60).copy(id = "schedule:b")
+        val checklistA = taskChecklistSuggestion("Step one").copy(id = "checklist:a")
+        val checklistB = taskChecklistSuggestion("Step two").copy(id = "checklist:b")
+
+        assertEquals(
+            setOf("schedule:a"),
+            supersededTaskAssistSuggestionIds(scheduleA, listOf(scheduleA, scheduleB))
+        )
+        assertEquals(
+            setOf("checklist:a"),
+            supersededTaskAssistSuggestionIds(checklistA, listOf(checklistA, checklistB))
+        )
+    }
+
+    @Test
+    fun `suggested checklist step chips disappear once their step exists`() {
+        assertEquals(
+            listOf("Make the call", "Capture follow-up"),
+            availableTaskChecklistStepOptions(
+                options = listOf("Confirm the right contact", "Make the call", "Capture follow-up"),
+                existingLabels = listOf("  confirm the right contact ")
+            )
+        )
+        assertEquals(
+            listOf("Make the call"),
+            availableTaskChecklistStepOptions(
+                options = listOf("Make the call"),
+                existingLabels = emptyList()
+            )
+        )
+    }
+
+    @Test
+    fun `new action label placeholder follows the pending action type`() {
+        assertEquals("Email Alex", taskActionLabelPlaceholder(TaskActionType.EMAIL))
+        assertEquals("Call Alex", taskActionLabelPlaceholder(TaskActionType.PHONE))
+        assertEquals("Client website", taskActionLabelPlaceholder(TaskActionType.WEBSITE))
+    }
+
+    @Test
+    fun `pending action type default follows the task context`() {
+        assertEquals(
+            TaskActionType.EMAIL.name,
+            contextualTaskDefaultActionTypeName("Email follow-up", emptyList())
+        )
+        assertEquals(
+            TaskActionType.PHONE.name,
+            contextualTaskDefaultActionTypeName("Call back Alex", emptyList())
+        )
+        assertEquals(
+            TaskActionType.MAP.name,
+            contextualTaskDefaultActionTypeName("Drop off the package at the venue", emptyList())
+        )
+        assertEquals(
+            TaskActionType.WEBSITE.name,
+            contextualTaskDefaultActionTypeName("Water the plants", emptyList())
+        )
+        assertEquals(
+            TaskActionType.MAP.name,
+            contextualTaskDefaultActionTypeName(
+                "anything",
+                listOf(taskActionSuggestion(TaskActionType.MAP))
+            )
+        )
+    }
+
+    @Test
+    fun `auto apply picks the first suggestion per kind only for untouched fields`() {
+        val firstTitle = taskTitleSuggestion(id = "title:a", title = "Call back Alex")
+        val secondTitle = taskTitleSuggestion(id = "title:b", title = "Phone Alex")
+        val schedule = taskScheduleSuggestion(preferredDurationMinutes = 30).copy(id = "schedule:a")
+        val priority = taskPrioritySuggestion(priority = 2).copy(id = "priority:a")
+        val checklist = taskChecklistSuggestion("Prep notes").copy(id = "checklist:a")
+        val action = taskActionSuggestion(TaskActionType.PHONE).copy(id = "action:a")
+
+        val ids = autoApplicableTaskAssistSuggestionIds(
+            suggestions = listOf(firstTitle, secondTitle, schedule, priority, checklist, action),
+            titleBlank = true,
+            priorityUnset = true,
+            scheduleUnset = false,
+            checklistEmpty = true
+        )
+
+        assertEquals(setOf("title:a", "priority:a", "checklist:a"), ids)
+    }
+
+    @Test
+    fun `suggestions already satisfied by the form are reported redundant`() {
+        val matchingTitle = taskTitleSuggestion(id = "title:match", title = "Call back Alex")
+        val matchingPriority = taskPrioritySuggestion(priority = 2).copy(id = "priority:match")
+        val matchingSchedule = taskScheduleSuggestion(preferredDurationMinutes = 30).copy(id = "schedule:match")
+        val matchingChecklist = taskChecklistSuggestion("Prep notes").copy(id = "checklist:match")
+        val freshTitle = taskTitleSuggestion(id = "title:new", title = "Phone Alex")
+
+        val redundant = redundantTaskAssistSuggestionIds(
+            suggestions = listOf(matchingTitle, matchingPriority, matchingSchedule, matchingChecklist, freshTitle),
+            currentTitle = "call back alex",
+            currentPriority = 2,
+            currentTargetDate = null,
+            currentDurationMinutes = 30,
+            currentStartMinuteOfDay = null,
+            currentChecklistLabels = listOf("Prep Notes"),
+            currentActionKeys = emptySet()
+        )
+
+        assertEquals(
+            setOf("title:match", "priority:match", "schedule:match", "checklist:match"),
+            redundant
+        )
+    }
+
+    @Test
+    fun `suggestions that still change the form stay visible`() {
+        val newSchedule = taskScheduleSuggestion(preferredDurationMinutes = 45).copy(id = "schedule:new")
+        val newChecklist = taskChecklistSuggestion("Prep notes", "Send recap").copy(id = "checklist:new")
+        val newAction = taskActionSuggestion(TaskActionType.PHONE).copy(id = "action:new")
+
+        val redundant = redundantTaskAssistSuggestionIds(
+            suggestions = listOf(newSchedule, newChecklist, newAction),
+            currentTitle = "Call back Alex",
+            currentPriority = 0,
+            currentTargetDate = null,
+            currentDurationMinutes = 30,
+            currentStartMinuteOfDay = null,
+            currentChecklistLabels = listOf("Prep notes"),
+            currentActionKeys = emptySet()
+        )
+
+        assertEquals(emptySet<String>(), redundant)
+    }
+
+    @Test
+    fun `applying a priority suggestion supersedes priority alternatives`() {
+        val priorityA = taskPrioritySuggestion(priority = 2).copy(id = "priority:a")
+        val priorityB = taskPrioritySuggestion(priority = 1).copy(id = "priority:b")
+        val titleC = taskTitleSuggestion(id = "title:c", title = "Pay bill")
+
+        assertEquals(
+            setOf("priority:a", "priority:b"),
+            supersededTaskAssistSuggestionIds(priorityA, listOf(priorityA, priorityB, titleC))
+        )
+    }
+
+    private fun taskTitleSuggestion(id: String, title: String): TaskAssistSuggestion.Title =
+        TaskAssistSuggestion.Title(
+            id = id,
+            label = title,
+            reason = "Test",
+            source = TaskAssistSource.LOCAL,
+            title = title
+        )
+
     private fun taskScheduleSuggestion(
         targetDate: LocalDate? = null,
         preferredStartMinuteOfDay: Int? = null,

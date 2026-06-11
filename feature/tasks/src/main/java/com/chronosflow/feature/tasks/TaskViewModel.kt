@@ -8,6 +8,8 @@ import com.chronosflow.core.ai.TaskAssistSuggestion
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
 import com.chronosflow.core.ai.genai.GenAiAssistCopy
 import com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot
+import com.chronosflow.core.ai.genai.RewriteAssistUiState
+import com.chronosflow.core.ai.genai.RewriteStyle
 import com.chronosflow.core.ai.genai.refreshAssistUiSnapshot
 import com.chronosflow.core.domain.model.AlarmDeliveryState
 import com.chronosflow.core.domain.model.AlarmReliability
@@ -54,6 +56,7 @@ data class TaskAssistUiState(
     val message: String? = null,
     val assistSnapshot: GenAiAssistUiSnapshot? = null
 )
+
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -112,6 +115,9 @@ class TaskViewModel @Inject constructor(
 
     private val _assistState = MutableStateFlow(TaskAssistUiState())
     val assistState = _assistState.asStateFlow()
+
+    private val _rewriteState = MutableStateFlow(RewriteAssistUiState())
+    val rewriteState = _rewriteState.asStateFlow()
 
     private val _showExactAlarmPermissionAction = MutableStateFlow(false)
     val showExactAlarmPermissionAction = _showExactAlarmPermissionAction.asStateFlow()
@@ -301,9 +307,15 @@ class TaskViewModel @Inject constructor(
                     )
                 }
                 .getOrDefault(emptyList())
-            if (suggestions.isNotEmpty()) {
+            // On-device proofread of the captured title (ML Kit GenAI Proofreading), surfaced as an
+            // extra Title suggestion alongside the generated ones. Best-effort: any failure is ignored.
+            val refinedTitle = runCatching {
+                request.title.takeIf { it.isNotBlank() }?.let { taskAssistPlanner.refineTitle(it) }
+            }.getOrNull()
+            val merged = (listOfNotNull(refinedTitle) + suggestions).distinctBy { it.id }
+            if (merged.isNotEmpty()) {
                 _assistState.value = TaskAssistUiState(
-                    suggestions = suggestions,
+                    suggestions = merged,
                     assistSnapshot = snapshot,
                     message = snapshot?.takeIf { it.aiDisabled }?.let { GenAiAssistCopy.disabledAssistMessage() }
                 )
@@ -318,6 +330,31 @@ class TaskViewModel @Inject constructor(
 
     fun clearTaskAssist() {
         _assistState.value = TaskAssistUiState()
+    }
+
+    /**
+     * Rewrites the task description with the on-device ML Kit GenAI Rewriting feature. The result
+     * is published as a preview the form must explicitly apply — the field is never replaced
+     * automatically.
+     */
+    fun rewriteTaskDescription(text: String, style: RewriteStyle, styleLabel: String) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            _rewriteState.value = RewriteAssistUiState(isLoading = true, styleLabel = styleLabel)
+            val rewritten = runCatching { taskAssistPlanner.rewriteText(trimmed, style) }.getOrNull()
+            _rewriteState.value = if (rewritten != null) {
+                RewriteAssistUiState(styleLabel = styleLabel, original = text, rewritten = rewritten)
+            } else {
+                RewriteAssistUiState(
+                    message = "Rewrite is unavailable on this device right now — your wording is unchanged."
+                )
+            }
+        }
+    }
+
+    fun clearTaskRewrite() {
+        _rewriteState.value = RewriteAssistUiState()
     }
 
     fun refreshAlarmCapabilities() {

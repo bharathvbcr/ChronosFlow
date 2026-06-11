@@ -9,6 +9,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
+import androidx.wear.tiles.TileService
 import com.chronosflow.core.domain.wear.WearFocusContract
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
@@ -20,7 +21,8 @@ import com.google.android.gms.wearable.WearableListenerService
  *
  * The phone publishes a single Data Layer item at [WearFocusContract.FOCUS_PATH]; this service
  * reacts to changes by showing/refreshing a countdown ongoing activity and removes it when the
- * item is deleted or the session is no longer active.
+ * item is deleted or the session is no longer active. The same state is cached in
+ * [WearFocusStateStore] so [ChronosTodayTileProvider] can render the focus ring from real data.
  */
 class FocusWearListenerService : WearableListenerService() {
 
@@ -28,22 +30,50 @@ class FocusWearListenerService : WearableListenerService() {
         for (event in dataEvents) {
             if (event.dataItem.uri.path != WearFocusContract.FOCUS_PATH) continue
             when (event.type) {
-                DataEvent.TYPE_DELETED -> cancelFocusOngoingActivity()
+                DataEvent.TYPE_DELETED -> clearFocusState()
                 DataEvent.TYPE_CHANGED -> {
                     val map = DataMapItem.fromDataItem(event.dataItem).dataMap
                     if (!map.getBoolean(WearFocusContract.KEY_ACTIVE, false)) {
-                        cancelFocusOngoingActivity()
+                        clearFocusState()
                     } else {
+                        val paused = map.getBoolean(WearFocusContract.KEY_PAUSED, false)
+                        val title = map.getString(WearFocusContract.KEY_TITLE)
+                            ?.takeIf { it.isNotBlank() } ?: DEFAULT_TITLE
+                        val plannedEndAtMillis = map.getLong(WearFocusContract.KEY_PLANNED_END_AT_MILLIS, 0L)
+                        val pausedTimeLeftSeconds = map.getInt(WearFocusContract.KEY_PAUSED_TIME_LEFT_SECONDS, 0)
                         showFocusOngoingActivity(
-                            paused = map.getBoolean(WearFocusContract.KEY_PAUSED, false),
-                            title = map.getString(WearFocusContract.KEY_TITLE)
-                                ?.takeIf { it.isNotBlank() } ?: DEFAULT_TITLE,
-                            plannedEndAtMillis = map.getLong(WearFocusContract.KEY_PLANNED_END_AT_MILLIS, 0L),
-                            pausedTimeLeftSeconds = map.getInt(WearFocusContract.KEY_PAUSED_TIME_LEFT_SECONDS, 0)
+                            paused = paused,
+                            title = title,
+                            plannedEndAtMillis = plannedEndAtMillis,
+                            pausedTimeLeftSeconds = pausedTimeLeftSeconds
                         )
+                        WearFocusStateStore.write(
+                            this,
+                            WearFocusStateStore.FocusState(
+                                active = true,
+                                paused = paused,
+                                title = title,
+                                plannedEndAtMillis = plannedEndAtMillis,
+                                pausedTimeLeftSeconds = pausedTimeLeftSeconds,
+                                totalSeconds = map.getInt(WearFocusContract.KEY_TOTAL_SECONDS, 0)
+                            )
+                        )
+                        requestFocusTileUpdate()
                     }
                 }
             }
+        }
+    }
+
+    private fun clearFocusState() {
+        cancelFocusOngoingActivity()
+        WearFocusStateStore.clear(this)
+        requestFocusTileUpdate()
+    }
+
+    private fun requestFocusTileUpdate() {
+        runCatching {
+            TileService.getUpdater(this).requestUpdate(ChronosTodayTileProvider::class.java)
         }
     }
 
@@ -77,7 +107,7 @@ class FocusWearListenerService : WearableListenerService() {
         }
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_focus_wear)
+            .setSmallIcon(R.drawable.ic_chronosflow_notification)
             .setContentTitle(title)
             .setContentText(if (paused) "Focus paused" else "Focus in progress")
             .setOngoing(true)
@@ -86,7 +116,7 @@ class FocusWearListenerService : WearableListenerService() {
             .setContentIntent(touchIntent)
 
         val ongoingActivity = OngoingActivity.Builder(applicationContext, NOTIFICATION_ID, builder)
-            .setStaticIcon(R.drawable.ic_focus_wear)
+            .setStaticIcon(R.drawable.ic_chronosflow_notification)
             .setTouchIntent(touchIntent)
             .setStatus(status)
             .build()

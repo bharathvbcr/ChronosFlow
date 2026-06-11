@@ -15,8 +15,14 @@ import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.EnergyIntensity
 import com.chronosflow.core.domain.model.SleepSchedule
 import com.chronosflow.core.domain.model.TimeBlock
+import com.chronosflow.core.domain.planner.GapFillBlock
+import com.chronosflow.core.domain.planner.GapFillHabitCandidate
+import com.chronosflow.core.domain.planner.GapFillPlanner
+import com.chronosflow.core.domain.planner.GapFillProposal
 import com.chronosflow.core.domain.planner.PlannerOperationResult
+import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
+import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
 import com.chronosflow.core.domain.usecase.ApplyAiPlanUseCase
 import com.chronosflow.core.ui.components.formatDisplayMinute
@@ -24,6 +30,7 @@ import com.chronosflow.feature.daydial.TimeBlockUiModel
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,7 +46,10 @@ class DayDialAiDelegate @Inject constructor(
     private val planExplainAssistPlanner: PlanExplainAssistPlanner,
     private val recommendationPlanInterpreter: RecommendationPlanInterpreter,
     private val applyAiPlanUseCase: ApplyAiPlanUseCase,
-    private val assistantPreferences: AssistantPreferences
+    private val assistantPreferences: AssistantPreferences,
+    private val gapFillPlanner: GapFillPlanner,
+    private val taskRepository: TaskRepository,
+    private val habitRepository: HabitRepository
 ) {
     private val _aiPlanResult = MutableStateFlow<String?>(null)
     val aiPlanResult = _aiPlanResult.asStateFlow()
@@ -116,12 +126,21 @@ class DayDialAiDelegate @Inject constructor(
                 val blocks = repository.getTimeBlocksByDate(date).first()
                 val sleepSchedule = sleepScheduleRepository.getSleepSchedule()
                 val review = reviewProvider(blocks)
+                val pendingTasks = runCatching { taskRepository.getAllTasks().first() }
+                    .getOrDefault(emptyList())
+                    .filterNot { it.isCompleted }
+                val dueHabitTitles = runCatching { habitRepository.observeHabits().first() }
+                    .getOrDefault(emptyList())
+                    .filter { it.isActive && isHabitReminderDueOnDate(it, date) }
+                    .map { it.title.ifBlank { "Habit" } }
                 val result = aiPlanner.generateReviewBackedDayPlan(
                     userPreferences = goals.withSleepWindow(sleepSchedule),
                     review = review,
                     existingBlocks = blocks,
                     currentTimeZone = ZoneId.systemDefault().id,
-                    privacyMode = _privacyMode.value
+                    privacyMode = _privacyMode.value,
+                    pendingTasks = pendingTasks,
+                    dueHabitTitles = dueHabitTitles
                 )
                 val filteredSuggestions = result.proposedBlocks
                     .filterNot { sleepSchedule.intersects(it.startMinuteOfDay, it.durationMinutes) }
@@ -134,6 +153,74 @@ class DayDialAiDelegate @Inject constructor(
                 _explainPlan.value = result.explanation
                 _explainPlanSource.value = result.explanationSource
                 _suggestedBlocks.value = filteredSuggestions.map { it.toUiSuggestion() }
+            } finally {
+                _isGenerating.value = false
+            }
+        }
+    }
+
+    /**
+     * Fills every qualifying gap with pending tasks and due habits (breaks last)
+     * and publishes the result through the standard AI-suggestion preview flow,
+     * so the user reviews and applies the plan from the AI sheet.
+     */
+    fun proposeGapFill(
+        scope: CoroutineScope,
+        date: LocalDate,
+        addBreaksAutomatically: Boolean,
+        onResult: (PlannerOperationResult, Boolean) -> Unit
+    ) {
+        scope.launch {
+            _isGenerating.value = true
+            try {
+                val blocks = repository.getTimeBlocksByDate(date).first()
+                val tasks = taskRepository.getAllTasks().first()
+                val habits = habitRepository.observeHabits().first()
+                val sleepSchedule = sleepScheduleRepository.getSleepSchedule()
+                val nowMinuteOfDay = if (date == LocalDate.now()) {
+                    java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+                } else {
+                    null
+                }
+                val habitCandidates = habits
+                    .filter { it.isActive }
+                    .filter { isHabitReminderDueOnDate(it, date) }
+                    .map { habit ->
+                        GapFillHabitCandidate(
+                            habitId = habit.id,
+                            title = habit.title.ifBlank { "Habit" },
+                            windowStartMinute = habit.windowStartMinute,
+                            windowEndMinute = habit.windowEndMinute
+                        )
+                    }
+                val proposal = gapFillPlanner.propose(
+                    blocks = blocks,
+                    tasks = tasks,
+                    habitCandidates = habitCandidates,
+                    sleepSchedule = sleepSchedule,
+                    nowMinuteOfDay = nowMinuteOfDay,
+                    addBreaksAutomatically = addBreaksAutomatically
+                )
+                if (proposal.proposedBlocks.isEmpty()) {
+                    _suggestedBlocks.value = emptyList()
+                    onResult(
+                        PlannerOperationResult.Rejected(gapFillEmptyMessage(proposal.gapCount), ""),
+                        false
+                    )
+                } else {
+                    val summary = gapFillSummaryMessage(proposal)
+                    _aiPlanResult.value = summary
+                    _suggestedBlocks.value = proposal.proposedBlocks.map { it.toUiSuggestion() }
+                    onResult(
+                        PlannerOperationResult.Applied(
+                            message = summary,
+                            blockId = "",
+                            snappedToMinute = null,
+                            affectedBlockIds = emptyList()
+                        ),
+                        false
+                    )
+                }
             } finally {
                 _isGenerating.value = false
             }
@@ -292,6 +379,21 @@ class DayDialAiDelegate @Inject constructor(
         }
     }
 
+    private fun GapFillBlock.toUiSuggestion(): TimeBlockUiModel {
+        return TimeBlockUiModel(
+            id = UUID.randomUUID().toString(),
+            title = title,
+            startMinuteOfDay = startMinute,
+            durationMinutes = durationMinutes,
+            color = Color(0xFF64B5F6),
+            provenance = BlockProvenance.AI_SUGGESTED.name,
+            flexibility = BlockFlexibility.MOVABLE.name,
+            category = category,
+            taskId = taskId,
+            habitId = habitId
+        )
+    }
+
     private fun ProposedSuggestionBlock.toUiSuggestion(): TimeBlockUiModel {
         return TimeBlockUiModel(
             id = id,
@@ -315,7 +417,9 @@ class DayDialAiDelegate @Inject constructor(
             id = id,
             date = date,
             title = title,
-            category = "AI",
+            // Gap-fill suggestions carry real categories (TASK/HABIT/RECOVERY);
+            // generated plan suggestions fall back to the legacy AI tag.
+            category = category.ifBlank { "AI" },
             startMinuteOfDay = startMinuteOfDay,
             durationMinutes = durationMinutes,
             timezone = ZoneId.systemDefault().id,
@@ -349,4 +453,18 @@ class DayDialAiDelegate @Inject constructor(
             PrivacyMode.valueOf(assistantPreferences.assistantPrivacyModeValue())
         }.getOrDefault(PrivacyMode.ON_DEVICE_ONLY)
     }
+}
+
+internal fun gapFillSummaryMessage(proposal: GapFillProposal): String = buildString {
+    append("${proposal.gapCount} gap${if (proposal.gapCount == 1) "" else "s"}")
+    append(" · ${proposal.taskCount} task${if (proposal.taskCount == 1) "" else "s"} fit")
+    if (proposal.habitCount > 0) {
+        append(" · ${proposal.habitCount} habit${if (proposal.habitCount == 1) "" else "s"}")
+    }
+}
+
+internal fun gapFillEmptyMessage(gapCount: Int): String = if (gapCount == 0) {
+    "No gaps of 45 minutes or more to fill"
+} else {
+    "Nothing left to schedule: no pending tasks or due habits fit these gaps"
 }

@@ -222,6 +222,17 @@ class TaskFormSheetLogicTest {
     }
 
     @Test
+    fun taskDurationPickerMinutesRoundTripsSliderTunedLabels() {
+        // Non-preset values written by the estimated-duration slider.
+        assertEquals(80, taskDurationPickerMinutes(taskDurationPickerLabel(80)))
+        assertEquals(25, taskDurationPickerMinutes("25m"))
+        assertEquals(180, taskDurationPickerMinutes("3h"))
+        assertEquals(140, taskDurationPickerMinutes("2h 20m"))
+        assertEquals(null, taskDurationPickerMinutes("garbage"))
+        assertEquals(null, taskDurationPickerMinutes(""))
+    }
+
+    @Test
     fun taskPreferredStartPickerOptionsUseExplicitMeridiemCopy() {
         assertEquals(
             listOf("Any time", "Morning 9:00 AM", "Noon 12:00 PM", "Afternoon 1:00 PM", "Evening 6:00 PM", "Custom"),

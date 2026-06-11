@@ -11,7 +11,9 @@ enum class DayDialTab(val label: String, val icon: ImageVector) {
     PLAN("Plan", Icons.AutoMirrored.Filled.EventNote),
     TODAY("Today", Icons.Default.Today),
     FOCUS("Focus", Icons.Default.Timer),
-    INSIGHTS("Insights", Icons.Default.Insights);
+    // Surfaced to users as "Review" (the unified review page); the enum name stays
+    // INSIGHTS to avoid churn across the planner/state code that references it.
+    INSIGHTS("Review", Icons.Default.Insights);
 
     companion object {
         val primary = listOf(PLAN, TODAY, FOCUS)

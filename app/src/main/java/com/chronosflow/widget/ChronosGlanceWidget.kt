@@ -8,8 +8,10 @@ import androidx.glance.Button
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
+import androidx.glance.LocalContext
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
+import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
@@ -26,41 +28,40 @@ import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import com.chronosflow.core.domain.model.ChronosWidgetSummary
+import com.chronosflow.core.domain.model.ChronosDayOverview
 import com.chronosflow.core.domain.model.WidgetFocusState
-import com.chronosflow.core.notifications.PrivacyRedaction
+import com.chronosflow.core.notifications.SECTION_FOCUS
 import dagger.hilt.android.EntryPointAccessors
 
+/**
+ * "Focus" widget: one job — the focus session. A prominent countdown with state-appropriate
+ * controls while a session is active; the current/next block plus a Start button while idle.
+ * Schedule lists, tasks, habits, and medication each have their own dedicated widget.
+ */
 class ChronosGlanceWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val entryPoint = EntryPointAccessors.fromApplication(
             context.applicationContext,
             WidgetActionEntryPoint::class.java
         )
-        val summary = runCatching {
-            entryPoint.widgetSummaryUseCase()()
-        }.getOrDefault(ChronosWidgetSummary())
-        val redactMedication = runCatching {
-            entryPoint.privacyPreferences().redactMedicationOnWidgets()
-        }.getOrDefault(true)
+        val overview = runCatching { entryPoint.dayOverviewUseCase()() }
+            .getOrDefault(ChronosDayOverview())
+        // Cache-only read of the pre-generated daily digest (Gemini Nano fills it while the app
+        // is foregrounded) — the widget never runs inference itself.
+        val digest = runCatching {
+            entryPoint.proactiveAssistGenerator()
+                .cachedCopy(java.time.LocalDate.now().toString(), System.currentTimeMillis())
+                ?.text
+        }.getOrNull()
         provideContent {
             GlanceTheme {
-                WidgetContent(
-                    summary = summary,
-                    medicationLabel = PrivacyRedaction.medicationWidgetLabel(
-                        summary.medicationName,
-                        redactMedicationNames = redactMedication
-                    )
-                )
+                FocusContent(overview, digest)
             }
         }
     }
 
     @Composable
-    private fun WidgetContent(
-        summary: ChronosWidgetSummary,
-        medicationLabel: String?
-    ) {
+    private fun FocusContent(overview: ChronosDayOverview, digest: String?) {
         Column(
             modifier = GlanceModifier
                 .fillMaxSize()
@@ -70,75 +71,84 @@ class ChronosGlanceWidget : GlanceAppWidget() {
             horizontalAlignment = Alignment.Horizontal.CenterHorizontally
         ) {
             Text(
-                text = "ChronosFlow",
+                text = "Focus",
                 style = TextStyle(
                     color = GlanceTheme.colors.primary,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
+                    fontSize = 16.sp
+                ),
+                modifier = GlanceModifier.clickable(openSectionAction(LocalContext.current, SECTION_FOCUS))
             )
             Spacer(modifier = GlanceModifier.height(6.dp))
-            Text(
-                text = focusStatusLine(summary),
-                style = TextStyle(
-                    color = GlanceTheme.colors.onBackground,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 14.sp
+            when (overview.focus.state) {
+                WidgetFocusState.RUNNING -> ActiveSession(
+                    statusLabel = "Focusing",
+                    timeLeftSeconds = overview.focus.timeLeftSeconds,
+                    primaryAction = "Pause" to FocusWidgetAction.ACTION_PAUSE
                 )
-            )
-            scheduleHintLine(summary)?.let { hint ->
-                Spacer(modifier = GlanceModifier.height(2.dp))
-                Text(
-                    text = hint,
-                    style = TextStyle(color = GlanceTheme.colors.onBackground, fontSize = 11.sp)
+                WidgetFocusState.PAUSED -> ActiveSession(
+                    statusLabel = "Paused",
+                    timeLeftSeconds = overview.focus.timeLeftSeconds,
+                    primaryAction = "Resume" to FocusWidgetAction.ACTION_RESUME
                 )
-            }
-            if (medicationLabel != null) {
-                Spacer(modifier = GlanceModifier.height(2.dp))
-                Text(
-                    text = medicationLabel,
-                    style = TextStyle(color = GlanceTheme.colors.onBackground, fontSize = 12.sp)
-                )
-            }
-            Spacer(modifier = GlanceModifier.height(12.dp))
-            FocusControls(summary.focusState)
-            if (medicationLabel != null || summary.habitId != null) {
-                Spacer(modifier = GlanceModifier.height(8.dp))
-                LoggingControls(
-                    medicationId = summary.medicationId,
-                    habitId = summary.habitId
-                )
-            }
-            if (summary.habitTitle != null) {
-                Spacer(modifier = GlanceModifier.height(6.dp))
-                Text(
-                    text = summary.habitTitle!!,
-                    style = TextStyle(color = GlanceTheme.colors.onBackground, fontSize = 11.sp)
-                )
+                WidgetFocusState.IDLE -> IdleSession(overview, digest)
             }
         }
     }
 
     @Composable
-    private fun FocusControls(focusState: WidgetFocusState) {
+    private fun ActiveSession(
+        statusLabel: String,
+        timeLeftSeconds: Int,
+        primaryAction: Pair<String, String>
+    ) {
+        Text(
+            text = statusLabel,
+            style = TextStyle(color = GlanceTheme.colors.onBackground, fontSize = 13.sp)
+        )
+        Text(
+            text = formatTimeLeft(timeLeftSeconds),
+            style = TextStyle(
+                color = GlanceTheme.colors.primary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 30.sp
+            )
+        )
+        Spacer(modifier = GlanceModifier.height(10.dp))
         Row(
             modifier = GlanceModifier.fillMaxWidth(),
             horizontalAlignment = Alignment.Horizontal.CenterHorizontally
         ) {
-            when (focusState) {
-                WidgetFocusState.IDLE -> focusButton("Start", FocusWidgetAction.ACTION_START)
-                WidgetFocusState.RUNNING -> {
-                    focusButton("Pause", FocusWidgetAction.ACTION_PAUSE)
-                    Spacer(modifier = GlanceModifier.width(8.dp))
-                    focusButton("Stop", FocusWidgetAction.ACTION_STOP)
-                }
-                WidgetFocusState.PAUSED -> {
-                    focusButton("Resume", FocusWidgetAction.ACTION_RESUME)
-                    Spacer(modifier = GlanceModifier.width(8.dp))
-                    focusButton("Stop", FocusWidgetAction.ACTION_STOP)
-                }
-            }
+            focusButton(primaryAction.first, primaryAction.second)
+            Spacer(modifier = GlanceModifier.width(8.dp))
+            focusButton("Stop", FocusWidgetAction.ACTION_STOP)
         }
+    }
+
+    @Composable
+    private fun IdleSession(overview: ChronosDayOverview, digest: String?) {
+        Text(
+            text = idleContextLine(overview),
+            style = TextStyle(
+                color = GlanceTheme.colors.onBackground,
+                fontWeight = FontWeight.Medium,
+                fontSize = 13.sp
+            ),
+            maxLines = 2
+        )
+        digest?.let { text ->
+            Spacer(modifier = GlanceModifier.height(4.dp))
+            Text(
+                text = text,
+                style = TextStyle(
+                    color = GlanceTheme.colors.onSurfaceVariant,
+                    fontSize = 11.sp
+                ),
+                maxLines = 2
+            )
+        }
+        Spacer(modifier = GlanceModifier.height(10.dp))
+        focusButton("Start focus", FocusWidgetAction.ACTION_START)
     }
 
     @Composable
@@ -153,51 +163,14 @@ class ChronosGlanceWidget : GlanceAppWidget() {
         )
     }
 
-    @Composable
-    private fun LoggingControls(medicationId: String?, habitId: String?) {
-        Row(
-            modifier = GlanceModifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.Horizontal.CenterHorizontally
-        ) {
-            if (medicationId != null) {
-                Button(
-                    text = "Taken",
-                    onClick = actionRunCallback<DoseAcknowledgementAction>(
-                        actionParametersOf(
-                            ActionParameters.Key<String>(DoseAcknowledgementAction.PLAN_ID_KEY) to medicationId,
-                            ActionParameters.Key<Boolean>(DoseAcknowledgementAction.TAKEN_KEY) to true
-                        )
-                    )
-                )
-            }
-            if (habitId != null) {
-                if (medicationId != null) {
-                    Spacer(modifier = GlanceModifier.width(8.dp))
-                }
-                Button(
-                    text = "Done",
-                    onClick = actionRunCallback<HabitMarkAction>(
-                        actionParametersOf(
-                            ActionParameters.Key<String>(HabitMarkAction.HABIT_ID_KEY) to habitId
-                        )
-                    )
-                )
-            }
+    private fun idleContextLine(overview: ChronosDayOverview): String {
+        overview.currentBlock?.let {
+            return "Now: ${it.title} · until ${formatMinuteOfDay(it.endMinuteOfDay)}"
         }
-    }
-
-    private fun focusStatusLine(summary: ChronosWidgetSummary): String = when (summary.focusState) {
-        WidgetFocusState.RUNNING -> "Focusing · ${formatTimeLeft(summary.focusTimeLeftSeconds)} left"
-        WidgetFocusState.PAUSED -> "Paused · ${formatTimeLeft(summary.focusTimeLeftSeconds)} left"
-        WidgetFocusState.IDLE -> summary.currentBlockTitle?.let { "Now: $it" } ?: "No focus session"
-    }
-
-    private fun scheduleHintLine(summary: ChronosWidgetSummary): String? {
-        // While idle, surface what's coming up. During a session the timer already tells the story.
-        if (summary.focusState != WidgetFocusState.IDLE) return null
-        val title = summary.nextBlockTitle ?: return null
-        val start = summary.nextBlockStartMinuteOfDay
-        return if (start != null) "Next: $title · ${formatMinuteOfDay(start)}" else "Next: $title"
+        overview.nextBlock?.let {
+            return "Next: ${it.title} · ${formatMinuteOfDay(it.startMinuteOfDay)}"
+        }
+        return "No session running"
     }
 
     private fun formatTimeLeft(seconds: Int): String {

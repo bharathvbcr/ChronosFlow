@@ -6,16 +6,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,7 +58,6 @@ fun ChronosSectionTitle(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChronosScreenScaffold(
     title: String,
@@ -76,23 +69,23 @@ fun ChronosScreenScaffold(
     containerColor: Color = Color.Transparent,
     content: @Composable (PaddingValues) -> Unit
 ) {
-    Scaffold(
-        modifier = modifier,
-        containerColor = containerColor,
-        snackbarHost = snackbarHost,
-        topBar = {
-            ChronosTopBar(
-                title = title,
-                onBack = onBack,
-                actions = actions
-            )
-        },
-        floatingActionButton = floatingActionButton,
-        content = content
-    )
+    ChronosScreenBackdrop(modifier = modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = containerColor,
+            snackbarHost = snackbarHost,
+            topBar = {
+                ChronosTopBar(
+                    title = title,
+                    onBack = onBack,
+                    actions = actions
+                )
+            },
+            floatingActionButton = floatingActionButton,
+            content = content
+        )
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChronosTopBar(
     title: String,
@@ -100,29 +93,11 @@ fun ChronosTopBar(
     onBack: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
-    CenterAlignedTopAppBar(
+    ChronosGlassTopBar(
+        title = title,
         modifier = modifier,
-        title = {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.semantics { heading() }
-            )
-        },
-        navigationIcon = {
-            if (onBack != null) {
-                ChronosTooltipIconButton(
-                    onClick = onBack,
-                    tooltip = "Back",
-                    contentDescription = "Back"
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
-                }
-            }
-        },
-        actions = actions,
-        windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)
+        onBack = onBack,
+        actions = actions
     )
 }
 

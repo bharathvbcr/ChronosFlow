@@ -8,12 +8,11 @@ import org.junit.Test
 
 class DayDialCommandProviderTest {
     @Test
-    fun `day dial command provider includes review commands when review is enabled`() {
+    fun `day dial command provider includes review command when review is enabled`() {
         val provider = dayDialCommandProvider(
             onOpenDayDial = { },
             onOpenPlan = { },
             onOpenFocusPlanner = { },
-            onOpenInsights = { },
             onOpenPlanningTools = { },
             onOpenTemplates = { },
             onOpenReview = { },
@@ -25,19 +24,18 @@ class DayDialCommandProviderTest {
         )
 
         val ids = provider.commands().map { it.id }
-        assertTrue(ids.contains("daydial.insights"))
         assertTrue(ids.contains("daydial.review"))
-        assertEquals(11, ids.size)
+        assertFalse(ids.contains("daydial.insights"))
+        assertEquals(10, ids.size)
         assertEquals("Today", provider.commands().first { it.id == "daydial.open" }.shortcutLabel)
     }
 
     @Test
-    fun `day dial command provider omits review commands when review is disabled`() {
+    fun `day dial command provider omits review command when review is disabled`() {
         val provider = dayDialCommandProvider(
             onOpenDayDial = { },
             onOpenPlan = { },
             onOpenFocusPlanner = { },
-            onOpenInsights = { },
             onOpenPlanningTools = { },
             onOpenTemplates = { },
             onOpenReview = { },
@@ -49,7 +47,6 @@ class DayDialCommandProviderTest {
         )
 
         val ids = provider.commands().map { it.id }
-        assertFalse(ids.contains("daydial.insights"))
         assertFalse(ids.contains("daydial.review"))
         assertEquals(9, ids.size)
     }

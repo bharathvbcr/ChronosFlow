@@ -19,6 +19,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chronosflow.core.ai.AssistNarrative
+import com.chronosflow.core.ai.FocusNextBlockSuggestion
 import com.chronosflow.core.ai.PrivacyMode
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
@@ -326,6 +328,8 @@ internal fun DayDialMainContent(
     focusRestoredMessage: String?,
     moodEnergyCheckIns: List<MoodEnergyCheckIn>,
     moodCheckInCoaching: AssistNarrative? = null,
+    nextFocusSuggestion: FocusNextBlockSuggestion? = null,
+    focusGuidance: AssistNarrative? = null,
     genAiRuntimeStatus: GenAiRuntimeStatus,
     insightsTabState: InsightsTabUiState,
     manualMissedBlockIds: Set<String>,
@@ -354,7 +358,6 @@ internal fun DayDialMainContent(
     featureFlags: ChronosFeatureFlags,
     onPlanningStyleSelected: (String) -> Unit,
     onPreviewOnDeviceModelChanged: (Boolean) -> Unit,
-    onShowRingGuideChanged: (Boolean) -> Unit,
     onProtectFocusChanged: (Boolean) -> Unit,
     onAddBreaksAutomaticallyChanged: (Boolean) -> Unit,
     onPreserveManualBlocksChanged: (Boolean) -> Unit,
@@ -413,7 +416,8 @@ internal fun DayDialMainContent(
     showMessage: (String) -> Unit,
     sidebarBackProgress: Float = 0f,
     currentTab: DayDialTab = DayDialTab.TODAY,
-    activeSidebarPage: SidebarPage? = null
+    activeSidebarPage: SidebarPage? = null,
+    scaffoldPadding: PaddingValues = PaddingValues()
 ) {
     val darkTheme = resolveDayDialDarkTheme(appearanceMode)
     val colorScheme = MaterialTheme.colorScheme
@@ -458,6 +462,8 @@ internal fun DayDialMainContent(
                         manualMissedBlockIds = manualMissedBlockIds,
                         compactMode = compactMode,
                         compactWindowStart = compactWindowStart,
+                        nightStartMinute = sleepScheduleStartMinute,
+                        nightEndMinute = sleepScheduleEndMinute,
                         glassSurfacesEnabled = glassSurfacesEnabled,
                         highContrastEnabled = highContrastEnabled,
                         showRingGuide = showRingGuide,
@@ -489,12 +495,15 @@ internal fun DayDialMainContent(
                             )
                         },
                         onDragCancel = viewModel::onBlockDragCancelled,
+                        onToggleCompactMode = viewModel::onCompactModeToggled,
+                        onWindowBack = viewModel::moveWindowBack,
+                        onWindowForward = viewModel::moveWindowForward,
+                        onCenterWindowOnNow = viewModel::centerWindowOnNow,
                         onStartFocus = viewModel::startFocusSession,
                         onCompleteBlock = viewModel::markBlockComplete,
                         onUndoMissed = { blockId -> viewModel.markCurrentBlockMissed(blockId, false) },
                         onShowMissed = { onActiveSheetChanged(SheetTarget.MissedBlocks) },
                         onOpenPlanTab = onOpenPlanTab,
-                        onShowRingGuideChanged = onShowRingGuideChanged,
                         onOpenReview = onOpenReview,
                         onOpenTasks = onOpenTasks,
                         onOpenHabits = onOpenHabits,
@@ -508,13 +517,20 @@ internal fun DayDialMainContent(
                         onOpenPlanned = { onActiveSheetChanged(SheetTarget.ReviewDetails(ReviewDetailSection.PLANNED)) },
                         onOpenActual = { onActiveSheetChanged(SheetTarget.ReviewDetails(ReviewDetailSection.ACTUAL)) },
                         onOpenMissedRecovery = { onActiveSheetChanged(SheetTarget.ReviewDetails(ReviewDetailSection.MISSED)) },
-                        contentBottomPadding = contentBottomPadding,
+                        contentTopPadding = scaffoldPadding.calculateTopPadding(),
+                        contentBottomPadding = contentBottomPadding + scaffoldPadding.calculateBottomPadding(),
                         onAiStripAction = { label ->
                             when (label) {
-                                "Fill gaps" -> viewModel.fillEmptyTime()
+                                "Fill gaps" -> {
+                                    viewModel.fillEmptyTime(addBreaksAutomatically)
+                                    onActiveSheetChanged(SheetTarget.AiPlan)
+                                }
                                 "Rebalance" -> viewModel.rebalanceDay()
                                 "Add breaks" -> viewModel.createQuickBlock(title = "Break", durationMinutes = 15)
-                                "Protect focus" -> viewModel.onAiPlanRequested(listOf("protect focus"))
+                                "Protect focus" -> {
+                                    viewModel.onAiPlanRequested(listOf("protect focus"))
+                                    onActiveSheetChanged(SheetTarget.AiPlan)
+                                }
                             }
                         }
                     )
@@ -564,8 +580,12 @@ internal fun DayDialMainContent(
                         onDeleteBlock = viewModel::deleteBlock,
                         onDuplicateBlock = viewModel::duplicateBlock,
                         onApplyTemplate = templateState.applyTemplate,
-                        onFillGaps = viewModel::fillEmptyTime,
-                        contentBottomPadding = contentBottomPadding
+                        onFillGaps = {
+                            viewModel.fillEmptyTime(addBreaksAutomatically)
+                            onActiveSheetChanged(SheetTarget.AiPlan)
+                        },
+                        contentTopPadding = scaffoldPadding.calculateTopPadding(),
+                        contentBottomPadding = contentBottomPadding + scaffoldPadding.calculateBottomPadding()
                     )
             }
 
@@ -614,11 +634,22 @@ internal fun DayDialMainContent(
                             onDismissSessionResumedBanner = viewModel::clearFocusRestoredMessage,
                             moodEnergyCheckIns = moodEnergyCheckIns,
                             moodCheckInCoaching = moodCheckInCoaching,
+                            nextFocusSuggestion = nextFocusSuggestion,
+                            onRequestNextFocusSuggestion = viewModel::refreshNextFocusSuggestion,
+                            focusGuidance = focusGuidance,
+                            onRefreshFocusGuidance = { remaining ->
+                                viewModel.refreshFocusGuidance(
+                                    remainingSeconds = remaining,
+                                    nextBlockTitle = nextBlock?.title
+                                )
+                            },
+                            onClearFocusGuidance = viewModel::clearFocusGuidance,
                             genAiRuntimeStatus = genAiRuntimeStatus,
                             cachedMoodScore = focusCachedAccent.first,
                             cachedEnergyScore = focusCachedAccent.second,
                             linkedBlockManuallyMissed = focusBlock?.id in manualMissedBlockIds,
-                            contentBottomPadding = contentBottomPadding
+                            contentTopPadding = scaffoldPadding.calculateTopPadding(),
+                            contentBottomPadding = contentBottomPadding + scaffoldPadding.calculateBottomPadding()
                         )
             }
 
@@ -635,6 +666,7 @@ internal fun DayDialMainContent(
                         reviewInsights = insightsTabState.reviewInsights,
                         recommendations = insightsTabState.recommendations,
                         assistSnapshot = insightsTabState.assistSnapshot,
+                        digest = insightsTabState.digest,
                         isRefreshing = insightsTabState.isRefreshing,
                         onRefreshRecommendations = viewModel::refreshInsightsRecommendations,
                         onApplyRecommendation = { recommendation ->
@@ -646,7 +678,11 @@ internal fun DayDialMainContent(
                         },
                         onOpenFullReview = onOpenReview,
                         onCreatePlan = onOpenPlanTab,
-                        contentBottomPadding = contentBottomPadding
+                        contentTopPadding = scaffoldPadding.calculateTopPadding(),
+                        contentBottomPadding = contentBottomPadding + scaffoldPadding.calculateBottomPadding(),
+                        period = insightsTabState.period,
+                        periodSummary = insightsTabState.periodSummary,
+                        onPeriodSelected = viewModel::setInsightsPeriod
                     )
             }
         }
@@ -698,12 +734,13 @@ internal fun DayDialMainContent(
                         review = review,
                         privacyMode = privacyMode,
                         previewOnDeviceModel = previewOnDeviceModel,
-                        compactMode = compactMode,
                         onSelectDate = viewModel::selectDate,
                         onPrivacyModeSelected = viewModel::setPrivacyMode,
                         onPreviewOnDeviceModelChanged = onPreviewOnDeviceModelChanged,
-                        onCompactModeToggled = viewModel::onCompactModeToggled,
-                        onGeneratePlan = { viewModel.onAiPlanRequested(listOf("Generate plan for $selectedDate")) },
+                        onGeneratePlan = {
+                            viewModel.onAiPlanRequested(listOf("Generate plan for $selectedDate"))
+                            onActiveSheetChanged(SheetTarget.AiPlan)
+                        },
                         planningStyle = planningStyle,
                         onPlanningStyleSelected = onPlanningStyleSelected,
                         protectFocusBlocks = protectFocusBlocks,
@@ -713,7 +750,10 @@ internal fun DayDialMainContent(
                         preserveManualBlocks = preserveManualBlocks,
                         onPreserveManualBlocksChanged = onPreserveManualBlocksChanged,
                         onRebalance = viewModel::rebalanceDay,
-                        onFillGaps = viewModel::fillEmptyTime,
+                        onFillGaps = {
+                            viewModel.fillEmptyTime(addBreaksAutomatically)
+                            onActiveSheetChanged(SheetTarget.AiPlan)
+                        },
                         onClearDay = viewModel::clearCurrentDay,
                         onSaveTemplate = templateState.saveCurrentAsTemplate,
                         onOpenMissed = { onActiveSheetChanged(SheetTarget.MissedBlocks) },
@@ -779,6 +819,7 @@ internal fun DayDialMainContent(
                         onOpenImport = { onActiveSheetChanged(SheetTarget.ImportBackup) },
                         onOpenWeeklySummary = { onActiveSheetChanged(SheetTarget.WeeklySummary) },
                         onOpenDiagnostics = { onActiveSheetChanged(SheetTarget.Diagnostics) },
+                        onOpenLogs = { onActiveSheetChanged(SheetTarget.Logs) },
                         selectedBlockId = selectedBlockId,
                         onOpenFocusScreen = onOpenFocusScreen,
                         onOpenTasks = onOpenTasks,
@@ -807,7 +848,8 @@ internal fun DayDialMainContent(
                         onQuickMedicationTaken = viewModel::markDayQuickMedicationTaken,
                         onQuickMedicationMissed = viewModel::markDayQuickMedicationMissed,
                         onOpenBlock = viewModel::onBlockSelected,
-                        contentBottomPadding = contentBottomPadding,
+                        contentTopPadding = scaffoldPadding.calculateTopPadding(),
+                        contentBottomPadding = contentBottomPadding + scaffoldPadding.calculateBottomPadding(),
                         showMessage = showMessage
                     )
                 }

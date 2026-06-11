@@ -4,6 +4,7 @@ import com.chronosflow.core.ai.MedicationAssistSuggestion
 import com.chronosflow.core.ai.RoutineAssistSource
 import com.chronosflow.core.domain.model.MedicationPlan
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class MedicationFormSheetStateTest {
@@ -38,6 +39,152 @@ class MedicationFormSheetStateTest {
         assertEquals("Mark Vitamin D missed from medication form", medicationFormMissedActionLabel(plan))
         assertEquals("Snooze Vitamin D for 15 minutes from medication form", medicationFormSnoozeActionLabel(plan, minutes = 15))
         assertEquals("Snooze Vitamin D for 60 minutes from medication form", medicationFormSnoozeActionLabel(plan, minutes = 60))
+    }
+
+    @Test
+    fun `applying a medication suggestion supersedes same kind alternatives only`() {
+        val morning = MedicationAssistSuggestion.Reminder(
+            id = "reminder:morning",
+            label = "Morning",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            primaryMinute = 8 * 60
+        )
+        val evening = morning.copy(id = "reminder:evening", label = "Evening", primaryMinute = 20 * 60)
+        val meal = MedicationAssistSuggestion.MealTiming(
+            id = "meal:food",
+            label = "With food",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            mealTiming = "With food"
+        )
+        val suggestions = listOf(morning, evening, meal)
+
+        assertEquals(
+            setOf("reminder:morning", "reminder:evening"),
+            supersededMedicationAssistSuggestionIds(morning, suggestions)
+        )
+        assertEquals(
+            setOf("meal:food"),
+            supersededMedicationAssistSuggestionIds(meal, suggestions)
+        )
+    }
+
+    @Test
+    fun `untouched reminder default follows the medication context`() {
+        assertEquals(
+            21 * 60,
+            contextualMedicationDefaultReminderMinute("Melatonin before bed", "", emptyList())
+        )
+        assertEquals(
+            8 * 60,
+            contextualMedicationDefaultReminderMinute("Vitamin D with breakfast", "", emptyList())
+        )
+        assertNull(contextualMedicationDefaultReminderMinute("Ibuprofen", "", emptyList()))
+        assertEquals(
+            20 * 60,
+            contextualMedicationDefaultReminderMinute(
+                "Ibuprofen",
+                "",
+                listOf(
+                    MedicationAssistSuggestion.Reminder(
+                        id = "reminder:suggested",
+                        label = "Evening",
+                        reason = "Test",
+                        source = RoutineAssistSource.LOCAL,
+                        primaryMinute = 20 * 60
+                    )
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `auto apply targets details reminder and meal timing only while untouched`() {
+        val details = MedicationAssistSuggestion.Details(
+            id = "details:a",
+            label = "Vitamin D",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            name = "Vitamin D",
+            dosage = "1000",
+            unit = "iu"
+        )
+        val reminder = MedicationAssistSuggestion.Reminder(
+            id = "reminder:a",
+            label = "Morning",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            primaryMinute = 8 * 60
+        )
+        val mealTiming = MedicationAssistSuggestion.MealTiming(
+            id = "meal:a",
+            label = "With food",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            mealTiming = "With food"
+        )
+        val refill = MedicationAssistSuggestion.RefillTracking(
+            id = "refill:a",
+            label = "Track refills",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            dosesLeft = 30
+        )
+
+        val ids = autoApplicableMedicationAssistSuggestionIds(
+            suggestions = listOf(details, reminder, mealTiming, refill),
+            doseUnset = true,
+            reminderUntouched = false,
+            mealTimingUntouched = true
+        )
+
+        assertEquals(setOf("details:a", "meal:a"), ids)
+    }
+
+    @Test
+    fun `suggestions already satisfied by the medication form are reported redundant`() {
+        val matchingReminder = MedicationAssistSuggestion.Reminder(
+            id = "reminder:match",
+            label = "Morning",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            primaryMinute = 8 * 60
+        )
+        val freshMealTiming = MedicationAssistSuggestion.MealTiming(
+            id = "meal:new",
+            label = "With food",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            mealTiming = "With food"
+        )
+        val matchingDetails = MedicationAssistSuggestion.Details(
+            id = "details:match",
+            label = "Vitamin D",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            name = "vitamin d",
+            dosage = "1000",
+            unit = "iu"
+        )
+
+        val redundant = redundantMedicationAssistSuggestionIds(
+            suggestions = listOf(matchingReminder, freshMealTiming, matchingDetails),
+            currentName = "Vitamin D",
+            currentDosage = "1000",
+            currentUnit = "iu",
+            currentFrequency = "Once daily",
+            currentPrimaryReminderMinute = 8 * 60,
+            currentSecondaryReminderMinute = null,
+            currentMealTiming = "Anytime",
+            currentHasRefillTracking = false,
+            currentRefillCount = null,
+            currentNotes = "",
+            currentForm = "tablet",
+            currentRoute = "oral"
+        )
+
+        assertEquals(setOf("reminder:match", "details:match"), redundant)
     }
 
     @Test

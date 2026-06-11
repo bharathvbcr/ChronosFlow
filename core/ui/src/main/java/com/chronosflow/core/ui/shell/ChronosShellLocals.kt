@@ -14,6 +14,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import java.time.LocalDate
 
 /** Bottom clearance for compact shell chrome (pill + FAB + margin), excluding system nav bar inset. */
 val ChronosCompactShellBottomClearance = 108.dp
@@ -25,11 +26,29 @@ class ChronosShellOverlayController {
     val suppressBottomChrome: Boolean
         get() = suppressionTags.isNotEmpty()
 
+    /**
+     * Date currently shown by the day dial, reported by the feature so shell
+     * chrome (e.g. the Today tab badge) can indicate when it is not today.
+     */
+    var dayDialViewedDate by mutableStateOf<LocalDate?>(null)
+
     fun setSuppressed(tag: String, suppressed: Boolean) {
         suppressionTags = if (suppressed) {
             suppressionTags + tag
         } else {
             suppressionTags - tag
+        }
+    }
+}
+
+/** Reports the day dial's viewed date to the shell while the caller is composed. */
+@Composable
+fun ChronosShellViewedDateReporter(viewedDate: LocalDate?) {
+    val controller = LocalChronosShellOverlayController.current ?: return
+    DisposableEffect(viewedDate, controller) {
+        controller.dayDialViewedDate = viewedDate
+        onDispose {
+            controller.dayDialViewedDate = null
         }
     }
 }

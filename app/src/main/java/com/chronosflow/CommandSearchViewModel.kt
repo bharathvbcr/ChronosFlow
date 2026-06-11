@@ -4,20 +4,30 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.chronosflow.core.ai.CommandAssistCandidate
 import com.chronosflow.core.ai.CommandAssistPlanner
+import com.chronosflow.core.ai.ConversationalAssistant
+import com.chronosflow.core.ai.AssistantActionProposal
+import com.chronosflow.core.ai.AssistantMessage
+import com.chronosflow.core.ai.AssistantResponse
+import com.chronosflow.core.ai.AssistantRole
+import com.chronosflow.core.ai.AssistantStreamEvent
 import com.chronosflow.core.ai.CaptureIntentClassifier
 import com.chronosflow.core.ai.CaptureIntentSuggestion
 import com.chronosflow.core.ai.CaptureIntentType
+import com.chronosflow.core.ai.ProactiveAssistGenerator
 import com.chronosflow.core.ai.SemanticAppSearchBridge
 import com.chronosflow.core.ai.SemanticDocumentType
 import com.chronosflow.core.ai.SemanticPlanningCorpusRefresher
 import com.chronosflow.core.ai.SemanticPlanningIndex
 import com.chronosflow.core.ai.SemanticSearchHit
+import com.chronosflow.core.ai.genai.AssistGenAiSource
+import com.chronosflow.core.data.datastore.ChronosPreferencesDataSource
 import com.chronosflow.core.ui.components.CommandPaletteGroups
 import com.chronosflow.core.ui.components.CommandPaletteItem
 import com.chronosflow.core.ui.components.filterCommandPaletteItems
 import com.chronosflow.core.ui.components.mergeCommandPaletteResults
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Clock
+import java.time.LocalDate
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -63,12 +73,42 @@ sealed interface LauncherAction {
     data object OnClearHistory : LauncherAction
 }
 
+data class AssistantReplyUi(
+    val question: String,
+    val reply: String,
+    /** Confirmable commands resolved from the assistant's proposals, most useful first. */
+    val proposedCommands: List<CommandPaletteItem>,
+    val source: AssistGenAiSource
+) {
+    val proposedCommand: CommandPaletteItem? get() = proposedCommands.firstOrNull()
+}
+
+data class AssistantPanelState(
+    val isAsking: Boolean = false,
+    /** The question currently being answered (or just answered). */
+    val question: String? = null,
+    /** Cumulative partial reply while the on-device model is still streaming. */
+    val streamingReply: String? = null,
+    val reply: AssistantReplyUi? = null,
+    /** Conversation so far, so follow-up questions keep their context until the palette closes. */
+    val history: List<AssistantMessage> = emptyList()
+)
+
+/** Palette command id that routes the typed query to the conversational assistant in-place. */
+const val ASSISTANT_ASK_COMMAND_ID = "assistant.ask"
+
+/** Palette command id for the cached proactive daily digest shown when the palette opens. */
+const val ASSISTANT_DIGEST_COMMAND_ID = "assistant.digest"
+
 @HiltViewModel
 class CommandSearchViewModel @Inject constructor(
     private val semanticIndex: SemanticPlanningIndex,
     private val appSearchBridge: SemanticAppSearchBridge,
     private val commandAssistPlanner: CommandAssistPlanner,
-    private val corpusRefresher: SemanticPlanningCorpusRefresher
+    private val conversationalAssistant: ConversationalAssistant,
+    private val corpusRefresher: SemanticPlanningCorpusRefresher,
+    private val proactiveAssistGenerator: ProactiveAssistGenerator,
+    private val preferences: ChronosPreferencesDataSource
 ) : ViewModel() {
     private val _indexReady = MutableStateFlow(false)
     val indexReady = _indexReady.asStateFlow()
@@ -76,6 +116,8 @@ class CommandSearchViewModel @Inject constructor(
     val appSearchEnabled = _appSearchEnabled.asStateFlow()
     private val _uiState = MutableStateFlow(CommandUiState())
     val uiState = _uiState.asStateFlow()
+    private val _assistantPanel = MutableStateFlow(AssistantPanelState())
+    val assistantPanel = _assistantPanel.asStateFlow()
     private var indexRefreshRequested = false
 
     suspend fun rebuildIndex(redactMedicationNames: Boolean? = null) {
@@ -142,6 +184,7 @@ class CommandSearchViewModel @Inject constructor(
             }
             LauncherAction.OnClose -> {
                 _uiState.value = CommandUiState()
+                _assistantPanel.value = AssistantPanelState()
             }
             LauncherAction.OnClearHistory -> {
                 _uiState.update {
@@ -191,11 +234,168 @@ class CommandSearchViewModel @Inject constructor(
                 val command = _uiState.value.results.firstOrNull { it.id == action.commandId }
                     ?: paletteCommands.firstOrNull { it.id == action.commandId }
                     ?: return
+                // The ask row converses in-place: the palette stays open so the reply panel
+                // is visible, and the query is kept for follow-ups.
+                if (command.id == ASSISTANT_ASK_COMMAND_ID) {
+                    command.onRun()
+                    return
+                }
+                recordRecentCommand(command.id)
                 _uiState.update { it.copy(isExecuting = true) }
                 command.onRun()
                 _uiState.value = CommandUiState()
             }
         }
+    }
+
+    /**
+     * Free-text conversational ask: streams [query] through the on-device [ConversationalAssistant],
+     * publishing partial text live and the final reply to [assistantPanel]. The conversation history
+     * is kept across asks so follow-ups stay in context until the palette closes. Quick-capture
+     * create commands for the query are offered alongside the static catalog, so "add task call mom
+     * tomorrow" can propose creating that task rather than just opening a screen. Any proposed action
+     * is resolved back to a runnable [CommandPaletteItem] that the user must still confirm — nothing
+     * runs automatically.
+     */
+    fun askAssistant(
+        query: String,
+        paletteCommands: List<CommandPaletteItem>,
+        actions: AssistantCommandActions = AssistantCommandActions()
+    ) {
+        if (query.isBlank()) return
+        val priorHistory = _assistantPanel.value.history
+        val proposableCommands = mergeCommandPaletteResults(
+            quickCaptureCreateCommands(query, actions),
+            paletteCommands
+        )
+        val candidates = proposableCommands.map { it.toAssistCandidate() }
+        _assistantPanel.update {
+            it.copy(isAsking = true, question = query, streamingReply = null, reply = null)
+        }
+        viewModelScope.launch {
+            var finalResponse: AssistantResponse? = null
+            runCatching {
+                conversationalAssistant.respondStream(
+                    history = priorHistory,
+                    userMessage = query,
+                    commands = candidates
+                ).collect { event ->
+                    when (event) {
+                        is AssistantStreamEvent.Partial -> _assistantPanel.update {
+                            it.copy(streamingReply = event.text.ifBlank { null })
+                        }
+                        is AssistantStreamEvent.Final -> finalResponse = event.response
+                    }
+                }
+            }
+            val response = finalResponse
+                ?: runCatching { conversationalAssistant.respond(priorHistory, query, candidates) }.getOrNull()
+                ?: AssistantResponse(
+                    reply = "The assistant is unavailable right now — the commands below still work.",
+                    proposals = emptyList(),
+                    source = AssistGenAiSource.LOCAL
+                )
+            val proposedCommands = response.proposals
+                .mapNotNull { proposal -> resolveProposedCommand(proposal, proposableCommands, actions) }
+                .distinctBy { it.id }
+            _assistantPanel.update {
+                it.copy(
+                    isAsking = false,
+                    streamingReply = null,
+                    reply = AssistantReplyUi(query, response.reply, proposedCommands, response.source),
+                    history = (priorHistory + listOf(
+                        AssistantMessage(AssistantRole.USER, query),
+                        AssistantMessage(AssistantRole.ASSISTANT, response.reply)
+                    )).takeLast(MAX_PANEL_HISTORY)
+                )
+            }
+        }
+    }
+
+    fun clearAssistant() {
+        _assistantPanel.value = AssistantPanelState()
+    }
+
+    /**
+     * Runs a confirmed assistant proposal. Quick-capture proposals are built per-query and are not
+     * part of the static command catalog, so they execute through the resolved item directly instead
+     * of the [LauncherAction.OnExecute] id lookup.
+     */
+    fun runAssistantProposal(command: CommandPaletteItem) {
+        recordRecentCommand(command.id)
+        _uiState.update { it.copy(isExecuting = true) }
+        command.onRun()
+        _uiState.value = CommandUiState()
+        _assistantPanel.value = AssistantPanelState()
+    }
+
+    private companion object {
+        /** Three full exchanges — matches what ConversationalAssistant feeds back into the prompt. */
+        const val MAX_PANEL_HISTORY = 6
+        const val KEY_RECENT_COMMAND_IDS = "command_palette_recent_ids"
+        const val MAX_RECENT_COMMANDS = 8
+        /** Above plain commands, below capture rows (260+) and the digest (400). */
+        const val RECENT_BOOST_PRIORITY = 200
+        val RECENT_EXCLUDED_ID_PREFIXES = listOf("capture.create.", "semantic.", "assistant.")
+    }
+
+    /**
+     * Resolves an assistant proposal to a runnable command. Capture proposals that carry a
+     * conversation-composed payload ("call mom" + "make it tomorrow at 2pm" → "call mom tomorrow
+     * at 2pm") are rebuilt from that payload so the opened form is prefilled with every detail,
+     * not just the last message. Falls back to the command resolved from the original query.
+     */
+    private fun resolveProposedCommand(
+        proposal: AssistantActionProposal,
+        proposableCommands: List<CommandPaletteItem>,
+        actions: AssistantCommandActions
+    ): CommandPaletteItem? {
+        val payload = proposal.capturePayload?.trim().orEmpty()
+        if (payload.isNotBlank()) {
+            quickCaptureCreateCommands(payload, actions)
+                .firstOrNull { it.id == proposal.commandId }
+                ?.let { return it }
+        }
+        return proposableCommands.firstOrNull { it.id == proposal.commandId }
+    }
+
+    /**
+     * Remembers the last [MAX_RECENT_COMMANDS] executed catalog commands so they surface first
+     * when the palette opens. Per-query rows (quick-capture, semantic hits, assistant rows) are
+     * skipped — they only make sense for the query that produced them.
+     */
+    private fun recordRecentCommand(commandId: String) {
+        if (RECENT_EXCLUDED_ID_PREFIXES.any { commandId.startsWith(it) }) return
+        runCatching {
+            val recents = recentCommandIds().filterNot { it == commandId }
+            preferences.putString(
+                KEY_RECENT_COMMAND_IDS,
+                (listOf(commandId) + recents).take(MAX_RECENT_COMMANDS).joinToString(",")
+            )
+        }
+    }
+
+    private fun recentCommandIds(): List<String> = runCatching {
+        preferences.getString(KEY_RECENT_COMMAND_IDS, "")
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+    }.getOrDefault(emptyList())
+
+    /** Boosts recently executed commands when the palette opens with no query. */
+    private fun recentCommandBoosts(
+        query: String,
+        paletteCommands: List<CommandPaletteItem>
+    ): List<CommandPaletteItem> {
+        if (query.isNotBlank()) return emptyList()
+        val recents = recentCommandIds()
+        if (recents.isEmpty()) return emptyList()
+        return paletteCommands
+            .filter { it.id in recents }
+            .map { command ->
+                val rank = recents.indexOf(command.id).coerceAtLeast(0)
+                command.copy(priority = RECENT_BOOST_PRIORITY - rank)
+            }
     }
 
     private fun requestIndexRefresh() {
@@ -223,10 +423,19 @@ class CommandSearchViewModel @Inject constructor(
                 semanticIndex.query(query)
             }
             val semantic = hits.map { it.toCommandItem(actions) }
+            // Quick-capture rows go first so they survive the prompt's candidate cap; an
+            // AI-confirmed capture type outranks the keyword heuristic's ordering.
+            val captureCommands = quickCaptureCreateCommands(query, actions)
             val assistIds = commandAssistPlanner.rankCommandIdsWithAssist(
                 query = query,
-                candidates = paletteCommands.map { it.toAssistCandidate() }
+                candidates = (captureCommands + paletteCommands).map { it.toAssistCandidate() }
             )
+            val aiConfirmedCapture = captureCommands
+                .filter { it.id in assistIds }
+                .map { command ->
+                    val rank = assistIds.indexOf(command.id)
+                    command.withBoostedPriority(320 - rank.coerceAtLeast(0))
+                }
             val boosted = paletteCommands
                 .filter { it.id in assistIds }
                 .map { command ->
@@ -239,7 +448,7 @@ class CommandSearchViewModel @Inject constructor(
                 boostPriority = 160,
                 excludeIds = assistIds.toSet()
             )
-            onResults(mergeCommandPaletteResults(boosted + localBoosted, semantic))
+            onResults(mergeCommandPaletteResults(aiConfirmedCapture + boosted + localBoosted, semantic))
         }
     }
 
@@ -279,14 +488,68 @@ class CommandSearchViewModel @Inject constructor(
     ): List<CommandPaletteItem> {
         val local = filterCommandPaletteItems(paletteCommands, query)
         val capture = quickCaptureCreateCommands(query, actions)
+        val recents = recentCommandBoosts(query, paletteCommands)
+        val assistant = listOfNotNull(
+            proactiveDigestCommand(query, actions),
+            askAssistantCommand(query, actions, paletteCommands)
+        )
         val semantic = searchCommands(
             query = query,
             actions = actions,
             paletteCommands = paletteCommands
         )
-        return mergeCommandPaletteResults(capture, local, semantic, asyncResults)
+        return mergeCommandPaletteResults(assistant, capture, recents, local, semantic, asyncResults)
             .filter { selectedSection == null || it.group == selectedSection }
             .take(maxResults)
+    }
+
+    /**
+     * The cached on-device daily digest, surfaced when the palette opens with no query so the
+     * first thing the user sees is a one-line read on their day. Cache-only — no live inference
+     * on the palette-open path. Tapping it opens the review.
+     */
+    private fun proactiveDigestCommand(
+        query: String,
+        actions: AssistantCommandActions
+    ): CommandPaletteItem? {
+        if (query.isNotBlank()) return null
+        val content = runCatching {
+            proactiveAssistGenerator.cachedCopy(LocalDate.now().toString(), System.currentTimeMillis())
+        }.getOrNull() ?: return null
+        return CommandPaletteItem(
+            id = ASSISTANT_DIGEST_COMMAND_ID,
+            title = "Today at a glance",
+            subtitle = content.text,
+            keywords = setOf("digest", "today", "assistant", "review"),
+            group = CommandPaletteGroups.ASSISTANT,
+            shortcutLabel = "Digest",
+            priority = 400,
+            onRun = actions.onOpenReview
+        )
+    }
+
+    /**
+     * Routes question-shaped queries ("what should I do next?", "plan my morning") to the
+     * conversational assistant. Running this row asks in-place — the palette stays open and the
+     * reply lands in the assistant panel.
+     */
+    private fun askAssistantCommand(
+        query: String,
+        actions: AssistantCommandActions,
+        paletteCommands: List<CommandPaletteItem>
+    ): CommandPaletteItem? {
+        val trimmed = query.trim()
+        if (!isAssistantQuestionQuery(trimmed)) return null
+        return CommandPaletteItem(
+            id = ASSISTANT_ASK_COMMAND_ID,
+            title = "Ask the assistant",
+            subtitle = "\"${trimmed.take(72)}\" — get an answer and a suggested action.",
+            keywords = setOf("ask", "assistant", "question", "ai"),
+            group = CommandPaletteGroups.ASSISTANT,
+            shortcutLabel = "Ask",
+            priority = 240,
+            onRun = { askAssistant(trimmed, paletteCommands, actions) }
+        )
     }
 
     private fun boostedPaletteCommands(
@@ -355,7 +618,8 @@ private fun quickCaptureCreateCommands(
                         subtitle = captureCreateSubtitle(
                             typeLabel = typeLabel,
                             suggestion = suggestion,
-                            action = captureCreateAction(CaptureIntentType.TASK, capture)
+                            action = captureCreateAction(CaptureIntentType.TASK, capture),
+                            capture = capture
                         ),
                         shortcut = captureCreateShortcut(CaptureIntentType.TASK, capture),
                         onRun = { actions.onCaptureTask(capture) }
@@ -368,7 +632,8 @@ private fun quickCaptureCreateCommands(
                         subtitle = captureCreateSubtitle(
                             typeLabel = typeLabel,
                             suggestion = suggestion,
-                            action = captureCreateAction(CaptureIntentType.MEDICATION, capture)
+                            action = captureCreateAction(CaptureIntentType.MEDICATION, capture),
+                            capture = capture
                         ),
                         shortcut = captureCreateShortcut(CaptureIntentType.MEDICATION, capture),
                         onRun = { actions.onCaptureMedication(capture) }
@@ -381,7 +646,8 @@ private fun quickCaptureCreateCommands(
                         subtitle = captureCreateSubtitle(
                             typeLabel = typeLabel,
                             suggestion = suggestion,
-                            action = captureCreateAction(CaptureIntentType.HABIT, capture)
+                            action = captureCreateAction(CaptureIntentType.HABIT, capture),
+                            capture = capture
                         ),
                         shortcut = captureCreateShortcut(CaptureIntentType.HABIT, capture),
                         onRun = { actions.onCaptureHabit(capture) }
@@ -394,7 +660,8 @@ private fun quickCaptureCreateCommands(
                         subtitle = captureCreateSubtitle(
                             typeLabel = typeLabel,
                             suggestion = suggestion,
-                            action = captureCreateAction(CaptureIntentType.FOCUS, capture)
+                            action = captureCreateAction(CaptureIntentType.FOCUS, capture),
+                            capture = capture
                         ),
                         shortcut = captureCreateShortcut(CaptureIntentType.FOCUS, capture),
                         onRun = { actions.onCaptureFocus(capture) }
@@ -440,15 +707,106 @@ private fun captureCreateTitle(typeLabel: String, capture: String): String =
 private fun captureCreateSubtitle(
     typeLabel: String,
     suggestion: CaptureIntentSuggestion,
-    action: String
+    action: String,
+    capture: String
 ): String {
-    val confidence = when {
-        suggestion.score >= 8 -> "Strong"
-        suggestion.score >= 4 -> "Likely"
-        else -> "Capture"
+    val intro = when {
+        suggestion.score >= 8 -> "Looks like ${typeLabel.withIndefiniteArticle()}"
+        suggestion.score >= 4 -> "Could be ${typeLabel.withIndefiniteArticle()}"
+        else -> "Capture as ${typeLabel.withIndefiniteArticle()}"
     }
-    return "$confidence $typeLabel: ${suggestion.reason} $action"
+    return buildString {
+        append(intro)
+        append(" — ")
+        append(action.replaceFirstChar { it.lowercaseChar() })
+        capturePrefillPreview(suggestion.type, capture)?.let { prefill ->
+            append(" ")
+            append(prefill)
+        }
+    }
 }
+
+private fun String.withIndefiniteArticle(): String =
+    if (firstOrNull()?.lowercaseChar() in setOf('a', 'e', 'i', 'o', 'u')) "an $this" else "a $this"
+
+/**
+ * Concrete prefill markers extracted from the capture text (date, time, duration, dose,
+ * cadence) so the Quick create row shows what the form will actually receive instead of
+ * generic boilerplate. Returns null when nothing recognizable was found.
+ */
+internal fun capturePrefillPreview(type: CaptureIntentType, capture: String): String? {
+    val normalized = capture.lowercase()
+    val parts = when (type) {
+        CaptureIntentType.TASK -> listOfNotNull(
+            captureDateWord(normalized),
+            captureClockTime(normalized),
+            captureDurationLabel(normalized),
+            "high priority".takeIf {
+                normalized.hasCaptureTerm("urgent", "asap", "high priority", "important", "critical")
+            }
+        )
+        CaptureIntentType.MEDICATION -> listOfNotNull(
+            captureDoseLabel(normalized),
+            captureFrequencyLabel(normalized),
+            captureDayPartWord(normalized),
+            captureClockTime(normalized)
+        )
+        CaptureIntentType.HABIT -> listOfNotNull(
+            captureFrequencyLabel(normalized),
+            captureDayPartWord(normalized),
+            captureDurationLabel(normalized)
+        )
+        CaptureIntentType.FOCUS -> listOfNotNull(
+            captureDurationLabel(normalized),
+            captureClockTime(normalized)
+        )
+    }
+    if (parts.isEmpty()) return null
+    return "Prefills ${parts.distinct().joinToString(" · ")}."
+}
+
+private val CAPTURE_DATE_WORD_PATTERN = Regex(
+    """\b(today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b"""
+)
+
+private fun captureDateWord(normalized: String): String? =
+    CAPTURE_DATE_WORD_PATTERN.find(normalized)?.value
+
+private val CAPTURE_CLOCK_TIME_PATTERN = Regex("""\b(\d{1,2})(:\d{2})?\s*(am|pm)\b""")
+
+private fun captureClockTime(normalized: String): String? =
+    CAPTURE_CLOCK_TIME_PATTERN.find(normalized)?.value?.replace(Regex("\\s+"), " ")
+
+private val CAPTURE_DURATION_PATTERN = Regex("""\b(\d{1,3})\s*(m|min|mins|minutes?|h|hr|hrs|hours?)\b""")
+
+private fun captureDurationLabel(normalized: String): String? {
+    val match = CAPTURE_DURATION_PATTERN.find(normalized) ?: return null
+    val amount = match.groupValues[1]
+    return if (match.groupValues[2].startsWith("h")) "${amount}h" else "${amount}m"
+}
+
+private val CAPTURE_DOSE_PATTERN = Regex(
+    """\b(\d+(?:\.\d+)?(?:/\d+)?)\s*(mg|mcg|iu|ml|g|units?|puffs?|drops?|sprays?|tablets?|tabs?|capsules?|caps?|pills?)\b"""
+)
+
+private fun captureDoseLabel(normalized: String): String? {
+    val match = CAPTURE_DOSE_PATTERN.find(normalized) ?: return null
+    return "${match.groupValues[1]} ${match.groupValues[2]}"
+}
+
+private val CAPTURE_FREQUENCY_PATTERN = Regex(
+    """\b\d\s*x\s*/?\s*(?:day|week|daily|weekly)\b|\b(?:once|twice)\s+(?:daily|a day|per day|weekly|a week|per week)\b|\b\d\s+times?\s+(?:a|per)\s+(?:day|week)\b|\bevery\s+(?:morning|night|evening|day|\d+\s+hours?)\b|\b(?:daily|nightly|weekdays|weekends)\b"""
+)
+
+private fun captureFrequencyLabel(normalized: String): String? =
+    CAPTURE_FREQUENCY_PATTERN.find(normalized)?.value?.replace(Regex("\\s+"), " ")
+
+private val CAPTURE_DAY_PART_PATTERN = Regex(
+    """\b(before bed|with breakfast|with lunch|with dinner|with food|after food|morning|afternoon|evening|night|bedtime)\b"""
+)
+
+private fun captureDayPartWord(normalized: String): String? =
+    CAPTURE_DAY_PART_PATTERN.find(normalized)?.value
 
 private fun captureCreateTypeLabel(type: CaptureIntentType, capture: String): String {
     val normalized = capture.lowercase()
@@ -652,6 +1010,18 @@ private val TASK_CAPTURE_APP_ACTION_PATTERN = Regex(
 private val HABIT_CAPTURE_APP_ASSIST_PATTERN = Regex(
     """\b(?:with|using|in|on)\s+(?:duolingo|strava|headspace|calm|spotify|youtube|you\s+tube|google\s+fit|fitbit|myfitnesspal|my\s+fitness\s+pal)\b"""
 )
+
+private val QUESTION_QUERY_PATTERN = Regex(
+    """^(what|when|where|which|who|whose|how|why|should|could|would|can|help|plan)\b.*""",
+    RegexOption.IGNORE_CASE
+)
+
+/** Question-shaped queries get an "Ask the assistant" row instead of dead-ending in search. */
+internal fun isAssistantQuestionQuery(query: String): Boolean {
+    val trimmed = query.trim()
+    if (trimmed.length < 6) return false
+    return trimmed.endsWith("?") || QUESTION_QUERY_PATTERN.matches(trimmed)
+}
 
 private fun String.capturePreview(maxLength: Int = 56): String {
     val normalized = trim().replace(Regex("\\s+"), " ")

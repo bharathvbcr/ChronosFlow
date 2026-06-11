@@ -180,15 +180,28 @@ class PlannerService @Inject constructor(
         }
 
         var cursor = 0
+        val movedBlocks = mutableListOf<TimeBlock>()
         blocks.forEach { block ->
             val maxStart = 1440 - block.durationMinutes
             val candidate = findNextAvailableStart(block, cursor, immutable, maxStart)
             if (candidate != null) {
-                repository.saveTimeBlock(block.withUpdatedStart(candidate))
+                if (candidate != block.startMinuteOfDay) {
+                    val moved = block.withUpdatedStart(candidate)
+                    repository.saveTimeBlock(moved)
+                    movedBlocks += moved
+                }
                 cursor = candidate + block.durationMinutes + 5
             }
         }
-        return PlannerOperationResult.Applied("Day rebalance complete", "", null, blocks.map { it.id })
+        if (movedBlocks.isEmpty()) {
+            return PlannerOperationResult.Rejected("Everything already fits — nothing to rebalance", "")
+        }
+        return PlannerOperationResult.Applied(
+            message = rebalanceSummaryMessage(movedBlocks),
+            blockId = "",
+            snappedToMinute = null,
+            affectedBlockIds = movedBlocks.map { it.id }
+        )
     }
 
     suspend fun logActualWindow(blockId: String, actualStartMinute: Int, actualEndMinute: Int): PlannerOperationResult {
@@ -341,4 +354,21 @@ class PlannerService @Inject constructor(
             }
         }
     }
+}
+
+internal fun rebalanceSummaryMessage(movedBlocks: List<TimeBlock>): String {
+    val moves = movedBlocks.take(3).joinToString(", ") { block ->
+        "${block.title.ifBlank { "Untitled" }} → ${formatRebalanceMinute(block.startMinuteOfDay)}"
+    }
+    val extra = movedBlocks.size - 3
+    return buildString {
+        append("Moved ${movedBlocks.size} block${if (movedBlocks.size == 1) "" else "s"}: ")
+        append(moves)
+        if (extra > 0) append(" and $extra more")
+    }
+}
+
+private fun formatRebalanceMinute(minute: Int): String {
+    val normalized = ((minute % 1440) + 1440) % 1440
+    return "%d:%02d".format(normalized / 60, normalized % 60)
 }

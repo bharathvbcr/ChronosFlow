@@ -83,6 +83,7 @@ class CalendarEventRepositoryImplTest {
         val start = Instant.parse("2026-05-08T14:00:00Z")
         val end = Instant.parse("2026-05-08T15:00:00Z")
         coEvery { calendarEventDao.insertCalendarEvent(any()) } returns Unit
+        coEvery { calendarEventDao.deleteEventsBetween(any(), any()) } returns Unit
 
         repository.saveCalendarEvent(
             CalendarEvent(
@@ -134,6 +135,7 @@ class CalendarEventRepositoryImplTest {
         every { cursor.getInt(7) } returns 0
         every { cursor.close() } just runs
         coEvery { calendarEventDao.insertCalendarEvent(any()) } returns Unit
+        coEvery { calendarEventDao.deleteEventsBetween(any(), any()) } returns Unit
         coEvery { timeBlockDao.deleteImportedBlocksBetween(any(), any()) } returns Unit
         coEvery { timeBlockDao.insertTimeBlock(any()) } returns Unit
 
@@ -145,6 +147,7 @@ class CalendarEventRepositoryImplTest {
                 syncedDate
             )
         }
+        coVerify { calendarEventDao.deleteEventsBetween(start, end) }
         coVerify {
             calendarEventDao.insertCalendarEvent(
                 match { entity ->
@@ -157,7 +160,7 @@ class CalendarEventRepositoryImplTest {
         coVerify {
             timeBlockDao.insertTimeBlock(
                 match { entity ->
-                    entity.id == "calendar-import-42-2026-05-08" &&
+                    entity.id == "calendar-import-42-2026-05-08-540" &&
                         entity.title == "Planning review" &&
                         entity.category == "CALENDAR" &&
                         entity.provenance == BlockProvenance.CALENDAR_IMPORTED.name &&
@@ -199,6 +202,7 @@ class CalendarEventRepositoryImplTest {
         every { cursor.getInt(7) } returns 1
         every { cursor.close() } just runs
         coEvery { calendarEventDao.insertCalendarEvent(any()) } returns Unit
+        coEvery { calendarEventDao.deleteEventsBetween(any(), any()) } returns Unit
         coEvery { timeBlockDao.deleteImportedBlocksBetween(any(), any()) } returns Unit
         coEvery { timeBlockDao.insertTimeBlock(any()) } returns Unit
 
@@ -256,6 +260,7 @@ class CalendarEventRepositoryImplTest {
             every { cursor.getInt(7) } returns 1
             every { cursor.close() } just runs
             coEvery { calendarEventDao.insertCalendarEvent(any()) } returns Unit
+        coEvery { calendarEventDao.deleteEventsBetween(any(), any()) } returns Unit
             coEvery { timeBlockDao.deleteImportedBlocksBetween(any(), any()) } returns Unit
             coEvery { timeBlockDao.insertTimeBlock(any()) } returns Unit
 
@@ -282,6 +287,7 @@ class CalendarEventRepositoryImplTest {
         repository.syncFromDeviceCalendar(start, end)
 
         coVerify(exactly = 0) { calendarEventDao.insertCalendarEvent(any()) }
+        coVerify(exactly = 0) { calendarEventDao.deleteEventsBetween(any(), any()) }
         coVerify(exactly = 0) { timeBlockDao.deleteImportedBlocksBetween(any(), any()) }
         coVerify(exactly = 0) { timeBlockDao.insertTimeBlock(any()) }
     }
@@ -318,6 +324,7 @@ class CalendarEventRepositoryImplTest {
             every { cursor.getInt(7) } returns 1
             every { cursor.close() } just runs
             coEvery { calendarEventDao.insertCalendarEvent(any()) } returns Unit
+        coEvery { calendarEventDao.deleteEventsBetween(any(), any()) } returns Unit
             coEvery { timeBlockDao.deleteImportedBlocksBetween(any(), any()) } returns Unit
 
             repository.syncFromDeviceCalendar(start, end)
@@ -418,6 +425,153 @@ class CalendarEventRepositoryImplTest {
         val result = repository.updateExportedTimeBlock(timeBlock(calendarEventId = null))
 
         assertFalse(result)
+    }
+
+    @Test
+    fun `syncFromDeviceCalendar keeps same day recurring instances distinct`() = runTest {
+        val contentResolver = mockk<ContentResolver>()
+        val cursor = mockk<Cursor>()
+        val instancesUri = mockk<Uri>()
+        val zoneId = ZoneId.systemDefault()
+        val syncedDate = LocalDate.parse("2026-05-08")
+        val start = syncedDate.atStartOfDay(zoneId).toInstant()
+        val end = syncedDate.plusDays(1).atStartOfDay(zoneId).toInstant()
+        val morningStart = syncedDate.atTime(9, 0).atZone(zoneId).toInstant()
+        val morningEnd = syncedDate.atTime(9, 30).atZone(zoneId).toInstant()
+        val eveningStart = syncedDate.atTime(16, 0).atZone(zoneId).toInstant()
+        val eveningEnd = syncedDate.atTime(16, 30).atZone(zoneId).toInstant()
+
+        every { context.checkSelfPermission(android.Manifest.permission.READ_CALENDAR) } returns PackageManager.PERMISSION_GRANTED
+        every { context.contentResolver } returns contentResolver
+        every { calendarPlatform.instancesUri(start, end) } returns instancesUri
+        every {
+            contentResolver.query(instancesUri, any(), any(), any(), any())
+        } returns cursor
+        every { cursor.moveToNext() } returnsMany listOf(true, true, false)
+        every { cursor.getLong(0) } returns 42L
+        every { cursor.getString(1) } returns "Standup"
+        every { cursor.getString(2) } returns null
+        every { cursor.getLong(3) } returnsMany listOf(morningStart.toEpochMilli(), eveningStart.toEpochMilli())
+        every { cursor.getLong(4) } returnsMany listOf(morningEnd.toEpochMilli(), eveningEnd.toEpochMilli())
+        every { cursor.getString(5) } returns "UTC"
+        every { cursor.getString(6) } returns null
+        every { cursor.getInt(7) } returns 0
+        every { cursor.close() } just runs
+        coEvery { calendarEventDao.insertCalendarEvent(any()) } returns Unit
+        coEvery { calendarEventDao.deleteEventsBetween(any(), any()) } returns Unit
+        coEvery { timeBlockDao.deleteImportedBlocksBetween(any(), any()) } returns Unit
+        coEvery { timeBlockDao.insertTimeBlock(any()) } returns Unit
+
+        repository.syncFromDeviceCalendar(start, end)
+
+        coVerify(exactly = 2) { timeBlockDao.insertTimeBlock(any()) }
+        coVerify { timeBlockDao.insertTimeBlock(match { it.id == "calendar-import-42-2026-05-08-540" }) }
+        coVerify { timeBlockDao.insertTimeBlock(match { it.id == "calendar-import-42-2026-05-08-960" }) }
+        coVerify { calendarEventDao.insertCalendarEvent(match { it.id == 42L && it.startAt == morningStart }) }
+        coVerify { calendarEventDao.insertCalendarEvent(match { it.id == 42L && it.startAt == eveningStart }) }
+    }
+
+    @Test
+    fun `syncFromDeviceCalendar splits timed events crossing midnight into per day blocks`() = runTest {
+        val contentResolver = mockk<ContentResolver>()
+        val cursor = mockk<Cursor>()
+        val instancesUri = mockk<Uri>()
+        val zoneId = ZoneId.systemDefault()
+        val syncedDate = LocalDate.parse("2026-05-08")
+        val start = syncedDate.atStartOfDay(zoneId).toInstant()
+        val end = syncedDate.plusDays(2).atStartOfDay(zoneId).toInstant()
+        val eventStart = syncedDate.atTime(23, 0).atZone(zoneId).toInstant()
+        val eventEnd = syncedDate.plusDays(1).atTime(1, 0).atZone(zoneId).toInstant()
+
+        every { context.checkSelfPermission(android.Manifest.permission.READ_CALENDAR) } returns PackageManager.PERMISSION_GRANTED
+        every { context.contentResolver } returns contentResolver
+        every { calendarPlatform.instancesUri(start, end) } returns instancesUri
+        every {
+            contentResolver.query(instancesUri, any(), any(), any(), any())
+        } returns cursor
+        every { cursor.moveToNext() } returnsMany listOf(true, false)
+        every { cursor.getLong(0) } returns 55L
+        every { cursor.getString(1) } returns "Red-eye flight"
+        every { cursor.getString(2) } returns null
+        every { cursor.getLong(3) } returns eventStart.toEpochMilli()
+        every { cursor.getLong(4) } returns eventEnd.toEpochMilli()
+        every { cursor.getString(5) } returns "UTC"
+        every { cursor.getString(6) } returns null
+        every { cursor.getInt(7) } returns 0
+        every { cursor.close() } just runs
+        coEvery { calendarEventDao.insertCalendarEvent(any()) } returns Unit
+        coEvery { calendarEventDao.deleteEventsBetween(any(), any()) } returns Unit
+        coEvery { timeBlockDao.deleteImportedBlocksBetween(any(), any()) } returns Unit
+        coEvery { timeBlockDao.insertTimeBlock(any()) } returns Unit
+
+        repository.syncFromDeviceCalendar(start, end)
+
+        coVerify(exactly = 2) { timeBlockDao.insertTimeBlock(any()) }
+        coVerify {
+            timeBlockDao.insertTimeBlock(
+                match {
+                    it.id == "calendar-import-55-2026-05-08-1380" &&
+                        it.startMinuteOfDay == 23 * 60 &&
+                        it.durationMinutes == 60
+                }
+            )
+        }
+        coVerify {
+            timeBlockDao.insertTimeBlock(
+                match {
+                    it.id == "calendar-import-55-2026-05-09-0" &&
+                        it.startMinuteOfDay == 0 &&
+                        it.durationMinutes == 60
+                }
+            )
+        }
+    }
+
+    @Test
+    fun `syncFromDeviceCalendar expands a mid day window to the full local day`() = runTest {
+        val contentResolver = mockk<ContentResolver>()
+        val cursor = mockk<Cursor>()
+        val instancesUri = mockk<Uri>()
+        val zoneId = ZoneId.systemDefault()
+        val syncedDate = LocalDate.parse("2026-05-08")
+        val dayStart = syncedDate.atStartOfDay(zoneId).toInstant()
+        val dayEnd = syncedDate.plusDays(1).atStartOfDay(zoneId).toInstant()
+        val midDayStart = syncedDate.atTime(14, 0).atZone(zoneId).toInstant()
+        val eventStart = syncedDate.atTime(9, 0).atZone(zoneId).toInstant()
+        val eventEnd = syncedDate.atTime(10, 0).atZone(zoneId).toInstant()
+
+        every { context.checkSelfPermission(android.Manifest.permission.READ_CALENDAR) } returns PackageManager.PERMISSION_GRANTED
+        every { context.contentResolver } returns contentResolver
+        // Only the expanded full-day window is stubbed: querying with the raw
+        // mid-day start would fail the test.
+        every { calendarPlatform.instancesUri(dayStart, dayEnd) } returns instancesUri
+        every {
+            contentResolver.query(instancesUri, any(), any(), any(), any())
+        } returns cursor
+        every { cursor.moveToNext() } returnsMany listOf(true, false)
+        every { cursor.getLong(0) } returns 42L
+        every { cursor.getString(1) } returns "Morning review"
+        every { cursor.getString(2) } returns null
+        every { cursor.getLong(3) } returns eventStart.toEpochMilli()
+        every { cursor.getLong(4) } returns eventEnd.toEpochMilli()
+        every { cursor.getString(5) } returns "UTC"
+        every { cursor.getString(6) } returns null
+        every { cursor.getInt(7) } returns 0
+        every { cursor.close() } just runs
+        coEvery { calendarEventDao.insertCalendarEvent(any()) } returns Unit
+        coEvery { calendarEventDao.deleteEventsBetween(any(), any()) } returns Unit
+        coEvery { timeBlockDao.deleteImportedBlocksBetween(any(), any()) } returns Unit
+        coEvery { timeBlockDao.insertTimeBlock(any()) } returns Unit
+
+        repository.syncFromDeviceCalendar(midDayStart, dayEnd)
+
+        coVerify { timeBlockDao.deleteImportedBlocksBetween(syncedDate, syncedDate) }
+        coVerify { calendarEventDao.deleteEventsBetween(dayStart, dayEnd) }
+        coVerify {
+            timeBlockDao.insertTimeBlock(
+                match { it.id == "calendar-import-42-2026-05-08-540" && it.startMinuteOfDay == 9 * 60 }
+            )
+        }
     }
 
     private fun timeBlock(calendarEventId: Long?): TimeBlock {

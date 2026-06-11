@@ -7,6 +7,7 @@ import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -43,6 +44,141 @@ class HabitFormSheetStateTest {
                 expanded = true
             )
         )
+    }
+
+    @Test
+    fun applyingHabitSuggestionSupersedesSameKindAlternativesOnly() {
+        val daily = HabitAssistSuggestion.Recurrence(
+            id = "recurrence:daily",
+            label = "Daily",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            cadence = "Daily"
+        )
+        val weekly = daily.copy(id = "recurrence:weekly", label = "Weekly", cadence = "Weekly")
+        val window = HabitAssistSuggestion.Window(
+            id = "window:morning",
+            label = "Morning",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            startMinute = 8 * 60,
+            endMinute = 9 * 60
+        )
+        val suggestions = listOf(daily, weekly, window)
+
+        assertEquals(
+            setOf("recurrence:daily", "recurrence:weekly"),
+            supersededHabitAssistSuggestionIds(daily, suggestions)
+        )
+        assertEquals(
+            setOf("window:morning"),
+            supersededHabitAssistSuggestionIds(window, suggestions)
+        )
+    }
+
+    @Test
+    fun untouchedWindowDefaultFollowsHabitContext() {
+        assertEquals(
+            6 * 60 to 10 * 60,
+            contextualHabitDefaultWindow("Morning run", emptyList())
+        )
+        assertEquals(
+            18 * 60 to 22 * 60,
+            contextualHabitDefaultWindow("Read 20 pages", emptyList())
+        )
+        assertNull(contextualHabitDefaultWindow("Tidy desk", emptyList()))
+        assertEquals(
+            12 * 60 to 13 * 60,
+            contextualHabitDefaultWindow(
+                "Tidy desk",
+                listOf(
+                    HabitAssistSuggestion.Window(
+                        id = "window:suggested",
+                        label = "Midday",
+                        reason = "Test",
+                        source = RoutineAssistSource.LOCAL,
+                        startMinute = 12 * 60,
+                        endMinute = 13 * 60
+                    )
+                )
+            )
+        )
+    }
+
+    @Test
+    fun autoApplyPicksFirstSuggestionPerKindOnlyForUntouchedFields() {
+        val title = HabitAssistSuggestion.Title(
+            id = "title:a",
+            label = "Morning run",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            title = "Morning run"
+        )
+        val recurrence = HabitAssistSuggestion.Recurrence(
+            id = "recurrence:a",
+            label = "3x / week",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            cadence = "3x / week"
+        )
+        val secondRecurrence = recurrence.copy(id = "recurrence:b", cadence = "Daily")
+        val window = HabitAssistSuggestion.Window(
+            id = "window:a",
+            label = "Morning",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            startMinute = 8 * 60,
+            endMinute = 9 * 60
+        )
+
+        val ids = autoApplicableHabitAssistSuggestionIds(
+            suggestions = listOf(title, recurrence, secondRecurrence, window),
+            titleBlank = true,
+            recurrenceUntouched = true,
+            windowUntouched = false,
+            difficultyUntouched = true,
+            dayPlanUntouched = true
+        )
+
+        assertEquals(setOf("title:a", "recurrence:a"), ids)
+    }
+
+    @Test
+    fun habitSuggestionsAlreadySatisfiedAreReportedRedundant() {
+        val matchingWindow = HabitAssistSuggestion.Window(
+            id = "window:match",
+            label = "Morning",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            startMinute = 8 * 60,
+            endMinute = 9 * 60
+        )
+        val matchingRecurrence = HabitAssistSuggestion.Recurrence(
+            id = "recurrence:match",
+            label = "Daily",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            cadence = "Daily"
+        )
+        val freshDifficulty = HabitAssistSuggestion.Difficulty(
+            id = "difficulty:new",
+            label = "Hard",
+            reason = "Test",
+            source = RoutineAssistSource.LOCAL,
+            difficulty = 4
+        )
+
+        val redundant = redundantHabitAssistSuggestionIds(
+            suggestions = listOf(matchingWindow, matchingRecurrence, freshDifficulty),
+            currentTitle = "Morning run",
+            currentRecurrencePreset = "Daily",
+            currentStartMinute = 8 * 60,
+            currentEndMinute = 9 * 60,
+            currentDifficulty = 2,
+            currentIsBundled = false
+        )
+
+        assertEquals(setOf("window:match", "recurrence:match"), redundant)
     }
 
     @Test

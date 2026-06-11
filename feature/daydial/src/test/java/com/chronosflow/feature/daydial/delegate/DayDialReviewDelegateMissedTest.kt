@@ -54,6 +54,7 @@ class DayDialReviewDelegateMissedTest {
             insightsRecommendationsPlanner = mockk(relaxed = true),
             deepWorkAssistPlanner = mockk(relaxed = true),
             genAiAssistCoordinator = mockk(relaxed = true),
+            reviewAssistPlanner = mockk(relaxed = true),
             manualMissedBlockRegistry = registry
         )
 

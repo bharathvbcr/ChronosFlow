@@ -119,5 +119,8 @@ class MlKitNanoPromptClientTest {
             generateCalls++
             return generatedText
         }
+
+        override fun generateTextStream(prompt: String): Flow<String> =
+            kotlinx.coroutines.flow.flowOf(generatedText)
     }
 }

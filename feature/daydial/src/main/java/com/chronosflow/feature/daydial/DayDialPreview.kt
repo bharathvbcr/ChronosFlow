@@ -72,7 +72,6 @@ fun DayDialPreview() {
                 onShowMissed = {},
                 onOpenPlanTab = {},
                 onAiStripAction = {},
-                onShowRingGuideChanged = {},
                 onOpenPlanned = {},
                 onOpenActual = {},
                 onOpenMissedRecovery = {}

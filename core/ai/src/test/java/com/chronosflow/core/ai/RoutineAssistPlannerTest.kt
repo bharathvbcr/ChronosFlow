@@ -13,6 +13,36 @@ import org.junit.Test
 
 class RoutineAssistPlannerTest {
     @Test
+    fun `habit refineTitle returns proofread name when materially different`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.proofread("medidate evry moring") } returns AssistTextGeneration(
+            text = "Meditate every morning",
+            source = AssistGenAiSource.GEMINI_NANO
+        )
+        val planner = HabitAssistPlanner(coordinator)
+
+        val suggestion = planner.refineTitle("medidate evry moring")
+
+        assertEquals("Meditate every morning", suggestion?.title)
+        assertEquals(RoutineAssistSource.GEMINI_NANO, suggestion?.source)
+    }
+
+    @Test
+    fun `medication refineName returns proofread name as details suggestion`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.proofread("metformne") } returns AssistTextGeneration(
+            text = "Metformin",
+            source = AssistGenAiSource.GEMINI_NANO
+        )
+        val planner = MedicationAssistPlanner(coordinator)
+
+        val suggestion = planner.refineName("metformne")
+
+        assertEquals("Metformin", (suggestion as? MedicationAssistSuggestion.Details)?.name)
+        assertEquals(RoutineAssistSource.GEMINI_NANO, suggestion?.source)
+    }
+
+    @Test
     fun `habit prompt includes concrete capture examples`() = runTest {
         val coordinator = mockk<GenAiAssistCoordinator>()
         val prompt = slot<String>()

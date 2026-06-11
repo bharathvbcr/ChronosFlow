@@ -32,7 +32,10 @@ internal val compactTodayTopSpacer = ChronosSpacing.Compact
 internal val compactTodayHeroDialHeight = 272.dp
 internal val compactTodayHeroTopPadding = ChronosSpacing.Small
 internal val compactTodayDialCanvasInset = ChronosSpacing.Standard
-internal const val compactTodayDialRadiusScale = 1.06f
+// 1.0f = no upscaling, so the ring + hour labels keep their designed margin inside the
+// hero box. Values >1 crowd the edges and push the 6 o'clock label to the box bottom,
+// where the zoom-toggle AnimatedContent clips it mid-transition.
+internal const val compactTodayDialRadiusScale = 1.0f
 
 internal fun BoxWithConstraintsScope.dayDialHeightClass(): DayDialWidthClass = when {
     maxHeight >= 700.dp -> DayDialWidthClass.EXPANDED

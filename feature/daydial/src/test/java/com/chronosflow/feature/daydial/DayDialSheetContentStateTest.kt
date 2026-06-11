@@ -44,18 +44,42 @@ class DayDialSheetContentStateTest {
     }
 
     @Test
-    fun `block editor duration slider uses five minute stops`() {
-        assertEquals(46, blockEditorDurationSliderSteps())
+    fun `focus settings reminder summary counts enabled reminders`() {
+        assertEquals(
+            "3 of 4 reminders on",
+            focusSettingsReminderSummary(
+                blockStartReminders = true,
+                breakReminders = true,
+                missedAlerts = false,
+                endDayReviewReminder = true
+            )
+        )
+        assertEquals(
+            "0 of 4 reminders on",
+            focusSettingsReminderSummary(
+                blockStartReminders = false,
+                breakReminders = false,
+                missedAlerts = false,
+                endDayReviewReminder = false
+            )
+        )
+    }
+
+    @Test
+    fun `block editor duration snaps five minutes short and fifteen minutes long`() {
         assertEquals(65, snapBlockEditorDuration(63f))
         assertEquals(5, snapBlockEditorDuration(3f))
         assertEquals(240, snapBlockEditorDuration(242f))
+        assertEquals(195, snapBlockEditorDuration(190f))
+        assertEquals(480, snapBlockEditorDuration(500f))
     }
 
     @Test
     fun `new block sheet initial duration honors prefilled target duration`() {
         assertEquals("45", newBlockSheetInitialDurationText(SheetTarget.NewBlock(durationMinutes = 45)))
         assertEquals("5", newBlockSheetInitialDurationText(SheetTarget.NewBlock(durationMinutes = 3)))
-        assertEquals("240", newBlockSheetInitialDurationText(SheetTarget.NewBlock(durationMinutes = 400)))
+        assertEquals("400", newBlockSheetInitialDurationText(SheetTarget.NewBlock(durationMinutes = 400)))
+        assertEquals("480", newBlockSheetInitialDurationText(SheetTarget.NewBlock(durationMinutes = 600)))
         assertEquals("25", newBlockSheetInitialDurationText(SheetTarget.NewBlock()))
     }
 
@@ -64,7 +88,7 @@ class DayDialSheetContentStateTest {
         assertEquals(75, blockEditorDurationFromEnd(startMinute = 9 * 60, endMinute = 10 * 60 + 15))
         assertEquals(90, blockEditorDurationFromEnd(startMinute = 23 * 60, endMinute = 30))
         assertEquals(5, blockEditorDurationFromEnd(startMinute = 9 * 60, endMinute = 9 * 60))
-        assertEquals(240, blockEditorDurationFromEnd(startMinute = 9 * 60, endMinute = 15 * 60))
+        assertEquals(360, blockEditorDurationFromEnd(startMinute = 9 * 60, endMinute = 15 * 60))
     }
 
     @Test

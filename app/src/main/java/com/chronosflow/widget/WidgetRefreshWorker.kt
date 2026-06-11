@@ -15,9 +15,9 @@ import java.time.Duration
  *
  * WorkManager's [androidx.work.PeriodicWorkRequest] has a 15-minute minimum interval, so this
  * uses a self-rescheduling one-time request to achieve the shorter [REFRESH_INTERVAL] cadence.
- * The loop is started when the first widget is added and cancelled when the last is removed
- * (see [ChronosGlanceWidgetReceiver]). WorkManager still defers execution under Doze, so the
- * battery cost stays modest.
+ * The loop is started when the first widget is added and cancelled when the last widget of any
+ * type is removed (see [ChronosWidgetReceiver]). WorkManager still defers execution under Doze,
+ * so the battery cost stays modest.
  */
 class WidgetRefreshWorker(
     appContext: Context,
@@ -25,7 +25,7 @@ class WidgetRefreshWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        runCatching { ChronosGlanceWidgetReceiver.refreshAll(applicationContext) }
+        runCatching { ChronosWidgetHub.refreshAll(applicationContext) }
         // The current run is still RUNNING here, so REPLACE is required to queue the next tick.
         enqueue(applicationContext, ExistingWorkPolicy.REPLACE)
         return Result.success()

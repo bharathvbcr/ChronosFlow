@@ -1,5 +1,6 @@
 package com.chronosflow.core.ai.genai
 
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 /** Mirrors ML Kit [com.google.mlkit.genai.common.FeatureStatus] without leaking SDK types. */
@@ -36,6 +37,12 @@ interface OnDeviceGeminiGateway {
     suspend fun ensureReadyForInference(): NanoModelStatus
 
     suspend fun generateText(prompt: String): Result<String>
+
+    /**
+     * Streams a cumulative response. Emits nothing (an empty flow) when the app is backgrounded or
+     * Gemini Nano is not ready, so callers can fall back to [generateText] or local copy.
+     */
+    fun generateTextStream(prompt: String): Flow<String>
 }
 
 interface CloudGeminiGateway {

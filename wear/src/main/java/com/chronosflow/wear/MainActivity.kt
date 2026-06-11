@@ -1,47 +1,32 @@
 package com.chronosflow.wear
 
-import android.app.Activity
-import android.graphics.Color
 import android.os.Bundle
-import android.view.Gravity
-import android.widget.LinearLayout
-import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.wear.compose.foundation.LocalAmbientModeManager
+import androidx.wear.compose.foundation.rememberAmbientModeManager
+import com.chronosflow.wear.presentation.WearApp
 
 /**
- * Minimal launcher surface so the Wear app is installable and visible in the app list.
+ * The watch app surface: a glanceable, action-oriented Wear OS Compose Material3 experience.
  *
- * The primary watch experience is the focus ongoing activity surfaced by
- * [FocusWearListenerService] when a session is active on the phone; this screen is a simple
- * resting entry point rather than a full control surface.
+ * It mirrors the phone's day as horizontally swipeable pages (Now / Habits / Tasks / Medication)
+ * and — unlike a read-only companion — lets the wearer act: start/pause/stop focus, check off a
+ * habit, complete a task, or acknowledge a dose, all routed back to the phone over the Data
+ * Layer. The single [AppScaffold] lives inside [WearApp] per the Wear Compose contract.
+ *
+ * The ambient-mode manager is provided here, at the top of the hierarchy, so the Focus screen
+ * can keep a dimmed countdown visible while the wrist is down.
  */
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.BLACK)
-            setPadding(24, 24, 24, 24)
+        setContent {
+            CompositionLocalProvider(LocalAmbientModeManager provides rememberAmbientModeManager()) {
+                WearApp()
+            }
         }
-
-        val title = TextView(this).apply {
-            text = "ChronosFlow"
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            gravity = Gravity.CENTER
-        }
-
-        val subtitle = TextView(this).apply {
-            text = "Start a focus session on your phone to see the live timer here."
-            setTextColor(Color.LTGRAY)
-            textSize = 13f
-            gravity = Gravity.CENTER
-        }
-
-        root.addView(title)
-        root.addView(subtitle)
-        setContentView(root)
     }
 }

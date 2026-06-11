@@ -9,7 +9,6 @@ fun dayDialCommandProvider(
     onOpenDayDial: () -> Unit,
     onOpenPlan: () -> Unit = onOpenDayDial,
     onOpenFocusPlanner: () -> Unit = onOpenDayDial,
-    onOpenInsights: () -> Unit = onOpenDayDial,
     onOpenPlanningTools: () -> Unit = onOpenDayDial,
     onOpenTemplates: () -> Unit = onOpenDayDial,
     onOpenReview: () -> Unit = onOpenDayDial,
@@ -51,24 +50,20 @@ fun dayDialCommandProvider(
             onRun = onOpenFocusPlanner
         ))
         if (featureFlags.reviewEnabled) {
-            add(CommandPaletteItem(
-                id = "daydial.insights",
-                title = "Open insights",
-                subtitle = "View planned vs actual trends and recommendations",
-                keywords = setOf("insights", "analytics", "stats", "performance", "trends"),
-                group = CommandPaletteGroups.DAY,
-                shortcutLabel = "Insights",
-                priority = 85,
-                onRun = onOpenInsights
-            ))
+            // Single review entry point: opens the Review page (execution score, planned
+            // vs actual, insights, and recommendations), from which the detailed
+            // planned/actual/missed sheet can be opened.
             add(CommandPaletteItem(
                 id = "daydial.review",
-                title = "Open daily review",
-                subtitle = "Full review with insights and weekly roll-up",
-                keywords = setOf("review", "summary", "retrospective", "end of day"),
+                title = "Open review",
+                subtitle = "Execution score, planned vs actual, insights, and recommendations",
+                keywords = setOf(
+                    "review", "insights", "analytics", "stats", "performance",
+                    "trends", "summary", "retrospective", "end of day"
+                ),
                 group = CommandPaletteGroups.SUPPORTING,
                 shortcutLabel = "Review",
-                priority = 80,
+                priority = 85,
                 onRun = onOpenReview
             ))
         }

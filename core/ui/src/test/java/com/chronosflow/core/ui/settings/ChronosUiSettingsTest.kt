@@ -62,23 +62,23 @@ class ChronosUiSettingsTest {
     }
 
     @Test
-    fun `feature flag defaults enable habits and meds only`() {
+    fun `feature flag defaults enable all surfaces`() {
         val flags = ChronosFeatureFlags()
 
         assertTrue(flags.habitsEnabled)
         assertTrue(flags.medicationEnabled)
-        assertFalse(flags.reviewEnabled)
-        assertFalse(flags.aiAdvisorEnabled)
+        assertTrue(flags.reviewEnabled)
+        assertTrue(flags.aiAdvisorEnabled)
     }
 
     @Test
-    fun `habits and meds default to enabled while parked assistants stay disabled`() = runTest {
+    fun `all surfaces default to enabled including graduated assistants`() = runTest {
         val snapshot = context.readChronosUiSettingsSnapshotFromDataStore()
 
         assertTrue(snapshot.featureFlags.habitsEnabled)
         assertTrue(snapshot.featureFlags.medicationEnabled)
-        assertFalse(snapshot.featureFlags.reviewEnabled)
-        assertFalse(snapshot.featureFlags.aiAdvisorEnabled)
+        assertTrue(snapshot.featureFlags.reviewEnabled)
+        assertTrue(snapshot.featureFlags.aiAdvisorEnabled)
         assertEquals(ChronosBackdropTheme.LIQUID, snapshot.backdropTheme)
     }
 
@@ -98,6 +98,21 @@ class ChronosUiSettingsTest {
     }
 
     @Test
+    fun `legacy parked review and ai false values are promoted once`() = runTest {
+        context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED, false)
+        context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED, false)
+        context.writeChronosUiBooleanSetting(
+            ChronosUiSettingsKeys.KEY_FEATURE_ASSISTANTS_DEFAULTS_PROMOTED,
+            false
+        )
+
+        val snapshot = context.readChronosUiSettingsSnapshotFromDataStore()
+
+        assertTrue(snapshot.featureFlags.reviewEnabled)
+        assertTrue(snapshot.featureFlags.aiAdvisorEnabled)
+    }
+
+    @Test
     fun `promoted habits and meds can still be disabled explicitly`() = runTest {
         context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_HABITS_ENABLED, false)
         context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED, false)
@@ -106,6 +121,17 @@ class ChronosUiSettingsTest {
 
         assertFalse(snapshot.featureFlags.habitsEnabled)
         assertFalse(snapshot.featureFlags.medicationEnabled)
+    }
+
+    @Test
+    fun `promoted review and ai can still be disabled explicitly`() = runTest {
+        context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED, false)
+        context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED, false)
+
+        val snapshot = context.readChronosUiSettingsSnapshotFromDataStore()
+
+        assertFalse(snapshot.featureFlags.reviewEnabled)
+        assertFalse(snapshot.featureFlags.aiAdvisorEnabled)
     }
 
     @Test

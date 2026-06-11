@@ -1,6 +1,7 @@
 package com.chronosflow.core.ai.genai
 
 import com.chronosflow.core.domain.model.DailyReviewSummary
+import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TimeBlock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -12,15 +13,19 @@ object PlanningPromptBuilder {
         date: LocalDate,
         timezone: String,
         review: DailyReviewSummary?,
-        existingBlocks: List<TimeBlock>
+        existingBlocks: List<TimeBlock>,
+        pendingTasks: List<Task> = emptyList(),
+        dueHabitTitles: List<String> = emptyList()
     ): String {
         val dateLabel = date.format(DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault()))
         val blockSummary = existingBlocks.take(12).joinToString("\n") { block ->
-            "- ${block.title} (${block.category}) ${block.startMinuteOfDay}-${block.startMinuteOfDay + block.durationMinutes}m"
+            "- ${block.title} (${block.category}, ${block.provenance.name}) ${block.startMinuteOfDay}-${block.startMinuteOfDay + block.durationMinutes}m"
         }.ifBlank { "- none" }
         val reviewSummary = review?.let {
             "planned=${it.plannedMinutes} actual=${it.actualMinutes} missed=${it.missedMinutes} drift=${it.driftMinutes}"
         } ?: "none"
+        val taskSummary = pendingTaskSummary(pendingTasks)
+        val habitSummary = dueHabitTitles.take(6).joinToString("\n") { "- $it" }.ifBlank { "- none" }
 
         return """
             You are ChronosFlow, a privacy-aware day planner. Produce a JSON object only (no markdown fences).
@@ -45,12 +50,32 @@ object PlanningPromptBuilder {
             - Respect locked or protected commitments in the existing plan.
             - Keep 3 to 6 blocks, non-overlapping, between 6:00 and 22:00 unless user asks otherwise.
             - Prefer recovery when review shows missed work or drift.
+            - Schedule the user's pending tasks and due habits into free time before inventing generic blocks.
             User preferences: ${userPreferences.ifBlank { "balanced day" }}
             Review summary: $reviewSummary
             Existing blocks:
             $blockSummary
+            Pending tasks (highest priority first):
+            $taskSummary
+            Habits due today:
+            $habitSummary
         """.trimIndent()
     }
+
+    internal fun pendingTaskSummary(pendingTasks: List<Task>): String =
+        pendingTasks
+            .filterNot(Task::isCompleted)
+            .sortedByDescending(Task::priority)
+            .take(10)
+            .joinToString("\n") { task ->
+                buildString {
+                    append("- ${task.title} (priority=${task.priority}")
+                    task.preferredDurationMinutes?.let { append(", prefers ${it}m") }
+                    task.dueDate?.let { append(", due") }
+                    append(")")
+                }
+            }
+            .ifBlank { "- none" }
 
     fun repairPrompt(currentPlan: String, conflictDescription: String): String = """
         You are ChronosFlow plan repair. Return plain text with numbered steps (max 6) to resolve the conflict.

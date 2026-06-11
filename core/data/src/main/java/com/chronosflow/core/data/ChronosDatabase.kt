@@ -77,7 +77,7 @@ import com.chronosflow.core.data.util.Converters
         TaskScheduleEntity::class,
         TaskReminderRuleEntity::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -729,6 +729,34 @@ abstract class ChronosDatabase : RoomDatabase() {
         val MIGRATION_15_16 = object : Migration(15, 16) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE review_insights ADD COLUMN assistSource TEXT")
+            }
+        }
+
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // calendar_events is a disposable snapshot of the device calendar
+                // (regenerated on every sync), so recreate it with the composite
+                // primary key instead of migrating rows.
+                db.execSQL("DROP TABLE IF EXISTS `calendar_events`")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `calendar_events` (
+                        `id` INTEGER NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `description` TEXT,
+                        `startAt` INTEGER NOT NULL,
+                        `endAt` INTEGER NOT NULL,
+                        `timezone` TEXT NOT NULL,
+                        `location` TEXT,
+                        `externalId` TEXT,
+                        `isAllDay` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`, `startAt`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_calendar_events_startAt` ON `calendar_events` (`startAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_calendar_events_endAt` ON `calendar_events` (`endAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_calendar_events_externalId` ON `calendar_events` (`externalId`)")
             }
         }
     }

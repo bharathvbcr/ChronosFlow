@@ -6,4 +6,9 @@
     <string name="shortcut_quick_add_long">Quick-Add Plan Block</string>
     <string name="shortcut_command_palette_short">Command Palette</string>
     <string name="shortcut_command_palette_long">Open Command Palette</string>
+    <string name="widget_desc_focus">Focus session timer with start, pause, and stop controls.</string>
+    <string name="widget_desc_agenda">Your current block and what\'s coming up today.</string>
+    <string name="widget_desc_tasks">Most urgent open tasks with one-tap complete.</string>
+    <string name="widget_desc_habits">Today\'s habits with streaks and one-tap check-off.</string>
+    <string name="widget_desc_medication">Today\'s doses with reminder times and a Taken button.</string>
 </resources>

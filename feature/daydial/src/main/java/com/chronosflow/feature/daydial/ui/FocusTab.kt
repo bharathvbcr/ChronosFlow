@@ -33,6 +33,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.chronosflow.core.ai.AssistNarrative
+import com.chronosflow.core.ai.FocusAssistSource
+import com.chronosflow.core.ai.FocusNextBlockSuggestion
 import com.chronosflow.core.ai.PrivacyMode
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
@@ -59,6 +62,7 @@ import com.chronosflow.core.ui.components.FocusCategoryChip
 import com.chronosflow.core.ui.components.FocusSessionIconButton
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
 import com.chronosflow.core.ui.components.FocusTimerRing
+import com.chronosflow.core.ui.components.formatDurationLabel
 import com.chronosflow.core.ui.components.formatFocusCountdown
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.core.ui.theme.categoryColor
@@ -145,11 +149,17 @@ internal fun FocusTab(
     onDismissSessionResumedBanner: () -> Unit = {},
     moodEnergyCheckIns: List<MoodEnergyCheckIn> = emptyList(),
     moodCheckInCoaching: AssistNarrative? = null,
+    nextFocusSuggestion: FocusNextBlockSuggestion? = null,
+    onRequestNextFocusSuggestion: () -> Unit = {},
+    focusGuidance: AssistNarrative? = null,
+    onRefreshFocusGuidance: (Long) -> Unit = {},
+    onClearFocusGuidance: () -> Unit = {},
     genAiRuntimeStatus: GenAiRuntimeStatus = GenAiRuntimeStatus(),
     cachedMoodScore: Int? = null,
     cachedEnergyScore: Int? = null,
     linkedBlockManuallyMissed: Boolean = false,
     onSaveMoodEnergyCheckIn: (Int, Int, Int, Int) -> Unit = { _, _, _, _ -> },
+    contentTopPadding: Dp = 0.dp,
     contentBottomPadding: Dp = 0.dp
 ) {
     val scrollState = rememberScrollState()
@@ -174,6 +184,16 @@ internal fun FocusTab(
         cachedMoodScore = cachedMoodScore,
         cachedEnergyScore = cachedEnergyScore
     )
+    LaunchedEffect(sessionActive, selectedReadyBlock?.id) {
+        if (!sessionActive) onRequestNextFocusSuggestion()
+    }
+    LaunchedEffect(sessionActive, focusSession.status, focusSession.blockId) {
+        if (sessionActive) {
+            onRefreshFocusGuidance(remainingSeconds)
+        } else {
+            onClearFocusGuidance()
+        }
+    }
     val pagePadding = ChronosSpacing.Standard
     val bottomContentPadding = dayDialScrollableBottomPadding(
         contentBottomPadding = contentBottomPadding,
@@ -188,7 +208,9 @@ internal fun FocusTab(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Medium)
     ) {
-        Spacer(Modifier.height(pagePadding))
+        // The tab scrolls full-bleed under the floating glass bar, so the bar
+        // inset arrives as scroll padding rather than a hard layout edge.
+        Spacer(Modifier.height(contentTopPadding + pagePadding))
         DayDialPageHeader(
             title = DayDialTab.FOCUS.label,
             subtitle = dayDialPrimaryPageSubtitle(DayDialTab.FOCUS),
@@ -216,7 +238,7 @@ internal fun FocusTab(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "${formatFocusMinute(block.startMinuteOfDay)} – ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${block.durationMinutes}m",
+                        text = "${formatFocusMinute(block.startMinuteOfDay)} – ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${formatDurationLabel(block.durationMinutes)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -271,6 +293,11 @@ internal fun FocusTab(
                 }
             )
         } else if (!showSessionUi) {
+            if (captureDraft == null) {
+                nextFocusSuggestion?.let { suggestion ->
+                    FocusNextSuggestionCard(suggestion = suggestion, onStart = onStart)
+                }
+            }
             ChronosEmptyState(
                 title = captureDraft?.title ?: if (nextFocusBlock != null) "Next block ready" else "Ready to focus",
                 message = captureDraft?.message ?: if (nextFocusBlock != null) {
@@ -545,6 +572,9 @@ internal fun FocusTab(
         }
 
         if (showSessionUi) {
+            focusGuidance?.let { guidance ->
+                FocusGuidanceCard(guidance = guidance)
+            }
             MoodEnergyCheckInCard(
                 onSave = onSaveMoodEnergyCheckIn,
                 privacyMode = privacyMode,
@@ -554,6 +584,93 @@ internal fun FocusTab(
             )
         }
         Spacer(Modifier.height(bottomContentPadding))
+    }
+}
+
+/**
+ * AI pick for the next focus block (FocusNextBlockPlanner), shown when no session is running.
+ * Starting it uses the same [onStart] path as a manually selected block — the suggestion is
+ * advisory only.
+ */
+@Composable
+private fun FocusNextSuggestionCard(
+    suggestion: FocusNextBlockSuggestion,
+    onStart: (String) -> Unit
+) {
+    FocusGlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)
+        ) {
+            Text(
+                text = "Suggested next focus",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = suggestion.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "${formatFocusMinute(suggestion.startMinuteOfDay)} – " +
+                    formatFocusMinute(suggestion.startMinuteOfDay + suggestion.durationMinutes) +
+                    " · ${formatDurationLabel(suggestion.durationMinutes)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "${focusSuggestionSourceLabel(suggestion.source)} · ${suggestion.reason}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(
+                onClick = { onStart(suggestion.id) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Start this block", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+internal fun focusSuggestionSourceLabel(source: FocusAssistSource): String = when (source) {
+    FocusAssistSource.GEMINI_NANO -> "Gemini Nano"
+    FocusAssistSource.CLOUD_GEMINI -> "Cloud Gemini"
+    FocusAssistSource.LOCAL -> "Local pick"
+}
+
+/** One-line session coaching (FocusGuidancePlanner) shown under the running timer. */
+@Composable
+private fun FocusGuidanceCard(guidance: AssistNarrative) {
+    FocusGlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)
+        ) {
+            Text(
+                text = "Session coach",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = guidance.headline,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = guidance.nextStep,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -722,7 +839,7 @@ internal fun focusCaptureDraftMessage(capture: String?): String {
     return buildList {
         add(title)
         start?.let { add(formatFocusMinute(it)) }
-        duration?.let { add("${it}m") }
+        duration?.let { add(formatDurationLabel(it)) }
     }.joinToString(" · ")
 }
 
@@ -871,7 +988,7 @@ internal fun focusTabNextStepUiState(
             urgent = false
         )
         minutesUntilNext > 0 -> FocusTabNextStepUiState(
-            label = "${minutesUntilNext}m tight handoff to $nextTitle",
+            label = "${formatDurationLabel(minutesUntilNext)} tight handoff to $nextTitle",
             urgent = true
         )
         minutesUntilNext == 0 -> FocusTabNextStepUiState(
@@ -879,7 +996,7 @@ internal fun focusTabNextStepUiState(
             urgent = true
         )
         else -> FocusTabNextStepUiState(
-            label = "Overlaps $nextTitle by ${-minutesUntilNext}m",
+            label = "Overlaps $nextTitle by ${formatDurationLabel(-minutesUntilNext)}",
             urgent = true
         )
     }
@@ -913,10 +1030,10 @@ internal fun focusSessionResumedDismissActionLabel(): String =
     "Dismiss session resumed notice"
 
 private fun focusTabWindowLabel(block: TimeBlockUiModel): String =
-    "${formatFocusMinute(block.startMinuteOfDay)} - ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${block.durationMinutes}m"
+    "${formatFocusMinute(block.startMinuteOfDay)} - ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${formatDurationLabel(block.durationMinutes)}"
 
 private fun focusTabWindowLabel(block: FocusTabBriefingBlock): String =
-    "${formatFocusMinute(block.startMinuteOfDay)} - ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${block.durationMinutes}m"
+    "${formatFocusMinute(block.startMinuteOfDay)} - ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${formatDurationLabel(block.durationMinutes)}"
 
 private fun focusTabPaceLabel(
     sessionActive: Boolean,

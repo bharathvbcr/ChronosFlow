@@ -1,299 +1,258 @@
 # ChronosFlow
 
-ChronosFlow is an Android day-planning app built around a simple idea: your day should be visible, adjustable, and learn from how you actually spend your time.
+<p align="center">
+  <img src="docs/images/chronos-dial-today.png" alt="ChronosFlow Chronos Dial — Today screen" width="320">
+</p>
 
-The active product direction is dial-first. The app now treats the 24-hour Chronos Dial, day planning, focus execution, and the global command palette as the primary experience. Standalone task, habit, medication, and review screens remain compiled as parked work, but they are no longer primary navigation targets until their wiring is promoted back into the dial flow.
+ChronosFlow is a dial-first Android day planner built around the Chronos Dial: a 24-hour circular view of the day where calendar events, planned time blocks, tasks, habits, medication reminders, and focus sessions all render as arcs on one surface. The app is a multi-module Jetpack Compose project with Hilt dependency injection, a Room data layer, on-device AI planning through ML Kit GenAI (Gemini Nano), and a companion Wear OS app.
 
-## Current Direction
+The product direction is intentionally narrow: Today, Plan, Focus, and a global command palette form the primary experience. Standalone task, habit, medication, and review screens remain compiled and reachable through commands, expanded layouts, and feature flags, but the dial is the spine of the app. The minimal product contract lives in [`README_MINIMAL.md`](README_MINIMAL.md) and the long-horizon plan in [`ROADMAP.md`](ROADMAP.md).
 
-ChronosFlow is not being shaped as a pile of feature tabs. The goal is a daily operating surface where every task, reminder, routine, and focus session becomes one of three things:
+## What It Does
 
-- an intent waiting to be scheduled,
-- a visible arc on the Chronos Dial,
-- an actual-time trace for daily review.
+- Renders the full day as a three-ring radial planner with a live now hand, current/next block context, free-time summary, and conflict indicators.
+- Plans the day with validated time blocks, task scheduling, free-time detection, conflict detection and repair, locked calendar commitments, and undo/redo planner commands.
+- Runs focus sessions from scheduled blocks through a foreground service that survives UI closure, with Android 16 Live Update progress notifications and Wear OS mirroring.
+- Suggests plans with on-device Gemini Nano (ML Kit GenAI Prompt API on AICore), optional cloud Gemini, and local heuristics — every AI suggestion is staged for explicit user review before it touches the plan.
+- Tracks tasks, habits, medication doses, mood/energy check-ins, and a daily planned-versus-actual review loop.
+- Extends to home screen Glance widgets, Wear OS tiles and a standalone watch app, app shortcuts, an experimental dial bubble, and agent app-control through AndroidX AppFunctions.
 
-The first app layout is therefore intentionally narrow: Today, Plan, Focus, and command palette.
-
-## Product Positioning
-
-ChronosFlow is designed as an Android 16 production-ready, Android 17 compatibility-tested, Material 3 Expressive-ready productivity app.
-
-It is not just a task list. ChronosFlow helps users plan the day, execute the day, track what happened, and improve tomorrow.
-
-## Core Experience
+## App Features
 
 ### Chronos Dial
 
-The Chronos Dial is the app's signature planner: a 24-hour circular view of the day.
+- 24-hour radial planner with three semantic rings: calendar events and fixed commitments, planned time blocks, and task/habit/medication markers.
+- Center summary for the current block, next block, planned time, free time, and conflicts, plus a current-time hand.
+- Tap, drag, resize, lock, and edit time blocks directly on the dial with ring-aware hit testing and haptic cues (`feature/daydial/dial/ChronosDialInteractionEngine.kt`).
+- Calendar read/write integration with auto-sync and import semantics for fixed commitments.
+- Day templates for reusable day blueprints.
 
-- Outer ring: calendar events and fixed commitments
-- Middle ring: planned time blocks
-- Inner ring: tasks, focus sessions, habits, and medication reminders
-- Center summary: current block, next block, planned time, free time, and conflicts
-- Now hand: current time indicator
+### Day Planning
 
-Users can tap, drag, resize, lock, and edit time blocks directly on the dial.
-
-### Daily Planner
-
-ChronosFlow supports structured day planning with:
-
-- Time blocks
-- Task scheduling
-- Free-time detection
-- Conflict warnings
-- Locked calendar commitments
-- AI-generated plan suggestions
-- Manual review before any AI change is applied
-
-### Tasks
-
-The task system supports:
-
-- Task creation and completion
-- Priorities
-- Due dates
-- Subtasks
-- Recurrence
-- Conversion from task to scheduled time block
-- Focus-session launch from a scheduled task
-
-### Habit Tracker
-
-Habits are first-class planning objects, not just streak counters.
-
-- Daily and weekly habits
-- Flexible targets, such as 3 times per week
-- Habit windows, such as workout between 6 AM and 10 AM
-- Streaks and consistency scores
-- Habit markers on the Chronos Dial
-- Missed-habit repair suggestions
-- Habit bundling, such as vitamins after breakfast
-
-### Medication Reminders
-
-ChronosFlow includes careful medication tracking and reminders.
-
-- Medication schedules
-- Exact reminders when appropriate
-- Dose acknowledgement
-- Missed-dose follow-up
-- Refill reminders
-- Notes for skipped doses or side effects
-
-ChronosFlow tracks and reminds. It does not provide medical advice.
+- Planner service with command-pattern mutations, undo/redo history, and deterministic conflict detection before save (`core/domain/planner/`).
+- Free-time calculation, gap-fill planning, and conflict repair UI.
+- Task-to-time-block scheduling with recurrence rules, reminder rules, checklists, attachments, and task-to-task connections.
+- Locked blocks for commitments that planning must work around.
 
 ### Focus Engine
 
-Focus sessions turn planned blocks into active work.
+- Focus sessions start from a scheduled block and run in a special-use foreground service (`feature/focus/FocusService.kt`) that owns its notification and survives process death.
+- Pause, resume, extend, stop, and complete actions drive a persisted session state machine (`core/domain/planner/FocusSessionReducer.kt`); completion writes actual-time evidence exactly once.
+- Android 16 Live Update / promoted progress notifications with a renderer fallback for devices without Live Update support (`core/notifications/LiveUpdateRenderer.kt`).
+- Focus timer ring UI, mood-accented theming, distraction notes, and focus history.
 
-- Start focus from a time block
-- Pomodoro or custom duration
-- Active foreground notification
-- Android 16 Live Update support for active sessions
-- Distraction notes
-- Completion tracking
-- Focus history
+### Tasks, Habits, And Medication
 
-### Mood and Energy Check-Ins
+- Tasks with priorities, due dates, subtasks/checklists, recurrence, contact connections, file attachments, and focus-session launch.
+- Daily and weekly habits with flexible targets, habit windows, streak charts, consistency tracking, and missed-habit repair suggestions.
+- Medication plans with schedules, exact reminders where justified, dose acknowledgement, missed-dose follow-up, refill tracking, adherence charts, and safety-profile notes. ChronosFlow tracks and reminds; it does not provide medical advice.
+- Mood and energy check-ins feed an energy-correlation engine that informs deep-work suggestions.
 
-Short check-ins help ChronosFlow learn when users work best.
+### Review And Insights
 
-- Mood
-- Energy
-- Stress
-- Focus level
-- Optional notes
-- Pattern discovery over time
-- Better deep-work suggestions
+- Daily review calculator compares planned versus actual time, surfaces missed blocks, and captures improvement notes (`core/domain/planner/DailyReviewCalculator.kt`).
+- Insights tab with execution score, period summaries, category breakdowns, and recommendations; a weekly review complements the daily loop.
 
-### Sleep and Routines
+### Command Palette And Launcher
 
-ChronosFlow can model recurring personal rhythms.
+- Global command palette in the app shell (`core/ui/components/CommandPalette.kt`) with per-feature command providers for day dial, focus, tasks, habits, medication, and quick create.
+- Commands respect sensitive-area locks and confirmation gates rather than bypassing them.
+- Speech input support and notification deep links route into the same navigation graph.
 
-- Sleep blocks
-- Wind-down reminders
-- Morning routines
-- Evening routines
-- Workout routines
-- Study routines
-- Planned versus actual comparison
+### AI-Assisted Planning
 
-### Daily Review
+- Three-tier model strategy in `core/ai/genai/`: ML Kit GenAI Prompt API running Gemini Nano on AICore, explicit cloud Gemini fallback when the user enables it (key via `local.properties`), and local planning heuristics when neither is available.
+- Planning flows include generate-a-day, repair an overloaded plan, deep-work window detection, missed-habit rescheduling, plan explanation, and a conversational assistant.
+- Every suggestion is staged in a review sheet (`feature/daydial/ui/AiReviewSheet.kt`) with per-suggestion Accept/Reject/Modify and bulk Apply All/Dismiss All — no autonomous AI writes.
+- ML Kit text tools (summarization, proofreading, rewriting) back text-assist rows in forms.
+- Semantic planning index built on AndroidX AppSearch for on-device retrieval over planning context.
+- Device support for Gemini Nano is not universal; readiness is surfaced in AI settings and documented in [`docs/gemini-nano-support.md`](docs/gemini-nano-support.md).
 
-The daily review closes the feedback loop.
+### Notifications And Alarms
 
-- What was planned
-- What actually happened
-- What was skipped
-- Why it changed
-- What should be adjusted tomorrow
+- Inexact scheduling is preferred for soft nudges and habit reminders; `SCHEDULE_EXACT_ALARM` is reserved for user-specified precise reminders, medication, and focus check-ins, with fallback behavior when exact alarms are unavailable (`core/domain/model/ExactAlarmPolicy.kt`).
+- Boot, timezone-change, time-set, and package-replaced receivers plus a WorkManager reconcile worker keep pending alarms consistent (`core/notifications/PendingAlarmReconciler.kt`, `ReminderReconcileWorker.kt`).
+- Notification action receivers for task completion, habit marking, and dose acknowledgement, with privacy redaction for sensitive content.
 
-This makes ChronosFlow a system for improving time use, not just recording tasks.
+### Widgets, Wear OS, And System Surfaces
 
-## AI Planning
+- Glance home screen widgets: Focus controls, Today's Schedule agenda, Tasks, Habits, and Medication, with actionable buttons and a background refresh worker (`app/src/main/java/com/chronosflow/widget/`).
+- Standalone Wear OS app (`wear/`) with Compose for Wear OS Material 3, a day-dial ring, focus screen, and phone handoff via `chronosflow://open`.
+- Wear tiles for Today and Habits; focus state, day summaries, and theme are mirrored over the Wearable Data Layer, and watch-originated actions replay through phone-side use cases.
+- AndroidX AppFunctions expose app-control functions to system agents (`app/src/main/java/com/chronosflow/appfunctions/ChronosAppFunctions.kt`).
+- Experimental dial bubble activity and app shortcuts.
 
-ChronosFlow uses AI as an assistant, not an autopilot.
+### Security, Privacy, And Data Protection
 
-Supported planning flows:
+- Biometric app lock with session control and sensitive-area gating (`core/data/security/`, `core/ui/security/`).
+- Optional SQLCipher-encrypted Room database with a plaintext-to-encrypted migrator (`core/data/ChronosSecureDatabaseProvider.kt`).
+- Privacy preferences gate cloud AI usage; notification content is redacted for sensitive areas.
+- Portable backup codec, repository, and scheduled backup worker plus data export (`core/data/backup/`).
+- Cross-device sync scaffolding through a Firestore-backed remote sync gateway and sync worker (`core/data/sync/`).
 
-- Generate an ideal day
-- Repair an overloaded plan
-- Find deep-work windows
-- Reschedule missed habits
-- Balance sleep, work, study, exercise, and breaks
-- Explain why a plan was suggested
+## Project Diagram
 
-AI suggestions are shown in a review sheet before they modify the user's day.
-
-The current Android implementation already follows Google's official on-device stack:
-
-- `ML Kit GenAI Prompt API`
-- `AICore` for Gemini Nano model delivery and execution
-- explicit cloud Gemini fallback when enabled
-- local heuristics when neither model path is available
-
-On-device Gemini Nano support follows the Android ML Kit-on-AICore path documented in [`docs/gemini-nano-support.md`](docs/gemini-nano-support.md). Device support is not universal, so the app must surface readiness clearly and fall back to local heuristics when Gemini Nano is unavailable.
-
-## Android Platform Direction
-
-ChronosFlow is designed for modern Android surfaces:
-
-- Jetpack Compose
-- Material 3 and Material 3 Expressive readiness
-- Dynamic color on Android 12+
-- Edge-to-edge layouts
-- Adaptive phone, tablet, foldable, desktop-window, and bubble layouts
-- Keyboard, mouse, trackpad, and stylus-friendly interactions
-- Android 16 progress-centric notifications for active focus sessions
-- Android 17 compatibility testing
-
-## Exact Alarm Strategy
-
-ChronosFlow uses alarms carefully.
-
-Inexact scheduling is preferred for:
-
-- Soft planner nudges
-- Habit reminders
-- Non-critical task reminders
-
-Exact alarms are reserved for:
-
-- User-specified precise reminders
-- Medication reminders that need precision
-- Focus check-ins tied to scheduled work blocks
-
-The app uses `SCHEDULE_EXACT_ALARM` where appropriate and must provide fallback behavior when exact alarms are unavailable.
-
-## Live Update Strategy
-
-Live Updates are only used for active, user-initiated, time-sensitive sessions.
-
-Good examples:
-
-- Active focus session
-- Active workout session
-- Medication dose awaiting acknowledgement
-
-Avoided examples:
-
-- Passive planner status
-- Generic upcoming events
-- Promotional notifications
-
-## Architecture
-
-Current module direction:
-
-```text
-:app
-:benchmark
-:core:ai
-:core:data
-:core:domain
-:core:notifications
-:feature:daydial
-:feature:focus
-:feature:habits
-:feature:medication
-:feature:review
-:feature:tasks
-:wear
+```mermaid
+flowchart TB
+  User["User"] --> Shell["App shell<br/>MainActivity + ChronosNavigationShell"]
+  Shell --> Palette["Command palette<br/>command providers"]
+  Shell --> DayDial["feature:daydial<br/>Chronos Dial, Today/Plan/Insights tabs"]
+  Shell --> Focus["feature:focus<br/>FocusService runtime"]
+  Shell --> Parked["feature:tasks / habits / medication<br/>command-accessible surfaces"]
+  DayDial --> Domain["core:domain<br/>planner service, conflict engine, reducers"]
+  Parked --> Domain
+  Focus --> Domain
+  Domain --> Data["core:data<br/>Room + DataStore + backup + sync"]
+  DayDial --> AI["core:ai<br/>Gemini Nano / cloud Gemini / heuristics"]
+  AI --> Review["AI review sheet<br/>user accepts before write"]
+  Review --> Domain
+  Domain --> Notif["core:notifications<br/>alarms, Live Updates, receivers"]
+  Shell --> Widgets["Glance widgets + AppFunctions + bubble"]
+  Shell -. Data Layer .-> Wear["wear module<br/>tiles + standalone watch app"]
 ```
 
-Planned domain cleanup:
+## Focus Session Flow
 
-```text
-:core:domain
-  - pure domain models
-  - scheduling rules
-  - planner use cases
-  - conflict detection
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant D as Chronos Dial / Focus tab
+  participant S as FocusService (foreground)
+  participant R as FocusSessionReducer
+  participant DB as Room (core:data)
+  participant N as Live Update notification
+  participant W as Wear OS
 
-:core:data
-  - Room entities
-  - DAOs
-  - repositories
-  - entity/domain mappers
+  U->>D: Start focus from a scheduled block
+  D->>S: start session
+  S->>R: reduce(Start)
+  R->>DB: persist session state
+  S->>N: post progress-centric notification
+  S-->>W: mirror state over Data Layer
+  U->>S: pause / resume / extend / stop (UI, notification, widget, or watch)
+  S->>R: reduce(action)
+  R->>DB: persist transitions
+  U->>S: complete
+  S->>DB: write actual-time evidence once
+  S->>N: completion notification
 ```
 
-## Parked Or Future Feature Areas
+## Repository Map
 
 ```text
-:feature:routines
-:feature:calendar
-:feature:insights
+.
+|-- app/                      # App shell: MainActivity, navigation, widgets, AppFunctions, onboarding, app lock
+|-- core/ai/                  # AI planners, GenAI gateways (Nano/cloud/heuristics), semantic index
+|-- core/data/                # Room database, DAOs, entities, DataStore, backup, sync, security
+|-- core/domain/              # Pure domain models, planner service, conflict/free-time engines, repositories
+|-- core/notifications/       # Alarm scheduling, receivers, Live Updates, reminder reconciliation
+|-- core/ui/                  # Design system: theme, glass surfaces, form kit, command palette, motion
+|-- feature/daydial/          # Chronos Dial, Today/Plan/Focus-planner/Insights tabs, AI review sheet
+|-- feature/focus/            # Focus foreground service, session runtime, wear bridge
+|-- feature/tasks/            # Task screen, form sheet, attachments, connections, command provider
+|-- feature/habits/           # Habit screen, recurrence editor, streak chart, command provider
+|-- feature/medication/       # Medication screen, adherence chart, plan notes, command provider
+|-- wear/                     # Standalone Wear OS app, tiles, data-layer listeners
+|-- benchmark/                # Macrobenchmarks, startup benchmark, baseline profile generator
+|-- docs/                     # Development, Gemini Nano support, product contract, design notes
+|-- scripts/                  # JBR Gradle helper, Android 17 smoke, memory budget smoke, benchmark helpers
+|-- README_MINIMAL.md         # Minimal product contract (MVP scope and acceptance criteria)
+|-- ROADMAP.md                # Long-horizon implementation roadmap
+`-- APP_DESCRIPTION.md        # Store-style app description
 ```
 
-## Development Status
+## Main Subsystems
 
-ChronosFlow is now in an active alpha implementation phase with a dial-first primary surface.
+| Area | Primary Files | Notes |
+| --- | --- | --- |
+| App shell | `app/.../MainActivity.kt`, `app/.../navigation/ChronosNavigationShell.kt`, `ChronosNavGraph.kt`, `ChronosRoute.kt` | Owns adaptive navigation, shell destinations (Plan, Today, Focus primary; Tasks/Habits/Meds/Review on expanded layouts behind feature flags), and notification routing. |
+| Chronos Dial | `feature/daydial/ChronosDial.kt`, `dial/ChronosDialInteractionEngine.kt`, `DayDialViewModel.kt`, `delegate/*` | Renders the three-ring dial and coordinates block, focus, AI, reminder, and review delegates. |
+| Planner domain | `core/domain/planner/PlannerService.kt`, `ConflictDetectionEngine.kt`, `FreeTimeCalculator.kt`, `PlannerCommandHistory.kt`, `FocusSessionReducer.kt` | Pure scheduling rules, command-pattern mutations with undo/redo, conflict and free-time math. |
+| Persistence | `core/data/ChronosDatabase.kt`, `dao/*`, `model/*Entity.kt`, `datastore/ChronosPreferencesDataSource.kt` | Room schema for plans, blocks, tasks, habits, medication, focus sessions, check-ins, and reviews; DataStore preferences. |
+| AI planning | `core/ai/ChronosAIPlanner.kt`, `genai/MlKitGeminiNanoGateway.kt`, `genai/CloudGeminiGatewayImpl.kt`, `genai/LocalPlanningHeuristics.kt`, `genai/GenAiAssistCoordinator.kt` | Model routing, prompt building, response parsing, and suggestion staging. |
+| Notifications | `core/notifications/AlarmScheduler.kt`, `AlarmDeliveryCoordinator.kt`, `LiveUpdateGateway.kt`, `FocusNotificationManager.kt` | Exact/inexact alarm policy, delivery, Live Updates, and action receivers. |
+| Design system | `core/ui/theme/ChronosTheme.kt`, `theme/ChronosFrostedGlass.kt`, `components/ChronosFormBottomSheet.kt`, `components/CommandPalette.kt` | Material 3 theming, Haze frosted-glass chrome, shared form kit, and the palette. |
+| Focus runtime | `feature/focus/FocusService.kt`, `FocusSessionRuntime.kt`, `WearFocusBridge.kt` | Foreground session execution, logging, widget dispatch, and watch mirroring. |
+| System surfaces | `app/.../widget/*`, `app/.../appfunctions/ChronosAppFunctions.kt`, `wear/*` | Glance widgets, agent app-control, Wear tiles and standalone app. |
+| Benchmarks | `benchmark/.../ChronosMacrobenchmark.kt`, `StartupBenchmark.kt`, `BaselineProfileGenerator.kt` | Startup and interaction macrobenchmarks plus baseline profile generation. |
 
-Implemented and actively stabilized:
+## Prerequisites
 
-- Gradle project baseline with modular structure
-- Core DayDial and Focus flows
-- AI planner with user-reviewed suggestion staging
-- Command palette command-provider coverage in the app shell
-- Alarm and notification scaffolding
-- Room data foundation and core domain/service boundaries
-- Habits, medication, and review modules wired as gated or command-accessible surfaces
-- Baseline profile and macrobenchmark test path (`chronosCiCheck`)
+- Android Studio (current stable) or a standalone Android SDK with `compileSdk 37`
+- JDK 17 (the project is configured for Android Studio's bundled JBR; `scripts/gradlew-jbr.ps1` wraps Gradle with it on Windows)
+- An Android device or emulator on API 26+ (`minSdk 26`, `targetSdk 37`)
+- Optional: a Wear OS device or emulator for the `:wear` module
+- Optional: a Gemini API key for cloud planning fallback
 
-In progress:
+## Setup
 
-- Domain/data consistency and module-boundary verification
-- Command palette and Android 16/17 polish pass for interaction and accessibility
-- Reliability hardening for focus state, reminders, and conflict handling
-- Feature promotion planning for future routines, calendar, and insights modules once dial handoff is complete
+1. Copy `local.properties.example` to `local.properties` and set `sdk.dir`.
+2. Optionally add `GEMINI_API_KEY=...` (from Google AI Studio) to `local.properties` to enable cloud Gemini planning when the privacy mode allows cloud use. Never commit `local.properties`.
 
-## Build Notes
+## Build And Run
 
-The repository expects a standard Android Gradle environment with:
-
-- Android Studio or Android SDK
-- JDK 17+
-- Gradle wrapper, once added
-
-After restoring or adding the Gradle wrapper, the expected verification command is:
+Assemble and install the debug app:
 
 ```powershell
 .\gradlew.bat :app:assembleDebug
 ```
 
-Benchmark verification:
+On machines without `java` on `PATH`:
+
+```powershell
+.\scripts\gradlew-jbr.ps1 :app:assembleDebug --no-daemon
+```
+
+Debug installs use `adb install -r` semantics so an existing install is preserved (see `scripts/install-debug-preserve.ps1`).
+
+Build the Wear OS app:
+
+```powershell
+.\gradlew.bat :wear:assembleDebug
+```
+
+## Verification
+
+Run unit tests:
+
+```powershell
+.\gradlew.bat test --no-daemon
+```
+
+Run the full non-emulator CI path — module isolation builds, unit tests, benchmark assembly, and test APK assembly:
+
+```powershell
+.\gradlew.bat chronosCiCheck --no-daemon
+```
+
+Run macrobenchmarks against a connected device:
 
 ```powershell
 .\gradlew.bat :benchmark:connectedCheck
 ```
 
-## Design Principles
+Code coverage is wired through Kover for the owned logic modules (`:core:ai`, `:core:domain`, `:feature:focus`, `:wear`). Additional smoke helpers live in `scripts/` (`android17-smoke.ps1`, `android-memory-budget-smoke.ps1`, `physical-benchmark.ps1`). See [`docs/development.md`](docs/development.md) for the full local verification guide.
 
-- Make time visible.
-- Keep planning fast.
-- Prefer calm hierarchy over visual noise.
-- Let users review AI changes before applying them.
-- Treat habits, medication, focus, sleep, and tasks as parts of one day.
-- Support large screens and non-touch input from the start.
-- Use exact alarms and Live Updates only where they are justified.
+## Important Implementation Notes
+
+- The Gradle module graph is `:app`, `:benchmark`, `:core:{ai,data,domain,notifications,ui}`, `:feature:{daydial,focus,tasks,habits,medication}`, and `:wear` (`settings.gradle.kts`).
+- `core/domain` stays free of Android persistence concerns; `core/data` owns Room entities, DAOs, mappers, and repositories behind domain repository interfaces.
+- AI never writes autonomously: all model output flows through suggestion staging and the `AiReviewSheet` before any planner mutation.
+- `FocusService` runs as a `specialUse` foreground service whose subtype is declared as an active focus session timer; focus state recovery after process death is part of the product contract.
+- Exact alarms are policy-gated; the reminder stack reconciles after boot, timezone changes, and permission-state changes.
+- Habits, medication, and review surfaces are feature-flag gated (`ChronosFeatureFlags`) and parked from compact navigation until their dial handoff is proven.
+- The frosted-glass shell chrome is built on Haze; shared glass and backdrop primitives live in `:core:ui`.
+
+## Core Technologies
+
+- Kotlin 2.2.21, Android Gradle Plugin 9.2.1, KSP
+- Jetpack Compose (BOM 2026.05) with Material 3, adaptive layouts, and window size classes
+- Hilt for dependency injection
+- Room 2.8 (with optional SQLCipher encryption) and DataStore Preferences
+- Navigation Compose, Lifecycle, WorkManager, Biometric
+- ML Kit GenAI (Prompt, Summarization, Proofreading, Rewriting) on AICore for Gemini Nano, plus the Google Generative AI client for cloud fallback
+- AndroidX AppSearch, AppFunctions, Glance app widgets
+- Wear OS: Compose for Wear OS Material 3, Tiles/ProtoLayout, Wearable Data Layer, remote interactions
+- Firebase Firestore (sync gateway scaffolding)
+- Haze frosted glass, Material icons extended
+- Testing: JUnit 4, MockK, Turbine, Robolectric, Roborazzi, Compose UI tests, Espresso, Macrobenchmark, Kover coverage

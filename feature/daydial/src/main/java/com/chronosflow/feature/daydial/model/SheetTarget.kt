@@ -22,6 +22,7 @@ sealed class SheetTarget {
     object ImportBackup : SheetTarget()
     object WeeklySummary : SheetTarget()
     object Diagnostics : SheetTarget()
+    object Logs : SheetTarget()
     data class ReviewDetails(val section: ReviewDetailSection) : SheetTarget()
     data class BlockEditor(val blockId: String) : SheetTarget()
 }

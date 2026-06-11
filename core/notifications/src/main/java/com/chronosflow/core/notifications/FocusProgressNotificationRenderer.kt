@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
 import javax.inject.Inject
@@ -58,7 +59,8 @@ class FocusProgressNotificationRenderer @Inject constructor(
         }
 
         return NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_focus_session)
+            .setSmallIcon(R.drawable.ic_chronosflow_notification)
+            .setColor(ContextCompat.getColor(context, R.color.chronosflow_brand_accent))
             .setContentTitle(displayTitle)
             .setContentText(displayText)
             .setContentIntent(contentIntent)

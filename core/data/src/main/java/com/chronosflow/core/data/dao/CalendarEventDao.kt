@@ -14,7 +14,7 @@ interface CalendarEventDao {
     @Query("SELECT * FROM calendar_events WHERE startAt < :end AND endAt > :start ORDER BY startAt ASC")
     fun observeEventsBetween(start: Instant, end: Instant): Flow<List<CalendarEventEntity>>
 
-    @Query("SELECT * FROM calendar_events WHERE id = :id")
+    @Query("SELECT * FROM calendar_events WHERE id = :id ORDER BY startAt ASC LIMIT 1")
     suspend fun getCalendarEventById(id: Long): CalendarEventEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -22,4 +22,7 @@ interface CalendarEventDao {
 
     @Delete
     suspend fun deleteCalendarEvent(event: CalendarEventEntity)
+
+    @Query("DELETE FROM calendar_events WHERE startAt < :end AND endAt > :start")
+    suspend fun deleteEventsBetween(start: Instant, end: Instant)
 }
