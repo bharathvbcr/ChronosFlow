@@ -26,9 +26,11 @@ import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
+import com.chronosflow.core.data.assist.CachedAssistLine
 import com.chronosflow.core.domain.model.ChronosWidgetSummary
 import com.chronosflow.core.notifications.PrivacyRedaction
 import dagger.hilt.android.EntryPointAccessors
+import java.time.LocalDate
 
 class ChronosGlanceWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -42,6 +44,10 @@ class ChronosGlanceWidget : GlanceAppWidget() {
         val redactMedication = runCatching {
             entryPoint.privacyPreferences().redactMedicationOnWidgets()
         }.getOrDefault(true)
+        // Pre-generated in the foreground app; the widget never runs GenAI itself.
+        val coachLine = runCatching {
+            entryPoint.proactiveAssistCache().dailyCoachLine(LocalDate.now())
+        }.getOrNull()
         provideContent {
             GlanceTheme {
                 WidgetContent(
@@ -51,7 +57,8 @@ class ChronosGlanceWidget : GlanceAppWidget() {
                     medicationLabel = PrivacyRedaction.medicationWidgetLabel(
                         summary.medicationName,
                         redactMedicationNames = redactMedication
-                    )
+                    ),
+                    coachLine = coachLine
                 )
             }
         }
@@ -62,7 +69,8 @@ class ChronosGlanceWidget : GlanceAppWidget() {
         habitId: String?,
         habitTitle: String?,
         medicationId: String?,
-        medicationLabel: String?
+        medicationLabel: String?,
+        coachLine: CachedAssistLine?
     ) {
         Column(
             modifier = GlanceModifier
@@ -81,6 +89,14 @@ class ChronosGlanceWidget : GlanceAppWidget() {
                 )
             )
             Spacer(modifier = GlanceModifier.height(8.dp))
+            if (coachLine != null) {
+                Text(
+                    text = coachLine.headline,
+                    style = TextStyle(color = GlanceTheme.colors.onBackground, fontSize = 12.sp),
+                    maxLines = 2
+                )
+                Spacer(modifier = GlanceModifier.height(6.dp))
+            }
             Text(
                 text = "Focus session",
                 style = TextStyle(color = GlanceTheme.colors.onBackground, fontSize = 14.sp)

@@ -196,14 +196,22 @@ class DayDialViewModelTest {
                 manualMissedBlockRegistry
             ),
             moodEnergyDelegate = DayDialMoodEnergyDelegate(moodEnergyRepository, mockk(relaxed = true)),
+            journalDelegate = mockk(relaxed = true),
+            trendsDelegate = mockk(relaxed = true),
             moodEnergyCheckInAssistPlanner = mockk<MoodEnergyCheckInAssistPlanner>(relaxed = true),
+            focusNextBlockPlanner = mockk(relaxed = true),
+            focusGuidancePlanner = mockk(relaxed = true),
+            proactiveAssistCache = mockk(relaxed = true),
             appLockDelegate = appLockDelegate,
             alarmCapabilityRefresher = alarmCapabilityRefresher,
             habitReminderScheduler = habitReminderScheduler,
             reminderPreferencesReader = reminderPreferencesReader,
             manualMissedBlockRegistry = manualMissedBlockRegistry,
             focusMoodAccentCache = mockk(relaxed = true),
-            dataExportRepository = dataExportRepository
+            dataExportRepository = dataExportRepository,
+            routineRepository = mockk(relaxed = true),
+            applyRoutineToDateUseCase = mockk(relaxed = true),
+            completeRoutineForDateUseCase = mockk(relaxed = true)
         )
         viewModel.dataExportDispatcher = testDispatcher
         viewModel.cancelMinuteTickerForTest()

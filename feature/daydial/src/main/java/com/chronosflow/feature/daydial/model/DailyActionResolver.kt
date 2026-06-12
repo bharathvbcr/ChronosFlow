@@ -34,7 +34,7 @@ internal fun resolveDailyAction(
             title = if (count == 1) missedBlocks.first().title else "$count missed blocks",
             subtitle = "Catch up before the day drifts",
             primaryLabel = "Review missed",
-            secondaryLabel = null,
+            secondaryLabel = "Reflow day",
             kind = DailyActionKind.MISSED_BLOCKS
         )
     }

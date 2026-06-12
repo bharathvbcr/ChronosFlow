@@ -96,7 +96,19 @@ internal fun DayDialSheetHost(
     onImportBackup: (String) -> Unit,
     onFinishFocus: (String) -> Unit,
     onEndDay: () -> Unit,
-    showMessage: (String) -> Unit
+    showMessage: (String) -> Unit,
+    journalEntry: com.chronosflow.core.domain.model.JournalEntry? = null,
+    sleepTrack: com.chronosflow.core.domain.model.SleepTrack? = null,
+    moodSummary: String? = null,
+    onSaveJournal: (date: java.time.LocalDate, body: String, promptType: String?) -> Unit = { _, _, _ -> },
+    onSaveSleep: (
+        date: java.time.LocalDate,
+        quality: Int,
+        startMinute: Int?,
+        endMinute: Int?,
+        interruptions: Int,
+        notes: String?
+    ) -> Unit = { _, _, _, _, _, _ -> }
 ) {
     val resolvedActiveSheet = resolveDayDialSheetTarget(
         activeSheet = activeSheet,
@@ -216,7 +228,12 @@ internal fun DayDialSheetHost(
                     onImportBackup = onImportBackup,
                     onFinishFocus = onFinishFocus,
                     onEndDay = onEndDay,
-                    showMessage = showMessage
+                    showMessage = showMessage,
+                    journalEntry = journalEntry,
+                    sleepTrack = sleepTrack,
+                    moodSummary = moodSummary,
+                    onSaveJournal = onSaveJournal,
+                    onSaveSleep = onSaveSleep
                 )
             }
         }

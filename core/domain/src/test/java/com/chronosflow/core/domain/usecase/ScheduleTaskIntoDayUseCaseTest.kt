@@ -5,12 +5,14 @@ import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.EnergyIntensity
 import com.chronosflow.core.domain.model.TaskRecurrenceRule
 import com.chronosflow.core.domain.model.TaskSchedule
+import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.core.domain.model.SleepSchedule
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TimeBlock
 import com.chronosflow.core.domain.planner.FreeTimeCalculator
 import com.chronosflow.core.domain.planner.PlannerOperationResult
 import com.chronosflow.core.domain.planner.PlannerService
+import com.chronosflow.core.domain.repository.MoodEnergyRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TaskScheduleRepository
@@ -25,6 +27,7 @@ import org.junit.Before
 import org.junit.Test
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 
 class ScheduleTaskIntoDayUseCaseTest {
@@ -32,6 +35,7 @@ class ScheduleTaskIntoDayUseCaseTest {
     private val taskScheduleRepository: TaskScheduleRepository = mockk()
     private val plannerService: PlannerService = mockk()
     private val sleepScheduleRepository: SleepScheduleRepository = mockk()
+    private val moodEnergyRepository: MoodEnergyRepository = mockk()
     private lateinit var useCase: ScheduleTaskIntoDayUseCase
 
     private val date = LocalDate.of(2026, 5, 9)
@@ -46,10 +50,12 @@ class ScheduleTaskIntoDayUseCaseTest {
             taskScheduleRepository = taskScheduleRepository,
             plannerService = plannerService,
             freeTimeCalculator = FreeTimeCalculator(),
-            sleepScheduleRepository = sleepScheduleRepository
+            sleepScheduleRepository = sleepScheduleRepository,
+            moodEnergyRepository = moodEnergyRepository
         )
         coEvery { sleepScheduleRepository.getSleepSchedule() } returns SleepSchedule.default()
         coEvery { taskScheduleRepository.getTaskSchedule(any()) } returns null
+        coEvery { moodEnergyRepository.getForDateRange(any(), any()) } returns emptyList()
     }
 
     @Test
@@ -72,6 +78,44 @@ class ScheduleTaskIntoDayUseCaseTest {
         assertEquals(BlockProvenance.TASK_CONVERTED, captured.captured.provenance)
         assertEquals("task-1", captured.captured.taskId)
         assertTrue(captured.captured.isProtected)
+    }
+
+    @Test
+    fun `urgent task is biased toward the measured energy peak`() = runTest {
+        val captured = slot<TimeBlock>()
+        coEvery { taskRepository.getTaskById("task-1") } returns task(id = "task-1", priority = 2)
+        coEvery { plannerService.getBlocksForDate(date) } returns emptyList()
+        coEvery { moodEnergyRepository.getForDateRange(any(), any()) } returns peakCheckIns(peakHour = 15)
+        coEvery { plannerService.createBlock(capture(captured)) } returns PlannerOperationResult.Applied(
+            message = "Placement valid",
+            blockId = "new-block",
+            snappedToMinute = 15 * 60
+        )
+
+        val result = scheduleTask("task-1", date = date)
+
+        assertTrue(result is PlannerOperationResult.Applied)
+        // Free all day, peak energy at 15:00 -> high-priority task lands on the peak instead of 08:00.
+        assertEquals(15 * 60, captured.captured.startMinuteOfDay)
+        assertEquals(EnergyIntensity.HIGH, captured.captured.energyLevel)
+    }
+
+    @Test
+    fun `low priority task ignores energy peak and keeps first-fit`() = runTest {
+        val captured = slot<TimeBlock>()
+        coEvery { taskRepository.getTaskById("task-1") } returns task(id = "task-1", priority = 0)
+        coEvery { plannerService.getBlocksForDate(date) } returns emptyList()
+        coEvery { moodEnergyRepository.getForDateRange(any(), any()) } returns peakCheckIns(peakHour = 15)
+        coEvery { plannerService.createBlock(capture(captured)) } returns PlannerOperationResult.Applied(
+            message = "Placement valid",
+            blockId = "new-block",
+            snappedToMinute = 8 * 60
+        )
+
+        scheduleTask("task-1", date = date)
+
+        assertEquals(8 * 60, captured.captured.startMinuteOfDay)
+        coVerify(exactly = 0) { moodEnergyRepository.getForDateRange(any(), any()) }
     }
 
     @Test
@@ -324,6 +368,24 @@ class ScheduleTaskIntoDayUseCaseTest {
         updatedAt = now,
         taskOccurrenceDate = taskOccurrenceDate
     )
+
+    private fun peakCheckIns(peakHour: Int): List<MoodEnergyCheckIn> {
+        val day = LocalDate.of(2026, 5, 7)
+        fun checkIn(idx: Int, hour: Int, energy: Int) = MoodEnergyCheckIn(
+            id = "checkin-$idx",
+            blockId = null,
+            moodScore = 3,
+            stressScore = 2,
+            energyScore = energy,
+            focusScore = 3,
+            notes = null,
+            recordedAt = LocalDateTime.of(day, LocalTime.of(hour, 0)),
+            checkInDate = day
+        )
+        // High energy clustered at the peak hour, low energy in the early morning.
+        return List(4) { checkIn(it, peakHour, energy = 5) } +
+            List(3) { checkIn(it + 4, 9, energy = 1) }
+    }
 
     private fun schedule(taskId: String, nextOccurrenceDate: LocalDate): TaskSchedule = TaskSchedule(
         id = "schedule-$taskId",

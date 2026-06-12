@@ -2,7 +2,9 @@ package com.chronosflow.feature.medication
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.chronosflow.core.ai.MedicationAdherenceAssistPlanner
 import com.chronosflow.core.ai.MedicationAssistPlanner
+import com.chronosflow.core.ai.RoutineAssistSource
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
 import com.chronosflow.core.ai.genai.GenAiAssistCopy
 import com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot
@@ -51,6 +53,13 @@ data class MedicationAssistUiState(
     val assistSnapshot: GenAiAssistUiSnapshot? = null
 )
 
+data class MedicationAdherenceSuggestion(
+    val plan: MedicationPlan,
+    val suggestedReminderMinute: Int,
+    val reason: String,
+    val source: RoutineAssistSource
+)
+
 private val weekdaySet = setOf(
     DayOfWeek.MONDAY,
     DayOfWeek.TUESDAY,
@@ -68,14 +77,28 @@ class MedicationViewModel @Inject constructor(
     private val sleepScheduleRepository: SleepScheduleRepository,
     private val alarmScheduler: AlarmScheduler,
     private val medicationAssistPlanner: MedicationAssistPlanner,
+    private val medicationAdherenceAssistPlanner: MedicationAdherenceAssistPlanner,
     private val genAiAssistCoordinator: GenAiAssistCoordinator,
     private val alarmCapabilityRefresher: AlarmCapabilityRefresher,
     private val alarmDeliveryCoordinator: AlarmDeliveryCoordinator
 ) : ViewModel() {
+    // Declared before init: the adherence collector can run synchronously
+    // during construction under an unconfined dispatcher.
+    private val _adherenceSuggestions = MutableStateFlow<List<MedicationAdherenceSuggestion>>(emptyList())
+    val adherenceSuggestions = _adherenceSuggestions.asStateFlow()
+
+    private val _adherenceAssistSnapshot = MutableStateFlow<GenAiAssistUiSnapshot?>(null)
+    val adherenceAssistSnapshot = _adherenceAssistSnapshot.asStateFlow()
+
     init {
         viewModelScope.launch {
             alarmCapabilityRefresher.refreshes.collect {
                 refreshExactAlarmPermissionState()
+            }
+        }
+        viewModelScope.launch {
+            medicationRepository.observeMedicationPlans().collect { current ->
+                refreshAdherenceSuggestions(current)
             }
         }
     }
@@ -94,6 +117,52 @@ class MedicationViewModel @Inject constructor(
 
     private val _assistState = MutableStateFlow(MedicationAssistUiState())
     val assistState = _assistState.asStateFlow()
+
+    private suspend fun refreshAdherenceSuggestions(current: List<MedicationPlan>) {
+        val active = current.filter { it.isActive }
+        if (active.isEmpty()) {
+            _adherenceSuggestions.value = emptyList()
+            return
+        }
+        _adherenceAssistSnapshot.value =
+            runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }.getOrNull()
+        val now = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+        val results = runCatching {
+            medicationAdherenceAssistPlanner.suggestAdjustments(active, LocalDate.now(), now)
+        }.getOrDefault(emptyList())
+        _adherenceSuggestions.value = results.mapNotNull { result ->
+            active.firstOrNull { it.id == result.medicationPlanId }?.let { plan ->
+                MedicationAdherenceSuggestion(
+                    plan = plan,
+                    suggestedReminderMinute = result.suggestedReminderMinute,
+                    reason = result.reason,
+                    source = result.source
+                )
+            }
+        }
+    }
+
+    /** Applies the suggested reminder time through the same path as the edit form. */
+    fun applyAdherenceSuggestion(suggestion: MedicationAdherenceSuggestion) {
+        val plan = suggestion.plan
+        updateMedication(
+            plan = plan,
+            name = plan.name,
+            dosage = plan.dosage,
+            unit = plan.unit,
+            reminderMinuteOfDay = suggestion.suggestedReminderMinute,
+            takeWithFood = plan.takeWithFood,
+            refillNeededAfterDoses = plan.refillNeededAfterDoses,
+            notes = plan.notes
+        )
+        _adherenceSuggestions.value =
+            _adherenceSuggestions.value.filterNot { it.plan.id == plan.id }
+    }
+
+    fun dismissAdherenceSuggestion(suggestion: MedicationAdherenceSuggestion) {
+        _adherenceSuggestions.value =
+            _adherenceSuggestions.value.filterNot { it.plan.id == suggestion.plan.id }
+    }
 
     fun addMedication(
         name: String,

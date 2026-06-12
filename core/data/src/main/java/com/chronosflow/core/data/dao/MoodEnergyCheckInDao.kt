@@ -16,6 +16,9 @@ interface MoodEnergyCheckInDao {
     @Query("SELECT * FROM mood_energy_check_ins WHERE checkInDate BETWEEN :start AND :end ORDER BY recordedAt DESC")
     suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<MoodEnergyCheckInEntity>
 
+    @Query("SELECT * FROM mood_energy_check_ins WHERE checkInDate BETWEEN :start AND :end ORDER BY recordedAt DESC")
+    fun observeForDateRange(start: LocalDate, end: LocalDate): Flow<List<MoodEnergyCheckInEntity>>
+
     @Query("SELECT * FROM mood_energy_check_ins ORDER BY recordedAt DESC LIMIT 1")
     suspend fun getLatest(): MoodEnergyCheckInEntity?
 

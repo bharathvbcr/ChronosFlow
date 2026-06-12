@@ -117,6 +117,38 @@ class PlannerServiceTest {
     }
 
     @Test
+    fun `rebalanceDay from now pulls overdue blocks forward to the floor`() = runTest {
+        val overdue = timeBlock(id = "overdue", startMinute = 8 * 60, durationMinutes = 60)
+
+        every { repository.getTimeBlocksByDate(date) } returns flowOf(listOf(overdue))
+        coEvery { repository.saveTimeBlock(any()) } returns Unit
+
+        val result = service.rebalanceDay(date, fromMinute = 13 * 60) // reflow from 1pm
+
+        assertTrue(result is PlannerOperationResult.Applied)
+        // not left in the morning, not packed to midnight — pulled forward to the floor
+        coVerify { repository.saveTimeBlock(match { it.id == "overdue" && it.startMinuteOfDay == 13 * 60 }) }
+    }
+
+    @Test
+    fun `rebalanceDay keeps an in-progress block anchored`() = runTest {
+        val inProgress = timeBlock(id = "active", startMinute = 12 * 60, durationMinutes = 120)
+            .copy(actualStartMinuteOfDay = 12 * 60)
+        val pending = timeBlock(id = "pending", startMinute = 15 * 60, durationMinutes = 60)
+
+        every { repository.getTimeBlocksByDate(date) } returns flowOf(listOf(inProgress, pending))
+        coEvery { repository.saveTimeBlock(any()) } returns Unit
+
+        val result = service.rebalanceDay(date, fromMinute = 13 * 60) // 1pm, inside the active block
+
+        assertTrue(result is PlannerOperationResult.Applied)
+        // the underway block is never relocated
+        coVerify(exactly = 0) { repository.saveTimeBlock(match { it.id == "active" }) }
+        // pending is packed after the active block ends (720 + 120), not on top of it
+        coVerify { repository.saveTimeBlock(match { it.id == "pending" && it.startMinuteOfDay == 840 }) }
+    }
+
+    @Test
     fun `logActualWindow updates actual times`() = runTest {
         val block = timeBlock(id = "1")
         coEvery { repository.getTimeBlockById("1") } returns block

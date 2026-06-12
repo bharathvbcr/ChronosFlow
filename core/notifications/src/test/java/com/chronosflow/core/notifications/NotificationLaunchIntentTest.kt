@@ -39,10 +39,13 @@ class NotificationLaunchIntentTest {
             SECTION_MEDICATION,
             resolveNotificationLaunch("uuid", AlarmRequestType.MEDICATION).section
         )
-        assertEquals(
-            SECTION_REVIEW,
-            resolveNotificationLaunch("daydial:2026-05-24:day:review", AlarmRequestType.DAILY_REVIEW).section
+        // Evening companion: the daily-review tap lands on the journal sheet.
+        val dailyReview = resolveNotificationLaunch(
+            "daydial:2026-05-24:day:review",
+            AlarmRequestType.DAILY_REVIEW
         )
+        assertEquals(SECTION_DAY, dailyReview.section)
+        assertEquals(DAY_TARGET_JOURNAL, dailyReview.dayTarget)
         assertEquals(
             SECTION_TASKS,
             resolveNotificationLaunch("task:abc", AlarmRequestType.URGENT_TASK).section

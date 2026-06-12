@@ -55,6 +55,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,6 +86,7 @@ import com.chronosflow.core.notifications.TaskContextCommandTarget
 import com.chronosflow.core.notifications.TaskContextInternalAction
 import com.chronosflow.core.notifications.launchTaskContextCommand
 import com.chronosflow.core.ui.components.ChronosEmptyState
+import com.chronosflow.core.ui.components.ChronosLinkOption
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosMetricTile
 import com.chronosflow.core.ui.components.ChronosScreenBackdrop
@@ -92,6 +94,8 @@ import com.chronosflow.core.ui.shell.ChronosModalBottomSheet
 import com.chronosflow.core.ui.components.ChronosScreenScaffold
 import com.chronosflow.core.ui.components.ChronosSectionHeader
 import com.chronosflow.core.ui.components.formatDisplayMinute
+import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
+import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 import com.chronosflow.core.ui.shell.LocalChronosShellBottomInset
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import kotlinx.coroutines.launch
@@ -117,6 +121,8 @@ fun TaskScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
+    val goals by viewModel.goals.collectAsStateWithLifecycle()
+    val goalOptions = remember(goals) { goals.map { ChronosLinkOption(it.id, it.title) } }
     val taskSchedulesByTaskId by viewModel.taskSchedulesByTaskId.collectAsStateWithLifecycle()
     val scheduleStatus by viewModel.scheduleStatus.collectAsStateWithLifecycle()
     val status by viewModel.status.collectAsStateWithLifecycle()
@@ -276,36 +282,39 @@ fun TaskScreen(
                 }
 
                 if (showNotificationPermissionAction || (!notificationPermissionGranted && urgentCount > 0)) {
-                    item {
+                    item(key = "attention_notification") {
                         TaskAttentionCard(
                             title = "Notifications are off",
                             message = "Urgent task alarms need notification access.",
                             actionLabel = "Enable",
                             onAction = requestNotificationPermission,
+                            modifier = Modifier.animateItem(),
                             onDismiss = viewModel::dismissNotificationPermissionAction
                         )
                     }
                 }
 
                 if (showExactAlarmPermissionAction || (!exactAlarmPermissionGranted && urgentCount > 0)) {
-                    item {
+                    item(key = "attention_exact_alarm") {
                         TaskAttentionCard(
                             title = "Exact alarms are off",
                             message = "Urgent tasks use a 10-minute fallback until exact alarms are enabled.",
                             actionLabel = "Settings",
                             onAction = viewModel::openExactAlarmSettings,
+                            modifier = Modifier.animateItem(),
                             onDismiss = viewModel::dismissExactAlarmPermissionAction
                         )
                     }
                 }
 
                 scheduleStatus?.let { statusMessage ->
-                    item {
+                    item(key = "attention_schedule_status") {
                         TaskAttentionCard(
                             title = "Scheduling update",
                             message = statusMessage,
                             actionLabel = "OK",
-                            onAction = viewModel::clearScheduleStatus
+                            onAction = viewModel::clearScheduleStatus,
+                            modifier = Modifier.animateItem()
                         )
                     }
                 }
@@ -355,8 +364,12 @@ fun TaskScreen(
                 }
 
                 if (visibleTasks.isEmpty()) {
-                    item {
-                        EmptyTasks(filter = filter, onAdd = { sheetTarget = TaskSheetTarget.Add() })
+                    item(key = "tasks_empty_state") {
+                        EmptyTasks(
+                            filter = filter,
+                            onAdd = { sheetTarget = TaskSheetTarget.Add() },
+                            modifier = Modifier.animateItem()
+                        )
                     }
                 } else {
                     items(visibleTasks, key = { it.id }) { task ->
@@ -381,7 +394,9 @@ fun TaskScreen(
     TaskFormSheet(
         target = sheetTarget,
         onDismiss = { sheetTarget = null },
-        onConfirm = { title, desc, priority, dueDate, alarmEnabled, preferredDurationMinutes, preferredStartMinuteOfDay, targetDate, checklist, linkedContact, actions, attachments, recurringConfig ->
+        goalOptions = goalOptions,
+        initialGoalId = (sheetTarget as? TaskSheetTarget.Edit)?.task?.goalId,
+        onConfirm = { title, desc, priority, dueDate, alarmEnabled, preferredDurationMinutes, preferredStartMinuteOfDay, targetDate, checklist, linkedContact, actions, attachments, recurringConfig, goalId ->
             when (val target = sheetTarget) {
                 is TaskSheetTarget.Add -> viewModel.addTask(
                     title = title,
@@ -396,7 +411,8 @@ fun TaskScreen(
                     linkedContact = linkedContact,
                     actions = actions,
                     attachments = attachments,
-                    recurringConfig = recurringConfig
+                    recurringConfig = recurringConfig,
+                    goalId = goalId
                 )
                 is TaskSheetTarget.Edit -> viewModel.updateTask(
                     task = target.task,
@@ -412,7 +428,8 @@ fun TaskScreen(
                     linkedContact = linkedContact,
                     actions = actions,
                     attachments = attachments,
-                    recurringConfig = recurringConfig
+                    recurringConfig = recurringConfig,
+                    goalId = goalId
                 )
                 null -> Unit
             }
@@ -447,7 +464,7 @@ fun TaskScreen(
 }
 
 @Composable
-private fun EmptyTasks(filter: TaskFilter, onAdd: () -> Unit) {
+private fun EmptyTasks(filter: TaskFilter, onAdd: () -> Unit, modifier: Modifier = Modifier) {
     ChronosEmptyState(
         title = if (filter == TaskFilter.DONE) "No completed tasks" else "No tasks here",
         message = if (filter == TaskFilter.DONE) {
@@ -455,7 +472,7 @@ private fun EmptyTasks(filter: TaskFilter, onAdd: () -> Unit) {
         } else {
             "Add the next concrete commitment, then protect time for it on the dial."
         },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         action = { Button(onClick = onAdd) { Text("Add task") } }
     )
 }
@@ -466,9 +483,10 @@ private fun TaskAttentionCard(
     message: String,
     actionLabel: String,
     onAction: () -> Unit,
+    modifier: Modifier = Modifier,
     onDismiss: (() -> Unit)? = null
 ) {
-    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+    ChronosListCard(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -557,16 +575,22 @@ private fun TaskItem(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
+                        val titleColor by animateColorAsState(
+                            targetValue = if (task.isCompleted) {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            animationSpec = ChronosValueAnimationFactory.stateChange(reduceMotion),
+                            label = "taskTitleColor"
+                        )
                         Text(
                             text = task.title,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null,
-                            color = if (task.isCompleted) {
-                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
+                            color = titleColor,
                             modifier = Modifier.weight(1f)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -589,7 +613,13 @@ private fun TaskItem(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         if (task.priority >= 2 && !task.isCompleted) {
-                            val color = alarmStateColor(alarmState)
+                            val color by animateColorAsState(
+                                targetValue = alarmStateColor(alarmState),
+                                animationSpec = ChronosValueAnimationFactory.stateChange(
+                                    rememberChronosUiSettings().reduceMotionEnabled
+                                ),
+                                label = "taskAlarmStateColor"
+                            )
                             TaskMetadataBadge(
                                 text = alarmStateLabel(task, alarmState),
                                 icon = Icons.Default.Alarm,

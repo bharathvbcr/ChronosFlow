@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chronosflow.core.ai.AssistNarrative
+import com.chronosflow.core.ai.FocusNextBlockSuggestion
 import com.chronosflow.core.ai.PrivacyMode
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
@@ -326,6 +327,10 @@ internal fun DayDialMainContent(
     focusRestoredMessage: String?,
     moodEnergyCheckIns: List<MoodEnergyCheckIn>,
     moodCheckInCoaching: AssistNarrative? = null,
+    focusGuidance: AssistNarrative? = null,
+    focusNextBlockSuggestion: FocusNextBlockSuggestion? = null,
+    sleepTrack: com.chronosflow.core.domain.model.SleepTrack? = null,
+    journalEntry: com.chronosflow.core.domain.model.JournalEntry? = null,
     genAiRuntimeStatus: GenAiRuntimeStatus,
     insightsTabState: InsightsTabUiState,
     manualMissedBlockIds: Set<String>,
@@ -374,8 +379,11 @@ internal fun DayDialMainContent(
     onReduceMotionChanged: (Boolean) -> Unit,
     onHighContrastChanged: (Boolean) -> Unit,
     onHabitsFeatureEnabledChanged: (Boolean) -> Unit,
+    onGoalsFeatureEnabledChanged: (Boolean) -> Unit,
     onMedicationFeatureEnabledChanged: (Boolean) -> Unit,
     onReviewFeatureEnabledChanged: (Boolean) -> Unit,
+    onJournalFeatureEnabledChanged: (Boolean) -> Unit,
+    onSleepFeatureEnabledChanged: (Boolean) -> Unit,
     onAiAdvisorFeatureEnabledChanged: (Boolean) -> Unit,
     onActiveSheetChanged: (SheetTarget?) -> Unit,
     onRequestNotificationPermission: () -> Unit,
@@ -395,6 +403,7 @@ internal fun DayDialMainContent(
     onOpenFocusScreen: () -> Unit,
     onOpenTasks: () -> Unit,
     onOpenHabits: () -> Unit,
+    onOpenGoals: () -> Unit,
     onOpenMedication: () -> Unit,
     onOpenReview: () -> Unit,
     appLockSettings: AppLockSettingsState,
@@ -508,6 +517,11 @@ internal fun DayDialMainContent(
                         onOpenPlanned = { onActiveSheetChanged(SheetTarget.ReviewDetails(ReviewDetailSection.PLANNED)) },
                         onOpenActual = { onActiveSheetChanged(SheetTarget.ReviewDetails(ReviewDetailSection.ACTUAL)) },
                         onOpenMissedRecovery = { onActiveSheetChanged(SheetTarget.ReviewDetails(ReviewDetailSection.MISSED)) },
+                        showSleepPrompt = featureFlags.reviewEnabled &&
+                            isViewingToday &&
+                            sleepTrack == null &&
+                            currentMinute < 12 * 60,
+                        onLogSleep = { onActiveSheetChanged(SheetTarget.SleepLog(LocalDate.now())) },
                         contentBottomPadding = contentBottomPadding,
                         onAiStripAction = { label ->
                             when (label) {
@@ -588,6 +602,10 @@ internal fun DayDialMainContent(
                             highContrastEnabled = highContrastEnabled,
                             onSaveMoodEnergyCheckIn = viewModel::saveMoodEnergyCheckIn,
                             onStart = viewModel::startFocusSession,
+                            onStartWithBreaks = { blockId, workMinutes, breakMinutes ->
+                                viewModel.startFocusSession(blockId, workMinutes, breakMinutes)
+                            },
+                            onAdvancePhase = viewModel::advanceFocusPhase,
                             onPause = viewModel::pauseFocusSession,
                             onResume = viewModel::resumeFocusSession,
                             onFinish = { viewModel.finishFocusSession("Complete") },
@@ -614,6 +632,8 @@ internal fun DayDialMainContent(
                             onDismissSessionResumedBanner = viewModel::clearFocusRestoredMessage,
                             moodEnergyCheckIns = moodEnergyCheckIns,
                             moodCheckInCoaching = moodCheckInCoaching,
+                            focusGuidance = focusGuidance,
+                            focusNextBlockSuggestion = focusNextBlockSuggestion,
                             genAiRuntimeStatus = genAiRuntimeStatus,
                             cachedMoodScore = focusCachedAccent.first,
                             cachedEnergyScore = focusCachedAccent.second,
@@ -636,6 +656,13 @@ internal fun DayDialMainContent(
                         recommendations = insightsTabState.recommendations,
                         assistSnapshot = insightsTabState.assistSnapshot,
                         isRefreshing = insightsTabState.isRefreshing,
+                        trendRangeDays = insightsTabState.trendRangeDays,
+                        trends = insightsTabState.trends,
+                        journalEntry = journalEntry,
+                        sleepTrack = sleepTrack,
+                        onTrendRangeSelected = viewModel::setInsightsTrendRange,
+                        onOpenJournal = { onActiveSheetChanged(SheetTarget.Journal(selectedDate)) },
+                        onOpenSleepLog = { onActiveSheetChanged(SheetTarget.SleepLog(selectedDate)) },
                         onRefreshRecommendations = viewModel::refreshInsightsRecommendations,
                         onApplyRecommendation = { recommendation ->
                             viewModel.applyInsightRecommendation(
@@ -721,6 +748,9 @@ internal fun DayDialMainContent(
                         onRestorePrevious = onRestorePrevious,
                         onCopyPlan = { viewModel.copyPlanFromPreviousDay() },
                         onApplyTemplate = templateState.applyTemplate,
+                        onApplyTemplateToday = templateState.applyTemplateToday,
+                        onApplyTemplateTomorrow = templateState.applyTemplateTomorrow,
+                        routineCompletionFor = templateState.routineCompletionFor,
                         onEditTemplate = templateState.editTemplate,
                         onDuplicateTemplate = templateState.duplicateTemplate,
                         onSaveCurrentAsTemplate = templateState.saveCurrentAsTemplate,
@@ -773,8 +803,11 @@ internal fun DayDialMainContent(
                         onHighContrastChanged = onHighContrastChanged,
                         featureFlags = featureFlags,
                         onHabitsFeatureEnabledChanged = onHabitsFeatureEnabledChanged,
+                        onGoalsFeatureEnabledChanged = onGoalsFeatureEnabledChanged,
                         onMedicationFeatureEnabledChanged = onMedicationFeatureEnabledChanged,
                         onReviewFeatureEnabledChanged = onReviewFeatureEnabledChanged,
+                        onJournalFeatureEnabledChanged = onJournalFeatureEnabledChanged,
+                        onSleepFeatureEnabledChanged = onSleepFeatureEnabledChanged,
                         onAiAdvisorFeatureEnabledChanged = onAiAdvisorFeatureEnabledChanged,
                         onOpenImport = { onActiveSheetChanged(SheetTarget.ImportBackup) },
                         onOpenWeeklySummary = { onActiveSheetChanged(SheetTarget.WeeklySummary) },
@@ -783,6 +816,7 @@ internal fun DayDialMainContent(
                         onOpenFocusScreen = onOpenFocusScreen,
                         onOpenTasks = onOpenTasks,
                         onOpenHabits = onOpenHabits,
+                        onOpenGoals = onOpenGoals,
                         onOpenMedication = onOpenMedication,
                         onOpenReview = onOpenReview,
                         appLockSettings = appLockSettings,

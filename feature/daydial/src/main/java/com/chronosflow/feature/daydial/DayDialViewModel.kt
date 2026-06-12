@@ -3,6 +3,9 @@ package com.chronosflow.feature.daydial
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.chronosflow.core.ai.AssistNarrative
+import com.chronosflow.core.ai.FocusGuidancePlanner
+import com.chronosflow.core.ai.FocusNextBlockPlanner
+import com.chronosflow.core.ai.FocusNextBlockSuggestion
 import com.chronosflow.core.ai.RecommendationQuickAction
 import com.chronosflow.core.ai.MoodEnergyCheckInAssistPlanner
 import com.chronosflow.core.ai.PrivacyMode
@@ -13,6 +16,7 @@ import com.chronosflow.core.domain.model.TimeBlock
 import com.chronosflow.core.domain.planner.FreeTimeCalculator
 import com.chronosflow.core.domain.planner.PlannerOperationResult
 import com.chronosflow.core.domain.planner.PlannerService
+import com.chronosflow.core.data.assist.ProactiveAssistCache
 import com.chronosflow.core.data.dao.FocusSessionDao
 import com.chronosflow.core.data.backup.ChronosDataExportFile
 import com.chronosflow.core.data.backup.ChronosDataExportRepository
@@ -25,8 +29,12 @@ import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.MedicationRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TaskScheduleRepository
+import com.chronosflow.core.domain.repository.RoutineRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
+import com.chronosflow.core.domain.model.Routine
+import com.chronosflow.core.domain.usecase.ApplyRoutineToDateUseCase
 import com.chronosflow.core.domain.usecase.CompleteHabitUseCase
+import com.chronosflow.core.domain.usecase.CompleteRoutineForDateUseCase
 import com.chronosflow.core.domain.usecase.ToggleTaskCompletionUseCase
 import com.chronosflow.core.notifications.AlarmCapabilityRefresher
 import com.chronosflow.core.notifications.HabitReminderScheduler
@@ -36,8 +44,11 @@ import com.chronosflow.core.data.security.AppLockAuthResult
 import com.chronosflow.core.data.security.SensitiveArea
 import com.chronosflow.feature.daydial.delegate.DayDialAppLockDelegate
 import com.chronosflow.feature.daydial.delegate.DayDialBlockDelegate
+import com.chronosflow.feature.daydial.delegate.CompanionTrendSections
 import com.chronosflow.feature.daydial.delegate.DayDialFocusDelegate
+import com.chronosflow.feature.daydial.delegate.DayDialJournalDelegate
 import com.chronosflow.feature.daydial.delegate.DayDialMoodEnergyDelegate
+import com.chronosflow.feature.daydial.delegate.DayDialTrendsDelegate
 import com.chronosflow.feature.daydial.delegate.DayDialReminderDelegate
 import com.chronosflow.feature.daydial.delegate.DayDialReviewDelegate
 import com.chronosflow.feature.daydial.model.DayQuickItemsUiState
@@ -54,8 +65,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -69,6 +82,8 @@ import javax.inject.Inject
 typealias PlannerHapticCue = com.chronosflow.feature.daydial.model.PlannerHapticCue
 typealias FocusExecutionStatus = com.chronosflow.feature.daydial.model.FocusExecutionStatus
 typealias FocusExecutionState = com.chronosflow.feature.daydial.model.FocusExecutionState
+typealias FocusPhase = com.chronosflow.feature.daydial.model.FocusPhase
+typealias FocusPhaseKind = com.chronosflow.feature.daydial.model.FocusPhaseKind
 typealias DailyReview = com.chronosflow.feature.daydial.model.DailyReview
 
 data class CalendarConnectionState(
@@ -121,14 +136,22 @@ class DayDialViewModel @Inject constructor(
     private val reminderDelegate: DayDialReminderDelegate,
     private val reviewDelegate: DayDialReviewDelegate,
     private val moodEnergyDelegate: DayDialMoodEnergyDelegate,
+    private val journalDelegate: DayDialJournalDelegate,
+    private val trendsDelegate: DayDialTrendsDelegate,
     private val moodEnergyCheckInAssistPlanner: MoodEnergyCheckInAssistPlanner,
+    private val focusNextBlockPlanner: FocusNextBlockPlanner,
+    private val focusGuidancePlanner: FocusGuidancePlanner,
+    private val proactiveAssistCache: ProactiveAssistCache,
     private val appLockDelegate: DayDialAppLockDelegate,
     private val alarmCapabilityRefresher: AlarmCapabilityRefresher,
     private val habitReminderScheduler: HabitReminderScheduler,
     private val reminderPreferencesReader: DayDialReminderPreferencesReader,
     private val manualMissedBlockRegistry: ManualMissedBlockRegistry,
     private val focusMoodAccentCache: FocusMoodAccentCache,
-    private val dataExportRepository: ChronosDataExportRepository
+    private val dataExportRepository: ChronosDataExportRepository,
+    private val routineRepository: RoutineRepository,
+    private val applyRoutineToDateUseCase: ApplyRoutineToDateUseCase,
+    private val completeRoutineForDateUseCase: CompleteRoutineForDateUseCase
 ) : ViewModel() {
 
     val appLockSettings = appLockDelegate.settings
@@ -153,6 +176,8 @@ class DayDialViewModel @Inject constructor(
     val selectedBlockId = coordinatorState.selectedBlockId
     private val _dataExportState = MutableStateFlow(DataExportState())
     val dataExportState = _dataExportState.asStateFlow()
+    val routines: kotlinx.coroutines.flow.StateFlow<List<Routine>> = routineRepository.observeRoutines()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val manualMissedBlockIds = combine(
         coordinatorState.selectedDate,
         manualMissedBlockRegistry.ids
@@ -211,6 +236,12 @@ class DayDialViewModel @Inject constructor(
     private val _moodCheckInCoaching = MutableStateFlow<AssistNarrative?>(null)
     val moodCheckInCoaching = _moodCheckInCoaching.asStateFlow()
 
+    private val _focusGuidance = MutableStateFlow<AssistNarrative?>(null)
+    val focusGuidance = _focusGuidance.asStateFlow()
+    private val _focusNextBlockSuggestion = MutableStateFlow<FocusNextBlockSuggestion?>(null)
+    val focusNextBlockSuggestion = _focusNextBlockSuggestion.asStateFlow()
+    private var focusAssistJob: Job? = null
+
     val canUndo = blockDelegate.canUndo
     val canRedo = blockDelegate.canRedo
 
@@ -229,6 +260,8 @@ class DayDialViewModel @Inject constructor(
     private val _insightsTabState = MutableStateFlow(InsightsTabUiState())
     val insightsTabState = _insightsTabState.asStateFlow()
     val moodEnergyCheckIns = moodEnergyDelegate.observeCheckIns(viewModelScope, selectedDate)
+    val journalEntryForDay = journalDelegate.journalEntry(viewModelScope, selectedDate)
+    val sleepTrackForDay = journalDelegate.sleepTrack(viewModelScope, selectedDate)
 
     val currentMinute = coordinatorState.currentMinute
     private val minuteTickerJob: Job
@@ -277,6 +310,25 @@ class DayDialViewModel @Inject constructor(
                 }
         }
         viewModelScope.launch {
+            focusDelegate.focusExecutionState
+                .map { it.status to it.blockId }
+                .distinctUntilChanged()
+                .collect { (status, blockId) ->
+                    when (status) {
+                        FocusExecutionStatus.RUNNING -> refreshFocusSessionAssist(blockId)
+                        FocusExecutionStatus.FINISHED -> refreshFocusNextBlockSuggestion(blockId)
+                        FocusExecutionStatus.IDLE,
+                        FocusExecutionStatus.SKIPPED -> {
+                            focusAssistJob?.cancel()
+                            _focusGuidance.value = null
+                            _focusNextBlockSuggestion.value = null
+                        }
+                        else -> Unit
+                    }
+                }
+        }
+        refreshTrendSections()
+        viewModelScope.launch {
             combine(reviewInsights, selectedDate, timeBlocksDomain) { insights, date, blocks ->
                 Triple(insights, date, blocks)
             }.collect { (insights, date, blocks) ->
@@ -284,6 +336,20 @@ class DayDialViewModel @Inject constructor(
                     reviewDelegate.currentReviewSummary(date, blocks)
                 }.getOrNull()
                 val recommendations = reviewDelegate.localInsightRecommendations(summary, insights)
+                // Fallback daily coach line for passive surfaces (widget): the
+                // Review screen writes the richer narrative, but only when opened.
+                val today = LocalDate.now()
+                if (date == today && recommendations.isNotEmpty() &&
+                    proactiveAssistCache.dailyCoachLine(today) == null
+                ) {
+                    val top = recommendations.first()
+                    proactiveAssistCache.putDailyCoachLine(
+                        date = today,
+                        headline = top.text,
+                        nextStep = "",
+                        source = top.source.name
+                    )
+                }
                 _insightsTabState.update { state ->
                     state.copy(
                         reviewInsights = insights,
@@ -295,6 +361,100 @@ class DayDialViewModel @Inject constructor(
     }
 
     fun clearMissedFromFocusMessage() = manualMissedBlockRegistry.clearMissedFromFocusMessage()
+
+    fun setInsightsTrendRange(days: Int) = refreshTrendSections(days.coerceIn(7, 60))
+
+    private fun refreshTrendSections(
+        windowDays: Int = _insightsTabState.value.trendRangeDays
+    ) {
+        viewModelScope.launch {
+            val sections = runCatching { trendsDelegate.loadTrends(windowDays) }
+                .getOrDefault(CompanionTrendSections())
+            _insightsTabState.update { state ->
+                state.copy(trendRangeDays = windowDays, trends = sections)
+            }
+        }
+    }
+
+    fun saveJournalEntry(date: LocalDate, body: String, promptType: String?) {
+        viewModelScope.launch {
+            journalDelegate.saveJournalEntry(date, body, promptType, journalEntryForDay.value)
+        }
+    }
+
+    fun saveSleepLog(
+        date: LocalDate,
+        quality: Int,
+        actualStartMinute: Int?,
+        actualEndMinute: Int?,
+        interruptions: Int,
+        windDownNotes: String?
+    ) {
+        viewModelScope.launch {
+            journalDelegate.saveSleepLog(
+                date = date,
+                quality = quality,
+                actualStartMinute = actualStartMinute,
+                actualEndMinute = actualEndMinute,
+                interruptions = interruptions,
+                windDownNotes = windDownNotes,
+                existing = sleepTrackForDay.value
+            )
+        }
+    }
+
+    /**
+     * Session started or resumed: generate in-session guidance plus the AI pick
+     * for the block after this one. The pick is also cached so the completion
+     * notification (posted by the background FocusService) can reuse it.
+     */
+    private fun refreshFocusSessionAssist(activeBlockId: String?) {
+        focusAssistJob?.cancel()
+        focusAssistJob = viewModelScope.launch {
+            val state = focusDelegate.focusExecutionState.value
+            val (moodScore, energyScore) = focusMoodAccentCache.moodEnergyForBlock(activeBlockId)
+            val suggestion = focusNextBlockPlanner.suggestNextBlock(
+                blocks = timeBlocksDomain.value.filter { it.id != activeBlockId },
+                currentMinute = currentMinute.value,
+                moodScore = moodScore,
+                energyScore = energyScore
+            )
+            _focusNextBlockSuggestion.value = suggestion
+            if (suggestion != null) {
+                proactiveAssistCache.putFocusNextBlockLine(
+                    date = LocalDate.now(),
+                    blockId = suggestion.id,
+                    line = "Next up: ${suggestion.title} — ${suggestion.reason}"
+                )
+            }
+            _focusGuidance.value = focusGuidancePlanner.suggestGuidance(
+                focusTitle = state.blockTitle ?: "Focus session",
+                linkedBlockId = state.blockId,
+                isRunning = state.status == FocusExecutionStatus.RUNNING,
+                isPaused = state.status == FocusExecutionStatus.PAUSED,
+                timeLeft = focusDelegate.focusRemainingSeconds(state).toInt(),
+                totalSeconds = (state.plannedDurationMinutes * 60).coerceAtLeast(1),
+                nextBlockTitle = suggestion?.title,
+                moodScore = moodScore,
+                energyScore = energyScore
+            )
+        }
+    }
+
+    /** Session finished: clear guidance and re-pick the next block fresh. */
+    private fun refreshFocusNextBlockSuggestion(finishedBlockId: String?) {
+        focusAssistJob?.cancel()
+        focusAssistJob = viewModelScope.launch {
+            _focusGuidance.value = null
+            val (moodScore, energyScore) = focusMoodAccentCache.moodEnergyForBlock(finishedBlockId)
+            _focusNextBlockSuggestion.value = focusNextBlockPlanner.suggestNextBlock(
+                blocks = timeBlocksDomain.value.filter { it.id != finishedBlockId },
+                currentMinute = currentMinute.value,
+                moodScore = moodScore,
+                energyScore = energyScore
+            )
+        }
+    }
 
     fun focusMoodAccentFor(blockId: String?): Pair<Int?, Int?> =
         focusMoodAccentCache.moodEnergyForBlock(blockId)
@@ -511,6 +671,58 @@ class DayDialViewModel @Inject constructor(
     fun createQuickBlockAtMinute(startMinute: Int, title: String = "Focus Block", durationMinutes: Int = 25, category: String = "WORK") =
         createQuickBlock(title, DialUtils.snapToIncrement(startMinute), durationMinutes, category)
 
+    /** Persists a routine (create or update) derived from a [Routine] domain model. */
+    fun persistRoutine(routine: Routine) {
+        viewModelScope.launch {
+            routineRepository.saveRoutine(routine)
+        }
+    }
+
+    /** Deletes the routine with [routineId] if it exists. */
+    fun deleteRoutineById(routineId: String) {
+        viewModelScope.launch {
+            routineRepository.getRoutineById(routineId)?.let { routineRepository.deleteRoutine(it) }
+        }
+    }
+
+    /**
+     * One-time idempotent import of any legacy prefs-era templates into the routines table.
+     * Runs [onComplete] once the routines table is guaranteed seeded, so the caller can stop
+     * re-importing on later loads.
+     */
+    fun importLegacyRoutinesIfEmpty(legacyRoutines: List<Routine>, onComplete: () -> Unit) {
+        viewModelScope.launch {
+            if (routineRepository.observeRoutines().first().isEmpty()) {
+                legacyRoutines.forEach { routineRepository.saveRoutine(it) }
+            }
+            onComplete()
+        }
+    }
+
+    /**
+     * Instantiates a routine's steps as blocks on [date], anchored at [startMinuteOfDay]
+     * (template-backed routines pass 0 — their offsets are absolute minutes-of-day), then
+     * reports how many blocks were created via [onApplied].
+     */
+    fun applyRoutineToDate(
+        routineId: String,
+        date: LocalDate,
+        startMinuteOfDay: Int,
+        onApplied: (Int) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val created = applyRoutineToDateUseCase(routineId, date, startMinuteOfDay)
+            onApplied(created)
+        }
+    }
+
+    /** Marks the routine completed for [date]. */
+    fun completeRoutineForDate(routineId: String, date: LocalDate) {
+        viewModelScope.launch {
+            completeRoutineForDateUseCase(routineId, date)
+        }
+    }
+
     fun duplicateBlock(blockId: String) = blockDelegate.duplicateBlock(viewModelScope, blockId, ::handlePlannerResult)
 
     fun deleteBlock(blockId: String) {
@@ -677,14 +889,20 @@ class DayDialViewModel @Inject constructor(
         }
     }
 
-    fun startFocusSession(blockId: String) {
+    fun startFocusSession(blockId: String, workMinutes: Int = 0, breakMinutes: Int = 0) {
         coordinatorState.selectBlock(blockId)
-        focusDelegate.startFocusSession(viewModelScope, plannerService, blockId)
+        focusDelegate.startFocusSession(viewModelScope, plannerService, blockId, workMinutes, breakMinutes)
     }
 
     fun pauseFocusSession() = focusDelegate.pauseFocusSession()
 
     fun resumeFocusSession() = focusDelegate.resumeFocusSession()
+
+    /** Tap-to-continue at a split-session phase boundary. */
+    fun advanceFocusPhase() = focusDelegate.advancePhase()
+
+    /** Drives split-session phase boundaries; invoked once per timer tick. */
+    fun checkFocusPhaseBoundary() = focusDelegate.checkPhaseBoundary(viewModelScope, plannerService)
 
     fun extendFocusSession(additionalMinutes: Int = 15) = focusDelegate.extendFocusSession(additionalMinutes)
 
@@ -730,7 +948,12 @@ class DayDialViewModel @Inject constructor(
     }
 
     fun rebalanceDay() =
-        blockDelegate.rebalanceDay(viewModelScope, coordinatorState.selectedDateValue, ::handlePlannerResult)
+        blockDelegate.rebalanceDay(
+            viewModelScope,
+            coordinatorState.selectedDateValue,
+            fromMinute = if (coordinatorState.isViewingToday) coordinatorState.currentMinuteValue else null,
+            ::handlePlannerResult
+        )
 
     fun undo() = blockDelegate.undo(viewModelScope, ::handlePlannerResult)
 

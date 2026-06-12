@@ -10,6 +10,8 @@ fun dayDialCommandProvider(
     onOpenPlan: () -> Unit = onOpenDayDial,
     onOpenFocusPlanner: () -> Unit = onOpenDayDial,
     onOpenInsights: () -> Unit = onOpenDayDial,
+    onOpenJournal: () -> Unit = onOpenInsights,
+    onOpenSleepLog: () -> Unit = onOpenInsights,
     onOpenPlanningTools: () -> Unit = onOpenDayDial,
     onOpenTemplates: () -> Unit = onOpenDayDial,
     onOpenReview: () -> Unit = onOpenDayDial,
@@ -55,11 +57,34 @@ fun dayDialCommandProvider(
                 id = "daydial.insights",
                 title = "Open insights",
                 subtitle = "View planned vs actual trends and recommendations",
-                keywords = setOf("insights", "analytics", "stats", "performance", "trends"),
+                keywords = setOf(
+                    "insights", "analytics", "stats", "performance", "trends",
+                    "mood", "energy", "habit", "medication", "adherence", "patterns", "companion"
+                ),
                 group = CommandPaletteGroups.DAY,
                 shortcutLabel = "Insights",
                 priority = 85,
                 onRun = onOpenInsights
+            ))
+            add(CommandPaletteItem(
+                id = "daydial.journal",
+                title = "Open journal",
+                subtitle = "Capture tonight's reflection and review recent entries",
+                keywords = setOf("journal", "reflection", "diary", "notes", "evening", "entry"),
+                group = CommandPaletteGroups.DAY,
+                shortcutLabel = "Journal",
+                priority = 78,
+                onRun = onOpenJournal
+            ))
+            add(CommandPaletteItem(
+                id = "daydial.sleep",
+                title = "Open sleep log",
+                subtitle = "Record last night's sleep quality and timing",
+                keywords = setOf("sleep", "rest", "wind down", "bedtime", "quality", "log"),
+                group = CommandPaletteGroups.DAY,
+                shortcutLabel = "Sleep",
+                priority = 77,
+                onRun = onOpenSleepLog
             ))
             add(CommandPaletteItem(
                 id = "daydial.review",
@@ -84,11 +109,11 @@ fun dayDialCommandProvider(
         ))
         add(CommandPaletteItem(
             id = "daydial.templates",
-            title = "Open templates",
+            title = "Open routines",
             subtitle = "Apply or save repeatable focus-day layouts",
-            keywords = setOf("templates", "routine", "copy", "save", "apply"),
+            keywords = setOf("routines", "templates", "routine", "copy", "save", "apply"),
             group = CommandPaletteGroups.PLAN,
-            shortcutLabel = "Templates",
+            shortcutLabel = "Routines",
             priority = 70,
             onRun = onOpenTemplates
         ))

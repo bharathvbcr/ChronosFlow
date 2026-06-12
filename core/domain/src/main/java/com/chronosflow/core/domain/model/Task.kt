@@ -18,5 +18,6 @@ data class Task(
     val checklist: List<TaskChecklistItem> = emptyList(),
     val linkedContact: TaskContactSnapshot? = null,
     val actions: List<TaskAction> = emptyList(),
-    val attachments: List<TaskAttachment> = emptyList()
+    val attachments: List<TaskAttachment> = emptyList(),
+    val goalId: String? = null
 )

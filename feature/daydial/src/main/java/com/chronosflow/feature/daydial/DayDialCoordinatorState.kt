@@ -38,6 +38,10 @@ internal class DayDialCoordinatorState {
     val currentMinuteValue: Int
         get() = currentMinuteState.value
 
+    /** True when the selected day is the real-world today, so "now"-relative actions apply. */
+    val isViewingToday: Boolean
+        get() = selectedDateState.value == LocalDate.now()
+
     fun refreshCurrentMinute() {
         currentMinuteState.value = currentMinuteOfDay()
     }

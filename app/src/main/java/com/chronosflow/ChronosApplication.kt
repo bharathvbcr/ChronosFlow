@@ -10,14 +10,20 @@ import android.util.Log
 import androidx.appfunctions.service.AppFunctionConfiguration
 import androidx.work.Configuration
 import com.chronosflow.appfunctions.ChronosAppFunctions
+import com.chronosflow.core.data.assist.ProactiveAssistCache
 import com.chronosflow.core.data.backup.ChronosPortableBackupInitializer
 import com.chronosflow.core.notifications.AlarmCapabilityRefresher
 import com.chronosflow.core.notifications.FocusNotificationManager
 import com.chronosflow.core.notifications.ReminderNotificationChannels
 import com.chronosflow.core.notifications.ReminderReconcileScheduler
+import com.chronosflow.widget.ChronosGlanceWidgetReceiver
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 import javax.inject.Provider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 internal const val APPLICATION_STARTUP_WORK_DEFER_MILLIS = 60_000L
 internal const val NOTIFICATION_CHANNEL_SETUP_DEFER_MILLIS = 5_000L
@@ -27,8 +33,10 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
     @Inject lateinit var alarmCapabilityRefresher: AlarmCapabilityRefresher
     @Inject lateinit var chronosAppFunctions: Provider<ChronosAppFunctions>
     @Inject lateinit var portableBackupInitializer: Provider<ChronosPortableBackupInitializer>
+    @Inject lateinit var proactiveAssistCache: Provider<ProactiveAssistCache>
 
     private val startupHandler = Handler(Looper.getMainLooper())
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override val appFunctionConfiguration: AppFunctionConfiguration
         get() = AppFunctionConfiguration.Builder()
@@ -67,11 +75,20 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
                 alarmCapabilityRefresher.register()
                 ReminderReconcileScheduler.enqueue(this)
                 portableBackupInitializer.get().start()
+                refreshWidgetOnAssistCacheWrites()
                 setupProfiling()
                 monitorProcessExitHealth()
             },
             APPLICATION_STARTUP_WORK_DEFER_MILLIS
         )
+    }
+
+    private fun refreshWidgetOnAssistCacheWrites() {
+        applicationScope.launch {
+            proactiveAssistCache.get().dailyCoachWrites.collect {
+                runCatching { ChronosGlanceWidgetReceiver.refreshAll(this@ChronosApplication) }
+            }
+        }
     }
 
     private fun setupProfiling() {

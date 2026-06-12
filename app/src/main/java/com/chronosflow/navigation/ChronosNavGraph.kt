@@ -21,6 +21,7 @@ import androidx.navigation.navArgument
 import com.chronosflow.core.ui.settings.ChronosFeatureFlags
 import com.chronosflow.feature.daydial.DayDialScreen
 import com.chronosflow.feature.daydial.model.DayDialTab
+import com.chronosflow.feature.goals.GoalScreen
 import com.chronosflow.feature.habits.HabitScreen
 import com.chronosflow.core.data.security.SensitiveArea
 import com.chronosflow.feature.medication.MedicationScreen
@@ -55,6 +56,7 @@ internal fun isShellPeerNavigation(from: String?, to: String?): Boolean {
         ChronosRoute.Day.section,
         ChronosRoute.Tasks.section,
         ChronosRoute.Habits.section,
+        ChronosRoute.Goals.section,
         ChronosRoute.Medication.section,
     )
     val fromSection = from?.substringBefore("?")?.substringBefore("/")
@@ -172,6 +174,11 @@ fun ChronosNavGraph(
                         navController.navigateSingleTop(ChronosRoute.Habits.route)
                     }
                 },
+                onOpenGoals = {
+                    if (featureFlags.goalsEnabled) {
+                        navController.navigateSingleTop(ChronosRoute.Goals.route)
+                    }
+                },
                 onOpenMedication = onOpenMedication,
                 onOpenReview = {
                     if (featureFlags.reviewEnabled) {
@@ -246,6 +253,46 @@ fun ChronosNavGraph(
                     )
                 } else {
                     ParkedFeatureDestination("Review")
+                }
+            }
+        }
+        composable(ChronosRoute.Goals.route) {
+            PaddedDestination(contentPadding) {
+                if (featureFlags.goalsEnabled) {
+                    GoalScreen(
+                        onBack = { navController.navigateBackToDay() }
+                    )
+                } else {
+                    ParkedFeatureDestination("Goals")
+                }
+            }
+        }
+        composable(
+            route = ChronosRoute.Goals.contextRoute,
+            arguments = listOf(
+                navArgument("target") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument("capture") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
+        ) {
+            val target = it.arguments?.getString("target")
+            val capture = decodeCaptureArgument(it.arguments?.getString("capture"))
+            PaddedDestination(contentPadding) {
+                if (featureFlags.goalsEnabled) {
+                    GoalScreen(
+                        onBack = { navController.navigateBackToDay() },
+                        openAddSheet = target == ChronosRoute.TARGET_ADD,
+                        initialAddCapture = capture
+                    )
+                } else {
+                    ParkedFeatureDestination("Goals")
                 }
             }
         }

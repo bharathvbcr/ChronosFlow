@@ -62,24 +62,39 @@ class ChronosUiSettingsTest {
     }
 
     @Test
-    fun `feature flag defaults enable habits and meds only`() {
+    fun `feature flag defaults enable all graduated features`() {
         val flags = ChronosFeatureFlags()
 
         assertTrue(flags.habitsEnabled)
         assertTrue(flags.medicationEnabled)
-        assertFalse(flags.reviewEnabled)
-        assertFalse(flags.aiAdvisorEnabled)
+        assertTrue(flags.reviewEnabled)
+        assertTrue(flags.aiAdvisorEnabled)
+        assertTrue(flags.goalsEnabled)
     }
 
     @Test
-    fun `habits and meds default to enabled while parked assistants stay disabled`() = runTest {
+    fun `graduated features default to enabled`() = runTest {
         val snapshot = context.readChronosUiSettingsSnapshotFromDataStore()
 
         assertTrue(snapshot.featureFlags.habitsEnabled)
         assertTrue(snapshot.featureFlags.medicationEnabled)
-        assertFalse(snapshot.featureFlags.reviewEnabled)
-        assertFalse(snapshot.featureFlags.aiAdvisorEnabled)
+        assertTrue(snapshot.featureFlags.reviewEnabled)
+        assertTrue(snapshot.featureFlags.aiAdvisorEnabled)
+        assertTrue(snapshot.featureFlags.goalsEnabled)
         assertEquals(ChronosBackdropTheme.LIQUID, snapshot.backdropTheme)
+    }
+
+    @Test
+    fun `companion features can still be disabled explicitly`() = runTest {
+        context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED, false)
+        context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_GOALS_ENABLED, false)
+
+        val snapshot = context.readChronosUiSettingsSnapshotFromDataStore()
+
+        assertFalse(snapshot.featureFlags.reviewEnabled)
+        assertFalse(snapshot.featureFlags.goalsEnabled)
+        // Disabling a companion feature must not silently disable the other graduated wave.
+        assertTrue(snapshot.featureFlags.habitsEnabled)
     }
 
     @Test

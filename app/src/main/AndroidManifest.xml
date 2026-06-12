@@ -112,6 +112,16 @@
             android:enabled="true"
             android:exported="false" />
 
+        <receiver
+            android:name="com.chronosflow.core.notifications.ReflowDayActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <receiver
+            android:name="com.chronosflow.core.notifications.ReminderGroupDeleteReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

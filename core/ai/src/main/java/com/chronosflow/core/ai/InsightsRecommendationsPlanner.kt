@@ -16,12 +16,13 @@ class InsightsRecommendationsPlanner @Inject constructor(
 ) {
     suspend fun suggest(
         summary: DailyReviewSummary?,
-        insights: List<ReviewInsight>
+        insights: List<ReviewInsight>,
+        trends: CompanionTrendContext = CompanionTrendContext()
     ): List<InsightRecommendation> {
-        val baseline = localRecommendations(summary, insights)
+        val baseline = localRecommendations(summary, insights, trends)
         if (summary == null) return baseline
         val generation = genAiAssistCoordinator.generateAssistText(
-            buildPrompt(summary, insights, baseline)
+            buildPrompt(summary, insights, baseline, trends)
         )
         val parsed = generation.text?.let { parseRecommendations(it, generation.source) }.orEmpty()
         return (parsed.ifEmpty { baseline }).take(3)
@@ -29,7 +30,8 @@ class InsightsRecommendationsPlanner @Inject constructor(
 
     fun localRecommendations(
         summary: DailyReviewSummary?,
-        insights: List<ReviewInsight>
+        insights: List<ReviewInsight>,
+        trends: CompanionTrendContext = CompanionTrendContext()
     ): List<InsightRecommendation> {
         if (insights.isNotEmpty()) {
             return insights.take(3).map { insight ->
@@ -66,6 +68,30 @@ class InsightsRecommendationsPlanner @Inject constructor(
                     )
                 )
             }
+            trends.peakEnergyHour?.let { hour ->
+                add(
+                    InsightRecommendation(
+                        text = "Energy usually peaks around %02d:00 — protect tomorrow's hardest block there.".format(hour),
+                        source = AssistGenAiSource.LOCAL
+                    )
+                )
+            }
+            if (trends.medicationMissedTotal >= 3) {
+                add(
+                    InsightRecommendation(
+                        text = "${trends.medicationMissedTotal} medication doses slipped in the last two weeks — review reminder times.",
+                        source = AssistGenAiSource.LOCAL
+                    )
+                )
+            }
+            trends.habitWeekOverWeekDelta?.takeIf { it < 0 }?.let {
+                add(
+                    InsightRecommendation(
+                        text = "Habit completions dipped vs the prior week — keep tomorrow's habit windows light.",
+                        source = AssistGenAiSource.LOCAL
+                    )
+                )
+            }
             if (isEmpty()) {
                 add(
                     InsightRecommendation(
@@ -80,7 +106,8 @@ class InsightsRecommendationsPlanner @Inject constructor(
     private fun buildPrompt(
         summary: DailyReviewSummary,
         insights: List<ReviewInsight>,
-        baseline: List<InsightRecommendation>
+        baseline: List<InsightRecommendation>,
+        trends: CompanionTrendContext
     ): String = buildString {
         appendLine("Write up to three schedule recommendations for ChronosFlow insights.")
         appendLine("Return one recommendation per line as recommendation|reason.")
@@ -89,6 +116,21 @@ class InsightsRecommendationsPlanner @Inject constructor(
         appendLine("Actual minutes: ${summary.actualMinutes}")
         appendLine("Missed minutes: ${summary.missedMinutes}")
         appendLine("Drift minutes: ${summary.driftMinutes}")
+        trends.peakEnergyHour?.let { hour ->
+            appendLine("Peak energy hour over the last 14 days: $hour:00")
+        }
+        if (trends.habitCompletion.isNotEmpty()) {
+            appendLine(
+                "Habit completions last 7 days: ${trends.habitCompletedLastWeek}; " +
+                    "prior 7 days: ${trends.habitCompletedPriorWeek}"
+            )
+        }
+        if (trends.medicationAdherence.isNotEmpty()) {
+            appendLine(
+                "Medication doses last 14 days: ${trends.medicationTakenTotal} taken, " +
+                    "${trends.medicationMissedTotal} missed"
+            )
+        }
         insights.take(5).forEach { insight ->
             appendLine("Insight: ${insight.title} — ${insight.detail}")
         }

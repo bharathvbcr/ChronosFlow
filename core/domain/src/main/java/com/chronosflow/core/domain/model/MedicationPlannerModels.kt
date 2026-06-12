@@ -59,6 +59,34 @@ data class MedicationAnalytics(
     val refillSoon: Boolean = false
 )
 
+/** Per-day taken/missed counts for a medication plan, oldest first, one entry per day in the window. */
+data class MedicationDailyAdherence(
+    val date: LocalDate,
+    val takenCount: Int,
+    val missedCount: Int
+)
+
+fun deriveMedicationAdherenceTrend(
+    events: List<MedicationDoseEvent>,
+    windowDays: Int = 14,
+    today: LocalDate = LocalDate.now()
+): List<MedicationDailyAdherence> {
+    if (windowDays <= 0) return emptyList()
+    val start = today.minusDays((windowDays - 1).toLong())
+    val byDate = events
+        .filter { it.eventDate in start..today }
+        .groupBy { it.eventDate }
+    return (0 until windowDays).map { offset ->
+        val date = start.plusDays(offset.toLong())
+        val dayEvents = byDate[date].orEmpty()
+        MedicationDailyAdherence(
+            date = date,
+            takenCount = dayEvents.count { it.type == MedicationDoseEventType.TAKEN },
+            missedCount = dayEvents.count { it.type == MedicationDoseEventType.MISSED }
+        )
+    }
+}
+
 fun buildLegacyMedicationSchedule(
     medicationPlanId: String,
     primaryReminderMinute: Int,

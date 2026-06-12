@@ -85,6 +85,33 @@ private const val DAY_IN_MINUTES = 1440
 internal const val DAY_END_MINUTE = DAY_IN_MINUTES
 private const val UNSCHEDULED_TIMELINE_MINUTE = DAY_IN_MINUTES + 1
 
+@Composable
+private fun TodaySleepPromptCard(
+    onLogSleep: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ChronosListCard(modifier = modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "How did you sleep?",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Log last night to track energy patterns.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Button(onClick = onLogSleep) { Text("Log sleep") }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun TodayTab(
@@ -137,6 +164,8 @@ internal fun TodayTab(
     onOpenPlanned: () -> Unit,
     onOpenActual: () -> Unit,
     onOpenMissedRecovery: () -> Unit,
+    showSleepPrompt: Boolean = false,
+    onLogSleep: () -> Unit = {},
     contentBottomPadding: Dp = 0.dp
 ) {
     val dailyAction = remember(timeBlocks, activeBlock, nextBlock, missedBlocks) {
@@ -171,6 +200,9 @@ internal fun TodayTab(
                     subtitle = dayDialPrimaryPageSubtitle(DayDialTab.TODAY),
                     icon = DayDialTab.TODAY.icon
                 )
+                if (showSleepPrompt) {
+                    TodaySleepPromptCard(onLogSleep = onLogSleep)
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -296,6 +328,9 @@ internal fun TodayTab(
                         subtitle = dayDialPrimaryPageSubtitle(DayDialTab.TODAY),
                         icon = DayDialTab.TODAY.icon
                     )
+                    if (showSleepPrompt) {
+                        TodaySleepPromptCard(onLogSleep = onLogSleep)
+                    }
                     TodayDialHero(
                         dialHeight = dialHeight,
                         timeBlocks = timeBlocks,
@@ -921,7 +956,8 @@ private fun todayActionHandlers(
     currentMinute = currentMinute,
     onCompleteBlock = onCompleteBlock,
     onPrepareNext = onBlockSelected,
-    onFillGaps = { onAiStripAction("Fill gaps") }
+    onFillGaps = { onAiStripAction("Fill gaps") },
+    onReflowDay = { onAiStripAction("Rebalance") }
 )
 
 @Composable

@@ -41,7 +41,11 @@ object ChronosUiSettingsKeys {
     const val KEY_FEATURE_MEDICATION_ENABLED = "feature.medicationEnabled"
     const val KEY_FEATURE_REVIEW_ENABLED = "feature.reviewEnabled"
     const val KEY_FEATURE_AI_ADVISOR_ENABLED = "feature.aiAdvisorEnabled"
+    const val KEY_FEATURE_GOALS_ENABLED = "feature.goalsEnabled"
+    const val KEY_FEATURE_JOURNAL_ENABLED = "feature.journalEnabled"
+    const val KEY_FEATURE_SLEEP_ENABLED = "feature.sleepEnabled"
     const val KEY_FEATURE_HABITS_MEDICATION_DEFAULTS_PROMOTED = "feature.habitsMedicationDefaultsPromoted"
+    const val KEY_FEATURE_COMPANION_DEFAULTS_PROMOTED = "feature.companionDefaultsPromoted"
     const val APPEARANCE_LIGHT = "LIGHT"
     const val APPEARANCE_DARK = "DARK"
     const val APPEARANCE_SYSTEM = "SYSTEM"
@@ -56,7 +60,10 @@ object ChronosUiSettingsKeys {
         KEY_FEATURE_HABITS_ENABLED,
         KEY_FEATURE_MEDICATION_ENABLED,
         KEY_FEATURE_REVIEW_ENABLED,
-        KEY_FEATURE_AI_ADVISOR_ENABLED
+        KEY_FEATURE_AI_ADVISOR_ENABLED,
+        KEY_FEATURE_GOALS_ENABLED,
+        KEY_FEATURE_JOURNAL_ENABLED,
+        KEY_FEATURE_SLEEP_ENABLED
     )
 }
 
@@ -84,23 +91,37 @@ private val Context.chronosUiSettingsDataStore: DataStore<Preferences> by prefer
     }
 )
 
+// Features that ship on-by-default. Each set has its own "defaults promoted" marker so that a user's
+// explicit opt-out of one wave (e.g. habits) does not suppress the graduation of a later wave.
 private val PromotedEnabledFeatureKeys = setOf(
     ChronosUiSettingsKeys.KEY_FEATURE_HABITS_ENABLED,
     ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED
 )
 
+private val PromotedCompanionFeatureKeys = setOf(
+    ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED,
+    ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED,
+    ChronosUiSettingsKeys.KEY_FEATURE_GOALS_ENABLED
+)
+
 data class ChronosFeatureFlags(
     val habitsEnabled: Boolean = true,
     val medicationEnabled: Boolean = true,
-    val reviewEnabled: Boolean = false,
-    val aiAdvisorEnabled: Boolean = false
+    val reviewEnabled: Boolean = true,
+    val aiAdvisorEnabled: Boolean = true,
+    val goalsEnabled: Boolean = true,
+    val journalEnabled: Boolean = true,
+    val sleepEnabled: Boolean = true
 ) {
     companion object {
         val AllEnabled = ChronosFeatureFlags(
             habitsEnabled = true,
             medicationEnabled = true,
             reviewEnabled = true,
-            aiAdvisorEnabled = true
+            aiAdvisorEnabled = true,
+            goalsEnabled = true,
+            journalEnabled = true,
+            sleepEnabled = true
         )
     }
 }
@@ -123,10 +144,7 @@ private fun defaultChronosUiSettingsSnapshot(): ChronosUiSettingsSnapshot {
         highContrastEnabled = false,
         appearanceMode = ChronosUiSettingsKeys.APPEARANCE_SYSTEM,
         backdropTheme = ChronosBackdropTheme.Default,
-        featureFlags = ChronosFeatureFlags(
-            habitsEnabled = true,
-            medicationEnabled = true
-        )
+        featureFlags = ChronosFeatureFlags.AllEnabled
     )
 }
 
@@ -134,16 +152,20 @@ private fun Context.legacyChronosUiPreferences(): SharedPreferences {
     return getSharedPreferences(ChronosUiSettingsKeys.PREFS_NAME, Context.MODE_PRIVATE)
 }
 
-private fun Preferences.habitsMedicationDefaultsPromoted(legacyPreferences: SharedPreferences): Boolean {
-    return this[booleanPreferencesKey(ChronosUiSettingsKeys.KEY_FEATURE_HABITS_MEDICATION_DEFAULTS_PROMOTED)]
-        ?: legacyPreferences.getBoolean(
-            ChronosUiSettingsKeys.KEY_FEATURE_HABITS_MEDICATION_DEFAULTS_PROMOTED,
-            false
-        )
+private fun Preferences.defaultsPromoted(legacyPreferences: SharedPreferences, markerKey: String): Boolean {
+    return this[booleanPreferencesKey(markerKey)]
+        ?: legacyPreferences.getBoolean(markerKey, false)
 }
 
-private fun SharedPreferences.habitsMedicationDefaultsPromoted(): Boolean {
-    return getBoolean(ChronosUiSettingsKeys.KEY_FEATURE_HABITS_MEDICATION_DEFAULTS_PROMOTED, false)
+private fun SharedPreferences.defaultsPromoted(markerKey: String): Boolean {
+    return getBoolean(markerKey, false)
+}
+
+/** The promotion marker that guards [key], or null if the feature is not graduated on-by-default. */
+private fun promotionMarkerFor(key: String): String? = when (key) {
+    in PromotedEnabledFeatureKeys -> ChronosUiSettingsKeys.KEY_FEATURE_HABITS_MEDICATION_DEFAULTS_PROMOTED
+    in PromotedCompanionFeatureKeys -> ChronosUiSettingsKeys.KEY_FEATURE_COMPANION_DEFAULTS_PROMOTED
+    else -> null
 }
 
 private fun Preferences.readBooleanSetting(
@@ -151,14 +173,16 @@ private fun Preferences.readBooleanSetting(
     key: String,
     defaultValue: Boolean
 ): Boolean {
-    if (key in PromotedEnabledFeatureKeys && !habitsMedicationDefaultsPromoted(legacyPreferences)) {
+    val marker = promotionMarkerFor(key)
+    if (marker != null && !defaultsPromoted(legacyPreferences, marker)) {
         return true
     }
     return this[booleanPreferencesKey(key)] ?: legacyPreferences.getBoolean(key, defaultValue)
 }
 
 private fun SharedPreferences.readBooleanSetting(key: String, defaultValue: Boolean): Boolean {
-    if (key in PromotedEnabledFeatureKeys && !habitsMedicationDefaultsPromoted()) {
+    val marker = promotionMarkerFor(key)
+    if (marker != null && !defaultsPromoted(marker)) {
         return true
     }
     return getBoolean(key, defaultValue)
@@ -206,10 +230,31 @@ private fun Preferences.toChronosUiSettingsSnapshot(context: Context): ChronosUi
                 ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED,
                 true
             ),
-            reviewEnabled = this[booleanPreferencesKey(ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED)]
-                ?: legacyPreferences.getBoolean(ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED, false),
-            aiAdvisorEnabled = this[booleanPreferencesKey(ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED)]
-                ?: legacyPreferences.getBoolean(ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED, false)
+            reviewEnabled = readBooleanSetting(
+                legacyPreferences,
+                ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED,
+                true
+            ),
+            aiAdvisorEnabled = readBooleanSetting(
+                legacyPreferences,
+                ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED,
+                true
+            ),
+            goalsEnabled = readBooleanSetting(
+                legacyPreferences,
+                ChronosUiSettingsKeys.KEY_FEATURE_GOALS_ENABLED,
+                true
+            ),
+            journalEnabled = readBooleanSetting(
+                legacyPreferences,
+                ChronosUiSettingsKeys.KEY_FEATURE_JOURNAL_ENABLED,
+                true
+            ),
+            sleepEnabled = readBooleanSetting(
+                legacyPreferences,
+                ChronosUiSettingsKeys.KEY_FEATURE_SLEEP_ENABLED,
+                true
+            )
         )
     )
 }
@@ -236,8 +281,11 @@ internal fun readChronosUiSettingsSnapshot(prefs: SharedPreferences): ChronosUiS
         featureFlags = ChronosFeatureFlags(
             habitsEnabled = prefs.readBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_HABITS_ENABLED, true),
             medicationEnabled = prefs.readBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED, true),
-            reviewEnabled = prefs.getBoolean(ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED, false),
-            aiAdvisorEnabled = prefs.getBoolean(ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED, false)
+            reviewEnabled = prefs.readBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED, true),
+            aiAdvisorEnabled = prefs.readBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED, true),
+            goalsEnabled = prefs.readBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_GOALS_ENABLED, true),
+            journalEnabled = prefs.readBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_JOURNAL_ENABLED, true),
+            sleepEnabled = prefs.readBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_SLEEP_ENABLED, true)
         )
     )
 }
@@ -275,18 +323,18 @@ fun Context.readChronosUiIntSetting(key: String, defaultValue: Int): Int {
 }
 
 suspend fun Context.writeChronosUiBooleanSetting(key: String, value: Boolean) {
-    val shouldMarkDefaultsPromoted = key in PromotedEnabledFeatureKeys
+    // Once the user explicitly sets a graduated feature, stop forcing its on-by-default value.
+    val promotionMarker = promotionMarkerFor(key)
     chronosUiSettingsDataStore.edit { preferences ->
         preferences[booleanPreferencesKey(key)] = value
-        if (shouldMarkDefaultsPromoted) {
-            preferences[booleanPreferencesKey(ChronosUiSettingsKeys.KEY_FEATURE_HABITS_MEDICATION_DEFAULTS_PROMOTED)] =
-                true
+        if (promotionMarker != null) {
+            preferences[booleanPreferencesKey(promotionMarker)] = true
         }
     }
     legacyChronosUiPreferences().edit().apply {
         putBoolean(key, value)
-        if (shouldMarkDefaultsPromoted) {
-            putBoolean(ChronosUiSettingsKeys.KEY_FEATURE_HABITS_MEDICATION_DEFAULTS_PROMOTED, true)
+        if (promotionMarker != null) {
+            putBoolean(promotionMarker, true)
         }
     }.apply()
 }

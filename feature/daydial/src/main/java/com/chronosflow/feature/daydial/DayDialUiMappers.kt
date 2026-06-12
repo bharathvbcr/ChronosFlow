@@ -27,5 +27,6 @@ fun TimeBlock.toDayDialUiModel(isSelected: Boolean = false): TimeBlockUiModel = 
     taskId = taskId,
     habitId = habitId,
     medicationPlanId = medicationPlanId,
+    routineId = routineId,
     category = category
 )

@@ -5,6 +5,7 @@ import androidx.compose.material.icons.automirrored.filled.EventNote
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Today
@@ -19,6 +20,7 @@ import com.chronosflow.core.ui.settings.ChronosFeatureFlags
 import java.net.URLEncoder
 
 const val SECTION_HABITS = "habits"
+const val SECTION_GOALS = "goals"
 
 sealed interface ChronosRoute {
     val route: String
@@ -53,6 +55,8 @@ sealed interface ChronosRoute {
         const val TARGET_APPEARANCE = "appearance"
         const val TARGET_ADD_BLOCK = "add-block"
         const val TARGET_INSIGHTS = "insights"
+        const val TARGET_JOURNAL = "journal"
+        const val TARGET_SLEEP = "sleep"
 
         fun createRoute(target: String? = null, capture: String? = null): String {
             if (target == null && capture == null) return SECTION_DAY
@@ -116,6 +120,23 @@ sealed interface ChronosRoute {
             }
     }
 
+    data object Goals : ChronosRoute {
+        override val route: String = SECTION_GOALS
+        override val section: String = SECTION_GOALS
+
+        const val contextRoute: String = "$SECTION_GOALS?target={target}&capture={capture}"
+
+        fun createRoute(target: String? = null, capture: String? = null): String =
+            if (target == null && capture == null) {
+                SECTION_GOALS
+            } else if (capture == null) {
+                "$SECTION_GOALS?target=${target?.let(::encodeRouteValue).orEmpty()}"
+            } else {
+                "$SECTION_GOALS?target=${target?.let(::encodeRouteValue).orEmpty()}" +
+                    "&capture=${encodeRouteValue(capture)}"
+            }
+    }
+
     data object Medication : ChronosRoute {
         override val route: String = SECTION_MEDICATION
         override val section: String = SECTION_MEDICATION
@@ -150,11 +171,12 @@ sealed interface ChronosRoute {
         const val SHELL_FOCUS = "focus"
         const val SHELL_TASKS = "tasks"
         const val SHELL_HABITS = "habits"
+        const val SHELL_GOALS = "goals"
         const val SHELL_MEDICATION = "medication"
         const val SHELL_REVIEW = "review"
         const val TARGET_ADD = "add"
 
-        val all: List<ChronosRoute> = listOf(Day, Focus, Tasks, Habits, Medication, Review)
+        val all: List<ChronosRoute> = listOf(Day, Focus, Tasks, Habits, Goals, Medication, Review)
         val shellDestinations: List<ShellDestination> = listOf(
             ShellDestination(
                 id = SHELL_PLAN,
@@ -196,6 +218,15 @@ sealed interface ChronosRoute {
                 route = Day.createRoute(Day.TARGET_HABITS),
                 section = Habits.section,
                 dayTarget = Day.TARGET_HABITS,
+                showInCompact = false
+            ),
+            ShellDestination(
+                id = SHELL_GOALS,
+                label = "Goals",
+                icon = Icons.Default.Flag,
+                route = Goals.route,
+                section = Goals.section,
+                dayTarget = null,
                 showInCompact = false
             ),
             ShellDestination(
@@ -259,6 +290,7 @@ sealed interface ChronosRoute {
                     SHELL_HABITS -> section == Habits.section || (
                         section == Day.section && dayTarget == Day.TARGET_HABITS
                         )
+                    SHELL_GOALS -> section == Goals.section
                     SHELL_MEDICATION -> section == Medication.section || (
                         section == Day.section && dayTarget == Day.TARGET_MEDICATION
                         )
@@ -278,6 +310,7 @@ sealed interface ChronosRoute {
                 Review.section -> if (featureFlags.reviewEnabled) Review.route else Day.createRoute()
                 Tasks.section -> Tasks.createRoute(launch.taskId, launch.target)
                 Habits.section -> if (featureFlags.habitsEnabled) Habits.route else Day.createRoute()
+                Goals.section -> if (featureFlags.goalsEnabled) Goals.route else Day.createRoute()
                 Focus.section -> Day.createRoute(Day.TARGET_FOCUS_PLANNER)
                 Day.section -> Day.createRoute(launch.dayTarget)
                 else -> Day.createRoute(launch.dayTarget)
@@ -287,6 +320,7 @@ sealed interface ChronosRoute {
             when (section) {
                 Tasks.section -> Day.createRoute(Day.TARGET_TASKS)
                 Habits.section -> Day.createRoute(Day.TARGET_HABITS)
+                Goals.section -> Goals.route
                 Medication.section -> Day.createRoute(Day.TARGET_MEDICATION)
                 Review.section -> Day.createRoute(Day.TARGET_REVIEW)
                 else -> routeForNotificationLaunch(NotificationLaunch(section = section))
@@ -297,6 +331,7 @@ sealed interface ChronosRoute {
 private fun ChronosRoute.ShellDestination.isAvailable(featureFlags: ChronosFeatureFlags): Boolean {
     return when (id) {
         ChronosRoute.SHELL_HABITS -> featureFlags.habitsEnabled
+        ChronosRoute.SHELL_GOALS -> featureFlags.goalsEnabled
         ChronosRoute.SHELL_MEDICATION -> featureFlags.medicationEnabled
         ChronosRoute.SHELL_REVIEW -> featureFlags.reviewEnabled
         else -> true

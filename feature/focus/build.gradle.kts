@@ -27,6 +27,7 @@ extensions.configure<LibraryExtension> {
 }
 
 dependencies {
+    implementation(project(":core:ai"))
     implementation(project(":core:domain"))
     implementation(project(":core:data"))
     implementation(project(":core:notifications"))
@@ -36,7 +37,6 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     ksp(libs.hilt.compiler)
 
-    testImplementation(project(":core:ai"))
     testImplementation(project(":core:data"))
     testImplementation(libs.junit)
     testImplementation(libs.mockk)

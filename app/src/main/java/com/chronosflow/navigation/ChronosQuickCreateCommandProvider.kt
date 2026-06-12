@@ -10,7 +10,11 @@ fun quickCreateCommandProvider(
     onNewTask: () -> Unit,
     onNewFocus: () -> Unit,
     onNewHabit: () -> Unit,
+    onNewGoal: () -> Unit,
     onNewMedication: () -> Unit,
+    onNewJournal: () -> Unit,
+    onLogSleep: () -> Unit,
+    onOpenRoutines: () -> Unit,
     featureFlags: ChronosFeatureFlags = ChronosFeatureFlags.AllEnabled
 ): CommandProvider = CommandProvider {
     buildList {
@@ -64,6 +68,20 @@ fun quickCreateCommandProvider(
                 )
             )
         }
+        if (featureFlags.goalsEnabled) {
+            add(
+                CommandPaletteItem(
+                    id = "quick.create-goal",
+                    title = "New goal",
+                    subtitle = "Create a measurable objective",
+                    keywords = setOf("add", "goal", "create", "new", "milestone", "objective"),
+                    group = CommandPaletteGroups.QUICK_CREATE,
+                    shortcutLabel = "Goal",
+                    priority = 84,
+                    onRun = onNewGoal
+                )
+            )
+        }
         if (featureFlags.medicationEnabled) {
             add(
                 CommandPaletteItem(
@@ -78,5 +96,43 @@ fun quickCreateCommandProvider(
                 )
             )
         }
+        if (featureFlags.reviewEnabled) {
+            add(
+                CommandPaletteItem(
+                    id = "quick.create-journal",
+                    title = "Journal entry",
+                    subtitle = "Write a quick reflection for today",
+                    keywords = setOf("add", "journal", "create", "new", "reflect", "diary", "note"),
+                    group = CommandPaletteGroups.QUICK_CREATE,
+                    shortcutLabel = "Journal",
+                    priority = 78,
+                    onRun = onNewJournal
+                )
+            )
+            add(
+                CommandPaletteItem(
+                    id = "quick.create-sleep",
+                    title = "Log sleep",
+                    subtitle = "Record last night's sleep",
+                    keywords = setOf("add", "sleep", "log", "new", "night", "rest", "bedtime"),
+                    group = CommandPaletteGroups.QUICK_CREATE,
+                    shortcutLabel = "Sleep",
+                    priority = 76,
+                    onRun = onLogSleep
+                )
+            )
+        }
+        add(
+            CommandPaletteItem(
+                id = "quick.open-routines",
+                title = "Apply routine",
+                subtitle = "Apply a saved routine to today's plan",
+                keywords = setOf("apply", "routine", "template", "preset", "plan", "open"),
+                group = CommandPaletteGroups.QUICK_CREATE,
+                shortcutLabel = "Routine",
+                priority = 74,
+                onRun = onOpenRoutines
+            )
+        )
     }
 }

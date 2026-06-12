@@ -96,6 +96,7 @@ dependencies {
     implementation(project(":feature:focus"))
     implementation(project(":feature:tasks"))
     implementation(project(":feature:habits"))
+    implementation(project(":feature:goals"))
     implementation(project(":feature:medication"))
     implementation(project(":feature:review"))
 

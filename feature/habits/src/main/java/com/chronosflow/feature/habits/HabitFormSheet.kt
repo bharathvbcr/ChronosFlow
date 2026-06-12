@@ -52,6 +52,8 @@ import com.chronosflow.core.ui.components.ChronosModalActionLabels
 import com.chronosflow.core.ui.components.ChronosFormPreviewCard
 import com.chronosflow.core.ui.components.commandPaletteSpeechQuery
 import com.chronosflow.core.ui.components.ChronosCollapsibleSection
+import com.chronosflow.core.ui.components.ChronosLinkOption
+import com.chronosflow.core.ui.components.ChronosLinkPickerField
 import com.chronosflow.core.ui.components.ChronosFormSection
 import com.chronosflow.core.ui.components.formatDurationLabel
 import com.chronosflow.core.ui.components.ChronosFormSwitchRow
@@ -153,7 +155,9 @@ private val habitDifficultyOptions = (1..5).associateWith(::difficultyLabel)
 internal fun HabitFormSheet(
     target: HabitSheetTarget?,
     onDismiss: () -> Unit,
-    onConfirm: (String, String, Int, Int, Int, Boolean, HabitSchedule, AppLaunchTarget?) -> Unit,
+    onConfirm: (String, String, Int, Int, Int, Boolean, HabitSchedule, AppLaunchTarget?, String?) -> Unit,
+    goalOptions: List<ChronosLinkOption> = emptyList(),
+    initialGoalId: String? = null,
     historyTemplates: List<HabitHistoryTemplate> = emptyList(),
     recentHistoryIds: List<String> = emptyList(),
     onHistoryTemplateSelected: (String) -> Unit = {},
@@ -254,6 +258,12 @@ internal fun HabitFormSheet(
         mutableStateOf(initialHabit?.launchTarget?.value ?: prefillLaunchSuggestion?.value.orEmpty())
     }
     var lastAutoAssistCapture by rememberSaveable(habitKey) { mutableStateOf("") }
+    var selectedGoalId by rememberSaveable(habitKey) {
+        mutableStateOf(initialHabit?.goalId ?: initialGoalId)
+    }
+    var goalExpanded by rememberSaveable(habitKey) {
+        mutableStateOf((initialHabit?.goalId ?: initialGoalId) != null)
+    }
 
     val parsedStart = parseFlexibleMinute(start)
     val parsedEnd = parseFlexibleMinute(end)
@@ -427,7 +437,8 @@ internal fun HabitFormSheet(
                 difficultyInt,
                 isBundled,
                 schedule,
-                normalizedLaunchTarget
+                normalizedLaunchTarget,
+                selectedGoalId
             )
         },
         enabled = isValid,
@@ -630,6 +641,22 @@ internal fun HabitFormSheet(
         val suggestedHabitTemplateLabel = contextualHabitTemplateLabels
             .firstOrNull()
             ?.takeIf { hasHabitTemplateContext(habitContextQuery, contextualAssistSuggestions) }
+        if (goalOptions.isNotEmpty() || selectedGoalId != null) {
+            ChronosCollapsibleSection(
+                title = "Goal",
+                summary = goalOptions.firstOrNull { it.id == selectedGoalId }?.label
+                    ?: "Link this habit to a goal",
+                expanded = goalExpanded,
+                onExpandedChange = { goalExpanded = it }
+            ) {
+                ChronosLinkPickerField(
+                    label = "Link to goal",
+                    options = goalOptions,
+                    selectedId = selectedGoalId,
+                    onSelected = { selectedGoalId = it }
+                )
+            }
+        }
         ChronosCollapsibleSection(
             title = "Templates",
             summary = selectedTemplateLabel.ifBlank {

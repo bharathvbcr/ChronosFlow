@@ -16,7 +16,11 @@ class QuickCreateCommandProviderTest {
             onNewTask = { invoked += "task" },
             onNewFocus = { invoked += "focus" },
             onNewHabit = { invoked += "habit" },
-            onNewMedication = { invoked += "medication" }
+            onNewGoal = { invoked += "goal" },
+            onNewMedication = { invoked += "medication" },
+            onNewJournal = { invoked += "journal" },
+            onLogSleep = { invoked += "sleep" },
+            onOpenRoutines = { invoked += "routines" }
         ).commands()
 
         assertEquals(
@@ -25,7 +29,11 @@ class QuickCreateCommandProviderTest {
                 "quick.create-task",
                 "quick.create-focus",
                 "quick.create-habit",
-                "quick.create-medication"
+                "quick.create-goal",
+                "quick.create-medication",
+                "quick.create-journal",
+                "quick.create-sleep",
+                "quick.open-routines"
             ),
             commands.map { it.id }
         )
@@ -35,6 +43,9 @@ class QuickCreateCommandProviderTest {
 
         commands.forEach { it.onRun() }
 
-        assertEquals(listOf("block", "task", "focus", "habit", "medication"), invoked)
+        assertEquals(
+            listOf("block", "task", "focus", "habit", "goal", "medication", "journal", "sleep", "routines"),
+            invoked
+        )
     }
 }

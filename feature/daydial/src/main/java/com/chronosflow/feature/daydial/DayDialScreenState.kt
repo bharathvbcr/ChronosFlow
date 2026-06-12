@@ -9,11 +9,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chronosflow.core.ai.AssistNarrative
+import com.chronosflow.core.ai.FocusNextBlockSuggestion
 import com.chronosflow.core.ai.PrivacyMode
 import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
+import com.chronosflow.core.domain.model.JournalEntry
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.core.domain.model.SleepSchedule
+import com.chronosflow.core.domain.model.SleepTrack
 import com.chronosflow.core.ui.settings.ChronosBackdropTheme
 import com.chronosflow.core.ui.settings.ChronosFeatureFlags
 import com.chronosflow.core.ui.settings.ChronosUiSettingsKeys
@@ -59,6 +62,10 @@ internal data class DayDialViewModelState(
     val missedFromFocusMessage: String?,
     val moodEnergyCheckIns: List<MoodEnergyCheckIn>,
     val moodCheckInCoaching: AssistNarrative?,
+    val focusGuidance: AssistNarrative?,
+    val focusNextBlockSuggestion: FocusNextBlockSuggestion?,
+    val journalEntry: JournalEntry?,
+    val sleepTrack: SleepTrack?,
     val insightsTabState: InsightsTabUiState
 )
 
@@ -98,6 +105,10 @@ internal fun rememberDayDialViewModelState(viewModel: DayDialViewModel): DayDial
     val missedFromFocusMessage by viewModel.missedFromFocusMessage.collectAsStateWithLifecycle()
     val moodEnergyCheckIns by viewModel.moodEnergyCheckIns.collectAsStateWithLifecycle()
     val moodCheckInCoaching by viewModel.moodCheckInCoaching.collectAsStateWithLifecycle()
+    val focusGuidance by viewModel.focusGuidance.collectAsStateWithLifecycle()
+    val focusNextBlockSuggestion by viewModel.focusNextBlockSuggestion.collectAsStateWithLifecycle()
+    val journalEntry by viewModel.journalEntryForDay.collectAsStateWithLifecycle()
+    val sleepTrack by viewModel.sleepTrackForDay.collectAsStateWithLifecycle()
     val insightsTabState by viewModel.insightsTabState.collectAsStateWithLifecycle()
 
     return DayDialViewModelState(
@@ -135,6 +146,10 @@ internal fun rememberDayDialViewModelState(viewModel: DayDialViewModel): DayDial
         missedFromFocusMessage = missedFromFocusMessage,
         moodEnergyCheckIns = moodEnergyCheckIns,
         moodCheckInCoaching = moodCheckInCoaching,
+        focusGuidance = focusGuidance,
+        focusNextBlockSuggestion = focusNextBlockSuggestion,
+        journalEntry = journalEntry,
+        sleepTrack = sleepTrack,
         insightsTabState = insightsTabState
     )
 }
@@ -184,8 +199,11 @@ internal class DayDialSettingsState(
     private val appearanceModeValueState: androidx.compose.runtime.MutableState<String>,
     private val backdropThemeValueState: androidx.compose.runtime.MutableState<String>,
     private val habitsFeatureEnabledState: androidx.compose.runtime.MutableState<Boolean>,
+    private val goalsFeatureEnabledState: androidx.compose.runtime.MutableState<Boolean>,
     private val medicationFeatureEnabledState: androidx.compose.runtime.MutableState<Boolean>,
     private val reviewFeatureEnabledState: androidx.compose.runtime.MutableState<Boolean>,
+    private val journalFeatureEnabledState: androidx.compose.runtime.MutableState<Boolean>,
+    private val sleepFeatureEnabledState: androidx.compose.runtime.MutableState<Boolean>,
     private val aiAdvisorFeatureEnabledState: androidx.compose.runtime.MutableState<Boolean>,
     private val syncStatusState: androidx.compose.runtime.MutableState<String>
 ) {
@@ -209,8 +227,11 @@ internal class DayDialSettingsState(
     var appearanceModeValue by appearanceModeValueState
     var backdropThemeValue by backdropThemeValueState
     var habitsFeatureEnabled by habitsFeatureEnabledState
+    var goalsFeatureEnabled by goalsFeatureEnabledState
     var medicationFeatureEnabled by medicationFeatureEnabledState
     var reviewFeatureEnabled by reviewFeatureEnabledState
+    var journalFeatureEnabled by journalFeatureEnabledState
+    var sleepFeatureEnabled by sleepFeatureEnabledState
     var aiAdvisorFeatureEnabled by aiAdvisorFeatureEnabledState
     var syncStatus by syncStatusState
 
@@ -225,7 +246,10 @@ internal class DayDialSettingsState(
             habitsEnabled = habitsFeatureEnabled,
             medicationEnabled = medicationFeatureEnabled,
             reviewEnabled = reviewFeatureEnabled,
-            aiAdvisorEnabled = aiAdvisorFeatureEnabled
+            aiAdvisorEnabled = aiAdvisorFeatureEnabled,
+            goalsEnabled = goalsFeatureEnabled,
+            journalEnabled = journalFeatureEnabled,
+            sleepEnabled = sleepFeatureEnabled
         )
 }
 
@@ -276,6 +300,10 @@ internal fun rememberDayDialSettingsState(): DayDialSettingsState {
             ChronosUiSettingsKeys.KEY_FEATURE_HABITS_ENABLED,
             true
         ),
+        goalsFeatureEnabledState = rememberPersistentBoolean(
+            ChronosUiSettingsKeys.KEY_FEATURE_GOALS_ENABLED,
+            true
+        ),
         medicationFeatureEnabledState = rememberPersistentBoolean(
             ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED,
             true
@@ -283,6 +311,14 @@ internal fun rememberDayDialSettingsState(): DayDialSettingsState {
         reviewFeatureEnabledState = rememberPersistentBoolean(
             ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED,
             false
+        ),
+        journalFeatureEnabledState = rememberPersistentBoolean(
+            ChronosUiSettingsKeys.KEY_FEATURE_JOURNAL_ENABLED,
+            true
+        ),
+        sleepFeatureEnabledState = rememberPersistentBoolean(
+            ChronosUiSettingsKeys.KEY_FEATURE_SLEEP_ENABLED,
+            true
         ),
         aiAdvisorFeatureEnabledState = rememberPersistentBoolean(
             ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED,

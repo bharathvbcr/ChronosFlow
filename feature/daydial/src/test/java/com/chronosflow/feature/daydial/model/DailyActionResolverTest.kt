@@ -57,6 +57,7 @@ class DailyActionResolverTest {
         )
         assertEquals(DailyActionKind.MISSED_BLOCKS, action?.kind)
         assertEquals("Review missed", action?.primaryLabel)
+        assertEquals("Reflow day", action?.secondaryLabel)
     }
 
     @Test

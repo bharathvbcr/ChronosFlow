@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
@@ -77,6 +78,7 @@ import com.chronosflow.feature.daydial.CalendarPermissionStatus
 import com.chronosflow.feature.daydial.DataExportPanel
 import com.chronosflow.feature.daydial.DataExportState
 import com.chronosflow.feature.daydial.DailyReview
+import com.chronosflow.feature.daydial.RoutineCompletionSummary
 import com.chronosflow.feature.daydial.TimeBlockUiModel
 import com.chronosflow.feature.daydial.isAllDayCalendarImport
 import com.chronosflow.feature.daydial.model.DayQuickItemKind
@@ -93,8 +95,11 @@ import java.time.format.DateTimeFormatter
 
 internal enum class DeveloperFeatureFlag {
     HABITS,
+    GOALS,
     MEDICATION,
     REVIEW,
+    JOURNAL,
+    SLEEP,
     AI_ADVISOR
 }
 
@@ -107,8 +112,11 @@ internal data class DeveloperFeatureFlagRow(
 internal fun developerFeatureFlagRows(featureFlags: ChronosFeatureFlags): List<DeveloperFeatureFlagRow> =
     listOf(
         DeveloperFeatureFlagRow(DeveloperFeatureFlag.HABITS, "Habits page", featureFlags.habitsEnabled),
+        DeveloperFeatureFlagRow(DeveloperFeatureFlag.GOALS, "Goals page", featureFlags.goalsEnabled),
         DeveloperFeatureFlagRow(DeveloperFeatureFlag.MEDICATION, "Meds page", featureFlags.medicationEnabled),
         DeveloperFeatureFlagRow(DeveloperFeatureFlag.REVIEW, "Review page", featureFlags.reviewEnabled),
+        DeveloperFeatureFlagRow(DeveloperFeatureFlag.JOURNAL, "Journal entry", featureFlags.journalEnabled),
+        DeveloperFeatureFlagRow(DeveloperFeatureFlag.SLEEP, "Sleep log", featureFlags.sleepEnabled),
         DeveloperFeatureFlagRow(DeveloperFeatureFlag.AI_ADVISOR, "AI advisor", featureFlags.aiAdvisorEnabled)
     )
 
@@ -165,6 +173,9 @@ internal fun SidebarPageContent(
     onCopyPlan: () -> Unit,
     onSaveTemplate: () -> Unit,
     onApplyTemplate: (TemplateBlueprint) -> Unit,
+    onApplyTemplateToday: (TemplateBlueprint) -> Unit = {},
+    onApplyTemplateTomorrow: (TemplateBlueprint) -> Unit = {},
+    routineCompletionFor: (TemplateBlueprint) -> RoutineCompletionSummary? = { null },
     onEditTemplate: (TemplateBlueprint) -> Unit,
     onDuplicateTemplate: (TemplateBlueprint) -> Unit,
     onSaveCurrentAsTemplate: () -> Unit,
@@ -216,8 +227,11 @@ internal fun SidebarPageContent(
     onHighContrastChanged: (Boolean) -> Unit,
     featureFlags: ChronosFeatureFlags,
     onHabitsFeatureEnabledChanged: (Boolean) -> Unit,
+    onGoalsFeatureEnabledChanged: (Boolean) -> Unit,
     onMedicationFeatureEnabledChanged: (Boolean) -> Unit,
     onReviewFeatureEnabledChanged: (Boolean) -> Unit,
+    onJournalFeatureEnabledChanged: (Boolean) -> Unit,
+    onSleepFeatureEnabledChanged: (Boolean) -> Unit,
     onAiAdvisorFeatureEnabledChanged: (Boolean) -> Unit,
     onOpenImport: () -> Unit,
     onOpenWeeklySummary: () -> Unit,
@@ -226,6 +240,7 @@ internal fun SidebarPageContent(
     onOpenFocusScreen: () -> Unit,
     onOpenTasks: () -> Unit,
     onOpenHabits: () -> Unit,
+    onOpenGoals: () -> Unit,
     onOpenMedication: () -> Unit,
     onOpenReview: () -> Unit,
     appLockSettings: AppLockSettingsState,
@@ -357,6 +372,14 @@ internal fun SidebarPageContent(
                         onClick = onOpenHabits
                     )
                 }
+                SidebarPage.GOALS -> {
+                    SidebarHubPanel(
+                        description = "Open long-term goals, their progress, and the work linked to them.",
+                        buttonLabel = "Open Goals",
+                        icon = Icons.Default.Flag,
+                        onClick = onOpenGoals
+                    )
+                }
                 SidebarPage.MEDICATION -> {
                     SidebarHubPanel(
                         description = "Open medication schedules, dose tracking, and reminder reliability.",
@@ -396,29 +419,52 @@ internal fun SidebarPageContent(
                     }
                 }
                 SidebarPage.TEMPLATES -> {
-                    ChronosSectionTitle(title = "Templates", subtitle = "Apply, edit, or duplicate reusable day blueprints")
+                    ChronosSectionTitle(title = "Routines", subtitle = "Apply, edit, or duplicate reusable day blueprints")
                     templates.forEach { template ->
+                        val completion = routineCompletionFor(template)
                         ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(template.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                     Text(
-                                        "Tap apply to seed the current day",
+                                        "Apply today or tomorrow, or seed the current day",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    if (completion != null && completion.totalCount > 0) {
+                                        Text(
+                                            routineCompletionLabel(completion.doneCount, completion.totalCount),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    TextButton(
+                                        onClick = { onApplyTemplateToday(template) },
+                                        modifier = Modifier.semantics {
+                                            contentDescription = routineApplyTodayActionLabel(template)
+                                        }
+                                    ) { Text("Apply today") }
+                                    TextButton(
+                                        onClick = { onApplyTemplateTomorrow(template) },
+                                        modifier = Modifier.semantics {
+                                            contentDescription = routineApplyTomorrowActionLabel(template)
+                                        }
+                                    ) { Text("Apply tomorrow") }
                                     TextButton(
                                         onClick = { onApplyTemplate(template) },
                                         modifier = Modifier.semantics {
                                             contentDescription = templateApplyActionLabel(template)
                                         }
-                                    ) { Text("Apply") }
+                                    ) { Text("Seed day") }
                                     TextButton(
                                         onClick = { onEditTemplate(template) },
                                         modifier = Modifier.semantics {
@@ -435,7 +481,7 @@ internal fun SidebarPageContent(
                             }
                         }
                     }
-                    Button(onClick = onSaveTemplate, modifier = Modifier.fillMaxWidth()) { Text("Save current day as template") }
+                    Button(onClick = onSaveTemplate, modifier = Modifier.fillMaxWidth()) { Text("Save current day as routine") }
                 }
                 SidebarPage.CALENDARS -> {
                     val previousMonthLabel = calendarMonthNavigationLabel(selectedDate, monthOffset = -1)
@@ -1004,8 +1050,11 @@ internal fun SidebarPageContent(
                                     onCheckedChange = { enabled ->
                                         when (row.flag) {
                                             DeveloperFeatureFlag.HABITS -> onHabitsFeatureEnabledChanged(enabled)
+                                            DeveloperFeatureFlag.GOALS -> onGoalsFeatureEnabledChanged(enabled)
                                             DeveloperFeatureFlag.MEDICATION -> onMedicationFeatureEnabledChanged(enabled)
                                             DeveloperFeatureFlag.REVIEW -> onReviewFeatureEnabledChanged(enabled)
+                                            DeveloperFeatureFlag.JOURNAL -> onJournalFeatureEnabledChanged(enabled)
+                                            DeveloperFeatureFlag.SLEEP -> onSleepFeatureEnabledChanged(enabled)
                                             DeveloperFeatureFlag.AI_ADVISOR -> onAiAdvisorFeatureEnabledChanged(enabled)
                                         }
                                     }
@@ -1099,6 +1148,13 @@ internal fun calendarDaySelectionLabel(date: LocalDate, isSelected: Boolean): St
 }
 
 internal fun templateApplyActionLabel(template: TemplateBlueprint): String = "Apply ${template.name} template"
+
+internal fun routineApplyTodayActionLabel(template: TemplateBlueprint): String = "Apply ${template.name} routine today"
+
+internal fun routineApplyTomorrowActionLabel(template: TemplateBlueprint): String = "Apply ${template.name} routine tomorrow"
+
+internal fun routineCompletionLabel(doneCount: Int, totalCount: Int): String =
+    "$doneCount/$totalCount blocks done today"
 
 internal fun templateEditActionLabel(template: TemplateBlueprint): String = "Edit ${template.name} template"
 

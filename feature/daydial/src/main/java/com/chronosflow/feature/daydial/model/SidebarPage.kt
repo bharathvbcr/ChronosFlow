@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
@@ -24,9 +25,10 @@ enum class SidebarPage(val label: String, val icon: ImageVector) {
     TASKS("Tasks", Icons.Default.Checklist),
     FOCUS_TIMER("Focus", Icons.Default.Timer),
     HABITS("Habits", Icons.Default.Favorite),
+    GOALS("Goals", Icons.Default.Flag),
     MEDICATION("Meds", Icons.Default.Medication),
     REVIEW("Review", Icons.Default.Assessment),
-    TEMPLATES("Templates", Icons.AutoMirrored.Filled.ViewList),
+    TEMPLATES("Routines", Icons.AutoMirrored.Filled.ViewList),
     CALENDARS("Calendars", Icons.Default.CalendarMonth),
     AI_SETTINGS("AI Settings", Icons.Default.Settings),
     PRIVACY_SYNC("Privacy & Sync", Icons.Outlined.DeviceHub),
@@ -39,12 +41,13 @@ enum class SidebarPage(val label: String, val icon: ImageVector) {
     companion object {
         val settingsPages = listOf(AI_SETTINGS, PRIVACY_SYNC, NOTIFICATIONS, APPEARANCE)
         val morePages = listOf(TEMPLATES, CALENDARS, DATA_EXPORT, DEVELOPER, ABOUT)
-        val rootPages = listOf(DAY_TOOLS, TASKS, HABITS, MEDICATION, REVIEW)
+        val rootPages = listOf(DAY_TOOLS, TASKS, HABITS, GOALS, MEDICATION, REVIEW)
 
         fun rootPages(featureFlags: ChronosFeatureFlags): List<SidebarPage> =
             rootPages.filter { page ->
                 when (page) {
                     HABITS -> featureFlags.habitsEnabled
+                    GOALS -> featureFlags.goalsEnabled
                     MEDICATION -> featureFlags.medicationEnabled
                     REVIEW -> featureFlags.reviewEnabled
                     else -> true

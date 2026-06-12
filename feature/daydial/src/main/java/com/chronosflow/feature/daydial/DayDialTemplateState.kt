@@ -51,10 +51,19 @@ internal class DayDialTemplateState(
     val saveEditedTemplate: () -> Unit,
     val saveCurrentAsTemplate: () -> Unit,
     val applyTemplate: (TemplateBlueprint) -> Unit,
+    val applyTemplateToday: (TemplateBlueprint) -> Unit,
+    val applyTemplateTomorrow: (TemplateBlueprint) -> Unit,
+    val routineCompletionFor: (TemplateBlueprint) -> RoutineCompletionSummary?,
     val importBackupText: (String) -> Unit,
     val editTemplate: (TemplateBlueprint) -> Unit,
     val duplicateTemplate: (TemplateBlueprint) -> Unit,
     val deleteTemplate: (() -> Unit)?
+)
+
+/** How many routine-seeded blocks for a given routine are done out of the total scheduled today. */
+internal data class RoutineCompletionSummary(
+    val doneCount: Int,
+    val totalCount: Int
 )
 
 internal data class TemplateBlockDraft(
@@ -147,12 +156,16 @@ internal fun saveTemplateEdit(
 @Composable
 internal fun rememberDayDialTemplateState(
     sortedBlocks: List<TimeBlockUiModel>,
+    customTemplates: List<TemplateBlueprint>,
     createBlock: (title: String, startMinute: Int, durationMinutes: Int, category: String) -> Unit,
+    onPersistTemplate: (TemplateBlueprint) -> Unit,
+    onDeleteTemplate: (String) -> Unit,
+    onApplyTemplateToDate: (TemplateBlueprint, java.time.LocalDate) -> Unit,
+    routineCompletions: Map<String, RoutineCompletionSummary>,
     showMessage: (String) -> Unit
 ): DayDialTemplateState {
     val builtInTemplates = remember { builtInDayDialTemplates() }
     val builtInTemplateIds = remember(builtInTemplates) { builtInTemplates.map { it.id }.toSet() }
-    var customTemplates by remember { mutableStateOf<List<TemplateBlueprint>>(emptyList()) }
     var templateEditorMode by remember { mutableStateOf<TemplateEditorMode?>(null) }
     var editTemplateId by remember { mutableStateOf<String?>(null) }
     var editTemplateName by remember { mutableStateOf("") }
@@ -234,7 +247,7 @@ internal fun rememberDayDialTemplateState(
                 showMessage("Fix invalid template blocks before saving")
                 return@DayDialTemplateState
             }
-            customTemplates = result.customTemplates
+            onPersistTemplate(result.savedTemplate)
             showMessage("Saved ${result.savedTemplate.name}")
             dismissTemplateEditor()
         },
@@ -260,6 +273,15 @@ internal fun rememberDayDialTemplateState(
             applyTemplateBlueprint(template, createBlock)
             showMessage("Applied ${template.name}")
         },
+        applyTemplateToday = { template ->
+            onApplyTemplateToDate(template, java.time.LocalDate.now())
+            showMessage("Applied ${template.name} today")
+        },
+        applyTemplateTomorrow = { template ->
+            onApplyTemplateToDate(template, java.time.LocalDate.now().plusDays(1))
+            showMessage("Applied ${template.name} tomorrow")
+        },
+        routineCompletionFor = { template -> routineCompletions[template.id] },
         importBackupText = { backupText ->
             val importedBlocks = parseDayDialBackupBlocks(backupText)
             if (importedBlocks.isEmpty()) {
@@ -282,12 +304,12 @@ internal fun rememberDayDialTemplateState(
                 id = UUID.randomUUID().toString(),
                 name = "${template.name} Copy"
             )
-            customTemplates = customTemplates + copy
+            onPersistTemplate(copy)
             showMessage("Duplicated ${template.name}")
         },
         deleteTemplate = if (templateToEdit != null && templateToEdit.id !in builtInTemplateIds) {
             {
-                customTemplates = customTemplates.filterNot { current -> current.id == templateToEdit.id }
+                onDeleteTemplate(templateToEdit.id)
                 showMessage("Deleted ${templateToEdit.name}")
                 dismissTemplateEditor()
             }
@@ -512,7 +534,7 @@ private fun defaultTemplateDraftBlock(startMinute: Int): TemplateBlockDraft =
         category = "WORK"
     )
 
-private fun builtInDayDialTemplates(): List<TemplateBlueprint> = listOf(
+internal fun builtInDayDialTemplates(): List<TemplateBlueprint> = listOf(
     TemplateBlueprint(
         id = "tpl_workday",
         name = "Workday",

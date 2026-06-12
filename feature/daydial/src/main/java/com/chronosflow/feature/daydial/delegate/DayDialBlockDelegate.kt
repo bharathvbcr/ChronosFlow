@@ -413,6 +413,7 @@ class DayDialBlockDelegate @Inject constructor(
     fun rebalanceDay(
         scope: CoroutineScope,
         date: LocalDate,
+        fromMinute: Int? = null,
         onResult: (PlannerOperationResult, Boolean) -> Unit
     ) {
         scope.launch {
@@ -423,7 +424,7 @@ class DayDialBlockDelegate @Inject constructor(
                 )
                 return@launch
             }
-            val result = plannerService.rebalanceDay(date)
+            val result = plannerService.rebalanceDay(date, fromMinute)
             onResult(result, false)
         }
     }

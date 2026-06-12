@@ -123,6 +123,7 @@ class MedicationActionReceiver : BroadcastReceiver() {
                 if (notificationId != -1) {
                     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     notificationManager.cancel(notificationId)
+                    ReminderNotificationGroups.refreshSummary(context)
                 }
 
                 // If snooze, take, or skip was completed, we can also clear the original alarm request state

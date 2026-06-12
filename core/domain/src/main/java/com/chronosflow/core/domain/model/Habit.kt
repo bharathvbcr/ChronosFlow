@@ -16,5 +16,6 @@ data class Habit(
     val schedule: HabitSchedule? = null,
     val recentEvents: List<HabitEvent> = emptyList(),
     val analytics: HabitAnalytics = HabitAnalytics(),
-    val launchTarget: AppLaunchTarget? = null
+    val launchTarget: AppLaunchTarget? = null,
+    val goalId: String? = null
 )

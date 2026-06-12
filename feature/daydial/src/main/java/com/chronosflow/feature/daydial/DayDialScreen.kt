@@ -62,6 +62,7 @@ fun DayDialScreen(
     onOpenFocusScreen: () -> Unit,
     onOpenTasks: () -> Unit,
     onOpenHabits: () -> Unit,
+    onOpenGoals: () -> Unit,
     onOpenMedication: () -> Unit,
     onOpenReview: () -> Unit,
     onSelectPrimaryTab: (DayDialTab) -> Unit,
@@ -74,6 +75,7 @@ fun DayDialScreen(
             onOpenFocusScreen = onOpenFocusScreen,
             onOpenTasks = onOpenTasks,
             onOpenHabits = onOpenHabits,
+            onOpenGoals = onOpenGoals,
             onOpenMedication = onOpenMedication,
             onOpenReview = onOpenReview,
             onSelectPrimaryTab = onSelectPrimaryTab,
@@ -92,6 +94,7 @@ fun DayDialScreen(
         onOpenFocusScreen = onOpenFocusScreen,
         onOpenTasks = onOpenTasks,
         onOpenHabits = onOpenHabits,
+            onOpenGoals = onOpenGoals,
         onOpenMedication = onOpenMedication,
         onOpenReview = onOpenReview,
         onSelectPrimaryTab = onSelectPrimaryTab,
@@ -110,6 +113,7 @@ private fun DayDialDataScreen(
     onOpenFocusScreen: () -> Unit,
     onOpenTasks: () -> Unit,
     onOpenHabits: () -> Unit,
+    onOpenGoals: () -> Unit,
     onOpenMedication: () -> Unit,
     onOpenReview: () -> Unit,
     onSelectPrimaryTab: (DayDialTab) -> Unit,
@@ -270,11 +274,39 @@ private fun DayDialDataScreen(
     }
 
     val sortedBlocks = remember(vmState.timeBlocks) { vmState.timeBlocks.sortedBy { it.startMinuteOfDay } }
+    val routines by viewModel.routines.collectAsStateWithLifecycle()
+    val routineTemplates = remember(routines) { routines.map { it.toTemplateBlueprint() } }
+    val routineCompletions = remember(vmState.timeBlocks) {
+        deriveRoutineCompletions(vmState.timeBlocks)
+    }
+    // One-time idempotent seeding: built-in templates were never persisted (custom templates
+    // lived only in memory before the routines table existed), so seed the table from the
+    // built-ins the first time it is empty. This makes every template DB-backed, which is what
+    // lets Apply today/tomorrow route through ApplyRoutineToDateUseCase for built-ins too;
+    // they stay read-only in the UI via the built-in id check in rememberDayDialTemplateState.
+    var didImportLegacyRoutines by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(didImportLegacyRoutines) {
+        if (!didImportLegacyRoutines) {
+            viewModel.importLegacyRoutinesIfEmpty(
+                legacyRoutines = builtInDayDialTemplates().map { it.toRoutine() }
+            ) {
+                didImportLegacyRoutines = true
+            }
+        }
+    }
     val templateState = rememberDayDialTemplateState(
         sortedBlocks = sortedBlocks,
+        customTemplates = routineTemplates,
         createBlock = { title, startMinute, duration, category ->
             viewModel.createQuickBlock(title, startMinute, duration, category)
         },
+        onPersistTemplate = { template -> viewModel.persistRoutine(template.toRoutine()) },
+        onDeleteTemplate = { routineId -> viewModel.deleteRoutineById(routineId) },
+        onApplyTemplateToDate = { template, date ->
+            // Step offsets are absolute minutes-of-day (anchor 0) — see RoutineTemplateConverters.
+            viewModel.applyRoutineToDate(template.id, date, ROUTINE_TEMPLATE_ANCHOR_MINUTE)
+        },
+        routineCompletions = routineCompletions,
         showMessage = { uiState.snackbarMessage = it }
     )
 
@@ -400,6 +432,7 @@ private fun DayDialDataScreen(
         onOpenFocusScreen = onOpenFocusScreen,
         onOpenTasks = onOpenTasks,
         onOpenHabits = onOpenHabits,
+            onOpenGoals = onOpenGoals,
         onOpenMedication = onOpenMedication,
         onOpenReview = onOpenReview,
         onSelectPrimaryTab = selectPrimaryTab,
@@ -493,7 +526,14 @@ private fun DayDialDataScreen(
                 viewModel.endDayReview(markMissed = missedBlocks.map { it.id })
                 uiState.activeSheet = null
             },
-            showMessage = { uiState.snackbarMessage = it }
+            showMessage = { uiState.snackbarMessage = it },
+            journalEntry = vmState.journalEntry,
+            sleepTrack = vmState.sleepTrack,
+            moodSummary = vmState.moodEnergyCheckIns.lastOrNull()?.let { checkIn ->
+                "Today's check-in: mood ${checkIn.moodScore}/5 · energy ${checkIn.energyScore}/5"
+            },
+            onSaveJournal = viewModel::saveJournalEntry,
+            onSaveSleep = viewModel::saveSleepLog
         )
     }
 
@@ -525,6 +565,16 @@ private fun applyLaunchTarget(
             uiState.currentTab = DayDialTab.TODAY
             uiState.activeSidebarPage = null
             uiState.activeSheet = SheetTarget.NewBlock(title = "New Block")
+        }
+        "journal" -> {
+            uiState.currentTab = DayDialTab.TODAY
+            uiState.activeSidebarPage = null
+            uiState.activeSheet = SheetTarget.Journal(LocalDate.now())
+        }
+        "sleep" -> {
+            uiState.currentTab = DayDialTab.TODAY
+            uiState.activeSidebarPage = null
+            uiState.activeSheet = SheetTarget.SleepLog(LocalDate.now())
         }
         "plan" -> {
             uiState.currentTab = DayDialTab.PLAN
@@ -567,6 +617,7 @@ private fun DayDialLightweightSidebarScreen(
     onOpenFocusScreen: () -> Unit,
     onOpenTasks: () -> Unit,
     onOpenHabits: () -> Unit,
+    onOpenGoals: () -> Unit,
     onOpenMedication: () -> Unit,
     onOpenReview: () -> Unit,
     onSelectPrimaryTab: (DayDialTab) -> Unit,
@@ -735,8 +786,11 @@ private fun DayDialLightweightSidebarScreen(
                         onHighContrastChanged = { settings.highContrastEnabled = it },
                         featureFlags = settings.featureFlags,
                         onHabitsFeatureEnabledChanged = { settings.habitsFeatureEnabled = it },
+                        onGoalsFeatureEnabledChanged = { settings.goalsFeatureEnabled = it },
                         onMedicationFeatureEnabledChanged = { settings.medicationFeatureEnabled = it },
                         onReviewFeatureEnabledChanged = { settings.reviewFeatureEnabled = it },
+                        onJournalFeatureEnabledChanged = { settings.journalFeatureEnabled = it },
+                        onSleepFeatureEnabledChanged = { settings.sleepFeatureEnabled = it },
                         onAiAdvisorFeatureEnabledChanged = { settings.aiAdvisorFeatureEnabled = it },
                         onOpenImport = {},
                         onOpenWeeklySummary = {},
@@ -745,6 +799,7 @@ private fun DayDialLightweightSidebarScreen(
                         onOpenFocusScreen = onOpenFocusScreen,
                         onOpenTasks = onOpenTasks,
                         onOpenHabits = onOpenHabits,
+            onOpenGoals = onOpenGoals,
                         onOpenMedication = onOpenMedication,
                         onOpenReview = onOpenReview,
                         appLockSettings = AppLockSettingsState(),

@@ -152,6 +152,12 @@ class MedicationRepositoryImpl @Inject constructor(
         medicationDoseEventDao.insertEvent(event.toEntity())
     }
 
+    override suspend fun getDoseEventsBetween(
+        start: java.time.LocalDate,
+        end: java.time.LocalDate
+    ): List<MedicationDoseEvent> =
+        medicationDoseEventDao.getEventsBetween(start, end).map { it.toDomain() }
+
     override suspend fun deleteMedicationPlan(plan: MedicationPlan) =
         medicationDao.deleteMedicationPlan(plan.toEntity())
 

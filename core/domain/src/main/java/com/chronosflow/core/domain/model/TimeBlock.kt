@@ -26,7 +26,9 @@ data class TimeBlock(
     val actualEndMinuteOfDay: Int?,
     val createdAt: Instant,
     val updatedAt: Instant,
-    val taskOccurrenceDate: LocalDate? = null
+    val taskOccurrenceDate: LocalDate? = null,
+    val goalId: String? = null,
+    val routineId: String? = null
 ) {
     init {
         require(startMinuteOfDay in 0..1439) { "startMinuteOfDay must be 0..1439" }

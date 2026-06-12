@@ -44,7 +44,7 @@ class TaskFormSheetUiTest {
                 TaskFormSheet(
                     target = TaskSheetTarget.Add(prefillTitle = "Follow-up"),
                     onDismiss = {},
-                    onConfirm = { title, _, _, _, _, _, _, _, _, _, _, _, _ ->
+                    onConfirm = { title, _, _, _, _, _, _, _, _, _, _, _, _, _ ->
                         capturedTitle = title
                     },
                     assistState = assistState,
@@ -89,7 +89,7 @@ class TaskFormSheetUiTest {
                 TaskFormSheet(
                     target = TaskSheetTarget.Add(),
                     onDismiss = {},
-                    onConfirm = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+                    onConfirm = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
                     assistState = assistState,
                     onRequestAssist = {},
                     onClearAssist = { assistState = TaskAssistUiState() }
@@ -130,7 +130,7 @@ class TaskFormSheetUiTest {
                 TaskFormSheet(
                     target = TaskSheetTarget.Add(),
                     onDismiss = {},
-                    onConfirm = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+                    onConfirm = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
                     assistState = assistState,
                     onRequestAssist = {},
                     onClearAssist = { assistState = TaskAssistUiState() }
@@ -188,7 +188,7 @@ class TaskFormSheetUiTest {
                 TaskFormSheet(
                     target = TaskSheetTarget.Add(prefillTitle = "Prepare launch"),
                     onDismiss = {},
-                    onConfirm = { _, _, _, _, _, duration, preferredStart, date, checklist, _, _, _, _ ->
+                    onConfirm = { _, _, _, _, _, duration, preferredStart, date, checklist, _, _, _, _, _ ->
                         capturedDuration = duration
                         capturedStart = preferredStart
                         capturedTargetDate = date
@@ -236,7 +236,7 @@ class TaskFormSheetUiTest {
                 TaskFormSheet(
                     target = TaskSheetTarget.Add(prefillTitle = "Ship launch fix"),
                     onDismiss = {},
-                    onConfirm = { _, _, priority, _, _, _, _, _, _, _, _, _, _ ->
+                    onConfirm = { _, _, priority, _, _, _, _, _, _, _, _, _, _, _ ->
                         capturedPriority = priority
                     },
                     assistState = assistState,

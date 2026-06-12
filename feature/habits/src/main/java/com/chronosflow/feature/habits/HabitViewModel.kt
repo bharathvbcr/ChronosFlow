@@ -12,11 +12,13 @@ import com.chronosflow.core.ai.genai.GenAiAssistCopy
 import com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot
 import com.chronosflow.core.ai.genai.refreshAssistUiSnapshot
 import com.chronosflow.core.domain.model.AppLaunchTarget
+import com.chronosflow.core.domain.model.Goal
 import com.chronosflow.core.domain.model.Habit
 import com.chronosflow.core.domain.model.HabitEvent
 import com.chronosflow.core.domain.model.HabitEventType
 import com.chronosflow.core.domain.model.HabitSchedule
 import com.chronosflow.core.domain.model.buildLegacyHabitSchedule
+import com.chronosflow.core.domain.repository.GoalRepository
 import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.PlannerPreferencesRepository
 import com.chronosflow.core.domain.usecase.CompleteHabitUseCase
@@ -33,6 +35,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -54,6 +57,7 @@ data class HabitAssistUiState(
 @HiltViewModel
 class HabitViewModel @Inject constructor(
     private val habitRepository: HabitRepository,
+    private val goalRepository: GoalRepository,
     private val plannerPreferencesRepository: PlannerPreferencesRepository,
     getActiveHabitsUseCase: GetActiveHabitsUseCase,
     observeHabitStreaksUseCase: ObserveHabitStreaksUseCase,
@@ -64,6 +68,9 @@ class HabitViewModel @Inject constructor(
     private val genAiAssistCoordinator: GenAiAssistCoordinator
 ) : ViewModel() {
     val allHabits = habitRepository.observeHabits()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val goals: StateFlow<List<Goal>> = goalRepository.observeGoals()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val activeHabits = getActiveHabitsUseCase()
@@ -100,7 +107,8 @@ class HabitViewModel @Inject constructor(
         difficulty: Int = 2,
         isBundled: Boolean = false,
         schedule: HabitSchedule? = null,
-        launchTarget: AppLaunchTarget? = null
+        launchTarget: AppLaunchTarget? = null,
+        goalId: String? = null
     ) {
         if (title.isBlank()) return
         viewModelScope.launch {
@@ -118,6 +126,7 @@ class HabitViewModel @Inject constructor(
                 lastCompletedDate = null,
                 isActive = true,
                 launchTarget = launchTarget,
+                goalId = goalId,
                 schedule = schedule?.copy(
                     id = schedule.id.ifBlank { "schedule-$habitId" },
                     habitId = habitId,
@@ -146,7 +155,8 @@ class HabitViewModel @Inject constructor(
         difficulty: Int,
         isBundled: Boolean,
         schedule: HabitSchedule? = null,
-        launchTarget: AppLaunchTarget? = null
+        launchTarget: AppLaunchTarget? = null,
+        goalId: String? = null
     ) {
         if (title.isBlank()) return
         viewModelScope.launch {
@@ -159,6 +169,7 @@ class HabitViewModel @Inject constructor(
                 difficulty = difficulty.coerceIn(1, 5),
                 isBundled = isBundled,
                 launchTarget = launchTarget,
+                goalId = goalId,
                 schedule = schedule?.copy(
                     id = schedule.id.ifBlank { habit.schedule?.id ?: "schedule-${habit.id}" },
                     habitId = habit.id,

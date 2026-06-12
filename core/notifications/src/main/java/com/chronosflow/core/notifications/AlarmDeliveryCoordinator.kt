@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.chronosflow.core.domain.model.AlarmDeliveryState
 import com.chronosflow.core.domain.model.AlarmRequestType
 import com.chronosflow.core.domain.model.AppLaunchTarget
@@ -67,6 +68,10 @@ class AlarmDeliveryCoordinator @Inject constructor(
             .setSmallIcon(R.drawable.ic_chronos_alarm)
             .setContentTitle(title)
             .setContentText(message)
+            .setColor(accentColorFor(channelId))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setGroup(ReminderNotificationGroups.GROUP_KEY)
+            .setDeleteIntent(ReminderNotificationGroups.deleteIntent(context))
             .setPriority(ReminderNotificationChannels.compatPriorityFor(channelId))
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
@@ -105,7 +110,7 @@ class AlarmDeliveryCoordinator @Inject constructor(
                     completeIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
-                notification.addAction(0, "Mark Done", completePendingIntent)
+                notification.addAction(R.drawable.ic_notif_check, "Mark Done", completePendingIntent)
             }
         }
 
@@ -166,13 +171,52 @@ class AlarmDeliveryCoordinator @Inject constructor(
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            notification.addAction(0, "Take", takePendingIntent)
-            notification.addAction(0, "Snooze 15m", snoozePendingIntent)
-            notification.addAction(0, "Skip", skipPendingIntent)
+            notification.addAction(R.drawable.ic_notif_check, "Take", takePendingIntent)
+            notification.addAction(R.drawable.ic_notif_snooze, "Snooze 15m", snoozePendingIntent)
+            notification.addAction(R.drawable.ic_notif_skip, "Skip", skipPendingIntent)
         }
+
+        // Plain planner-block reminders (not a habit/task/medication) carry a one-tap recovery
+        // action so a slipping day can be reflowed from the lock screen without opening the app.
+        val isPlannerBlockReminder = blockId != null && habitId == null && task == null && !isMedication
+        if (isPlannerBlockReminder) {
+            val reflowIntent = Intent(context, ReflowDayActionReceiver::class.java).apply {
+                action = ReflowDayActionReceiver.ACTION_REFLOW_DAY
+                putExtra(ReflowDayActionReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+            }
+            val reflowPendingIntent = PendingIntent.getBroadcast(
+                context,
+                notificationId + 401,
+                reflowIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            notification.addAction(0, "Reflow day", reflowPendingIntent)
+        }
+
+        val isHabitCategory = habitId != null || habitLaunchTarget != null
+        val isTaskCategory = task != null
+        notification.setSubText(
+            ReminderNotificationGroups.categoryLabel(
+                isMedication = isMedication,
+                isHabit = isHabitCategory,
+                isTask = isTaskCategory
+            )
+        )
+        notification.setLargeIcon(
+            NotificationIcons.categoryBadge(
+                context = context,
+                iconRes = ReminderNotificationGroups.categoryIconRes(
+                    isMedication = isMedication,
+                    isHabit = isHabitCategory,
+                    isTask = isTaskCategory
+                ),
+                backgroundColor = accentColorFor(channelId)
+            )
+        )
 
         val builtNotification = notification.build()
         notificationManager.notify(notificationId, builtNotification)
+        ReminderNotificationGroups.refreshSummary(context)
 
         markDelivered(requestId)
         if (requestId != null) {
@@ -191,10 +235,23 @@ class AlarmDeliveryCoordinator @Inject constructor(
             .setSmallIcon(R.drawable.ic_chronos_alarm)
             .setContentTitle("Low Medication Supply: ${plan.name}")
             .setContentText(message)
+            .setSubText(ReminderNotificationGroups.categoryLabel(isMedication = true, isHabit = false, isTask = false))
+            .setLargeIcon(
+                NotificationIcons.categoryBadge(
+                    context = context,
+                    iconRes = ReminderNotificationGroups.categoryIconRes(isMedication = true, isHabit = false, isTask = false),
+                    backgroundColor = accentColorFor(channelId)
+                )
+            )
+            .setColor(accentColorFor(channelId))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setGroup(ReminderNotificationGroups.GROUP_KEY)
+            .setDeleteIntent(ReminderNotificationGroups.deleteIntent(context))
             .setPriority(ReminderNotificationChannels.compatPriorityFor(channelId))
             .setAutoCancel(true)
             .build()
         notificationManager.notify(notificationId, builtNotification)
+        ReminderNotificationGroups.refreshSummary(context)
     }
 
     private suspend fun loadTaskForRequest(requestId: String?): Task? {
@@ -288,6 +345,15 @@ class AlarmDeliveryCoordinator @Inject constructor(
     ): List<TaskContextCommand> {
         if (task == null) return emptyList()
         return safeExternalTaskContextCommands(context, task, limit = 3)
+    }
+
+    private fun accentColorFor(channelId: String): Int {
+        val colorRes = if (channelId == ReminderNotificationChannels.CRITICAL_CHANNEL_ID) {
+            R.color.notification_accent_critical
+        } else {
+            R.color.notification_accent
+        }
+        return ContextCompat.getColor(context, colorRes)
     }
 
     companion object {

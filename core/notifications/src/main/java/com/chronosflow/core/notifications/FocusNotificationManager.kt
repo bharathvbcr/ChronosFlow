@@ -65,12 +65,14 @@ class FocusNotificationManager @Inject constructor(
             ) as NotificationManager
         ) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            NotificationChannelGroups.ensureCreated(notificationManager)
             val channel = NotificationChannel(
                 FOCUS_CHANNEL_ID,
                 context.getString(R.string.focus_notification_channel_name),
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = context.getString(R.string.focus_notification_channel_description)
+                group = NotificationChannelGroups.FOCUS
                 setShowBadge(false)
             }
             notificationManager.createNotificationChannel(channel)

@@ -65,3 +65,9 @@ internal fun recoverableServiceSessionId(session: FocusSessionState?): String? =
     is FocusSessionState.Paused -> session.sessionId
     else -> null
 }
+
+internal fun recoverableSessionBlockId(session: FocusSessionState?): String? = when (session) {
+    is FocusSessionState.Running -> session.blockId
+    is FocusSessionState.Paused -> session.blockId
+    else -> null
+}

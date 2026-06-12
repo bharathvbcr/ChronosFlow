@@ -13,12 +13,14 @@ import com.chronosflow.core.domain.model.AlarmDeliveryState
 import com.chronosflow.core.domain.model.AlarmReliability
 import com.chronosflow.core.domain.model.AlarmRequest
 import com.chronosflow.core.domain.model.AlarmRequestType
+import com.chronosflow.core.domain.model.Goal
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TaskAction
 import com.chronosflow.core.domain.model.TaskAttachment
 import com.chronosflow.core.domain.model.TaskChecklistItem
 import com.chronosflow.core.domain.model.TaskContactSnapshot
 import com.chronosflow.core.domain.repository.AlarmRequestRepository
+import com.chronosflow.core.domain.repository.GoalRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TaskScheduleRepository
@@ -39,6 +41,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -63,6 +66,7 @@ class TaskViewModel @Inject constructor(
     private val toggleTaskCompletionUseCase: ToggleTaskCompletionUseCase,
     private val scheduleTaskIntoDayUseCase: ScheduleTaskIntoDayUseCase,
     private val taskRepository: TaskRepository,
+    private val goalRepository: GoalRepository,
     private val taskScheduleRepository: TaskScheduleRepository,
     private val alarmRequestRepository: AlarmRequestRepository,
     private val sleepScheduleRepository: SleepScheduleRepository,
@@ -83,6 +87,9 @@ class TaskViewModel @Inject constructor(
     }
 
     val tasks = getTasksUseCase()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val goals: StateFlow<List<Goal>> = goalRepository.observeGoals()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val taskSchedulesByTaskId = tasks
@@ -152,11 +159,12 @@ class TaskViewModel @Inject constructor(
         linkedContact: TaskContactSnapshot? = null,
         actions: List<TaskAction> = emptyList(),
         attachments: List<TaskAttachment> = emptyList(),
-        recurringConfig: TaskRecurringConfig = TaskRecurringConfig()
+        recurringConfig: TaskRecurringConfig = TaskRecurringConfig(),
+        goalId: String? = null
     ) {
         if (title.isBlank()) return
         viewModelScope.launch {
-            val task = addTaskUseCase(
+            val created = addTaskUseCase(
                 title = title.trim(),
                 description = description?.trim()?.ifBlank { null },
                 priority = priority.coerceIn(0, 2),
@@ -169,6 +177,11 @@ class TaskViewModel @Inject constructor(
                 actions = actions,
                 attachments = attachments
             )
+            val task = if (created.goalId != goalId) {
+                created.copy(goalId = goalId).also { taskRepository.saveTask(it) }
+            } else {
+                created
+            }
             val schedule = buildTaskScheduleFromConfig(
                 taskId = task.id,
                 existingSchedule = null,
@@ -201,7 +214,8 @@ class TaskViewModel @Inject constructor(
         linkedContact: TaskContactSnapshot? = null,
         actions: List<TaskAction> = emptyList(),
         attachments: List<TaskAttachment> = emptyList(),
-        recurringConfig: TaskRecurringConfig = TaskRecurringConfig()
+        recurringConfig: TaskRecurringConfig = TaskRecurringConfig(),
+        goalId: String? = null
     ) {
         if (title.isBlank()) return
         viewModelScope.launch {
@@ -217,6 +231,7 @@ class TaskViewModel @Inject constructor(
                 linkedContact = linkedContact,
                 actions = actions,
                 attachments = attachments,
+                goalId = goalId,
                 updatedAt = Instant.now()
             )
             taskRepository.saveTask(updated)

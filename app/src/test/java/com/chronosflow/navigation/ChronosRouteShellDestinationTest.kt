@@ -94,6 +94,7 @@ class ChronosRouteShellDestinationTest {
                 ChronosRoute.SHELL_FOCUS,
                 ChronosRoute.SHELL_TASKS,
                 ChronosRoute.SHELL_HABITS,
+                ChronosRoute.SHELL_GOALS,
                 ChronosRoute.SHELL_MEDICATION,
                 ChronosRoute.SHELL_REVIEW
             ),
@@ -102,7 +103,7 @@ class ChronosRouteShellDestinationTest {
     }
 
     @Test
-    fun `default shell destinations include habits and meds while review stays gated`() {
+    fun `default shell destinations include habits goals meds and graduated review`() {
         assertEquals(
             listOf(
                 ChronosRoute.SHELL_PLAN,
@@ -110,7 +111,9 @@ class ChronosRouteShellDestinationTest {
                 ChronosRoute.SHELL_FOCUS,
                 ChronosRoute.SHELL_TASKS,
                 ChronosRoute.SHELL_HABITS,
-                ChronosRoute.SHELL_MEDICATION
+                ChronosRoute.SHELL_GOALS,
+                ChronosRoute.SHELL_MEDICATION,
+                ChronosRoute.SHELL_REVIEW
             ),
             ChronosRoute.expandedShellDestinations(ChronosFeatureFlags()).map { it.id }
         )
@@ -122,11 +125,11 @@ class ChronosRouteShellDestinationTest {
                 ChronosRoute.SHELL_FOCUS,
                 ChronosRoute.SHELL_TASKS,
                 ChronosRoute.SHELL_HABITS,
-                ChronosRoute.SHELL_MEDICATION,
-                ChronosRoute.SHELL_REVIEW
+                ChronosRoute.SHELL_GOALS,
+                ChronosRoute.SHELL_MEDICATION
             ),
             ChronosRoute.expandedShellDestinations(
-                ChronosFeatureFlags(reviewEnabled = true)
+                ChronosFeatureFlags(reviewEnabled = false)
             ).map { it.id }
         )
     }
@@ -217,7 +220,7 @@ class ChronosRouteShellDestinationTest {
     }
 
     @Test
-    fun `medication notifications are enabled by default while review remains gated`() {
+    fun `medication and graduated review notifications are enabled by default`() {
         assertEquals(
             ChronosRoute.Medication.route,
             ChronosRoute.routeForNotificationLaunch(
@@ -233,34 +236,47 @@ class ChronosRouteShellDestinationTest {
             )
         )
         assertEquals(
-            ChronosRoute.Day.createRoute(),
+            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS),
             ChronosRoute.routeForNotificationLaunch(
                 NotificationLaunch(section = SECTION_REVIEW),
                 ChronosFeatureFlags()
             )
         )
         assertEquals(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS),
+            ChronosRoute.Day.createRoute(),
             ChronosRoute.routeForNotificationLaunch(
                 NotificationLaunch(section = SECTION_REVIEW),
-                ChronosFeatureFlags(reviewEnabled = true)
+                ChronosFeatureFlags(reviewEnabled = false)
             )
         )
     }
 
     @Test
-    fun `quick add includes habits and meds by default`() {
+    fun `quick add includes habits goals and meds by default`() {
         assertEquals(
-            listOf("New block", "New task", "New meds", "New habit", "Type a task, med, or habit"),
+            listOf(
+                "New block",
+                "New task",
+                "New meds",
+                "New habit",
+                "New goal",
+                "Journal entry",
+                "Log sleep",
+                "Type a task, med, habit, or goal"
+            ),
             quickAddActionsFor(ChronosFeatureFlags()).map { it.label }
         )
 
         assertEquals(
-            listOf("New block", "New task", "Type a task, med, or habit"),
+            listOf("New block", "New task", "Type a task, med, habit, or goal"),
             quickAddActionsFor(
                 ChronosFeatureFlags(
                     habitsEnabled = false,
-                    medicationEnabled = false
+                    medicationEnabled = false,
+                    goalsEnabled = false,
+                    reviewEnabled = false,
+                    journalEnabled = false,
+                    sleepEnabled = false
                 )
             ).map { it.label }
         )
@@ -285,6 +301,14 @@ class ChronosRouteShellDestinationTest {
         assertEquals(
             ChronosRoute.Habits.createRoute(ChronosRoute.TARGET_ADD),
             actionRoutes["New habit"]
+        )
+        assertEquals(
+            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_JOURNAL),
+            actionRoutes["Journal entry"]
+        )
+        assertEquals(
+            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_SLEEP),
+            actionRoutes["Log sleep"]
         )
     }
 

@@ -191,7 +191,7 @@ class DayDialReminderDelegate @Inject constructor(
                     id = reminderId(date, "day", "review"),
                     minuteOfDay = 21 * 60,
                     title = "Daily review",
-                    message = "Review planned, actual, and missed blocks.",
+                    message = "Review your day and capture tonight's journal.",
                     type = AlarmRequestType.DAILY_REVIEW
                 )
             }

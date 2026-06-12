@@ -60,6 +60,7 @@ import com.chronosflow.core.ui.settings.resolveChronosDarkTheme
 import com.chronosflow.core.ui.theme.ChronosTheme
 import com.chronosflow.feature.daydial.dayDialCommandProvider
 import com.chronosflow.feature.focus.focusCommandProvider
+import com.chronosflow.feature.goals.goalCommandProvider
 import com.chronosflow.feature.habits.habitCommandProvider
 import com.chronosflow.feature.medication.medicationCommandProvider
 import com.chronosflow.feature.review.reviewCommandProvider
@@ -316,11 +317,31 @@ private fun ChronosFlowApp(
                             ChronosRoute.Habits.createRoute(ChronosRoute.TARGET_ADD)
                         )
                     },
+                    onNewGoal = {
+                        navController.navigateSingleTop(
+                            ChronosRoute.Goals.createRoute(ChronosRoute.TARGET_ADD)
+                        )
+                    },
                     onNewMedication = {
                         navController.navigateToMedication(
                             activity,
                             appLockViewModel,
                             ChronosRoute.TARGET_ADD
+                        )
+                    },
+                    onNewJournal = {
+                        navController.navigateSingleTop(
+                            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_JOURNAL)
+                        )
+                    },
+                    onLogSleep = {
+                        navController.navigateSingleTop(
+                            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_SLEEP)
+                        )
+                    },
+                    onOpenRoutines = {
+                        navController.navigateSingleTop(
+                            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TEMPLATES)
                         )
                     },
                     featureFlags = featureFlags
@@ -349,6 +370,11 @@ private fun ChronosFlowApp(
                 add(taskCommandProvider(openTasksSidebar))
                 if (featureFlags.habitsEnabled) {
                     add(habitCommandProvider(openHabitsSidebarIfEnabled))
+                }
+                if (featureFlags.goalsEnabled) {
+                    add(goalCommandProvider {
+                        navController.navigateSingleTop(ChronosRoute.Goals.route)
+                    })
                 }
                 if (featureFlags.medicationEnabled) {
                     add(medicationCommandProvider(onOpenMedication = openMedicationSidebarIfEnabled))

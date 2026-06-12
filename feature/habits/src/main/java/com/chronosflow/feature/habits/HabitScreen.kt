@@ -1,5 +1,10 @@
 package com.chronosflow.feature.habits
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -48,6 +53,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chronosflow.core.ai.HabitAssistRequest
 import com.chronosflow.core.domain.model.Habit
 import com.chronosflow.core.ui.components.ChronosEmptyState
+import com.chronosflow.core.ui.components.ChronosLinkOption
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosMetricTile
 import com.chronosflow.core.ui.components.ChronosConfirmBottomSheet
@@ -56,6 +62,8 @@ import com.chronosflow.core.ui.components.ChronosScreenBackdrop
 import com.chronosflow.core.ui.components.ChronosScreenScaffold
 import com.chronosflow.core.ui.components.ChronosSectionHeader
 import com.chronosflow.core.ui.components.formatDisplayMinute
+import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
+import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 import com.chronosflow.core.ui.shell.LocalChronosShellBottomInset
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import java.time.LocalDate
@@ -71,6 +79,8 @@ fun HabitScreen(
 ) {
     val activeHabits by viewModel.activeHabits.collectAsStateWithLifecycle()
     val allHabits by viewModel.allHabits.collectAsStateWithLifecycle()
+    val goals by viewModel.goals.collectAsStateWithLifecycle()
+    val goalOptions = remember(goals) { goals.map { ChronosLinkOption(it.id, it.title) } }
     val recentHistoryTemplateIds by viewModel.recentHistoryTemplateIds.collectAsStateWithLifecycle()
     val streaks by viewModel.streaks.collectAsStateWithLifecycle()
     val repairSuggestions by viewModel.repairSuggestions.collectAsStateWithLifecycle()
@@ -149,28 +159,31 @@ fun HabitScreen(
                 }
                 item { HabitStreakChart(streaks = streaks) }
                 if (repairSuggestions.isNotEmpty()) {
-                    item {
+                    item(key = "habit_repair_panel") {
                         HabitRepairPanel(
                             suggestions = repairSuggestions,
                             assistSnapshot = repairAssistSnapshot,
-                            onComplete = { suggestion -> viewModel.completeHabit(suggestion.habit) }
+                            onComplete = { suggestion -> viewModel.completeHabit(suggestion.habit) },
+                            modifier = Modifier.animateItem()
                         )
                     }
                 }
                 if (activeHabits.isEmpty()) {
-                    item {
+                    item(key = "habit_empty_state") {
                         ChronosEmptyState(
                             title = "No active habits",
-                            message = "Add one habit to start building a daily streak."
+                            message = "Add one habit to start building a daily streak.",
+                            modifier = Modifier.animateItem()
                         )
                     }
-                    item {
+                    item(key = "habit_empty_quick_add") {
                         ChronosQuickAddChips(
                             label = "Start quickly",
                             options = listOf("Morning walk", "Meditation", "Read 20 min", "Hydrate"),
                             onSelect = { title ->
                                 sheetTarget = HabitSheetTarget.Add(prefillTitle = title)
-                            }
+                            },
+                            modifier = Modifier.animateItem()
                         )
                     }
                 } else {
@@ -197,7 +210,9 @@ fun HabitScreen(
     HabitFormSheet(
         target = sheetTarget,
         onDismiss = { sheetTarget = null },
-        onConfirm = { title, cadence, start, end, difficulty, isBundled, schedule, launchTarget ->
+        goalOptions = goalOptions,
+        initialGoalId = (sheetTarget as? HabitSheetTarget.Edit)?.habit?.goalId,
+        onConfirm = { title, cadence, start, end, difficulty, isBundled, schedule, launchTarget, goalId ->
             when (val target = sheetTarget) {
                 is HabitSheetTarget.Edit -> viewModel.updateHabit(
                     target.habit,
@@ -208,7 +223,8 @@ fun HabitScreen(
                     difficulty,
                     isBundled,
                     schedule,
-                    launchTarget
+                    launchTarget,
+                    goalId
                 )
                 is HabitSheetTarget.Add -> viewModel.addHabit(
                     title,
@@ -218,7 +234,8 @@ fun HabitScreen(
                     difficulty,
                     isBundled,
                     schedule,
-                    launchTarget
+                    launchTarget,
+                    goalId
                 )
                 null -> Unit
             }
@@ -304,9 +321,10 @@ internal fun habitArchiveConfirmTitle(habit: Habit): String {
 private fun HabitRepairPanel(
     suggestions: List<HabitRepairSuggestion>,
     assistSnapshot: com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot?,
-    onComplete: (HabitRepairSuggestion) -> Unit
+    onComplete: (HabitRepairSuggestion) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+    ChronosListCard(modifier = modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -375,6 +393,7 @@ private fun HabitRow(
     onArchive: () -> Unit,
     onOpenContext: () -> Unit
 ) {
+    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
     val status = habit.statusLabel(nowMinute)
     val isDue = status == "Due now"
     val isDone = habit.lastCompletedDate == LocalDate.now()
@@ -469,23 +488,33 @@ private fun HabitRow(
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                     Text(if (isDone) "Completed today" else "Complete")
                 }
-                if (isPaused) {
-                    FilledTonalButton(
-                        onClick = onResume,
-                        modifier = Modifier
-                            .weight(1f)
-                            .semantics { contentDescription = habitResumeActionLabel(habit) }
-                    ) {
-                        Text("Resume")
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = onOpenContext,
-                        modifier = Modifier
-                            .weight(1f)
-                            .semantics { contentDescription = habitMoreActionLabel(habit) }
-                    ) {
-                        Text("More")
+                AnimatedContent(
+                    targetState = isPaused,
+                    modifier = Modifier.weight(1f),
+                    transitionSpec = {
+                        val spec = ChronosValueAnimationFactory.selection<Float>(reduceMotion)
+                        fadeIn(spec) togetherWith fadeOut(spec)
+                    },
+                    label = "habitPauseResumeAction"
+                ) { paused ->
+                    if (paused) {
+                        FilledTonalButton(
+                            onClick = onResume,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .semantics { contentDescription = habitResumeActionLabel(habit) }
+                        ) {
+                            Text("Resume")
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = onOpenContext,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .semantics { contentDescription = habitMoreActionLabel(habit) }
+                        ) {
+                            Text("More")
+                        }
                     }
                 }
             }
@@ -635,16 +664,27 @@ private fun HabitStatusPill(
     emphasized: Boolean,
     success: Boolean
 ) {
-    val container = when {
+    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
+    val targetContainer = when {
         success -> MaterialTheme.colorScheme.tertiaryContainer
         emphasized -> MaterialTheme.colorScheme.primaryContainer
         else -> MaterialTheme.colorScheme.surfaceVariant
     }
-    val content = when {
+    val targetContent = when {
         success -> MaterialTheme.colorScheme.onTertiaryContainer
         emphasized -> MaterialTheme.colorScheme.onPrimaryContainer
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
+    val container by animateColorAsState(
+        targetValue = targetContainer,
+        animationSpec = ChronosValueAnimationFactory.stateChange(reduceMotion),
+        label = "habitStatusPillContainer"
+    )
+    val content by animateColorAsState(
+        targetValue = targetContent,
+        animationSpec = ChronosValueAnimationFactory.stateChange(reduceMotion),
+        label = "habitStatusPillContent"
+    )
     Surface(shape = MaterialTheme.shapes.small, color = container, contentColor = content) {
         Text(
             text = label,

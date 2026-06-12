@@ -9,9 +9,11 @@ import com.chronosflow.core.data.dao.CalendarEventDao
 import com.chronosflow.core.data.dao.DayPlanDao
 import com.chronosflow.core.data.dao.AlarmDao
 import com.chronosflow.core.data.dao.FocusSessionDao
+import com.chronosflow.core.data.dao.GoalDao
 import com.chronosflow.core.data.dao.HabitEventDao
 import com.chronosflow.core.data.dao.HabitDao
 import com.chronosflow.core.data.dao.HabitScheduleDao
+import com.chronosflow.core.data.dao.JournalEntryDao
 import com.chronosflow.core.data.dao.MedicationDoseEventDao
 import com.chronosflow.core.data.dao.MedicationDao
 import com.chronosflow.core.data.dao.MedicationSafetyProfileDao
@@ -19,6 +21,8 @@ import com.chronosflow.core.data.dao.MedicationScheduleDao
 import com.chronosflow.core.data.dao.MoodEnergyCheckInDao
 import com.chronosflow.core.data.dao.RecurrenceRuleDao
 import com.chronosflow.core.data.dao.ReviewDao
+import com.chronosflow.core.data.dao.RoutineDao
+import com.chronosflow.core.data.dao.SleepTrackDao
 import com.chronosflow.core.data.dao.TaskDao
 import com.chronosflow.core.data.dao.TaskScheduleDao
 import com.chronosflow.core.data.dao.TimeBlockDao
@@ -28,9 +32,11 @@ import com.chronosflow.core.data.model.CalendarEventEntity
 import com.chronosflow.core.data.model.DailyReviewEntity
 import com.chronosflow.core.data.model.DayPlanEntity
 import com.chronosflow.core.data.model.FocusSessionEntity
+import com.chronosflow.core.data.model.GoalEntity
 import com.chronosflow.core.data.model.HabitEventEntity
 import com.chronosflow.core.data.model.HabitEntity
 import com.chronosflow.core.data.model.HabitScheduleEntity
+import com.chronosflow.core.data.model.JournalEntryEntity
 import com.chronosflow.core.data.model.MedicationDoseEventEntity
 import com.chronosflow.core.data.model.MedicationPlanEntity
 import com.chronosflow.core.data.model.MedicationSafetyProfileEntity
@@ -38,6 +44,9 @@ import com.chronosflow.core.data.model.MedicationScheduleEntity
 import com.chronosflow.core.data.model.MoodEnergyCheckInEntity
 import com.chronosflow.core.data.model.RecurrenceRuleEntity
 import com.chronosflow.core.data.model.ReviewInsightEntity
+import com.chronosflow.core.data.model.RoutineEntity
+import com.chronosflow.core.data.model.RoutineStepEntity
+import com.chronosflow.core.data.model.SleepTrackEntity
 import com.chronosflow.core.data.model.TaskEntity
 import com.chronosflow.core.data.model.TaskActionEntity
 import com.chronosflow.core.data.model.TaskAttachmentEntity
@@ -75,9 +84,14 @@ import com.chronosflow.core.data.util.Converters
         TaskActionEntity::class,
         TaskAttachmentEntity::class,
         TaskScheduleEntity::class,
-        TaskReminderRuleEntity::class
+        TaskReminderRuleEntity::class,
+        GoalEntity::class,
+        JournalEntryEntity::class,
+        SleepTrackEntity::class,
+        RoutineEntity::class,
+        RoutineStepEntity::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -99,6 +113,10 @@ abstract class ChronosDatabase : RoomDatabase() {
     abstract fun focusSessionDao(): FocusSessionDao
     abstract fun calendarEventDao(): CalendarEventDao
     abstract fun moodEnergyCheckInDao(): MoodEnergyCheckInDao
+    abstract fun goalDao(): GoalDao
+    abstract fun journalEntryDao(): JournalEntryDao
+    abstract fun sleepTrackDao(): SleepTrackDao
+    abstract fun routineDao(): RoutineDao
 
     companion object {
         val MIGRATION_2_3 = object : Migration(2, 3) {
@@ -729,6 +747,103 @@ abstract class ChronosDatabase : RoomDatabase() {
         val MIGRATION_15_16 = object : Migration(15, 16) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE review_insights ADD COLUMN assistSource TEXT")
+            }
+        }
+
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Goal linkage columns on existing tables.
+                db.execSQL("ALTER TABLE tasks ADD COLUMN goalId TEXT")
+                db.execSQL("ALTER TABLE habits ADD COLUMN goalId TEXT")
+                db.execSQL("ALTER TABLE time_blocks ADD COLUMN goalId TEXT")
+                db.execSQL("ALTER TABLE time_blocks ADD COLUMN routineId TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tasks_goalId ON tasks(goalId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_habits_goalId ON habits(goalId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_time_blocks_goalId ON time_blocks(goalId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_time_blocks_routineId ON time_blocks(routineId)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS goals (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        description TEXT,
+                        category TEXT NOT NULL,
+                        targetValue INTEGER NOT NULL,
+                        startDate TEXT NOT NULL,
+                        targetDate TEXT,
+                        progressValue INTEGER NOT NULL,
+                        isCompleted INTEGER NOT NULL
+                    )
+                    """
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_goals_isCompleted ON goals(isCompleted)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_goals_targetDate ON goals(targetDate)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS journal_entries (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        entryDate TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        body TEXT NOT NULL,
+                        promptType TEXT,
+                        moodCheckInId TEXT,
+                        isPrimary INTEGER NOT NULL
+                    )
+                    """
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_journal_entries_entryDate ON journal_entries(entryDate)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_journal_entries_moodCheckInId ON journal_entries(moodCheckInId)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS sleep_tracks (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        date TEXT NOT NULL,
+                        plannedStartMinute INTEGER,
+                        plannedEndMinute INTEGER,
+                        actualStartMinute INTEGER,
+                        actualEndMinute INTEGER,
+                        sleepQuality INTEGER NOT NULL,
+                        windDownNotes TEXT,
+                        interruptedCount INTEGER NOT NULL
+                    )
+                    """
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_sleep_tracks_date ON sleep_tracks(date)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS routines (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        isActive INTEGER NOT NULL,
+                        lastCompletedDate TEXT,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL
+                    )
+                    """
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_routines_isActive ON routines(isActive)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS routine_steps (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        routineId TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        offsetMinute INTEGER NOT NULL,
+                        durationMinutes INTEGER NOT NULL,
+                        energyLevel INTEGER NOT NULL,
+                        sortOrder INTEGER NOT NULL,
+                        FOREIGN KEY(routineId) REFERENCES routines(id) ON DELETE CASCADE
+                    )
+                    """
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_routine_steps_routineId ON routine_steps(routineId)")
             }
         }
     }

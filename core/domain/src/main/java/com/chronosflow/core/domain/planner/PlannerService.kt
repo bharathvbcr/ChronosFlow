@@ -166,29 +166,57 @@ class PlannerService @Inject constructor(
         return deleteBlock(block)
     }
 
-    suspend fun rebalanceDay(date: java.time.LocalDate): PlannerOperationResult {
-        val blocks = getBlocksForDate(date)
+    /**
+     * Repacks flexible blocks to remove gaps.
+     *
+     * When [fromMinute] is supplied (the current minute-of-day for today), packing starts at that
+     * floor instead of midnight: future blocks are compacted and overdue-but-unfinished blocks are
+     * pulled forward into the remaining day, while blocks that are already underway stay anchored.
+     * A block counts as underway when its execution has been logged ([TimeBlock.actualStartMinuteOfDay]
+     * is set, i.e. completed or in progress) or the clock currently falls inside its window. This
+     * turns "compact the whole day" into "reflow what's left from now", so a slipped afternoon is
+     * recovered without repacking onto work that is already happening. Passing null (other days)
+     * preserves the original full-day behaviour.
+     */
+    suspend fun rebalanceDay(
+        date: java.time.LocalDate,
+        fromMinute: Int? = null
+    ): PlannerOperationResult {
+        val floor = (fromMinute ?: 0).coerceIn(0, 1440)
+        val allBlocks = getBlocksForDate(date)
+
+        fun TimeBlock.isUnderway(): Boolean =
+            actualStartMinuteOfDay != null ||
+                (startMinuteOfDay < floor && floor < startMinuteOfDay + durationMinutes)
+
+        val movable = allBlocks
             .filter { it.flexibility == BlockFlexibility.MOVABLE || it.flexibility == BlockFlexibility.RESIZABLE }
+            .filterNot { it.isLocked || it.isUnderway() }
             .sortedBy { it.startMinuteOfDay }
 
-        if (blocks.isEmpty()) {
+        if (movable.isEmpty()) {
             return PlannerOperationResult.Rejected("No flexible blocks to rebalance", "")
         }
 
-        val immutable: List<TimeBlock> = getBlocksForDate(date).filter {
-            it.flexibility == BlockFlexibility.FIXED || it.flexibility == BlockFlexibility.OPTIONAL
-        }
+        // Everything not being moved anchors the layout: fixed/optional blocks, locked blocks, and
+        // flexible blocks that have already started or elapsed.
+        val movableIds = movable.mapTo(HashSet()) { it.id }
+        val anchors: List<TimeBlock> = allBlocks.filterNot { it.id in movableIds }
 
-        var cursor = 0
-        blocks.forEach { block ->
+        var cursor = floor
+        val movedIds = mutableListOf<String>()
+        movable.forEach { block ->
             val maxStart = 1440 - block.durationMinutes
-            val candidate = findNextAvailableStart(block, cursor, immutable, maxStart)
+            val candidate = findNextAvailableStart(block, cursor, anchors, maxStart)
             if (candidate != null) {
-                repository.saveTimeBlock(block.withUpdatedStart(candidate))
+                if (candidate != block.startMinuteOfDay) {
+                    repository.saveTimeBlock(block.withUpdatedStart(candidate))
+                }
+                movedIds.add(block.id)
                 cursor = candidate + block.durationMinutes + 5
             }
         }
-        return PlannerOperationResult.Applied("Day rebalance complete", "", null, blocks.map { it.id })
+        return PlannerOperationResult.Applied("Day rebalance complete", "", null, movedIds)
     }
 
     suspend fun logActualWindow(blockId: String, actualStartMinute: Int, actualEndMinute: Int): PlannerOperationResult {

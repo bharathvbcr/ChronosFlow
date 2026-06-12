@@ -6,4 +6,5 @@
     <string name="shortcut_quick_add_long">Quick-Add Plan Block</string>
     <string name="shortcut_command_palette_short">Command Palette</string>
     <string name="shortcut_command_palette_long">Open Command Palette</string>
+    <string name="chronos_widget_description">Start a focus session and mark habits or doses without opening the app.</string>
 </resources>

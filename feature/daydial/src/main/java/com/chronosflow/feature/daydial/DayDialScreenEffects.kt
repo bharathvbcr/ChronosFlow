@@ -67,6 +67,7 @@ internal fun DayDialScreenEffects(
     LaunchedEffect(vmState.focusSession.status, uiState.currentTab) {
         while (vmState.focusSession.status == FocusExecutionStatus.RUNNING && uiState.currentTab == DayDialTab.FOCUS) {
             delay(1_000)
+            viewModel.checkFocusPhaseBoundary()
             uiState.focusTick++
         }
     }

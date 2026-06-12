@@ -69,6 +69,7 @@ internal fun dayDialSidebarPageSubtitle(page: SidebarPage): String =
         SidebarPage.TASKS -> "Capture, prioritize, and complete tasks"
         SidebarPage.FOCUS_TIMER -> "Open focus sessions and timer controls"
         SidebarPage.HABITS -> "Track routines for the selected day"
+        SidebarPage.GOALS -> "Long-term objectives and progress"
         SidebarPage.MEDICATION -> "Medication reminders and dose tracking"
         SidebarPage.REVIEW -> "Planned, actual, and missed time"
         SidebarPage.TEMPLATES -> "Reusable day blueprints"

@@ -10,9 +10,11 @@ import com.chronosflow.core.data.dao.AlarmDao
 import com.chronosflow.core.data.dao.CalendarEventDao
 import com.chronosflow.core.data.dao.DayPlanDao
 import com.chronosflow.core.data.dao.FocusSessionDao
+import com.chronosflow.core.data.dao.GoalDao
 import com.chronosflow.core.data.dao.HabitEventDao
 import com.chronosflow.core.data.dao.HabitDao
 import com.chronosflow.core.data.dao.HabitScheduleDao
+import com.chronosflow.core.data.dao.JournalEntryDao
 import com.chronosflow.core.data.dao.MedicationDoseEventDao
 import com.chronosflow.core.data.dao.MedicationDao
 import com.chronosflow.core.data.dao.MedicationSafetyProfileDao
@@ -20,6 +22,8 @@ import com.chronosflow.core.data.dao.MedicationScheduleDao
 import com.chronosflow.core.data.dao.MoodEnergyCheckInDao
 import com.chronosflow.core.data.dao.RecurrenceRuleDao
 import com.chronosflow.core.data.dao.ReviewDao
+import com.chronosflow.core.data.dao.RoutineDao
+import com.chronosflow.core.data.dao.SleepTrackDao
 import com.chronosflow.core.data.dao.TaskDao
 import com.chronosflow.core.data.dao.TaskScheduleDao
 import com.chronosflow.core.data.dao.TimeBlockDao
@@ -28,13 +32,17 @@ import com.chronosflow.core.data.repository.CalendarEventRepositoryImpl
 import com.chronosflow.core.data.repository.DayPlanRepositoryImpl
 import com.chronosflow.core.data.repository.DeviceCalendarPlatform
 import com.chronosflow.core.data.repository.FocusSessionRepositoryImpl
+import com.chronosflow.core.data.repository.GoalRepositoryImpl
 import com.chronosflow.core.data.repository.HabitRepositoryImpl
+import com.chronosflow.core.data.repository.JournalRepositoryImpl
 import com.chronosflow.core.data.repository.MedicationRepositoryImpl
 import com.chronosflow.core.data.repository.MoodEnergyRepositoryImpl
 import com.chronosflow.core.data.repository.PlannerPreferencesRepositoryImpl
 import com.chronosflow.core.data.repository.RecurrenceRuleRepositoryImpl
 import com.chronosflow.core.data.repository.ReviewRepositoryImpl
+import com.chronosflow.core.data.repository.RoutineRepositoryImpl
 import com.chronosflow.core.data.repository.SleepScheduleRepositoryImpl
+import com.chronosflow.core.data.repository.SleepTrackRepositoryImpl
 import com.chronosflow.core.data.repository.TaskRepositoryImpl
 import com.chronosflow.core.data.repository.TaskScheduleRepositoryImpl
 import com.chronosflow.core.data.repository.TimeBlockRepositoryImpl
@@ -43,13 +51,17 @@ import com.chronosflow.core.domain.repository.AlarmRequestRepository
 import com.chronosflow.core.domain.repository.CalendarEventRepository
 import com.chronosflow.core.domain.repository.DayPlanRepository
 import com.chronosflow.core.domain.repository.FocusSessionRepository
+import com.chronosflow.core.domain.repository.GoalRepository
 import com.chronosflow.core.domain.repository.HabitRepository
+import com.chronosflow.core.domain.repository.JournalRepository
 import com.chronosflow.core.domain.repository.MedicationRepository
 import com.chronosflow.core.domain.repository.MoodEnergyRepository
 import com.chronosflow.core.domain.repository.PlannerPreferencesRepository
 import com.chronosflow.core.domain.repository.RecurrenceRuleRepository
 import com.chronosflow.core.domain.repository.ReviewRepository
+import com.chronosflow.core.domain.repository.RoutineRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
+import com.chronosflow.core.domain.repository.SleepTrackRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TaskScheduleRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
@@ -87,9 +99,13 @@ object DataModule {
                 ChronosDatabase.MIGRATION_12_13,
                 ChronosDatabase.MIGRATION_13_14,
                 ChronosDatabase.MIGRATION_14_15,
-                ChronosDatabase.MIGRATION_15_16
+                ChronosDatabase.MIGRATION_15_16,
+                ChronosDatabase.MIGRATION_16_17
             )
         )
+            // Guard against opening a database written by a newer (uncommitted) schema:
+            // Room cannot downgrade, so wipe and rebuild rather than crash on launch.
+            .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
 
         ChronosMockDataSeederInstaller.installIfEnabled(builder)
 
@@ -146,6 +162,18 @@ object DataModule {
 
     @Provides
     fun provideMoodEnergyCheckInDao(db: ChronosDatabase) = db.moodEnergyCheckInDao()
+
+    @Provides
+    fun provideGoalDao(db: ChronosDatabase) = db.goalDao()
+
+    @Provides
+    fun provideJournalEntryDao(db: ChronosDatabase) = db.journalEntryDao()
+
+    @Provides
+    fun provideSleepTrackDao(db: ChronosDatabase) = db.sleepTrackDao()
+
+    @Provides
+    fun provideRoutineDao(db: ChronosDatabase) = db.routineDao()
 
     @Provides
     @Singleton
@@ -264,5 +292,29 @@ object DataModule {
     @Singleton
     fun provideFocusSessionRepository(focusSessionDao: FocusSessionDao): FocusSessionRepository {
         return FocusSessionRepositoryImpl(focusSessionDao)
+    }
+
+    @Provides
+    @Singleton
+    fun provideGoalRepository(goalDao: GoalDao): GoalRepository {
+        return GoalRepositoryImpl(goalDao)
+    }
+
+    @Provides
+    @Singleton
+    fun provideJournalRepository(journalEntryDao: JournalEntryDao): JournalRepository {
+        return JournalRepositoryImpl(journalEntryDao)
+    }
+
+    @Provides
+    @Singleton
+    fun provideSleepTrackRepository(sleepTrackDao: SleepTrackDao): SleepTrackRepository {
+        return SleepTrackRepositoryImpl(sleepTrackDao)
+    }
+
+    @Provides
+    @Singleton
+    fun provideRoutineRepository(routineDao: RoutineDao): RoutineRepository {
+        return RoutineRepositoryImpl(routineDao)
     }
 }

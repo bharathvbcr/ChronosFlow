@@ -13,7 +13,9 @@ fun Context.sendFocusServiceCommand(
     archiveOnStop: Boolean = false,
     logActualOnStop: Boolean = true,
     wasSkip: Boolean = false,
-    adjustSeconds: Int? = null
+    adjustSeconds: Int? = null,
+    terminal: Boolean = true,
+    boundaryLabel: String? = null
 ) {
     val intent = Intent(this, FocusService::class.java).apply {
         this.action = action
@@ -24,6 +26,8 @@ fun Context.sendFocusServiceCommand(
         putExtra(FocusService.EXTRA_ARCHIVE_ON_STOP, archiveOnStop)
         putExtra(FocusService.EXTRA_LOG_ACTUAL_ON_STOP, logActualOnStop)
         putExtra(FocusService.EXTRA_WAS_SKIP, wasSkip)
+        putExtra(FocusService.EXTRA_TERMINAL, terminal)
+        boundaryLabel?.let { putExtra(FocusService.EXTRA_BOUNDARY_LABEL, it) }
         adjustSeconds?.let { putExtra(FocusService.EXTRA_ADJUST_SECONDS, it) }
     }
     if (action == FocusService.ACTION_STOP) {

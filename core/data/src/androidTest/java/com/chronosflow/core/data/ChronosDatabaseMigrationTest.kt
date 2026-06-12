@@ -23,12 +23,12 @@ class ChronosDatabaseMigrationTest {
     )
 
     @Test
-    fun migrate7To16ValidatesFullCheckedInSchemaChain() {
+    fun migrate7To17ValidatesFullCheckedInSchemaChain() {
         helper.createDatabase(TEST_DB, 7).close()
 
         helper.runMigrationsAndValidate(
             TEST_DB,
-            16,
+            17,
             true,
             *AVAILABLE_SCHEMA_MIGRATIONS
         )
@@ -388,6 +388,58 @@ class ChronosDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migrate16To17AddsExpansionTablesAndLinkColumns() {
+        helper.createDatabase(TEST_DB, 16).apply {
+            insert(
+                "tasks",
+                SQLiteDatabase.CONFLICT_NONE,
+                ContentValues().apply {
+                    put("id", "task-goal")
+                    put("title", "Draft chapter")
+                    putNull("description")
+                    put("isCompleted", 0)
+                    put("priority", 1)
+                    putNull("dueDate")
+                    put("createdAt", 1_717_000_000_000L)
+                    put("updatedAt", 1_717_000_000_000L)
+                }
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            17,
+            true,
+            ChronosDatabase.MIGRATION_16_17
+        ).apply {
+            // Preserved row gains a null goal link.
+            query("SELECT title, goalId FROM tasks WHERE id = 'task-goal'").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("Draft chapter", cursor.getString(0))
+                org.junit.Assert.assertTrue(cursor.isNull(1))
+            }
+            // New tables are queryable.
+            query("SELECT COUNT(*) FROM goals").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals(0, cursor.getInt(0))
+            }
+            query("SELECT COUNT(*) FROM journal_entries").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals(0, cursor.getInt(0))
+            }
+            query("SELECT COUNT(*) FROM sleep_tracks").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals(0, cursor.getInt(0))
+            }
+            query("SELECT COUNT(*) FROM routine_steps").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
     private companion object {
         const val TEST_DB = "chronos-migration-test"
         val AVAILABLE_SCHEMA_MIGRATIONS: Array<Migration> = arrayOf(
@@ -399,7 +451,8 @@ class ChronosDatabaseMigrationTest {
             ChronosDatabase.MIGRATION_12_13,
             ChronosDatabase.MIGRATION_13_14,
             ChronosDatabase.MIGRATION_14_15,
-            ChronosDatabase.MIGRATION_15_16
+            ChronosDatabase.MIGRATION_15_16,
+            ChronosDatabase.MIGRATION_16_17
         )
     }
 }

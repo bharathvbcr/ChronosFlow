@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 16,
-    "identityHash": "7da2ce4222646f88b4ef11b4588d9880",
+    "identityHash": "42f1d49ec9d7d7f52c8d86add078b2b1",
     "entities": [
       {
         "tableName": "tasks",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `description` TEXT, `isCompleted` INTEGER NOT NULL, `priority` INTEGER NOT NULL, `dueDate` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `preferredDurationMinutes` INTEGER, `preferredStartMinuteOfDay` INTEGER, `targetDate` TEXT, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `description` TEXT, `isCompleted` INTEGER NOT NULL, `priority` INTEGER NOT NULL, `dueDate` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `preferredDurationMinutes` INTEGER, `preferredStartMinuteOfDay` INTEGER, `targetDate` TEXT, `goalId` TEXT, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -68,6 +68,11 @@
             "fieldPath": "targetDate",
             "columnName": "targetDate",
             "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "goalId",
+            "columnName": "goalId",
+            "affinity": "TEXT"
           }
         ],
         "primaryKey": {
@@ -94,12 +99,21 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_tasks_dueDate` ON `${TABLE_NAME}` (`dueDate`)"
+          },
+          {
+            "name": "index_tasks_goalId",
+            "unique": false,
+            "columnNames": [
+              "goalId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tasks_goalId` ON `${TABLE_NAME}` (`goalId`)"
           }
         ]
       },
       {
         "tableName": "time_blocks",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `date` TEXT NOT NULL, `title` TEXT NOT NULL, `category` TEXT NOT NULL, `startMinuteOfDay` INTEGER NOT NULL, `durationMinutes` INTEGER NOT NULL, `timezone` TEXT NOT NULL, `source` TEXT NOT NULL, `provenance` TEXT NOT NULL, `flexibility` TEXT NOT NULL, `energyLevel` INTEGER NOT NULL, `taskId` TEXT, `calendarEventId` INTEGER, `medicationPlanId` TEXT, `habitId` TEXT, `isLocked` INTEGER NOT NULL, `isProtected` INTEGER NOT NULL, `recurrenceRuleId` TEXT, `taskOccurrenceDate` TEXT, `actualStartMinuteOfDay` INTEGER, `actualEndMinuteOfDay` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `date` TEXT NOT NULL, `title` TEXT NOT NULL, `category` TEXT NOT NULL, `startMinuteOfDay` INTEGER NOT NULL, `durationMinutes` INTEGER NOT NULL, `timezone` TEXT NOT NULL, `source` TEXT NOT NULL, `provenance` TEXT NOT NULL, `flexibility` TEXT NOT NULL, `energyLevel` INTEGER NOT NULL, `taskId` TEXT, `calendarEventId` INTEGER, `medicationPlanId` TEXT, `habitId` TEXT, `isLocked` INTEGER NOT NULL, `isProtected` INTEGER NOT NULL, `recurrenceRuleId` TEXT, `taskOccurrenceDate` TEXT, `actualStartMinuteOfDay` INTEGER, `actualEndMinuteOfDay` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `goalId` TEXT, `routineId` TEXT, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -230,6 +244,16 @@
             "columnName": "updatedAt",
             "affinity": "INTEGER",
             "notNull": true
+          },
+          {
+            "fieldPath": "goalId",
+            "columnName": "goalId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "routineId",
+            "columnName": "routineId",
+            "affinity": "TEXT"
           }
         ],
         "primaryKey": {
@@ -319,6 +343,24 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_time_blocks_recurrenceRuleId` ON `${TABLE_NAME}` (`recurrenceRuleId`)"
+          },
+          {
+            "name": "index_time_blocks_goalId",
+            "unique": false,
+            "columnNames": [
+              "goalId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_time_blocks_goalId` ON `${TABLE_NAME}` (`goalId`)"
+          },
+          {
+            "name": "index_time_blocks_routineId",
+            "unique": false,
+            "columnNames": [
+              "routineId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_time_blocks_routineId` ON `${TABLE_NAME}` (`routineId`)"
           }
         ]
       },
@@ -443,7 +485,7 @@
       },
       {
         "tableName": "habits",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `cadence` TEXT NOT NULL, `windowStartMinute` INTEGER NOT NULL, `windowEndMinute` INTEGER NOT NULL, `difficulty` INTEGER NOT NULL, `isBundled` INTEGER NOT NULL, `streakCount` INTEGER NOT NULL, `lastCompletedDate` TEXT, `isActive` INTEGER NOT NULL, `launchAppLabel` TEXT, `launchAppValue` TEXT, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `cadence` TEXT NOT NULL, `windowStartMinute` INTEGER NOT NULL, `windowEndMinute` INTEGER NOT NULL, `difficulty` INTEGER NOT NULL, `isBundled` INTEGER NOT NULL, `streakCount` INTEGER NOT NULL, `lastCompletedDate` TEXT, `isActive` INTEGER NOT NULL, `launchAppLabel` TEXT, `launchAppValue` TEXT, `goalId` TEXT, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -513,6 +555,11 @@
             "fieldPath": "launchAppValue",
             "columnName": "launchAppValue",
             "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "goalId",
+            "columnName": "goalId",
+            "affinity": "TEXT"
           }
         ],
         "primaryKey": {
@@ -548,6 +595,15 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_habits_windowEndMinute` ON `${TABLE_NAME}` (`windowEndMinute`)"
+          },
+          {
+            "name": "index_habits_goalId",
+            "unique": false,
+            "columnNames": [
+              "goalId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_habits_goalId` ON `${TABLE_NAME}` (`goalId`)"
           }
         ]
       },
@@ -2358,7 +2414,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7da2ce4222646f88b4ef11b4588d9880')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '42f1d49ec9d7d7f52c8d86add078b2b1')"
     ]
   }
 }

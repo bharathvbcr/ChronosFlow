@@ -3,6 +3,7 @@ package com.chronosflow.feature.daydial.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -34,6 +36,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,7 +53,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.chronosflow.core.ai.AssistNarrative
+import com.chronosflow.core.ai.FocusAssistSource
+import com.chronosflow.core.ai.FocusNextBlockSuggestion
 import com.chronosflow.core.ai.PrivacyMode
+import com.chronosflow.core.ai.genai.GenAiAssistCopy
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.feature.daydial.latestFocusMoodAccent
@@ -66,6 +75,8 @@ import com.chronosflow.core.ui.theme.rememberFocusTimerAccent
 import com.chronosflow.feature.daydial.FocusExecutionState
 import com.chronosflow.feature.daydial.FocusExecutionStatus
 import com.chronosflow.feature.daydial.TimeBlockUiModel
+import com.chronosflow.feature.daydial.model.FocusPhaseKind
+import com.chronosflow.feature.daydial.model.FocusPhasePlanner
 import com.chronosflow.feature.daydial.isAllDayCalendarImport
 import com.chronosflow.feature.daydial.model.DayDialTab
 import kotlin.math.roundToInt
@@ -130,6 +141,8 @@ internal fun FocusTab(
     reduceMotionEnabled: Boolean = false,
     highContrastEnabled: Boolean = false,
     onStart: (String) -> Unit,
+    onStartWithBreaks: (String, Int, Int) -> Unit = { id, _, _ -> onStart(id) },
+    onAdvancePhase: () -> Unit = {},
     onPause: () -> Unit,
     onResume: () -> Unit,
     onFinish: () -> Unit,
@@ -145,6 +158,8 @@ internal fun FocusTab(
     onDismissSessionResumedBanner: () -> Unit = {},
     moodEnergyCheckIns: List<MoodEnergyCheckIn> = emptyList(),
     moodCheckInCoaching: AssistNarrative? = null,
+    focusGuidance: AssistNarrative? = null,
+    focusNextBlockSuggestion: FocusNextBlockSuggestion? = null,
     genAiRuntimeStatus: GenAiRuntimeStatus = GenAiRuntimeStatus(),
     cachedMoodScore: Int? = null,
     cachedEnergyScore: Int? = null,
@@ -228,8 +243,18 @@ internal fun FocusTab(
                     if (linkedBlockManuallyMissed) {
                         FocusMissedBadge()
                     }
+                    var splitOptionIndex by rememberSaveable(block.id) { mutableIntStateOf(0) }
+                    FocusSplitSelector(
+                        blockDurationMinutes = block.durationMinutes,
+                        selectedIndex = splitOptionIndex,
+                        onSelect = { splitOptionIndex = it },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     Button(
-                        onClick = { onStart(block.id) },
+                        onClick = {
+                            val option = FocusSplitOptions[splitOptionIndex]
+                            onStartWithBreaks(block.id, option.workMinutes, option.breakMinutes)
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         shape = RoundedCornerShape(20.dp)
@@ -349,7 +374,15 @@ internal fun FocusTab(
                 }
             }
             val activeTitle = focusTabActiveTitle(selectedBlock?.title, focusSession)
-            val totalSeconds = selectedBlock?.let { (it.durationMinutes * 60).coerceAtLeast(1) } ?: 1500
+            val isSplit = focusSession.isSplitSession
+            val onBreak = focusSession.isOnBreak
+            val awaitingAdvance = focusSession.awaitingPhaseAdvance
+            val phaseMinutes = focusSession.currentPhase?.durationMinutes
+            val totalSeconds = when {
+                phaseMinutes != null -> (phaseMinutes * 60).coerceAtLeast(1)
+                selectedBlock != null -> (selectedBlock.durationMinutes * 60).coerceAtLeast(1)
+                else -> 1500
+            }
             val progressFraction = (remainingSeconds.toFloat() / totalSeconds.toFloat()).coerceIn(0f, 1f)
             val blockAccent = rememberFocusTimerAccent(
                 blockCategory = selectedBlock?.category,
@@ -357,6 +390,7 @@ internal fun FocusTab(
                 moodScore = moodScore,
                 energyScore = energyScore
             )
+            val ringAccent = if (onBreak) MaterialTheme.colorScheme.tertiary else blockAccent
 
             Text(
                 text = activeTitle,
@@ -366,11 +400,18 @@ internal fun FocusTab(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            selectedBlock?.category?.let { category ->
-                FocusCategoryChip(
-                    category = category,
+            if (isSplit) {
+                FocusPhaseIndicator(
+                    focusSession = focusSession,
                     highContrastEnabled = highContrastEnabled
                 )
+            } else {
+                selectedBlock?.category?.let { category ->
+                    FocusCategoryChip(
+                        category = category,
+                        highContrastEnabled = highContrastEnabled
+                    )
+                }
             }
             if (linkedBlockManuallyMissed) {
                 FocusMissedBadge()
@@ -381,8 +422,16 @@ internal fun FocusTab(
                 remainingFraction = progressFraction,
                 reduceMotionEnabled = reduceMotionEnabled,
                 highContrastEnabled = highContrastEnabled,
-                accentColor = blockAccent
+                accentColor = ringAccent
             )
+
+            if (awaitingAdvance) {
+                FocusPhaseBoundaryControls(
+                    focusSession = focusSession,
+                    onAdvancePhase = onAdvancePhase,
+                    onFinish = onFinish
+                )
+            } else {
 
             Row(
                 horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Medium),
@@ -459,6 +508,7 @@ internal fun FocusTab(
                         }
                 ) { Text("-5m", fontWeight = FontWeight.SemiBold) }
             }
+            } // end awaitingAdvance else
 
             if (!highContrastEnabled) {
                 Text(
@@ -497,6 +547,23 @@ internal fun FocusTab(
             )
         }
 
+        if (showSessionUi) {
+            focusGuidance?.let { narrative ->
+                FocusGuidanceCard(
+                    narrative = narrative,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        if (!showSessionUi && !showBlockReady && focusNextBlockSuggestion != null) {
+            FocusNextBlockAssistCard(
+                suggestion = focusNextBlockSuggestion,
+                onStart = onStart,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
         if (nextFocusBlock != null && (showSessionUi || showBlockReady)) {
             val nextAccent = categoryColor(nextFocusBlock.category)
             Text(
@@ -528,6 +595,16 @@ internal fun FocusTab(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (
+                            focusNextBlockSuggestion?.id == nextFocusBlock.id &&
+                            focusNextBlockSuggestion.reason.isNotBlank()
+                        ) {
+                            Text(
+                                text = focusNextBlockSuggestion.reason,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
                     }
                 }
             }
@@ -555,6 +632,93 @@ internal fun FocusTab(
         }
         Spacer(Modifier.height(bottomContentPadding))
     }
+}
+
+@Composable
+private fun FocusGuidanceCard(
+    narrative: AssistNarrative,
+    modifier: Modifier = Modifier
+) {
+    FocusGlassCard(modifier = modifier) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Micro)
+        ) {
+            Text(
+                text = "Focus coach",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = narrative.headline,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = narrative.nextStep,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = GenAiAssistCopy.assistSourceLabel(narrative.source),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+@Composable
+private fun FocusNextBlockAssistCard(
+    suggestion: FocusNextBlockSuggestion,
+    onStart: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FocusGlassCard(modifier = modifier) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
+        ) {
+            Text(
+                text = "Suggested next focus",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "${suggestion.title} · ${formatFocusMinute(suggestion.startMinuteOfDay)} · ${suggestion.durationMinutes}m",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (suggestion.reason.isNotBlank()) {
+                Text(
+                    text = suggestion.reason,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = focusAssistSourceLabel(suggestion.source),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Button(
+                onClick = { onStart(suggestion.id) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Start focus", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+private fun focusAssistSourceLabel(source: FocusAssistSource): String = when (source) {
+    FocusAssistSource.GEMINI_NANO -> "Gemini Nano"
+    FocusAssistSource.CLOUD_GEMINI -> "Cloud Gemini"
+    FocusAssistSource.LOCAL -> "Local"
 }
 
 @Composable
@@ -947,4 +1111,191 @@ private fun focusPrivacyModeLabel(mode: PrivacyMode): String = when (mode) {
     PrivacyMode.ON_DEVICE_ONLY -> "Gemini Nano"
     PrivacyMode.CLOUD_ALLOWED -> "Cloud Gemini"
     PrivacyMode.DISABLED -> "Privacy off"
+}
+
+/** A work/break split preset offered before starting a focus session. */
+internal data class FocusSplitOption(
+    val label: String,
+    val workMinutes: Int,
+    val breakMinutes: Int
+)
+
+internal val FocusSplitOptions: List<FocusSplitOption> = listOf(
+    FocusSplitOption("No breaks", 0, 0),
+    FocusSplitOption("25 · 5", 25, 5),
+    FocusSplitOption("50 · 10", 50, 10),
+    FocusSplitOption("30 · 5", 30, 5)
+)
+
+/** Human-readable summary of what a split preset produces for a given block. */
+internal fun focusSplitSummary(blockDurationMinutes: Int, option: FocusSplitOption): String {
+    if (option.workMinutes <= 0 || option.breakMinutes <= 0) {
+        return "One ${blockDurationMinutes}m block, no breaks"
+    }
+    val phases = FocusPhasePlanner.plan(blockDurationMinutes, option.workMinutes, option.breakMinutes)
+    if (phases.size <= 1) {
+        return "Too short to split — one ${blockDurationMinutes}m block"
+    }
+    val focusCount = phases.count { it.kind == FocusPhaseKind.FOCUS }
+    val breakCount = phases.count { it.kind == FocusPhaseKind.BREAK }
+    return "$focusCount×${option.workMinutes}m focus + $breakCount×${option.breakMinutes}m break"
+}
+
+/** Label for the current phase of an active split session (e.g. "Focus 2 of 3"). */
+internal fun focusPhaseLabel(focusSession: FocusExecutionState): String {
+    val phase = focusSession.currentPhase ?: return "Focus"
+    return when (phase.kind) {
+        FocusPhaseKind.BREAK -> "Break · ${phase.durationMinutes}m"
+        FocusPhaseKind.FOCUS -> {
+            val focusIndex = focusSession.phases
+                .take(focusSession.currentPhaseIndex + 1)
+                .count { it.kind == FocusPhaseKind.FOCUS }
+            val focusTotal = focusSession.phases.count { it.kind == FocusPhaseKind.FOCUS }
+            "Focus $focusIndex of $focusTotal"
+        }
+    }
+}
+
+/** Boundary prompt copy as (heading, advance-button label). */
+internal fun focusBoundaryPrompt(focusSession: FocusExecutionState): Pair<String, String> {
+    val finished = focusSession.currentPhase
+    val next = focusSession.nextPhase ?: return "Session complete" to "Finish"
+    return when (next.kind) {
+        FocusPhaseKind.BREAK -> "Time for a break" to "Start ${next.durationMinutes}m break"
+        FocusPhaseKind.FOCUS -> {
+            val heading = if (finished?.kind == FocusPhaseKind.BREAK) "Break's over" else "Next focus interval"
+            heading to "Back to focus (${next.durationMinutes}m)"
+        }
+    }
+}
+
+@Composable
+private fun FocusSplitSelector(
+    blockDurationMinutes: Int,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)
+    ) {
+        Text(
+            text = "Breaks",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
+        ) {
+            FocusSplitOptions.forEachIndexed { index, option ->
+                FilterChip(
+                    selected = index == selectedIndex,
+                    onClick = { onSelect(index) },
+                    label = { Text(option.label) }
+                )
+            }
+        }
+        Text(
+            text = focusSplitSummary(blockDurationMinutes, FocusSplitOptions[selectedIndex]),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun FocusPhaseIndicator(
+    focusSession: FocusExecutionState,
+    highContrastEnabled: Boolean
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)
+    ) {
+        Text(
+            text = focusPhaseLabel(focusSession),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = if (focusSession.isOnBreak) {
+                MaterialTheme.colorScheme.tertiary
+            } else {
+                MaterialTheme.colorScheme.primary
+            }
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            focusSession.phases.forEachIndexed { index, phase ->
+                val active = index == focusSession.currentPhaseIndex
+                val done = index < focusSession.currentPhaseIndex
+                val base = if (phase.kind == FocusPhaseKind.BREAK) {
+                    MaterialTheme.colorScheme.tertiary
+                } else {
+                    MaterialTheme.colorScheme.primary
+                }
+                val dotColor = when {
+                    active -> base
+                    done -> base.copy(alpha = if (highContrastEnabled) 0.7f else 0.5f)
+                    else -> base.copy(alpha = if (highContrastEnabled) 0.4f else 0.2f)
+                }
+                Box(
+                    modifier = Modifier
+                        .size(if (active) 10.dp else 8.dp)
+                        .clip(CircleShape)
+                        .background(dotColor)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FocusPhaseBoundaryControls(
+    focusSession: FocusExecutionState,
+    onAdvancePhase: () -> Unit,
+    onFinish: () -> Unit
+) {
+    val next = focusSession.nextPhase
+    val (heading, advanceLabel) = focusBoundaryPrompt(focusSession)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
+    ) {
+        Text(
+            text = heading,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center
+        )
+        Button(
+            onClick = onAdvancePhase,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (next?.kind == FocusPhaseKind.BREAK) {
+                    MaterialTheme.colorScheme.tertiary
+                } else {
+                    MaterialTheme.colorScheme.primary
+                }
+            )
+        ) {
+            Icon(Icons.Default.PlayArrow, contentDescription = null)
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(advanceLabel, fontWeight = FontWeight.SemiBold)
+        }
+        TextButton(
+            onClick = onFinish,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("End session")
+        }
+    }
 }

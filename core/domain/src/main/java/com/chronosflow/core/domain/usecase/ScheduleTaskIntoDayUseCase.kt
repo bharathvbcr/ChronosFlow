@@ -8,6 +8,7 @@ import com.chronosflow.core.domain.model.TimeBlock
 import com.chronosflow.core.domain.planner.FreeTimeCalculator
 import com.chronosflow.core.domain.planner.PlannerOperationResult
 import com.chronosflow.core.domain.planner.PlannerService
+import com.chronosflow.core.domain.repository.MoodEnergyRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TaskScheduleRepository
@@ -23,7 +24,8 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
     private val taskScheduleRepository: TaskScheduleRepository,
     private val plannerService: PlannerService,
     private val freeTimeCalculator: FreeTimeCalculator,
-    private val sleepScheduleRepository: SleepScheduleRepository
+    private val sleepScheduleRepository: SleepScheduleRepository,
+    private val moodEnergyRepository: MoodEnergyRepository
 ) {
     suspend operator fun invoke(
         taskId: String,
@@ -61,6 +63,15 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
             )
         }
         val sleepSchedule = sleepScheduleRepository.getSleepSchedule()
+        val energyLevel = energyForPriority(task.priority)
+        // Demanding work is placed near the user's measured energy peak; lighter work keeps first-fit.
+        // An explicit preferred start always wins, so we only seek a peak when none was set.
+        val peakEnergyHour =
+            if (energyLevel == EnergyIntensity.HIGH && task.preferredStartMinuteOfDay == null) {
+                peakEnergyHour(scheduledDate)
+            } else {
+                null
+            }
         val startMinute = findStartMinute(
             blocks = blocks,
             date = scheduledDate,
@@ -69,7 +80,8 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
             nowMinuteOfDay = nowMinuteOfDay,
             sleepSchedule = sleepSchedule,
             currentDate = currentDate,
-            currentTime = currentTime
+            currentTime = currentTime,
+            peakEnergyHour = peakEnergyHour
         )
             ?: return PlannerOperationResult.Rejected(
                 "No open $duration minute gap ${noGapDateLabel(scheduledDate, currentDate)}",
@@ -87,7 +99,7 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
                 timezone = ZoneId.systemDefault().id,
                 provenance = BlockProvenance.TASK_CONVERTED,
                 flexibility = BlockFlexibility.RESIZABLE,
-                energyLevel = energyForPriority(task.priority),
+                energyLevel = energyLevel,
                 source = "TASK",
                 taskId = task.id,
                 calendarEventId = null,
@@ -138,7 +150,8 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
         nowMinuteOfDay: Int?,
         sleepSchedule: SleepSchedule,
         currentDate: LocalDate,
-        currentTime: LocalTime
+        currentTime: LocalTime,
+        peakEnergyHour: Int?
     ): Int? {
         val earliest = if (date == currentDate) {
             val minute = nowMinuteOfDay ?: currentTime.let { it.hour * 60 + it.minute }
@@ -146,20 +159,50 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
         } else {
             preferredStartMinuteOfDay ?: 8 * 60
         }
-        return freeTimeCalculator.calculate(blocks)
-            .asSequence()
+        val fittingGaps = freeTimeCalculator.calculate(blocks)
             .map { segment -> maxOf(segment.startMinute, earliest) to segment.endMinute }
-            .firstOrNull { (start, end) ->
+            .filter { (start, end) ->
                 start in 0..1439 &&
                     end <= 1440 &&
                     start + duration <= end &&
                     !sleepSchedule.intersects(start, duration)
             }
-            ?.first
+        if (fittingGaps.isEmpty()) return null
+
+        if (peakEnergyHour != null) {
+            val peakStart = peakEnergyHour * 60
+            val peakEnd = peakStart + 60
+            // Within each gap, slide as close to the peak as the gap allows, then keep the placement
+            // that overlaps the peak window the most. Fall back to first-fit when none can reach it.
+            val biased = fittingGaps
+                .mapNotNull { (start, end) ->
+                    val placed = peakStart.coerceIn(start, end - duration)
+                    val overlap = minOf(placed + duration, peakEnd) - maxOf(placed, peakStart)
+                    if (overlap > 0 && !sleepSchedule.intersects(placed, duration)) placed to overlap else null
+                }
+                .maxByOrNull { it.second }
+                ?.first
+            if (biased != null) return biased
+        }
+        return fittingGaps.first().first
+    }
+
+    private suspend fun peakEnergyHour(date: LocalDate): Int? {
+        val checkIns = moodEnergyRepository.getForDateRange(date.minusDays(ENERGY_HISTORY_DAYS), date)
+        if (checkIns.size < MIN_ENERGY_SAMPLES) return null
+        return checkIns
+            .groupBy { it.recordedAt.hour }
+            .maxByOrNull { (_, entries) -> entries.map { it.energyScore }.average() }
+            ?.key
     }
 
     private fun snapUpToQuarterHour(minute: Int): Int {
         val snapped = ((minute + 14) / 15) * 15
         return snapped.coerceAtMost(1439)
+    }
+
+    private companion object {
+        const val ENERGY_HISTORY_DAYS = 13L
+        const val MIN_ENERGY_SAMPLES = 3
     }
 }

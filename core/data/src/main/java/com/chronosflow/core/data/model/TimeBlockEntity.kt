@@ -17,7 +17,9 @@ import java.time.LocalDate
         Index("habitId"),
         Index("category"),
         Index("provenance"),
-        Index("recurrenceRuleId")
+        Index("recurrenceRuleId"),
+        Index("goalId"),
+        Index("routineId")
     ]
 )
 data class TimeBlockEntity(
@@ -43,6 +45,8 @@ data class TimeBlockEntity(
     val actualStartMinuteOfDay: Int?,
     val actualEndMinuteOfDay: Int?,
     val createdAt: Instant,
-    val updatedAt: Instant
+    val updatedAt: Instant,
+    val goalId: String? = null,
+    val routineId: String? = null
 )
 

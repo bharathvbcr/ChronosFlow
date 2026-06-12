@@ -19,6 +19,7 @@ import com.chronosflow.core.notifications.SECTION_FOCUS
 import com.chronosflow.core.notifications.SECTION_MEDICATION
 import com.chronosflow.core.notifications.SECTION_REVIEW
 import com.chronosflow.core.notifications.SECTION_TASKS
+import com.chronosflow.navigation.SECTION_GOALS
 import com.chronosflow.navigation.SECTION_HABITS
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -40,6 +41,7 @@ class BubbleActivity : ComponentActivity() {
                             onOpenFocusScreen = { openMainSection(SECTION_FOCUS) },
                             onOpenTasks = { openMainSection(SECTION_TASKS) },
                             onOpenHabits = { openMainSection(SECTION_HABITS) },
+                            onOpenGoals = { openMainSection(SECTION_GOALS) },
                             onOpenMedication = { openMainSection(SECTION_MEDICATION) },
                             onOpenReview = { openMainSection(SECTION_REVIEW) },
                             onSelectPrimaryTab = {}

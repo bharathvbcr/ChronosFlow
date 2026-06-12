@@ -7,17 +7,26 @@ import com.chronosflow.core.domain.model.MedicationDoseEvent
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TimeBlock
+import com.chronosflow.core.domain.planner.PlannerOperationResult
+import com.chronosflow.core.domain.planner.PlannerService
 import com.chronosflow.core.domain.repository.CalendarEventRepository
+import com.chronosflow.core.domain.repository.GoalRepository
 import com.chronosflow.core.domain.repository.HabitRepository
+import com.chronosflow.core.domain.repository.JournalRepository
 import com.chronosflow.core.domain.repository.MedicationRepository
 import com.chronosflow.core.domain.repository.MoodEnergyRepository
 import com.chronosflow.core.domain.repository.ReviewRepository
+import com.chronosflow.core.domain.repository.RoutineRepository
+import com.chronosflow.core.domain.repository.SleepTrackRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
+import com.chronosflow.core.domain.usecase.ApplyRoutineToDateUseCase
+import com.chronosflow.core.domain.usecase.RecordSleepUseCase
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
+import java.time.LocalDate
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -31,6 +40,13 @@ class ChronosAppFunctionsTest {
     private val timeBlockRepository: TimeBlockRepository = mockk(relaxed = true)
     private val reviewRepository: ReviewRepository = mockk(relaxed = true)
     private val calendarEventRepository: CalendarEventRepository = mockk(relaxed = true)
+    private val goalRepository: GoalRepository = mockk(relaxed = true)
+    private val journalRepository: JournalRepository = mockk(relaxed = true)
+    private val routineRepository: RoutineRepository = mockk(relaxed = true)
+    private val sleepTrackRepository: SleepTrackRepository = mockk(relaxed = true)
+    private val recordSleepUseCase: RecordSleepUseCase = mockk(relaxed = true)
+    private val applyRoutineToDateUseCase: ApplyRoutineToDateUseCase = mockk(relaxed = true)
+    private val plannerService: PlannerService = mockk()
 
     private val appFunctionContext: AppFunctionContext = mockk(relaxed = true)
 
@@ -41,7 +57,14 @@ class ChronosAppFunctionsTest {
         moodEnergyRepository = moodEnergyRepository,
         timeBlockRepository = timeBlockRepository,
         reviewRepository = reviewRepository,
-        calendarEventRepository = calendarEventRepository
+        calendarEventRepository = calendarEventRepository,
+        goalRepository = goalRepository,
+        journalRepository = journalRepository,
+        routineRepository = routineRepository,
+        sleepTrackRepository = sleepTrackRepository,
+        recordSleepUseCase = recordSleepUseCase,
+        applyRoutineToDateUseCase = applyRoutineToDateUseCase,
+        plannerService = plannerService
     )
 
     @Test
@@ -312,5 +335,33 @@ class ChronosAppFunctionsTest {
         coVerify(exactly = 1) {
             calendarEventRepository.syncFromDeviceCalendar(any(), any())
         }
+    }
+
+    @Test
+    fun reflowRemainingDayReflowsTodayFromNow() = runTest {
+        coEvery { plannerService.rebalanceDay(any(), any()) } returns
+            PlannerOperationResult.Applied("Day rebalance complete", "", null, listOf("b1"))
+
+        val result = appFunctions.reflowRemainingDay(
+            appFunctionContext = appFunctionContext
+        )
+
+        assertTrue(result)
+        // today is reflowed from the current minute, not from midnight
+        coVerify(exactly = 1) {
+            plannerService.rebalanceDay(LocalDate.now(), match { it != null && it != 0 })
+        }
+    }
+
+    @Test
+    fun reflowRemainingDayReturnsFalseWhenNothingFlexible() = runTest {
+        coEvery { plannerService.rebalanceDay(any(), any()) } returns
+            PlannerOperationResult.Rejected("No flexible blocks to rebalance", "")
+
+        val result = appFunctions.reflowRemainingDay(
+            appFunctionContext = appFunctionContext
+        )
+
+        assertFalse(result)
     }
 }

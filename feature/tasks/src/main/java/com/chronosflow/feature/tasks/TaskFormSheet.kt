@@ -79,6 +79,8 @@ import com.chronosflow.core.ui.components.commandPaletteSpeechQuery
 import com.chronosflow.core.ui.components.ChronosFormSection
 import com.chronosflow.core.ui.components.ChronosFormSwitchRow
 import com.chronosflow.core.ui.components.ChronosLauncherAppPicker
+import com.chronosflow.core.ui.components.ChronosLinkOption
+import com.chronosflow.core.ui.components.ChronosLinkPickerField
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosOptionChips
 import com.chronosflow.core.ui.components.ChronosQuickAddChips
@@ -179,8 +181,11 @@ internal fun TaskFormSheet(
         linkedContact: TaskContactSnapshot?,
         actions: List<TaskAction>,
         attachments: List<TaskAttachment>,
-        recurringConfig: TaskRecurringConfig
+        recurringConfig: TaskRecurringConfig,
+        goalId: String?
     ) -> Unit,
+    goalOptions: List<ChronosLinkOption> = emptyList(),
+    initialGoalId: String? = null,
     onDelete: ((Task) -> Unit)? = null,
     onDuplicate: ((Task) -> Unit)? = null,
     alarmState: TaskAlarmUiState? = null,
@@ -281,6 +286,12 @@ internal fun TaskFormSheet(
     }
     var linkedContact by remember(taskKey) {
         mutableStateOf(initialTask?.linkedContact)
+    }
+    var selectedGoalId by rememberSaveable(taskKey) {
+        mutableStateOf(initialTask?.goalId ?: initialGoalId)
+    }
+    var goalExpanded by rememberSaveable(taskKey) {
+        mutableStateOf((initialTask?.goalId ?: initialGoalId) != null)
     }
     val actionDrafts = remember(taskKey) {
         mutableStateListOf<TaskActionDraft>().apply {
@@ -758,7 +769,8 @@ internal fun TaskFormSheet(
                     recurringConfig.copy(
                         startsOn = recurringConfig.startsOn,
                         reminderDrafts = recurringConfig.reminderDrafts
-                    )
+                    ),
+                    selectedGoalId
                 )
             }
         },
@@ -963,6 +975,23 @@ internal fun TaskFormSheet(
                 TaskAssistSuggestionChips(
                     suggestions = visibleSuggestions,
                     onSuggestion = ::applyAssistSuggestion
+                )
+            }
+        }
+
+        if (goalOptions.isNotEmpty() || selectedGoalId != null) {
+            ChronosCollapsibleSection(
+                title = "Goal",
+                summary = goalOptions.firstOrNull { it.id == selectedGoalId }?.label
+                    ?: "Link this task to a goal",
+                expanded = goalExpanded,
+                onExpandedChange = { goalExpanded = it }
+            ) {
+                ChronosLinkPickerField(
+                    label = "Link to goal",
+                    options = goalOptions,
+                    selectedId = selectedGoalId,
+                    onSelected = { selectedGoalId = it }
                 )
             }
         }

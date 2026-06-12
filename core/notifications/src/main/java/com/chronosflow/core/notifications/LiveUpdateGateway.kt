@@ -77,11 +77,21 @@ class LiveUpdateGateway @Inject constructor(
             .setSmallIcon(R.drawable.ic_focus_session)
             .setContentTitle(decision.redactedTitle)
             .setContentText(decision.redactedText)
+            .setSubText(context.getString(R.string.focus_notification_subtext))
             .setContentIntent(contentIntent)
+            .setColor(ContextCompat.getColor(context, R.color.notification_accent))
+            .setColorized(false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_PROGRESS)
+
+        if (Build.VERSION.SDK_INT >= 36) {
+            // Compact glanceable text shown in the status-bar live pill / chip.
+            builder.setShortCriticalText(
+                FocusNotificationContent.pillText(context, timeLeftSeconds, isPaused)
+            )
+        }
 
         if (decision.canUsePromotedOngoing && Build.VERSION.SDK_INT >= 37) {
             builder.setRequestPromotedOngoing(true)
@@ -189,6 +199,9 @@ class LiveUpdateGateway @Inject constructor(
                 Notification.ProgressStyle()
                     .setStyledByProgress(true)
                     .setProgress(progress)
+                    .setProgressTrackerIcon(
+                        Icon.createWithResource(context, R.drawable.ic_focus_session)
+                    )
                     .addProgressSegment(
                         Notification.ProgressStyle.Segment(max)
                             .setColor(accent)
@@ -266,6 +279,27 @@ object FocusNotificationContent {
         val minutes = timeLeftSeconds.coerceAtLeast(0) / 60
         val seconds = timeLeftSeconds.coerceAtLeast(0) % 60
         return "%02d:%02d".format(minutes, seconds)
+    }
+
+    /** Ultra-compact remaining-time label for the status-bar live pill (e.g. "12m", "1h 5m"). */
+    fun pillText(context: Context, timeLeftSeconds: Int, isPaused: Boolean): String =
+        if (isPaused) {
+            context.getString(R.string.focus_notification_pill_paused)
+        } else {
+            pillTimeText(timeLeftSeconds)
+        }
+
+    /** Pure compact-time formatter behind [pillText] (e.g. "12m", "1h 5m", "45s"). */
+    fun pillTimeText(timeLeftSeconds: Int): String {
+        val total = timeLeftSeconds.coerceAtLeast(0)
+        val hours = total / 3600
+        val minutes = (total % 3600) / 60
+        val seconds = total % 60
+        return when {
+            hours > 0 -> "${hours}h ${minutes}m"
+            minutes > 0 -> "${minutes}m"
+            else -> "${seconds}s"
+        }
     }
 
     fun runningBody(context: Context, timeLeftSeconds: Int, redactSensitiveTitles: Boolean): String {

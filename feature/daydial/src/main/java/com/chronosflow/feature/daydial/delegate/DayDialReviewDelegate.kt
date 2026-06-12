@@ -3,6 +3,7 @@ package com.chronosflow.feature.daydial.delegate
 import com.chronosflow.core.data.focus.ManualMissedBlockRegistry
 import com.chronosflow.core.domain.model.ActualTimeSegment
 import com.chronosflow.core.domain.model.ActualTimeSource
+import com.chronosflow.core.ai.CompanionTrendContext
 import com.chronosflow.core.ai.EnergyCorrelationEngine
 import com.chronosflow.core.ai.EnergyInsight
 import com.chronosflow.core.ai.InsightRecommendation
@@ -20,6 +21,9 @@ import com.chronosflow.core.domain.model.ReviewInsightType
 import com.chronosflow.core.domain.model.TimeBlock
 import com.chronosflow.core.domain.model.AlarmDeliveryState
 import com.chronosflow.core.domain.model.AlarmRequestType
+import com.chronosflow.core.domain.model.deriveHabitCompletionTrend
+import com.chronosflow.core.domain.model.deriveMedicationAdherenceTrend
+import com.chronosflow.core.domain.model.deriveMoodEnergyTrends
 import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.MedicationRepository
 import com.chronosflow.core.domain.repository.MoodEnergyRepository
@@ -129,9 +133,12 @@ class DayDialReviewDelegate @Inject constructor(
         val blocks = repository.getTimeBlocksByDate(date).first()
         val summary = currentReviewSummary(date, blocks)
         val snapshot = runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }.getOrNull()
+        // Trends are additive context: a fetch failure degrades to today-only.
+        val trends = runCatching { companionTrendContext(date) }.getOrDefault(CompanionTrendContext())
         val recommendations = insightsRecommendationsPlanner.suggest(
             summary = summary,
-            insights = summary.insights
+            insights = summary.insights,
+            trends = trends
         )
         return InsightsTabRefreshResult(
             reviewInsights = summary.insights,
@@ -144,6 +151,25 @@ class DayDialReviewDelegate @Inject constructor(
         summary: DailyReviewSummary?,
         insights: List<ReviewInsight>
     ): List<InsightRecommendation> = insightsRecommendationsPlanner.localRecommendations(summary, insights)
+
+    private suspend fun companionTrendContext(today: LocalDate): CompanionTrendContext {
+        val start = today.minusDays(13)
+        return CompanionTrendContext(
+            moodEnergyTrends = deriveMoodEnergyTrends(
+                moodEnergyRepository.observeForDateRange(start, today).first()
+            ),
+            habitCompletion = deriveHabitCompletionTrend(
+                habitRepository.getHabitEventsBetween(start, today),
+                windowDays = 14,
+                today = today
+            ),
+            medicationAdherence = deriveMedicationAdherenceTrend(
+                medicationRepository.getDoseEventsBetween(start, today),
+                windowDays = 14,
+                today = today
+            )
+        )
+    }
 
     private suspend fun persistRefreshedInsights(date: LocalDate) {
         val blocks = repository.getTimeBlocksByDate(date).first()

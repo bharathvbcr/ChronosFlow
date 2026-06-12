@@ -7,7 +7,7 @@ import java.time.LocalDate
 
 @Entity(
     tableName = "habits",
-    indices = [Index("isActive"), Index("windowStartMinute"), Index("windowEndMinute")]
+    indices = [Index("isActive"), Index("windowStartMinute"), Index("windowEndMinute"), Index("goalId")]
 )
 data class HabitEntity(
     @PrimaryKey val id: String,
@@ -21,5 +21,6 @@ data class HabitEntity(
     val lastCompletedDate: LocalDate?,
     val isActive: Boolean,
     val launchAppLabel: String? = null,
-    val launchAppValue: String? = null
+    val launchAppValue: String? = null,
+    val goalId: String? = null
 )

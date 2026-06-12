@@ -1,5 +1,12 @@
 package com.chronosflow.feature.daydial.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -61,6 +68,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosSectionTitle
+import com.chronosflow.core.ui.motion.ChronosTransitionDirection
+import com.chronosflow.core.ui.motion.ChronosTransitionFactory
+import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
+import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.core.ui.theme.categoryColor
 import com.chronosflow.feature.daydial.TimeBlockUiModel
@@ -72,6 +83,7 @@ import com.chronosflow.feature.daydial.model.DayQuickItemsUiState
 import com.chronosflow.feature.daydial.model.DayDialTab
 import com.chronosflow.feature.daydial.model.TemplateBlueprint
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -174,11 +186,12 @@ internal fun PlanTab(
         }
 
         if (largeGaps.isNotEmpty() || overlaps.isNotEmpty()) {
-            item {
+            item(key = "plan_schedule_attention") {
                 PlanScheduleAttentionCard(
                     largeGapCount = largeGaps.size,
                     overlapCount = overlaps.size,
                     onFillGaps = onFillGaps,
+                    modifier = Modifier.animateItem(),
                     onRepairConflicts = if (overlaps.isEmpty()) {
                         null
                     } else {
@@ -192,8 +205,8 @@ internal fun PlanTab(
             item { ChronosSectionTitle(title = "Timeline") }
 
             if (timeBlocks.isEmpty()) {
-                item {
-                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                item(key = "plan_empty_timeline") {
+                    ChronosListCard(modifier = Modifier.animateItem().fillMaxWidth()) {
                         Column(
                             verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact),
                             modifier = Modifier.padding(ChronosSpacing.Compact)
@@ -284,13 +297,14 @@ internal fun PlanTab(
         }
 
         if (suggestedBlocks.isNotEmpty()) {
-            item {
+            item(key = "plan_ai_suggestions") {
                 PlanAiSuggestionsCard(
                     suggestions = suggestedBlocks.take(3),
                     onOpenAiSheet = onOpenAiSheet,
                     onApplyAiSuggestions = onApplyAiSuggestions,
                     onAcceptAiSuggestion = onAcceptAiSuggestion,
-                    onRejectAiSuggestion = onRejectAiSuggestion
+                    onRejectAiSuggestion = onRejectAiSuggestion,
+                    modifier = Modifier.animateItem()
                 )
             }
         }
@@ -311,6 +325,7 @@ private fun PlanDateScroller(
     onQuickMedicationTaken: (String, Int?) -> Unit,
     onQuickMedicationMissed: (String, Int?) -> Unit
 ) {
+    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
     val dates = remember(selectedDate) { planDateScrollDates(selectedDate) }
     val dateListState = rememberLazyListState(
         initialFirstVisibleItemIndex = planDateInitialFirstVisibleIndex(dates, selectedDate)
@@ -350,57 +365,73 @@ private fun PlanDateScroller(
                 }
             }
 
-            if (fullCalendarVisible) {
-                PlanMonthCalendar(
-                    selectedDate = selectedDate,
-                    onSelectDate = onSelectDate
-                )
-                PlanCalendarAgenda(
-                    timeBlocks = timeBlocks,
-                    quickItems = quickItems,
-                    onBlockSelected = onBlockSelected,
-                    onQuickTaskDone = onQuickTaskDone,
-                    onQuickHabitDone = onQuickHabitDone,
-                    onQuickMedicationTaken = onQuickMedicationTaken,
-                    onQuickMedicationMissed = onQuickMedicationMissed
-                )
-            } else {
-                LazyRow(
-                    state = dateListState,
-                    horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
-                    contentPadding = PaddingValues(horizontal = 2.dp)
-                ) {
-                    items(dates, key = { it.toEpochDay() }) { date ->
-                        val isSelected = date == selectedDate
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { onSelectDate(date) },
-                            modifier = Modifier
-                                .width(78.dp)
-                                .semantics {
-                                    contentDescription = planDateChipActionLabel(date, isSelected)
-                                },
-                            label = {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        text = planDateChipWeekdayLabel(date),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        text = planDateChipDateLabel(date),
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                }
-                            },
-                            shape = MaterialTheme.shapes.small,
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+            AnimatedContent(
+                targetState = fullCalendarVisible,
+                transitionSpec = {
+                    if (reduceMotion) {
+                        EnterTransition.None togetherWith ExitTransition.None
+                    } else {
+                        val spec = ChronosValueAnimationFactory.stateChange<Float>(reduceMotion)
+                        (fadeIn(spec) togetherWith fadeOut(spec))
+                            .using(SizeTransform(clip = false))
+                    }
+                },
+                label = "planCalendarMode"
+            ) { showFullCalendar ->
+                if (showFullCalendar) {
+                    Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
+                        PlanMonthCalendar(
+                            selectedDate = selectedDate,
+                            onSelectDate = onSelectDate
                         )
+                        PlanCalendarAgenda(
+                            timeBlocks = timeBlocks,
+                            quickItems = quickItems,
+                            onBlockSelected = onBlockSelected,
+                            onQuickTaskDone = onQuickTaskDone,
+                            onQuickHabitDone = onQuickHabitDone,
+                            onQuickMedicationTaken = onQuickMedicationTaken,
+                            onQuickMedicationMissed = onQuickMedicationMissed
+                        )
+                    }
+                } else {
+                    LazyRow(
+                        state = dateListState,
+                        horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
+                        contentPadding = PaddingValues(horizontal = 2.dp)
+                    ) {
+                        items(dates, key = { it.toEpochDay() }) { date ->
+                            val isSelected = date == selectedDate
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onSelectDate(date) },
+                                modifier = Modifier
+                                    .width(78.dp)
+                                    .semantics {
+                                        contentDescription = planDateChipActionLabel(date, isSelected)
+                                    },
+                                label = {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = planDateChipWeekdayLabel(date),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = planDateChipDateLabel(date),
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                },
+                                shape = MaterialTheme.shapes.small,
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -413,9 +444,7 @@ private fun PlanMonthCalendar(
     selectedDate: LocalDate,
     onSelectDate: (LocalDate) -> Unit
 ) {
-    val monthDates = remember(selectedDate.year, selectedDate.monthValue) {
-        planCalendarMonthGridDates(selectedDate)
-    }
+    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
     Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -461,45 +490,69 @@ private fun PlanMonthCalendar(
             }
         }
 
-        monthDates.chunked(7).forEach { week ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
-            ) {
-                week.forEach { date ->
-                    val isSelected = date == selectedDate
-                    val inSelectedMonth = date.month == selectedDate.month && date.year == selectedDate.year
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { onSelectDate(date) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .semantics {
-                                contentDescription = planCalendarDayActionLabel(date, isSelected)
-                            },
-                        label = {
-                            Text(
-                                text = date.dayOfMonth.toString(),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
-                            )
-                        },
-                        shape = MaterialTheme.shapes.small,
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            containerColor = if (inSelectedMonth) {
-                                MaterialTheme.colorScheme.surfaceContainerHigh
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainer
-                            },
-                            labelColor = if (inSelectedMonth) {
-                                MaterialTheme.colorScheme.onSurface
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        )
+        AnimatedContent(
+            targetState = YearMonth.from(selectedDate),
+            transitionSpec = {
+                if (reduceMotion) {
+                    val spec = ChronosValueAnimationFactory.stateChange<Float>(true)
+                    fadeIn(spec) togetherWith fadeOut(spec)
+                } else {
+                    val forward = targetState.isAfter(initialState)
+                    val set = ChronosTransitionFactory.materialSharedAxis(
+                        direction = if (forward) {
+                            ChronosTransitionDirection.Forward
+                        } else {
+                            ChronosTransitionDirection.Backward
+                        }
                     )
+                    set.enter togetherWith set.exit
+                }
+            },
+            label = "planCalendarMonthGrid"
+        ) { month ->
+            val monthDates = remember(month) { planCalendarMonthGridDates(month.atDay(1)) }
+            Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
+                monthDates.chunked(7).forEach { week ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
+                    ) {
+                        week.forEach { date ->
+                            val isSelected = date == selectedDate
+                            val inSelectedMonth = date.month == month.month && date.year == month.year
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onSelectDate(date) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .semantics {
+                                        contentDescription = planCalendarDayActionLabel(date, isSelected)
+                                    },
+                                label = {
+                                    Text(
+                                        text = date.dayOfMonth.toString(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                                    )
+                                },
+                                shape = MaterialTheme.shapes.small,
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    containerColor = if (inSelectedMonth) {
+                                        MaterialTheme.colorScheme.surfaceContainerHigh
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceContainer
+                                    },
+                                    labelColor = if (inSelectedMonth) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -737,6 +790,7 @@ private fun PlanScheduleAttentionCard(
     largeGapCount: Int,
     overlapCount: Int,
     onFillGaps: () -> Unit,
+    modifier: Modifier = Modifier,
     onRepairConflicts: (() -> Unit)? = null
 ) {
     val actionLabel = planScheduleAttentionActionLabel(largeGapCount, overlapCount)
@@ -745,7 +799,7 @@ private fun PlanScheduleAttentionCard(
         if (largeGapCount > 0) add("$largeGapCount large gap${if (largeGapCount == 1) "" else "s"}")
         if (overlapCount > 0) add("$overlapCount overlap${if (overlapCount == 1) "" else "s"}")
     }.joinToString(" · ")
-    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+    ChronosListCard(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -802,9 +856,10 @@ private fun PlanAiSuggestionsCard(
     onOpenAiSheet: () -> Unit,
     onApplyAiSuggestions: () -> Unit,
     onAcceptAiSuggestion: (String) -> Unit,
-    onRejectAiSuggestion: (String) -> Unit
+    onRejectAiSuggestion: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+    ChronosListCard(modifier = modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
             Text(
                 text = "AI suggestions",

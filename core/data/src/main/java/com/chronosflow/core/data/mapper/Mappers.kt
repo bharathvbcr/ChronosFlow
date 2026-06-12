@@ -68,7 +68,8 @@ fun TaskEntity.toDomain(): Task = Task(
     updatedAt = updatedAt,
     preferredDurationMinutes = preferredDurationMinutes,
     preferredStartMinuteOfDay = preferredStartMinuteOfDay,
-    targetDate = targetDate
+    targetDate = targetDate,
+    goalId = goalId
 )
 
 fun Task.toEntity(): TaskEntity = TaskEntity(
@@ -82,7 +83,8 @@ fun Task.toEntity(): TaskEntity = TaskEntity(
     updatedAt = updatedAt,
     preferredDurationMinutes = preferredDurationMinutes,
     preferredStartMinuteOfDay = preferredStartMinuteOfDay,
-    targetDate = targetDate
+    targetDate = targetDate,
+    goalId = goalId
 )
 
 fun TaskWithChecklistItems.toDomain(): Task = task.toDomain().copy(
@@ -219,7 +221,9 @@ fun TimeBlockEntity.toDomain(): TimeBlock = TimeBlock(
     actualStartMinuteOfDay = actualStartMinuteOfDay,
     actualEndMinuteOfDay = actualEndMinuteOfDay,
     createdAt = createdAt,
-    updatedAt = updatedAt
+    updatedAt = updatedAt,
+    goalId = goalId,
+    routineId = routineId
 )
 
 fun TimeBlock.toEntity(): TimeBlockEntity = TimeBlockEntity(
@@ -245,7 +249,9 @@ fun TimeBlock.toEntity(): TimeBlockEntity = TimeBlockEntity(
     actualStartMinuteOfDay = actualStartMinuteOfDay,
     actualEndMinuteOfDay = actualEndMinuteOfDay,
     createdAt = createdAt,
-    updatedAt = updatedAt
+    updatedAt = updatedAt,
+    goalId = goalId,
+    routineId = routineId
 )
 
 fun RecurrenceRule.toEntity(): RecurrenceRuleEntity = RecurrenceRuleEntity(
@@ -369,7 +375,8 @@ fun HabitEntity.toDomain(): Habit = Habit(
     isActive = isActive,
     launchTarget = launchAppValue?.let { value ->
         normalizeAppLaunchTarget(launchAppLabel.orEmpty(), value)
-    }
+    },
+    goalId = goalId
 )
 
 fun Habit.toEntity(): HabitEntity = HabitEntity(
@@ -384,7 +391,8 @@ fun Habit.toEntity(): HabitEntity = HabitEntity(
     lastCompletedDate = lastCompletedDate,
     isActive = isActive,
     launchAppLabel = launchTarget?.label,
-    launchAppValue = launchTarget?.value
+    launchAppValue = launchTarget?.value,
+    goalId = goalId
 )
 
 fun MedicationPlanEntity.toDomain(): MedicationPlan = MedicationPlan(

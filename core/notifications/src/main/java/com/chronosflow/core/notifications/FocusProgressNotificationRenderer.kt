@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
 import javax.inject.Inject
@@ -61,7 +62,9 @@ class FocusProgressNotificationRenderer @Inject constructor(
             .setSmallIcon(R.drawable.ic_focus_session)
             .setContentTitle(displayTitle)
             .setContentText(displayText)
+            .setSubText(context.getString(R.string.focus_notification_subtext))
             .setContentIntent(contentIntent)
+            .setColor(ContextCompat.getColor(context, R.color.notification_accent))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)

@@ -116,11 +116,12 @@ internal fun dailyActionSecondaryHandler(
     currentMinute: Int,
     onCompleteBlock: (String) -> Unit,
     onPrepareNext: (String) -> Unit,
-    onFillGaps: () -> Unit
+    onFillGaps: () -> Unit,
+    onReflowDay: () -> Unit
 ): (() -> Unit)? = when (action.kind) {
     DailyActionKind.EMPTY_DAY -> ({ onAddBlock(currentMinute) })
     DailyActionKind.ACTIVE_BLOCK -> activeBlockId?.let { id -> ({ onCompleteBlock(id) }) }
     DailyActionKind.UPCOMING_BLOCK -> nextBlockId?.let { id -> ({ onPrepareNext(id) }) }
-    DailyActionKind.MISSED_BLOCKS -> null
+    DailyActionKind.MISSED_BLOCKS -> onReflowDay
     DailyActionKind.OPEN_TIME -> ({ onFillGaps() })
 }

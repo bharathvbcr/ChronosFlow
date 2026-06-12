@@ -1,5 +1,13 @@
 package com.chronosflow.feature.daydial.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
@@ -42,6 +51,8 @@ import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosMetricTile
 import com.chronosflow.core.ui.components.ChronosSectionTitle
 import com.chronosflow.core.ui.components.GenAiAssistBanner
+import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
+import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.feature.daydial.DailyReview
 import com.chronosflow.feature.daydial.TimeBlockUiModel
@@ -86,7 +97,15 @@ internal fun InsightsTab(
     onApplyRecommendation: (InsightRecommendation) -> Unit,
     onOpenFullReview: () -> Unit = {},
     contentBottomPadding: Dp = 0.dp,
-    onCreatePlan: () -> Unit = {}
+    onCreatePlan: () -> Unit = {},
+    trendRangeDays: Int = 14,
+    trends: com.chronosflow.feature.daydial.delegate.CompanionTrendSections =
+        com.chronosflow.feature.daydial.delegate.CompanionTrendSections(),
+    journalEntry: com.chronosflow.core.domain.model.JournalEntry? = null,
+    sleepTrack: com.chronosflow.core.domain.model.SleepTrack? = null,
+    onTrendRangeSelected: (Int) -> Unit = {},
+    onOpenJournal: () -> Unit = {},
+    onOpenSleepLog: () -> Unit = {}
 ) {
     val periodPlanned = review.plannedMinutes
     val periodActual = review.actualMinutes.coerceAtLeast(0)
@@ -195,9 +214,19 @@ internal fun InsightsTab(
                     missedSummary = missedSummary,
                     onCreatePlan = onCreatePlan
                 )
-                if (isPlanSet) {
+                val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
+                AnimatedVisibility(
+                    visible = isPlanSet,
+                    enter = if (reduceMotion) fadeIn() else expandVertically() + fadeIn(),
+                    exit = if (reduceMotion) fadeOut() else shrinkVertically() + fadeOut()
+                ) {
+                    val animatedCompletion by animateFloatAsState(
+                        targetValue = completion.toFloat().coerceIn(0f, 100f) / 100f,
+                        animationSpec = ChronosValueAnimationFactory.stateChange(reduceMotion),
+                        label = "executionCompletion"
+                    )
                     LinearProgressIndicator(
-                        progress = { completion.toFloat().coerceIn(0f, 100f) / 100f },
+                        progress = { animatedCompletion },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(8.dp),
@@ -225,18 +254,24 @@ internal fun InsightsTab(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(20.dp)
                     ) {
-                        if (isRefreshing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier
-                                    .height(18.dp)
-                                    .width(18.dp),
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(Modifier.width(8.dp))
-                        } else {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
+                        val refreshFade = ChronosValueAnimationFactory.stateChange<Float>(reduceMotion)
+                        AnimatedContent(
+                            targetState = isRefreshing,
+                            transitionSpec = { fadeIn(refreshFade) togetherWith fadeOut(refreshFade) },
+                            label = "refreshLeadingIndicator"
+                        ) { refreshing ->
+                            if (refreshing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier
+                                        .height(18.dp)
+                                        .width(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                            }
                         }
+                        Spacer(Modifier.width(8.dp))
                         Text(
                             if (isRefreshing) "Refreshing…" else "Refresh recommendations",
                             fontWeight = FontWeight.SemiBold
@@ -416,6 +451,16 @@ internal fun InsightsTab(
                 }
             }
         }
+
+        InsightsTrendSections(
+            trendRangeDays = trendRangeDays,
+            trends = trends,
+            journalEntry = journalEntry,
+            sleepTrack = sleepTrack,
+            onTrendRangeSelected = onTrendRangeSelected,
+            onOpenJournal = onOpenJournal,
+            onOpenSleepLog = onOpenSleepLog
+        )
         Spacer(Modifier.height(bottomContentPadding))
     }
 }

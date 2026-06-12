@@ -9,6 +9,8 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.ServiceCompat
+import com.chronosflow.core.ai.findNextFocusBlock
+import com.chronosflow.core.data.assist.ProactiveAssistCache
 import com.chronosflow.core.data.dao.FocusSessionDao
 import com.chronosflow.core.data.focus.ManualMissedBlockRegistry
 import com.chronosflow.core.data.mapper.toDomain
@@ -39,6 +41,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
 import javax.inject.Inject
@@ -54,6 +58,7 @@ class FocusService : Service() {
     @Inject lateinit var logActualTimeUseCase: LogActualTimeUseCase
     @Inject lateinit var privacyPreferences: PrivacyPreferences
     @Inject lateinit var manualMissedBlockRegistry: ManualMissedBlockRegistry
+    @Inject lateinit var proactiveAssistCache: ProactiveAssistCache
 
     private val notificationManager: NotificationManager by lazy {
         getSystemService(NotificationManager::class.java)
@@ -66,6 +71,12 @@ class FocusService : Service() {
     private var currentBlockId: String? = null
     private var currentBlockTitle: String? = null
     private var currentTotalSeconds: Int = DEFAULT_FOCUS_SECONDS
+    // False while mirroring an intermediate phase of a split session: reaching
+    // zero must not log actual time or fire the "session complete" notification.
+    private var currentTerminal: Boolean = true
+    // For a non-terminal phase, the prompt to post when its timer runs out (e.g.
+    // "Time for a 5m break — tap to continue"). Null on the final split phase.
+    private var currentBoundaryLabel: String? = null
     private var timerJob: Job? = null
     private var blockTitleJob: Job? = null
     private var sessionStartElapsedRealtime: Long = 0L
@@ -190,6 +201,10 @@ class FocusService : Service() {
     }
 
     private suspend fun startNewSession(intent: Intent?): FocusSessionSnapshot {
+        // Phase metadata is a property of the session being started, so it is
+        // read here (not on every command) — a periodic SYNC must never flip it.
+        currentTerminal = intent?.getBooleanExtra(EXTRA_TERMINAL, true) ?: true
+        currentBoundaryLabel = intent?.getStringExtra(EXTRA_BOUNDARY_LABEL)
         val requestedTotalSeconds = resolveRequestedTotalSeconds(intent)
         val requestedTimeLeft = resolveRequestedTimeLeft(intent, requestedTotalSeconds)
         return runtime.start(
@@ -373,6 +388,8 @@ class FocusService : Service() {
     }
 
     private fun updateForegroundNotification(snapshot: FocusSessionSnapshot) {
+        // A live countdown is back on screen — clear any "tap to continue" nudge.
+        FocusCompletionNotifier.cancelPhaseBoundary(this)
         currentSessionId = snapshot.sessionId
         currentBlockId = snapshot.blockId ?: currentBlockId
         refreshBlockTitle(currentBlockId)
@@ -412,12 +429,36 @@ class FocusService : Service() {
                 }
                 if (snapshot.timeLeftSeconds <= 0 && runtime.completeIfFinished()) {
                     persistSession(runtime.snapshot().state)
-                    completeAndLogCurrentSession()
-                    FocusCompletionNotifier.show(
-                        context = this@FocusService,
-                        blockTitle = currentBlockTitle,
-                        redactSensitiveTitles = privacyPreferences.redactSensitiveNotifications()
-                    )
+                    val redactSensitiveTitles = privacyPreferences.redactSensitiveNotifications()
+                    val boundaryLabel = currentBoundaryLabel
+                    when {
+                        // Legacy / final-phase completion: log actual time and announce.
+                        currentTerminal -> {
+                            completeAndLogCurrentSession()
+                            FocusCompletionNotifier.show(
+                                context = this@FocusService,
+                                blockTitle = currentBlockTitle,
+                                redactSensitiveTitles = redactSensitiveTitles,
+                                nextStepLine = buildNextBlockLine(redactSensitiveTitles)
+                            )
+                        }
+                        // Intermediate split phase: the in-app layer owns completion,
+                        // so just nudge the user to continue (works while backgrounded).
+                        boundaryLabel != null -> FocusCompletionNotifier.showPhaseBoundary(
+                            context = this@FocusService,
+                            blockTitle = currentBlockTitle,
+                            body = boundaryLabel,
+                            redactSensitiveTitles = redactSensitiveTitles
+                        )
+                        // Final split phase reached zero while backgrounded: announce
+                        // completion, but leave actual-time logging to the in-app layer.
+                        else -> FocusCompletionNotifier.show(
+                            context = this@FocusService,
+                            blockTitle = currentBlockTitle,
+                            redactSensitiveTitles = redactSensitiveTitles,
+                            nextStepLine = buildNextBlockLine(redactSensitiveTitles)
+                        )
+                    }
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     break
@@ -433,6 +474,26 @@ class FocusService : Service() {
     private fun stopTicker() {
         timerJob?.cancel()
         timerJob = null
+    }
+
+    /**
+     * "Next up" line for the completion notification. Uses the deterministic
+     * local picker (no GenAI in a background service); when the foreground app
+     * pre-generated an AI line for the same block today, that line wins.
+     */
+    private suspend fun buildNextBlockLine(redactSensitiveTitles: Boolean): String? {
+        if (redactSensitiveTitles) return null
+        val today = LocalDate.now()
+        val blocks = runCatching { timeBlockRepository.getTimeBlocksByDate(today).first() }
+            .getOrDefault(emptyList())
+            .filter { it.id != currentBlockId }
+        val now = LocalTime.now()
+        val pick = findNextFocusBlock(blocks, now.hour * 60 + now.minute) ?: return null
+        proactiveAssistCache.focusNextBlockLine(today, pick.id)?.let { return it }
+        return "Next up: ${pick.title} at %02d:%02d".format(
+            pick.startMinuteOfDay / 60,
+            pick.startMinuteOfDay % 60
+        )
     }
 
     private suspend fun completeAndLogCurrentSession() {
@@ -504,6 +565,8 @@ class FocusService : Service() {
         const val EXTRA_LOG_ACTUAL_ON_STOP = "log_actual_on_stop"
         const val EXTRA_WAS_SKIP = "was_skip"
         const val EXTRA_ADJUST_SECONDS = "adjust_seconds"
+        const val EXTRA_TERMINAL = "terminal"
+        const val EXTRA_BOUNDARY_LABEL = "boundary_label"
 
         private const val DEFAULT_FOCUS_SECONDS = 25 * 60
         private const val EXTEND_SECONDS = 15 * 60

@@ -61,6 +61,34 @@ data class HabitAnalytics(
     val bestCompletionMinuteOfDay: Int? = null
 )
 
+/** Per-day completion/miss counts for a habit, oldest first, one entry per day in the window. */
+data class HabitDailyCompletion(
+    val date: LocalDate,
+    val completedCount: Int,
+    val missedCount: Int
+)
+
+fun deriveHabitCompletionTrend(
+    events: List<HabitEvent>,
+    windowDays: Int = 14,
+    today: LocalDate = LocalDate.now()
+): List<HabitDailyCompletion> {
+    if (windowDays <= 0) return emptyList()
+    val start = today.minusDays((windowDays - 1).toLong())
+    val byDate = events
+        .filter { it.eventDate in start..today }
+        .groupBy { it.eventDate }
+    return (0 until windowDays).map { offset ->
+        val date = start.plusDays(offset.toLong())
+        val dayEvents = byDate[date].orEmpty()
+        HabitDailyCompletion(
+            date = date,
+            completedCount = dayEvents.count { it.type == HabitEventType.COMPLETED },
+            missedCount = dayEvents.count { it.type == HabitEventType.MISSED }
+        )
+    }
+}
+
 fun buildLegacyHabitSchedule(
     habitId: String,
     cadence: String,

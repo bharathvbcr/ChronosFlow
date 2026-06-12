@@ -1,0 +1,101 @@
+package com.chronosflow.feature.daydial.delegate
+
+import com.chronosflow.core.domain.model.JournalEntry
+import com.chronosflow.core.domain.model.SleepTrack
+import com.chronosflow.core.domain.repository.JournalRepository
+import com.chronosflow.core.domain.repository.SleepTrackRepository
+import com.chronosflow.core.domain.usecase.RecordSleepUseCase
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
+import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+
+/** Evening-companion state: the selected day's journal entry and sleep log. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class DayDialJournalDelegate @Inject constructor(
+    private val journalRepository: JournalRepository,
+    private val sleepTrackRepository: SleepTrackRepository,
+    private val recordSleepUseCase: RecordSleepUseCase
+) {
+    fun journalEntry(
+        scope: CoroutineScope,
+        selectedDate: StateFlow<LocalDate>
+    ): StateFlow<JournalEntry?> = selectedDate.flatMapLatest { date ->
+        journalRepository.observeForDate(date).map { entries ->
+            entries.firstOrNull { it.isPrimary } ?: entries.firstOrNull()
+        }
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Sleep is keyed by wake-day: the entry for [selectedDate] covers the night ending that morning. */
+    fun sleepTrack(
+        scope: CoroutineScope,
+        selectedDate: StateFlow<LocalDate>
+    ): StateFlow<SleepTrack?> = selectedDate.flatMapLatest { date ->
+        sleepTrackRepository.observeForDate(date)
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
+
+    suspend fun saveJournalEntry(
+        date: LocalDate,
+        body: String,
+        promptType: String?,
+        existing: JournalEntry?
+    ) {
+        val trimmed = body.trim()
+        if (trimmed.isBlank()) return
+        val now = Instant.now()
+        // Only reuse the existing row when it belongs to the target day, so a stale selected-date
+        // entry can never be written onto a different date.
+        val entry = existing?.takeIf { it.entryDate == date }?.copy(
+            body = trimmed,
+            promptType = promptType,
+            updatedAt = now
+        ) ?: JournalEntry(
+            id = UUID.randomUUID().toString(),
+            entryDate = date,
+            createdAt = now,
+            updatedAt = now,
+            body = trimmed,
+            promptType = promptType,
+            isPrimary = true
+        )
+        journalRepository.save(entry)
+    }
+
+    suspend fun saveSleepLog(
+        date: LocalDate,
+        quality: Int,
+        actualStartMinute: Int?,
+        actualEndMinute: Int?,
+        interruptions: Int,
+        windDownNotes: String?,
+        existing: SleepTrack?
+    ) {
+        val base = existing?.takeIf { it.date == date } ?: SleepTrack(
+            id = UUID.randomUUID().toString(),
+            date = date,
+            plannedStartMinute = null,
+            plannedEndMinute = null,
+            actualStartMinute = null,
+            actualEndMinute = null,
+            sleepQuality = 3,
+            windDownNotes = null,
+            interruptedCount = 0
+        )
+        recordSleepUseCase(
+            base.copy(
+                sleepQuality = quality.coerceIn(1, 5),
+                actualStartMinute = actualStartMinute,
+                actualEndMinute = actualEndMinute,
+                interruptedCount = interruptions.coerceAtLeast(0),
+                windDownNotes = windDownNotes?.trim()?.takeIf { it.isNotBlank() }
+            )
+        )
+    }
+}

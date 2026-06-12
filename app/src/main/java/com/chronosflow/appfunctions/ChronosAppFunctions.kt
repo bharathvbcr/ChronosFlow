@@ -8,28 +8,41 @@ import com.chronosflow.core.domain.model.ActualTimeSource
 import com.chronosflow.core.domain.model.BlockFlexibility
 import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.EnergyIntensity
+import com.chronosflow.core.domain.model.Goal
 import com.chronosflow.core.domain.model.HabitEvent
 import com.chronosflow.core.domain.model.HabitEventType
+import com.chronosflow.core.domain.model.JournalEntry
 import com.chronosflow.core.domain.model.MedicationDoseEvent
 import com.chronosflow.core.domain.model.MedicationDoseEventType
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
+import com.chronosflow.core.domain.model.SleepTrack
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TimeBlock
+import com.chronosflow.core.domain.planner.PlannerOperationResult
+import com.chronosflow.core.domain.planner.PlannerService
 import com.chronosflow.core.domain.repository.CalendarEventRepository
+import com.chronosflow.core.domain.repository.GoalRepository
 import com.chronosflow.core.domain.repository.HabitRepository
+import com.chronosflow.core.domain.repository.JournalRepository
 import com.chronosflow.core.domain.repository.MedicationRepository
 import com.chronosflow.core.domain.repository.MoodEnergyRepository
 import com.chronosflow.core.domain.repository.ReviewRepository
+import com.chronosflow.core.domain.repository.RoutineRepository
+import com.chronosflow.core.domain.repository.SleepTrackRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
+import com.chronosflow.core.domain.usecase.ApplyRoutineToDateUseCase
+import com.chronosflow.core.domain.usecase.RecordSleepUseCase
 import com.chronosflow.feature.focus.FocusService
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 /**
@@ -43,7 +56,14 @@ class ChronosAppFunctions @Inject constructor(
     private val moodEnergyRepository: MoodEnergyRepository,
     private val timeBlockRepository: TimeBlockRepository,
     private val reviewRepository: ReviewRepository,
-    private val calendarEventRepository: CalendarEventRepository
+    private val calendarEventRepository: CalendarEventRepository,
+    private val goalRepository: GoalRepository,
+    private val journalRepository: JournalRepository,
+    private val routineRepository: RoutineRepository,
+    private val sleepTrackRepository: SleepTrackRepository,
+    private val recordSleepUseCase: RecordSleepUseCase,
+    private val applyRoutineToDateUseCase: ApplyRoutineToDateUseCase,
+    private val plannerService: PlannerService
 ) {
 
     /**
@@ -436,6 +456,206 @@ class ChronosAppFunctions @Inject constructor(
                 calendarEventRepository.syncFromDeviceCalendar(now, end)
             }
             true
+        }
+    }
+
+    /**
+     * Creates a new long-term goal in ChronosFlow.
+     * Call this when the user wants to set, add, or track a goal, objective, or target they want to work towards.
+     *
+     * @param title The title of the goal (e.g. "Read 12 books", "Run a marathon").
+     * @param description Optional description, motivation, or notes for the goal.
+     * @param targetValueOptional Optional numeric target to reach (e.g. 12 for "read 12 books"). Defaults to 1.
+     * @param targetDateOptional Optional target completion date in YYYY-MM-DD format.
+     * @return True if the goal was successfully created, false otherwise.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun createGoal(
+        appFunctionContext: AppFunctionContext,
+        title: String? = null,
+        description: String? = null,
+        targetValueOptional: Int? = null,
+        targetDateOptional: String? = null
+    ): Boolean {
+        return runAppFunction {
+            val normalizedTitle = title.requiredText() ?: return@runAppFunction false
+            val normalizedDescription = description?.trim()?.takeIf { it.isNotEmpty() }
+            val goal = Goal(
+                id = UUID.randomUUID().toString(),
+                title = normalizedTitle,
+                description = normalizedDescription,
+                category = "Personal",
+                targetValue = targetValueOptional?.coerceAtLeast(1) ?: 1,
+                startDate = LocalDate.now(),
+                targetDate = targetDateOptional?.let { LocalDate.parse(it) },
+                progressValue = 0,
+                isCompleted = false
+            )
+            withContext(Dispatchers.IO) {
+                goalRepository.saveGoal(goal)
+            }
+            true
+        }
+    }
+
+    /**
+     * Adds a journal entry for today.
+     * Call this when the user wants to journal, reflect, write down their thoughts, or record a diary entry.
+     *
+     * @param text The body text of the journal entry.
+     * @param promptOptional Optional prompt type or reflection prompt that this entry responds to.
+     * @return True if the journal entry was successfully saved, false otherwise.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun addJournalEntry(
+        appFunctionContext: AppFunctionContext,
+        text: String? = null,
+        promptOptional: String? = null
+    ): Boolean {
+        return runAppFunction {
+            val normalizedBody = text.requiredText() ?: return@runAppFunction false
+            val now = Instant.now()
+            val entry = JournalEntry(
+                id = UUID.randomUUID().toString(),
+                entryDate = LocalDate.now(),
+                createdAt = now,
+                updatedAt = now,
+                body = normalizedBody,
+                promptType = promptOptional?.trim()?.ifEmpty { null },
+                moodCheckInId = null,
+                isPrimary = true
+            )
+            withContext(Dispatchers.IO) {
+                journalRepository.save(entry)
+            }
+            true
+        }
+    }
+
+    /**
+     * Logs last night's sleep for today.
+     * Call this when the user reports how they slept, wants to record their sleep, bedtime, wake time, or sleep quality.
+     *
+     * @param quality Sleep quality rating from 1 (terrible) to 5 (excellent). Required.
+     * @param bedTimeIso Optional time the user went to bed in 24-hour HH:mm format (e.g. "23:30").
+     * @param wakeTimeIso Optional time the user woke up in 24-hour HH:mm format (e.g. "07:15").
+     * @param interruptions Optional number of times sleep was interrupted during the night.
+     * @param windDownNotes Optional notes about the wind-down routine or how the night went.
+     * @return True if the sleep log was successfully recorded, false otherwise.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun logSleep(
+        appFunctionContext: AppFunctionContext,
+        quality: Int? = null,
+        bedTimeIso: String? = null,
+        wakeTimeIso: String? = null,
+        interruptions: Int? = null,
+        windDownNotes: String? = null
+    ): Boolean {
+        return runAppFunction {
+            val normalizedQuality = quality?.coerceIn(1, 5) ?: return@runAppFunction false
+            val actualStartMinute = bedTimeIso.requiredText()?.let {
+                val time = LocalTime.parse(it)
+                time.hour * 60 + time.minute
+            }
+            val actualEndMinute = wakeTimeIso.requiredText()?.let {
+                val time = LocalTime.parse(it)
+                time.hour * 60 + time.minute
+            }
+            val today = LocalDate.now()
+            val normalizedNotes = windDownNotes?.trim()?.takeIf { it.isNotEmpty() }
+            val normalizedInterruptions = interruptions?.coerceAtLeast(0)
+            withContext(Dispatchers.IO) {
+                // Merge into any existing track for the day (the table has a UNIQUE date and the DAO
+                // REPLACEs on conflict, so a blind insert would wipe earlier-recorded fields).
+                val existing = sleepTrackRepository.observeForDate(today).first()
+                val base = existing ?: SleepTrack(
+                    id = UUID.randomUUID().toString(),
+                    date = today,
+                    plannedStartMinute = null,
+                    plannedEndMinute = null,
+                    actualStartMinute = null,
+                    actualEndMinute = null,
+                    sleepQuality = normalizedQuality,
+                    windDownNotes = null,
+                    interruptedCount = 0
+                )
+                recordSleepUseCase(
+                    base.copy(
+                        sleepQuality = normalizedQuality,
+                        actualStartMinute = actualStartMinute ?: base.actualStartMinute,
+                        actualEndMinute = actualEndMinute ?: base.actualEndMinute,
+                        windDownNotes = normalizedNotes ?: base.windDownNotes,
+                        interruptedCount = normalizedInterruptions ?: base.interruptedCount
+                    )
+                )
+            }
+            true
+        }
+    }
+
+    /**
+     * Applies a saved routine to a day, scheduling all of its steps as time blocks on the planner dial.
+     * Call this when the user wants to start, run, apply, or schedule a named routine (e.g. "morning routine", "evening wind-down") for a day.
+     *
+     * @param routineName The name/title of the routine to apply (matched case-insensitively).
+     * @param dayOptional Optional day to apply the routine to: "today", "tomorrow", or a date in YYYY-MM-DD format. Defaults to today.
+     * @return True if a matching routine was found and at least one block was scheduled, false otherwise.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun applyRoutine(
+        appFunctionContext: AppFunctionContext,
+        routineName: String? = null,
+        dayOptional: String? = null
+    ): Boolean {
+        return runAppFunction {
+            val normalizedName = routineName.requiredText() ?: return@runAppFunction false
+            val targetDate = when (dayOptional?.trim()?.lowercase()) {
+                "tomorrow" -> LocalDate.now().plusDays(1)
+                null, "", "today" -> LocalDate.now()
+                else -> LocalDate.parse(dayOptional.trim())
+            }
+            withContext(Dispatchers.IO) {
+                val routine = routineRepository.observeRoutines().first()
+                    .firstOrNull { it.title.equals(normalizedName, ignoreCase = true) }
+                    ?: return@withContext false
+                // Routine step offsets are stored as absolute minute-of-day, so the anchor is 0.
+                val created = applyRoutineToDateUseCase(routine.id, targetDate, 0)
+                created >= 1
+            }
+        }
+    }
+
+    /**
+     * Reflows the remaining part of the day's plan, pulling overdue and upcoming flexible blocks
+     * forward from the current time to close gaps after the day has slipped behind schedule.
+     * Call this when the user is behind schedule and wants to catch up, reorganize, rebalance, or
+     * "fix" the rest of their day. Blocks already in progress or completed are left where they are,
+     * and fixed or locked blocks are never moved.
+     *
+     * @param dayOptional Optional day to reflow: "today" or a date in YYYY-MM-DD format. Defaults to today. For a future date the whole day is repacked; for today only the time from now onward is reflowed.
+     * @return True if the remaining day was reflowed successfully, false if there were no flexible blocks to reorganize.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun reflowRemainingDay(
+        appFunctionContext: AppFunctionContext,
+        dayOptional: String? = null
+    ): Boolean {
+        return runAppFunction {
+            val today = LocalDate.now()
+            val targetDate = when (dayOptional?.trim()?.lowercase()) {
+                "tomorrow" -> today.plusDays(1)
+                null, "", "today" -> today
+                else -> LocalDate.parse(dayOptional.trim())
+            }
+            val fromMinute = if (targetDate == today) {
+                LocalTime.now().let { it.hour * 60 + it.minute }
+            } else {
+                null
+            }
+            withContext(Dispatchers.IO) {
+                plannerService.rebalanceDay(targetDate, fromMinute) is PlannerOperationResult.Applied
+            }
         }
     }
 

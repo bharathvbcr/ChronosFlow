@@ -1,5 +1,7 @@
 package com.chronosflow.feature.daydial.model
 
+import java.time.LocalDate
+
 enum class ReviewDetailSection {
     PLANNED,
     ACTUAL,
@@ -24,4 +26,6 @@ sealed class SheetTarget {
     object Diagnostics : SheetTarget()
     data class ReviewDetails(val section: ReviewDetailSection) : SheetTarget()
     data class BlockEditor(val blockId: String) : SheetTarget()
+    data class Journal(val date: LocalDate) : SheetTarget()
+    data class SleepLog(val date: LocalDate) : SheetTarget()
 }

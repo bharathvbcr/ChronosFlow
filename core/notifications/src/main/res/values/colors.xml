@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="focus_progress_accent">#7257B8</color>
+    <!-- Notification brand tint applied to small icon, app name and action labels. -->
+    <color name="notification_accent">#7257B8</color>
+    <!-- Warmer tint for critical reminders (medication doses, urgent deadlines). -->
+    <color name="notification_accent_critical">#E0573E</color>
 </resources>

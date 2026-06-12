@@ -1,5 +1,6 @@
 package com.chronosflow.widget
 
+import com.chronosflow.core.data.assist.ProactiveAssistCache
 import com.chronosflow.core.data.privacy.PrivacyPreferences
 import com.chronosflow.core.domain.usecase.CompleteHabitByIdUseCase
 import com.chronosflow.core.domain.usecase.GetChronosWidgetSummaryUseCase
@@ -17,4 +18,5 @@ interface WidgetActionEntryPoint {
     fun recordMedicationWidgetActionUseCase(): RecordMedicationWidgetActionUseCase
     fun focusWidgetCommandDispatcher(): FocusWidgetCommandDispatcher
     fun privacyPreferences(): PrivacyPreferences
+    fun proactiveAssistCache(): ProactiveAssistCache
 }

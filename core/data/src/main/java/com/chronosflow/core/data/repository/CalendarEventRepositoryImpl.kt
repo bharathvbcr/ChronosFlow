@@ -16,6 +16,7 @@ import com.chronosflow.core.domain.model.CALENDAR_EVENT_CATEGORY
 import com.chronosflow.core.domain.model.CalendarEvent
 import com.chronosflow.core.domain.model.EnergyIntensity
 import com.chronosflow.core.domain.model.TimeBlock
+import com.chronosflow.core.domain.model.classifyImportedEventEnergy
 import com.chronosflow.core.domain.repository.CalendarEventRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -183,7 +184,7 @@ class CalendarEventRepositoryImpl @Inject constructor(
             timezone = syncZone.id,
             provenance = BlockProvenance.CALENDAR_IMPORTED,
             flexibility = BlockFlexibility.FIXED,
-            energyLevel = EnergyIntensity.MODERATE,
+            energyLevel = classifyImportedEventEnergy(title, description),
             source = BlockProvenance.CALENDAR_IMPORTED.name,
             taskId = null,
             calendarEventId = id,

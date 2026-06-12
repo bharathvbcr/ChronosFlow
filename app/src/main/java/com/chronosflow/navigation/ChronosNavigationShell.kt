@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -39,8 +40,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Badge
@@ -64,6 +68,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -74,10 +79,14 @@ import com.chronosflow.core.ui.shell.LocalChronosShellOverlayController
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -128,6 +137,14 @@ private object ChronosShellDefaults {
 private object ChronosShellMotion {
     const val NavShellOffsetFraction = 0.5f
 }
+
+/** Bounds of a bottom-bar navigation item relative to the bar, used to position the sliding selection pill. */
+private data class ChronosNavItemBounds(
+    val x: Float,
+    val y: Float,
+    val width: Float,
+    val height: Float
+)
 
 private fun chronosShellSurfaceTransition(
     reducedMotion: Boolean,
@@ -199,9 +216,36 @@ internal fun quickAddActionsFor(featureFlags: ChronosFeatureFlags): List<Chronos
             )
         )
     }
+    if (featureFlags.goalsEnabled) {
+        add(
+            ChronosQuickAddAction(
+                label = "New goal",
+                icon = Icons.Default.Flag,
+                route = ChronosRoute.Goals.createRoute(ChronosRoute.TARGET_ADD)
+            )
+        )
+    }
+    if (featureFlags.journalEnabled) {
+        add(
+            ChronosQuickAddAction(
+                label = "Journal entry",
+                icon = Icons.Default.EditNote,
+                route = ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_JOURNAL)
+            )
+        )
+    }
+    if (featureFlags.sleepEnabled) {
+        add(
+            ChronosQuickAddAction(
+                label = "Log sleep",
+                icon = Icons.Default.Bedtime,
+                route = ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_SLEEP)
+            )
+        )
+    }
     add(
         ChronosQuickAddAction(
-            label = "Type a task, med, or habit",
+            label = "Type a task, med, habit, or goal",
             icon = Icons.Default.Search,
             route = QUICK_COMMAND_ROUTE
         )
@@ -847,29 +891,70 @@ private fun ChronosCompactFloatingBottomBar(
         tonalElevation = if (highContrastEnabled || frosted) 0.dp else 8.dp,
         shadowElevation = if (highContrastEnabled || frosted) 0.dp else 10.dp
     ) {
-        Row(
+        val density = LocalDensity.current
+        var barCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+        val itemBounds = remember { mutableStateMapOf<Int, ChronosNavItemBounds>() }
+        val selectedIndex = destinations.indexOfFirst { it.id == selectedId }
+        val selectedBounds = itemBounds[selectedIndex]
+        // A single rounded pill that glides between tabs (iOS-style) instead of each tab
+        // cross-fading its own background independently.
+        val indicatorX by animateFloatAsState(
+            targetValue = selectedBounds?.x ?: 0f,
+            animationSpec = ChronosValueAnimationFactory.selection(reducedMotion),
+            label = "navIndicatorX"
+        )
+        val indicatorWidth by animateFloatAsState(
+            targetValue = selectedBounds?.width ?: 0f,
+            animationSpec = ChronosValueAnimationFactory.selection(reducedMotion),
+            label = "navIndicatorWidth"
+        )
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .onGloballyPositioned { barCoordinates = it }
         ) {
-            destinations.forEach { destination ->
-                ChronosCompactNavigationItem(
-                    destination = destination,
-                    selected = selectedId == destination.id,
-                    badgeValue = badgeValueFor(destination.id, shellState),
-                    reducedMotion = reducedMotion,
-                    onClick = { onNavigate(destination) },
-                    onDoubleClick = { onDoubleClick(destination) },
-                    modifier = Modifier.weight(1f)
+            if (selectedBounds != null && indicatorWidth > 0f) {
+                Box(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            translationX = indicatorX
+                            translationY = selectedBounds.y
+                        }
+                        .size(
+                            width = with(density) { indicatorWidth.toDp() },
+                            height = with(density) { selectedBounds.height.toDp() }
+                        )
+                        .background(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(24.dp)
+                        )
                 )
             }
-            ChronosQuickAddButton(
-                expanded = quickAddExpanded,
-                reducedMotion = reducedMotion,
-                onClick = onQuickAddClick
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                destinations.forEachIndexed { index, destination ->
+                    ChronosCompactNavigationItem(
+                        destination = destination,
+                        selected = selectedId == destination.id,
+                        badgeValue = badgeValueFor(destination.id, shellState),
+                        reducedMotion = reducedMotion,
+                        onClick = { onNavigate(destination) },
+                        onDoubleClick = { onDoubleClick(destination) },
+                        onBoundsChanged = { bounds -> itemBounds[index] = bounds },
+                        barCoordinates = { barCoordinates },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                ChronosQuickAddButton(
+                    expanded = quickAddExpanded,
+                    reducedMotion = reducedMotion,
+                    onClick = onQuickAddClick
+                )
+            }
         }
     }
 }
@@ -1157,18 +1242,11 @@ private fun ChronosCompactNavigationItem(
     badgeValue: String?,
     reducedMotion: Boolean,
     onClick: () -> Unit,
+    onBoundsChanged: (ChronosNavItemBounds) -> Unit,
+    barCoordinates: () -> LayoutCoordinates?,
     modifier: Modifier = Modifier,
     onDoubleClick: () -> Unit = {}
 ) {
-    val containerColor by animateColorAsState(
-        targetValue = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0f)
-        },
-        animationSpec = ChronosValueAnimationFactory.selection(reducedMotion),
-        label = "compactNavContainer"
-    )
     val contentColor by animateColorAsState(
         targetValue = if (selected) {
             MaterialTheme.colorScheme.onPrimaryContainer
@@ -1201,6 +1279,18 @@ private fun ChronosCompactNavigationItem(
 
     Surface(
         modifier = modifier
+            .onGloballyPositioned { coordinates ->
+                val barCoords = barCoordinates() ?: return@onGloballyPositioned
+                val position = barCoords.localPositionOf(coordinates, Offset.Zero)
+                onBoundsChanged(
+                    ChronosNavItemBounds(
+                        x = position.x,
+                        y = position.y,
+                        width = coordinates.size.width.toFloat(),
+                        height = coordinates.size.height.toFloat()
+                    )
+                )
+            }
             .graphicsLayer {
                 scaleX = itemScale
                 scaleY = itemScale
@@ -1230,7 +1320,7 @@ private fun ChronosCompactNavigationItem(
                 }
             ),
         shape = RoundedCornerShape(24.dp),
-        color = containerColor,
+        color = Color.Transparent,
         contentColor = contentColor
     ) {
         Column(

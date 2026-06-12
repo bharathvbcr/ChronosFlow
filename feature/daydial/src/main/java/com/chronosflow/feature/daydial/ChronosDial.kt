@@ -239,6 +239,12 @@ fun ChronosDial(
 
     Canvas(
         modifier = modifier
+            // Layout modifiers must precede drawWithCache so the cached background
+            // (dial track, ticks, ring guides) shares the inset coordinate space of
+            // the canvas content; otherwise the track renders at a larger radius and
+            // reads as a second dark ring offset from the block arcs.
+            .aspectRatio(1f)
+            .padding(canvasInset)
             .drawWithCache {
                 val cachedCenter = Offset(size.width / 2f, size.height / 2f)
                 val cachedOuterRadius = scaledDialOuterDiameter(size.minDimension, effectiveDialRadiusScale)
@@ -309,8 +315,6 @@ fun ChronosDial(
                     }
                 }
             }
-            .aspectRatio(1f)
-            .padding(canvasInset)
             .pointerInput(blocks, compactMode, compactWindowStart, effectiveDialRadiusScale) {
                 detectTapGestures(
                     onTap = { offset ->

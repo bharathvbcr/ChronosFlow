@@ -16,6 +16,8 @@ import com.chronosflow.core.domain.usecase.ScheduleMedicationReminderUseCase
 import com.chronosflow.core.ai.MedicationAssistRequest
 import com.chronosflow.core.ai.MedicationAssistSuggestion
 import com.chronosflow.core.ai.RoutineAssistSource
+import com.chronosflow.core.ai.MedicationAdherenceAssistPlanner
+import com.chronosflow.core.ai.MedicationAdherenceAssistResult
 import com.chronosflow.core.ai.MedicationAssistPlanner
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
 import com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot
@@ -57,6 +59,7 @@ class MedicationViewModelTest {
     private val sleepScheduleRepository: SleepScheduleRepository = mockk()
     private val alarmScheduler: AlarmScheduler = mockk()
     private val medicationAssistPlanner: MedicationAssistPlanner = mockk()
+    private val medicationAdherenceAssistPlanner: MedicationAdherenceAssistPlanner = mockk(relaxed = true)
     private val genAiAssistCoordinator: GenAiAssistCoordinator = mockk()
     private val alarmCapabilityRefresher: AlarmCapabilityRefresher = mockk()
     private val alarmDeliveryCoordinator: AlarmDeliveryCoordinator = mockk(relaxed = true)
@@ -98,6 +101,7 @@ class MedicationViewModelTest {
             sleepScheduleRepository = sleepScheduleRepository,
             alarmScheduler = alarmScheduler,
             medicationAssistPlanner = medicationAssistPlanner,
+            medicationAdherenceAssistPlanner = medicationAdherenceAssistPlanner,
             genAiAssistCoordinator = genAiAssistCoordinator,
             alarmCapabilityRefresher = alarmCapabilityRefresher,
             alarmDeliveryCoordinator = alarmDeliveryCoordinator
@@ -369,6 +373,7 @@ class MedicationViewModelTest {
             sleepScheduleRepository = sleepScheduleRepository,
             alarmScheduler = alarmScheduler,
             medicationAssistPlanner = medicationAssistPlanner,
+            medicationAdherenceAssistPlanner = medicationAdherenceAssistPlanner,
             genAiAssistCoordinator = genAiAssistCoordinator,
             alarmCapabilityRefresher = alarmCapabilityRefresher,
             alarmDeliveryCoordinator = alarmDeliveryCoordinator
@@ -376,6 +381,59 @@ class MedicationViewModelTest {
 
         viewModel.rememberHistoryTemplateSelection("selected-id")
         verify { plannerPreferencesRepository.saveRecentMedicationTemplateIds(listOf("selected-id", "older", "older2", "older3", "older4")) }
+    }
+
+    @Test
+    fun `adherence suggestions populate and apply moves the reminder`() = runTest {
+        val plan = MedicationPlan(
+            id = "plan-adherence",
+            name = "Vitamin D",
+            dosage = "1",
+            unit = "tablet",
+            notes = null,
+            startAt = null,
+            endAt = null,
+            reminderMinuteOfDay = 8 * 60,
+            takeWithFood = false,
+            missedCount = 0,
+            refillNeededAfterDoses = null,
+            isActive = true
+        )
+        every { medicationRepository.observeMedicationPlans() } returns flowOf(listOf(plan))
+        coEvery {
+            medicationAdherenceAssistPlanner.suggestAdjustments(any(), any(), any())
+        } returns listOf(
+            MedicationAdherenceAssistResult(
+                medicationPlanId = "plan-adherence",
+                suggestedReminderMinute = 600,
+                reason = "Usually taken around 10:00",
+                source = RoutineAssistSource.LOCAL
+            )
+        )
+        viewModel = MedicationViewModel(
+            medicationRepository = medicationRepository,
+            plannerPreferencesRepository = plannerPreferencesRepository,
+            scheduleMedicationReminderUseCase = scheduleMedicationReminderUseCase,
+            sleepScheduleRepository = sleepScheduleRepository,
+            alarmScheduler = alarmScheduler,
+            medicationAssistPlanner = medicationAssistPlanner,
+            medicationAdherenceAssistPlanner = medicationAdherenceAssistPlanner,
+            genAiAssistCoordinator = genAiAssistCoordinator,
+            alarmCapabilityRefresher = alarmCapabilityRefresher,
+            alarmDeliveryCoordinator = alarmDeliveryCoordinator
+        )
+
+        val suggestion = viewModel.adherenceSuggestions.value.single()
+        assertEquals(600, suggestion.suggestedReminderMinute)
+
+        viewModel.applyAdherenceSuggestion(suggestion)
+
+        coVerify {
+            medicationRepository.saveMedicationPlan(
+                match { it.id == "plan-adherence" && it.reminderMinuteOfDay == 600 }
+            )
+        }
+        assertEquals(emptyList<MedicationAdherenceSuggestion>(), viewModel.adherenceSuggestions.value)
     }
 
     @Test

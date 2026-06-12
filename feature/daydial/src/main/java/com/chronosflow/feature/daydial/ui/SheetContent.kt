@@ -54,7 +54,9 @@ import com.chronosflow.feature.daydial.ui.ActionGrid
 import com.chronosflow.feature.daydial.ui.AiReviewSheet
 import com.chronosflow.feature.daydial.ui.CheckboxSetting
 import com.chronosflow.feature.daydial.ui.DailyReviewHeader
+import com.chronosflow.feature.daydial.ui.JournalEntrySheetContent
 import com.chronosflow.feature.daydial.ui.PrivacyModeSelector
+import com.chronosflow.feature.daydial.ui.SleepLogSheetContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -134,7 +136,19 @@ internal fun SheetContent(
     onImportBackup: (String) -> Unit,
     onFinishFocus: (String) -> Unit,
     onEndDay: () -> Unit,
-    showMessage: (String) -> Unit
+    showMessage: (String) -> Unit,
+    journalEntry: com.chronosflow.core.domain.model.JournalEntry? = null,
+    sleepTrack: com.chronosflow.core.domain.model.SleepTrack? = null,
+    moodSummary: String? = null,
+    onSaveJournal: (date: LocalDate, body: String, promptType: String?) -> Unit = { _, _, _ -> },
+    onSaveSleep: (
+        date: LocalDate,
+        quality: Int,
+        startMinute: Int?,
+        endMinute: Int?,
+        interruptions: Int,
+        notes: String?
+    ) -> Unit = { _, _, _, _, _, _ -> }
 ) {
     Column(modifier = Modifier.padding(16.dp).navigationBarsPadding()) {
         when (target) {
@@ -925,6 +939,23 @@ internal fun SheetContent(
                 Text("Missed alerts: ${if (missedAlerts) "on" else "off"}")
                 Text("End-of-day review: ${if (endDayReviewReminder) "on" else "off"}")
             }
+            is SheetTarget.Journal -> JournalEntrySheetContent(
+                date = target.date,
+                existing = journalEntry,
+                moodSummary = moodSummary,
+                onSave = { body, promptType ->
+                    onSaveJournal(target.date, body, promptType)
+                    onDismiss()
+                }
+            )
+            is SheetTarget.SleepLog -> SleepLogSheetContent(
+                date = target.date,
+                existing = sleepTrack,
+                onSave = { quality, startMinute, endMinute, interruptions, notes ->
+                    onSaveSleep(target.date, quality, startMinute, endMinute, interruptions, notes)
+                    onDismiss()
+                }
+            )
         }
         Spacer(modifier = Modifier.height(16.dp))
         TextButton(
@@ -1012,6 +1043,8 @@ internal fun sheetCloseActionLabel(target: SheetTarget, selectedBlock: TimeBlock
     is SheetTarget.ImportBackup -> "Close import backup"
     is SheetTarget.WeeklySummary -> "Close weekly summary"
     is SheetTarget.Diagnostics -> "Close diagnostics"
+    is SheetTarget.Journal -> "Close journal"
+    is SheetTarget.SleepLog -> "Close sleep log"
     is SheetTarget.ReviewDetails -> "Close ${target.section.name.lowercase().replaceFirstChar { it.uppercase() }} review"
 }
 

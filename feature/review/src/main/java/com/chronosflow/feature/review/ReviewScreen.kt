@@ -27,6 +27,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.chronosflow.core.ai.AssistNarrative
+import com.chronosflow.core.ai.genai.GenAiAssistCopy
 import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.ReviewInsight
 import com.chronosflow.core.domain.model.ReviewInsightSeverity
@@ -52,6 +54,7 @@ fun ReviewScreen(
     val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
     val review by viewModel.review.collectAsStateWithLifecycle()
     val weeklyRollup by viewModel.weeklyRollup.collectAsStateWithLifecycle()
+    val coachNarrative by viewModel.coachNarrative.collectAsStateWithLifecycle()
     val bottomInset = LocalChronosShellBottomInset.current
 
     ChronosScreenScaffold(
@@ -99,6 +102,9 @@ fun ReviewScreen(
             } else {
                 item { ReviewSummaryMetrics(summary) }
                 item { ReviewExecutionRow(summary) }
+                coachNarrative?.let { narrative ->
+                    item { ReviewCoachCard(narrative) }
+                }
                 if (summary.insights.isNotEmpty()) {
                     item {
                         ChronosSectionHeader(
@@ -152,6 +158,34 @@ private fun WeeklyRollupCard(rollup: WeeklyReviewRollup) {
                     "${formatMinutes(rollup.missedMinutes)} unaccounted",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReviewCoachCard(narrative: AssistNarrative) {
+    ChronosListCard {
+        Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Micro)) {
+            Text(
+                text = "Coach summary",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = narrative.headline,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = narrative.nextStep,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = GenAiAssistCopy.assistSourceLabel(narrative.source),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
             )
         }
     }

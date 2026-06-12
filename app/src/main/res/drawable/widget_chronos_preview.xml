@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="180dp"
+    android:height="180dp"
+    android:viewportWidth="180"
+    android:viewportHeight="180">
+
+    <!-- Card background -->
+    <path
+        android:fillColor="#F6F4EF"
+        android:pathData="M16,16 L164,16 A12,12 0 0 1 176,28 L176,152 A12,12 0 0 1 164,164 L16,164 A12,12 0 0 1 4,152 L4,28 A12,12 0 0 1 16,16 Z" />
+
+    <!-- Title bar (ChronosFlow) -->
+    <path
+        android:fillColor="#3A5A40"
+        android:pathData="M50,52 L130,52 A4,4 0 0 1 134,56 L134,62 A4,4 0 0 1 130,66 L50,66 A4,4 0 0 1 46,62 L46,56 A4,4 0 0 1 50,52 Z" />
+
+    <!-- Subtitle (Focus session) -->
+    <path
+        android:fillColor="#9A9A8E"
+        android:pathData="M62,82 L118,82 A3,3 0 0 1 121,85 L121,88 A3,3 0 0 1 118,91 L62,91 A3,3 0 0 1 59,88 L59,85 A3,3 0 0 1 62,82 Z" />
+
+    <!-- Start button -->
+    <path
+        android:fillColor="#3A5A40"
+        android:pathData="M40,112 L84,112 A10,10 0 0 1 94,122 L94,122 A10,10 0 0 1 84,132 L40,132 A10,10 0 0 1 30,122 L30,122 A10,10 0 0 1 40,112 Z" />
+
+    <!-- Pause button -->
+    <path
+        android:fillColor="#588157"
+        android:pathData="M100,112 L140,112 A10,10 0 0 1 150,122 L150,122 A10,10 0 0 1 140,132 L100,132 A10,10 0 0 1 90,122 L90,122 A10,10 0 0 1 100,112 Z" />
+</vector>

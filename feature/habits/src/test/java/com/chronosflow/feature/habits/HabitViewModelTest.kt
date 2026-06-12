@@ -17,6 +17,7 @@ import com.chronosflow.core.domain.model.HabitEventType
 import com.chronosflow.core.domain.model.HabitSchedule
 import com.chronosflow.core.domain.model.PlannerRecurrence
 import com.chronosflow.core.domain.model.PlannerRecurrenceType
+import com.chronosflow.core.domain.repository.GoalRepository
 import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.PlannerPreferencesRepository
 import com.chronosflow.core.domain.usecase.CompleteHabitUseCase
@@ -47,6 +48,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class HabitViewModelTest {
     private val habitRepository: HabitRepository = mockk()
+    private val goalRepository: GoalRepository = mockk(relaxed = true)
     private val plannerPreferencesRepository: PlannerPreferencesRepository = mockk(relaxed = true)
     private val getActiveHabitsUseCase: GetActiveHabitsUseCase = mockk()
     private val observeHabitStreaksUseCase: ObserveHabitStreaksUseCase = mockk()
@@ -521,6 +523,7 @@ class HabitViewModelTest {
         every { plannerPreferencesRepository.getRecentHabitTemplateIds() } returns recentTemplateIds
         return HabitViewModel(
             habitRepository = habitRepository,
+            goalRepository = goalRepository,
             plannerPreferencesRepository = plannerPreferencesRepository,
             getActiveHabitsUseCase = getActiveHabitsUseCase,
             observeHabitStreaksUseCase = observeHabitStreaksUseCase,

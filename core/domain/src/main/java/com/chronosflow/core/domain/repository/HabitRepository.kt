@@ -4,6 +4,7 @@ import com.chronosflow.core.domain.model.Habit
 import com.chronosflow.core.domain.model.HabitEvent
 import com.chronosflow.core.domain.model.HabitSchedule
 import kotlinx.coroutines.flow.Flow
+import java.time.LocalDate
 
 interface HabitRepository {
     fun observeHabits(): Flow<List<Habit>>
@@ -11,5 +12,6 @@ interface HabitRepository {
     suspend fun saveHabit(habit: Habit)
     suspend fun saveHabitSchedule(schedule: HabitSchedule)
     suspend fun addHabitEvent(event: HabitEvent)
+    suspend fun getHabitEventsBetween(start: LocalDate, end: LocalDate): List<HabitEvent>
     suspend fun deleteHabit(habit: Habit)
 }

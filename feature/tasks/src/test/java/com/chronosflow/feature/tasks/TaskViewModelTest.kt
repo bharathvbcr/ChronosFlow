@@ -27,6 +27,7 @@ import com.chronosflow.core.domain.model.TaskContactSnapshot
 import com.chronosflow.core.domain.planner.PlannerOperationResult
 import com.chronosflow.core.domain.repository.AlarmRequestRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
+import com.chronosflow.core.domain.repository.GoalRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TaskScheduleRepository
 import com.chronosflow.core.domain.usecase.AddTaskUseCase
@@ -67,6 +68,7 @@ class TaskViewModelTest {
     private val toggleTaskCompletionUseCase: ToggleTaskCompletionUseCase = mockk()
     private val scheduleTaskIntoDayUseCase: ScheduleTaskIntoDayUseCase = mockk()
     private val taskRepository: TaskRepository = mockk()
+    private val goalRepository: GoalRepository = mockk(relaxed = true)
     private val taskScheduleRepository: TaskScheduleRepository = mockk(relaxed = true)
     private val alarmRequestRepository: AlarmRequestRepository = mockk(relaxed = true)
     private val sleepScheduleRepository: SleepScheduleRepository = mockk()
@@ -94,12 +96,14 @@ class TaskViewModelTest {
         every { alarmScheduler.canPostReminders() } returns true
         every { alarmScheduler.canScheduleExactAlarms() } returns true
         every { alarmCapabilityRefresher.refreshes } returns MutableSharedFlow(extraBufferCapacity = 1)
+        every { goalRepository.observeGoals() } returns flowOf(emptyList())
         viewModel = TaskViewModel(
             getTasksUseCase,
             addTaskUseCase,
             toggleTaskCompletionUseCase,
             scheduleTaskIntoDayUseCase,
             taskRepository,
+            goalRepository,
             taskScheduleRepository,
             alarmRequestRepository,
             sleepScheduleRepository,
@@ -136,6 +140,7 @@ class TaskViewModelTest {
             toggleTaskCompletionUseCase,
             scheduleTaskIntoDayUseCase,
             taskRepository,
+            goalRepository,
             taskScheduleRepository,
             alarmRequestRepository,
             sleepScheduleRepository,

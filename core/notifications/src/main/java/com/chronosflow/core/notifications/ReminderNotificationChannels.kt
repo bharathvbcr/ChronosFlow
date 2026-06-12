@@ -14,12 +14,14 @@ object ReminderNotificationChannels {
     fun ensureCreated(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        NotificationChannelGroups.ensureCreated(manager)
         val defaultChannel = NotificationChannel(
             DEFAULT_CHANNEL_ID,
             "Reminders",
             NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
             description = "Planner nudges, block starts, and daily review reminders"
+            group = NotificationChannelGroups.REMINDERS
         }
         val criticalChannel = NotificationChannel(
             CRITICAL_CHANNEL_ID,
@@ -27,6 +29,7 @@ object ReminderNotificationChannels {
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "Medication doses and urgent task deadlines"
+            group = NotificationChannelGroups.REMINDERS
         }
         manager.createNotificationChannel(defaultChannel)
         manager.createNotificationChannel(criticalChannel)

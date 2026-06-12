@@ -18,6 +18,7 @@ const val SECTION_REVIEW = "review"
 const val SECTION_TASKS = "tasks"
 
 const val DAY_TARGET_TODAY = "today"
+const val DAY_TARGET_JOURNAL = "journal"
 const val TASK_LAUNCH_TARGET_CONTEXT = "context"
 
 data class NotificationLaunch(
@@ -68,7 +69,11 @@ internal fun resolveNotificationLaunch(
 ): NotificationLaunch {
     return when (requestType) {
         AlarmRequestType.MEDICATION -> NotificationLaunch(section = SECTION_MEDICATION)
-        AlarmRequestType.DAILY_REVIEW -> NotificationLaunch(section = SECTION_REVIEW)
+        // Evening companion: the daily-review tap lands on the journal sheet.
+        AlarmRequestType.DAILY_REVIEW -> NotificationLaunch(
+            section = SECTION_DAY,
+            dayTarget = DAY_TARGET_JOURNAL
+        )
         AlarmRequestType.URGENT_TASK -> NotificationLaunch(
             section = SECTION_TASKS,
             taskId = requestId?.takeIf { it.startsWith("task:") }?.removePrefix("task:")

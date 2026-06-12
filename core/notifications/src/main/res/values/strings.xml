@@ -7,11 +7,14 @@
     <string name="focus_notification_running_text">%1$s remaining</string>
     <string name="focus_notification_redacted_text">Session in progress</string>
     <string name="focus_notification_metric_label">Remaining</string>
+    <string name="focus_notification_subtext">Focus</string>
     <string name="focus_notification_action_pause">Pause</string>
     <string name="focus_notification_action_resume">Resume</string>
     <string name="focus_notification_action_stop">Stop</string>
     <string name="focus_notification_action_extend">+15m</string>
     <string name="focus_notification_completed_text">Focus session completed</string>
+    <string name="focus_notification_completed_big_text">Nicely done — your focus session is complete. Take a short break or start your next block.</string>
+    <string name="focus_notification_pill_paused">Paused</string>
     <string name="focus_completion_channel_name">Focus completion</string>
     <string name="focus_completion_channel_description">Alerts when a focus session finishes</string>
     <string name="notification_permission_enabled">Notifications enabled</string>

@@ -11,7 +11,8 @@ import java.time.LocalDate
     tableName = "tasks",
     indices = [
         Index("isCompleted"),
-        Index("dueDate")
+        Index("dueDate"),
+        Index("goalId")
     ]
 )
 data class TaskEntity(
@@ -25,7 +26,8 @@ data class TaskEntity(
     val updatedAt: Instant,
     val preferredDurationMinutes: Int? = null,
     val preferredStartMinuteOfDay: Int? = null,
-    val targetDate: LocalDate? = null
+    val targetDate: LocalDate? = null,
+    val goalId: String? = null
 )
 
 @Entity(

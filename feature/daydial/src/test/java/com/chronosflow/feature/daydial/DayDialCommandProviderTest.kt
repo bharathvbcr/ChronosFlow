@@ -27,7 +27,9 @@ class DayDialCommandProviderTest {
         val ids = provider.commands().map { it.id }
         assertTrue(ids.contains("daydial.insights"))
         assertTrue(ids.contains("daydial.review"))
-        assertEquals(11, ids.size)
+        assertTrue(ids.contains("daydial.journal"))
+        assertTrue(ids.contains("daydial.sleep"))
+        assertEquals(13, ids.size)
         assertEquals("Today", provider.commands().first { it.id == "daydial.open" }.shortcutLabel)
     }
 
@@ -51,6 +53,8 @@ class DayDialCommandProviderTest {
         val ids = provider.commands().map { it.id }
         assertFalse(ids.contains("daydial.insights"))
         assertFalse(ids.contains("daydial.review"))
+        assertFalse(ids.contains("daydial.journal"))
+        assertFalse(ids.contains("daydial.sleep"))
         assertEquals(9, ids.size)
     }
 }

@@ -102,4 +102,12 @@ class LiveUpdateGatewayTest {
         assertEquals("25:05", FocusNotificationContent.formatTimeLeft(1_505))
         assertEquals("00:00", FocusNotificationContent.formatTimeLeft(-10))
     }
+
+    @Test
+    fun `live pill compacts remaining time by magnitude`() {
+        assertEquals("1h 5m", FocusNotificationContent.pillTimeText(3_900))
+        assertEquals("12m", FocusNotificationContent.pillTimeText(12 * 60))
+        assertEquals("45s", FocusNotificationContent.pillTimeText(45))
+        assertEquals("0s", FocusNotificationContent.pillTimeText(-10))
+    }
 }

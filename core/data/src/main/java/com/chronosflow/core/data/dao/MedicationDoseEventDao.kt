@@ -15,6 +15,9 @@ interface MedicationDoseEventDao {
     @Query("SELECT * FROM medication_dose_events WHERE medicationPlanId = :medicationPlanId ORDER BY recordedAt DESC")
     suspend fun getEventsForPlan(medicationPlanId: String): List<MedicationDoseEventEntity>
 
+    @Query("SELECT * FROM medication_dose_events WHERE eventDate BETWEEN :start AND :end ORDER BY eventDate ASC")
+    suspend fun getEventsBetween(start: java.time.LocalDate, end: java.time.LocalDate): List<MedicationDoseEventEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvent(event: MedicationDoseEventEntity)
 }

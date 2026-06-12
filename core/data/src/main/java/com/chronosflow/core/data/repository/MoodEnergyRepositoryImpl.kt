@@ -17,6 +17,9 @@ class MoodEnergyRepositoryImpl @Inject constructor(
     override fun observeForDate(date: LocalDate): Flow<List<MoodEnergyCheckIn>> =
         dao.observeForDate(date).map { list -> list.map { it.toDomain(currentZoneId()) } }
 
+    override fun observeForDateRange(start: LocalDate, end: LocalDate): Flow<List<MoodEnergyCheckIn>> =
+        dao.observeForDateRange(start, end).map { list -> list.map { it.toDomain(currentZoneId()) } }
+
     override suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<MoodEnergyCheckIn> =
         dao.getForDateRange(start, end).map { it.toDomain(currentZoneId()) }
 

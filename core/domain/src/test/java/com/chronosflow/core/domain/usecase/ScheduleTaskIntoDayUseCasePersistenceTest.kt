@@ -10,7 +10,9 @@ import com.chronosflow.core.domain.model.TaskSchedule
 import com.chronosflow.core.domain.model.TimeBlock
 import com.chronosflow.core.domain.planner.FreeTimeCalculator
 import com.chronosflow.core.domain.planner.PlannerOperationResult
+import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.core.domain.planner.PlannerService
+import com.chronosflow.core.domain.repository.MoodEnergyRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TaskScheduleRepository
@@ -21,6 +23,7 @@ import java.time.LocalTime
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -122,7 +125,8 @@ class ScheduleTaskIntoDayUseCasePersistenceTest {
         freeTimeCalculator = FreeTimeCalculator(),
         sleepScheduleRepository = object : SleepScheduleRepository {
             override fun getSleepSchedule(): SleepSchedule = SleepSchedule.default()
-        }
+        },
+        moodEnergyRepository = FakeMoodEnergyRepository()
     )
 
     private fun task(
@@ -215,6 +219,17 @@ private class FakeTaskRepository(
         tasksById.remove(task.id)
         tasksFlow.value = tasksById.values.toList()
     }
+}
+
+private class FakeMoodEnergyRepository : MoodEnergyRepository {
+    override fun observeForDate(date: LocalDate): Flow<List<MoodEnergyCheckIn>> = flowOf(emptyList())
+    override fun observeForDateRange(start: LocalDate, end: LocalDate): Flow<List<MoodEnergyCheckIn>> =
+        flowOf(emptyList())
+    override suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<MoodEnergyCheckIn> = emptyList()
+    override suspend fun getLatest(): MoodEnergyCheckIn? = null
+    override suspend fun getForBlock(blockId: String): List<MoodEnergyCheckIn> = emptyList()
+    override suspend fun save(checkIn: MoodEnergyCheckIn) = Unit
+    override suspend fun delete(id: String) = Unit
 }
 
 private class FakeTaskScheduleRepository : TaskScheduleRepository {

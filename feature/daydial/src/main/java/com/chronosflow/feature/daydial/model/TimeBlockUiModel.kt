@@ -19,5 +19,6 @@ data class TimeBlockUiModel(
     val taskId: String? = null,
     val habitId: String? = null,
     val medicationPlanId: String? = null,
+    val routineId: String? = null,
     val category: String = "WORK"
 )

@@ -1,5 +1,13 @@
 package com.chronosflow.feature.medication
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -66,6 +74,8 @@ import com.chronosflow.core.ui.components.ChronosMetricTile
 import com.chronosflow.core.ui.components.ChronosQuickAddChips
 import com.chronosflow.core.ui.components.ChronosSectionHeader
 import com.chronosflow.core.ui.components.formatDisplayMinute
+import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
+import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 import com.chronosflow.core.ui.shell.LocalChronosShellBottomInset
 import com.chronosflow.core.ui.theme.ChronosSpacing
 
@@ -82,6 +92,8 @@ fun MedicationScreen(
     val status by viewModel.status.collectAsStateWithLifecycle()
     val showExactAlarmPermissionAction by viewModel.showExactAlarmPermissionAction.collectAsStateWithLifecycle()
     val assistState by viewModel.assistState.collectAsStateWithLifecycle()
+    val adherenceSuggestions by viewModel.adherenceSuggestions.collectAsStateWithLifecycle()
+    val adherenceAssistSnapshot by viewModel.adherenceAssistSnapshot.collectAsStateWithLifecycle()
     val activePlans = plans.filter { it.isActive }
     val snackbarHostState = remember { SnackbarHostState() }
     var sheetTarget by remember { mutableStateOf<MedicationSheetTarget?>(null) }
@@ -163,31 +175,46 @@ fun MedicationScreen(
                     MedicationAdherenceChart(plans = plans)
                 }
                 if (showExactAlarmPermissionAction) {
-                    item {
+                    item(key = "med_attention_exact_alarm") {
                         MedicationAttentionCard(
                             title = "Exact alarms are off",
                             message = "Reminders use a 10-minute fallback until exact alarms are enabled.",
                             actionLabel = "Settings",
                             onAction = viewModel::openExactAlarmSettings,
+                            modifier = Modifier.animateItem(),
                             onDismiss = viewModel::dismissExactAlarmPermissionAction
                         )
                     }
                 }
+                if (adherenceSuggestions.isNotEmpty()) {
+                    item(key = "med_adherence_panel") {
+                        MedicationAdherencePanel(
+                            suggestions = adherenceSuggestions,
+                            assistSnapshot = adherenceAssistSnapshot,
+                            onApply = viewModel::applyAdherenceSuggestion,
+                            onDismiss = viewModel::dismissAdherenceSuggestion,
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
                 if (activePlans.isEmpty()) {
-                    item {
+                    item(key = "med_empty_state") {
                         ChronosEmptyState(
                             title = "No medication plans",
                             message = "Add a plan to schedule a reminder and track adherence.",
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .animateItem()
+                                .fillMaxWidth()
                         )
                     }
-                    item {
+                    item(key = "med_empty_quick_add") {
                         ChronosQuickAddChips(
                             label = "Start quickly",
                             options = listOf("Vitamin D", "Blood pressure", "Evening dose", "Inhaler"),
                             onSelect = { name ->
                                 sheetTarget = MedicationSheetTarget.Add(prefillName = name)
-                            }
+                            },
+                            modifier = Modifier.animateItem()
                         )
                     }
                 } else {
@@ -332,14 +359,80 @@ private fun medicationArchiveConfirmTitle(plan: MedicationPlan): String {
 }
 
 @Composable
+private fun MedicationAdherencePanel(
+    suggestions: List<MedicationAdherenceSuggestion>,
+    assistSnapshot: com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot?,
+    onApply: (MedicationAdherenceSuggestion) -> Unit,
+    onDismiss: (MedicationAdherenceSuggestion) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ChronosListCard(modifier = modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(
+                    Icons.Default.Medication,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "Adherence helper",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            assistSnapshot?.let { snapshot ->
+                com.chronosflow.core.ui.components.GenAiAssistBanner(
+                    title = snapshot.bannerTitle,
+                    message = snapshot.bannerMessage
+                )
+            }
+            suggestions.take(3).forEach { suggestion ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            suggestion.plan.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            "${suggestion.reason}. New reminder: ${formatDisplayMinute(suggestion.suggestedReminderMinute)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = com.chronosflow.core.ai.genai.GenAiAssistCopy.routineAssistSourceLabel(suggestion.source),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        FilledTonalButton(onClick = { onApply(suggestion) }) {
+                            Text("Apply")
+                        }
+                        TextButton(onClick = { onDismiss(suggestion) }) {
+                            Text("Dismiss")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MedicationAttentionCard(
     title: String,
     message: String,
     actionLabel: String,
     onAction: () -> Unit,
+    modifier: Modifier = Modifier,
     onDismiss: (() -> Unit)? = null
 ) {
-    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+    ChronosListCard(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -393,6 +486,9 @@ private fun MedicationRow(
     onOpenContext: () -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
+    val revealEnter = if (reduceMotion) fadeIn() else expandVertically() + fadeIn()
+    val revealExit = if (reduceMotion) fadeOut() else shrinkVertically() + fadeOut()
     val analytics = plan.analytics
     val missed = analytics.missedCountLast14Days.coerceAtLeast(plan.missedCount)
     val score = analytics.adherenceRate.coerceIn(0f, 1f)
@@ -518,7 +614,11 @@ private fun MedicationRow(
                 }
             }
 
-            if (refillIsUrgent && supplyRemaining != null) {
+            AnimatedVisibility(
+                visible = refillIsUrgent && supplyRemaining != null,
+                enter = revealEnter,
+                exit = revealExit
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.small,
@@ -576,7 +676,12 @@ private fun MedicationRow(
                 }
             }
 
-            if (expanded) {
+            AnimatedVisibility(
+                visible = expanded,
+                enter = revealEnter,
+                exit = revealExit
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -646,26 +751,37 @@ private fun MedicationRow(
                         ) {
                             Text("Skip today")
                         }
-                        if (isPaused) {
-                            FilledTonalButton(
-                                onClick = onResume,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .semantics { contentDescription = medicationResumeActionLabel(plan) }
-                            ) {
-                                Text("Resume")
-                            }
-                        } else {
-                            FilledTonalButton(
-                                onClick = onPause,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .semantics { contentDescription = medicationPauseActionLabel(plan) }
-                            ) {
-                                Text("Pause")
+                        AnimatedContent(
+                            targetState = isPaused,
+                            modifier = Modifier.weight(1f),
+                            transitionSpec = {
+                                val spec = ChronosValueAnimationFactory.selection<Float>(reduceMotion)
+                                fadeIn(spec) togetherWith fadeOut(spec)
+                            },
+                            label = "medicationPauseResumeAction"
+                        ) { paused ->
+                            if (paused) {
+                                FilledTonalButton(
+                                    onClick = onResume,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .semantics { contentDescription = medicationResumeActionLabel(plan) }
+                                ) {
+                                    Text("Resume")
+                                }
+                            } else {
+                                FilledTonalButton(
+                                    onClick = onPause,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .semantics { contentDescription = medicationPauseActionLabel(plan) }
+                                ) {
+                                    Text("Pause")
+                                }
                             }
                         }
                     }
+                }
                 }
             }
         }
@@ -851,16 +967,25 @@ private fun MedicationInfoPill(
     emphasized: Boolean = false,
     alert: Boolean = false
 ) {
-    val containerColor = when {
-        alert -> MaterialTheme.colorScheme.errorContainer
-        emphasized -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
-    }
-    val contentColor = when {
-        alert -> MaterialTheme.colorScheme.onErrorContainer
-        emphasized -> MaterialTheme.colorScheme.onPrimaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
+    val containerColor by animateColorAsState(
+        targetValue = when {
+            alert -> MaterialTheme.colorScheme.errorContainer
+            emphasized -> MaterialTheme.colorScheme.primaryContainer
+            else -> MaterialTheme.colorScheme.surfaceVariant
+        },
+        animationSpec = ChronosValueAnimationFactory.stateChange(reduceMotion),
+        label = "medInfoPillContainer"
+    )
+    val contentColor by animateColorAsState(
+        targetValue = when {
+            alert -> MaterialTheme.colorScheme.onErrorContainer
+            emphasized -> MaterialTheme.colorScheme.onPrimaryContainer
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = ChronosValueAnimationFactory.stateChange(reduceMotion),
+        label = "medInfoPillContent"
+    )
 
     Surface(
         modifier = modifier,
