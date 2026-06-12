@@ -11,6 +11,8 @@ import com.chronosflow.core.domain.model.BlockFlexibility
 import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.SleepSchedule
+import com.chronosflow.core.domain.planner.FreeTimeCalculator
+import com.chronosflow.core.domain.planner.GapFillPlanner
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
 import com.chronosflow.core.domain.usecase.ApplyAiPlanUseCase
@@ -54,7 +56,10 @@ class DayDialAiDelegateTest {
         planExplainAssistPlanner = mockk(relaxed = true),
         recommendationPlanInterpreter = mockk(relaxed = true),
         applyAiPlanUseCase = applyAiPlanUseCase,
-        assistantPreferences = assistantPreferences
+        assistantPreferences = assistantPreferences,
+        gapFillPlanner = GapFillPlanner(FreeTimeCalculator()),
+        taskRepository = mockk(relaxed = true),
+        habitRepository = mockk(relaxed = true)
     )
 
     @Test
@@ -68,7 +73,10 @@ class DayDialAiDelegateTest {
             planExplainAssistPlanner = mockk(relaxed = true),
             recommendationPlanInterpreter = mockk(relaxed = true),
             applyAiPlanUseCase = applyAiPlanUseCase,
-            assistantPreferences = assistantPreferences
+            assistantPreferences = assistantPreferences,
+            gapFillPlanner = GapFillPlanner(FreeTimeCalculator()),
+            taskRepository = mockk(relaxed = true),
+            habitRepository = mockk(relaxed = true)
         )
 
         persistedDelegate.privacyMode.test {
@@ -96,7 +104,10 @@ class DayDialAiDelegateTest {
             planExplainAssistPlanner = mockk(relaxed = true),
             recommendationPlanInterpreter = mockk(relaxed = true),
             applyAiPlanUseCase = applyAiPlanUseCase,
-            assistantPreferences = assistantPreferences
+            assistantPreferences = assistantPreferences,
+            gapFillPlanner = GapFillPlanner(FreeTimeCalculator()),
+            taskRepository = mockk(relaxed = true),
+            habitRepository = mockk(relaxed = true)
         )
 
         persistedDelegate.previewOnDeviceModel.test {

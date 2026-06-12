@@ -46,6 +46,8 @@ object ChronosUiSettingsKeys {
     const val KEY_FEATURE_SLEEP_ENABLED = "feature.sleepEnabled"
     const val KEY_FEATURE_HABITS_MEDICATION_DEFAULTS_PROMOTED = "feature.habitsMedicationDefaultsPromoted"
     const val KEY_FEATURE_COMPANION_DEFAULTS_PROMOTED = "feature.companionDefaultsPromoted"
+    const val KEY_ASSIST_AUTO_APPLY = "assist.autoApplySuggestions"
+    const val KEY_ONBOARDING_COMPLETED = "onboarding.completed"
     const val APPEARANCE_LIGHT = "LIGHT"
     const val APPEARANCE_DARK = "DARK"
     const val APPEARANCE_SYSTEM = "SYSTEM"
@@ -73,7 +75,8 @@ enum class ChronosBackdropTheme(val label: String) {
     WATER_DROPS("Water drops"),
     AURORA("Aurora"),
     SUNSET_GLOW("Sunset Glow"),
-    NEBULA("Cosmic Nebula");
+    NEBULA("Cosmic Nebula"),
+    MINIMAL("Minimal");
 
     companion object {
         val Default = LIQUID
@@ -91,18 +94,38 @@ private val Context.chronosUiSettingsDataStore: DataStore<Preferences> by prefer
     }
 )
 
-// Features that ship on-by-default. Each set has its own "defaults promoted" marker so that a user's
-// explicit opt-out of one wave (e.g. habits) does not suppress the graduation of a later wave.
-private val PromotedEnabledFeatureKeys = setOf(
-    ChronosUiSettingsKeys.KEY_FEATURE_HABITS_ENABLED,
-    ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED
+/**
+ * A set of feature keys that graduate from off-to-on together, guarded by a single "promoted"
+ * marker. Until the marker is set, the feature reads as enabled regardless of any stale stored
+ * value; once the user makes a deliberate choice (any write to one of the keys sets the marker),
+ * the stored value is respected. This is how shipped-off features become on-by-default without
+ * stranding installs that persisted a `false` before graduation.
+ */
+private data class FeatureGraduation(
+    val markerKey: String,
+    val featureKeys: Set<String>
 )
 
-private val PromotedCompanionFeatureKeys = setOf(
-    ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED,
-    ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED,
-    ChronosUiSettingsKeys.KEY_FEATURE_GOALS_ENABLED
+private val FeatureGraduations: List<FeatureGraduation> = listOf(
+    FeatureGraduation(
+        markerKey = ChronosUiSettingsKeys.KEY_FEATURE_HABITS_MEDICATION_DEFAULTS_PROMOTED,
+        featureKeys = setOf(
+            ChronosUiSettingsKeys.KEY_FEATURE_HABITS_ENABLED,
+            ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED
+        )
+    ),
+    FeatureGraduation(
+        markerKey = ChronosUiSettingsKeys.KEY_FEATURE_COMPANION_DEFAULTS_PROMOTED,
+        featureKeys = setOf(
+            ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED,
+            ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED,
+            ChronosUiSettingsKeys.KEY_FEATURE_GOALS_ENABLED
+        )
+    )
 )
+
+private fun graduationForKey(key: String): FeatureGraduation? =
+    FeatureGraduations.firstOrNull { key in it.featureKeys }
 
 data class ChronosFeatureFlags(
     val habitsEnabled: Boolean = true,
@@ -152,20 +175,12 @@ private fun Context.legacyChronosUiPreferences(): SharedPreferences {
     return getSharedPreferences(ChronosUiSettingsKeys.PREFS_NAME, Context.MODE_PRIVATE)
 }
 
-private fun Preferences.defaultsPromoted(legacyPreferences: SharedPreferences, markerKey: String): Boolean {
-    return this[booleanPreferencesKey(markerKey)]
-        ?: legacyPreferences.getBoolean(markerKey, false)
+private fun Preferences.markerPromoted(legacyPreferences: SharedPreferences, markerKey: String): Boolean {
+    return this[booleanPreferencesKey(markerKey)] ?: legacyPreferences.getBoolean(markerKey, false)
 }
 
-private fun SharedPreferences.defaultsPromoted(markerKey: String): Boolean {
+private fun SharedPreferences.markerPromoted(markerKey: String): Boolean {
     return getBoolean(markerKey, false)
-}
-
-/** The promotion marker that guards [key], or null if the feature is not graduated on-by-default. */
-private fun promotionMarkerFor(key: String): String? = when (key) {
-    in PromotedEnabledFeatureKeys -> ChronosUiSettingsKeys.KEY_FEATURE_HABITS_MEDICATION_DEFAULTS_PROMOTED
-    in PromotedCompanionFeatureKeys -> ChronosUiSettingsKeys.KEY_FEATURE_COMPANION_DEFAULTS_PROMOTED
-    else -> null
 }
 
 private fun Preferences.readBooleanSetting(
@@ -173,16 +188,16 @@ private fun Preferences.readBooleanSetting(
     key: String,
     defaultValue: Boolean
 ): Boolean {
-    val marker = promotionMarkerFor(key)
-    if (marker != null && !defaultsPromoted(legacyPreferences, marker)) {
+    val graduation = graduationForKey(key)
+    if (graduation != null && !markerPromoted(legacyPreferences, graduation.markerKey)) {
         return true
     }
     return this[booleanPreferencesKey(key)] ?: legacyPreferences.getBoolean(key, defaultValue)
 }
 
 private fun SharedPreferences.readBooleanSetting(key: String, defaultValue: Boolean): Boolean {
-    val marker = promotionMarkerFor(key)
-    if (marker != null && !defaultsPromoted(marker)) {
+    val graduation = graduationForKey(key)
+    if (graduation != null && !markerPromoted(graduation.markerKey)) {
         return true
     }
     return getBoolean(key, defaultValue)
@@ -324,17 +339,17 @@ fun Context.readChronosUiIntSetting(key: String, defaultValue: Int): Int {
 
 suspend fun Context.writeChronosUiBooleanSetting(key: String, value: Boolean) {
     // Once the user explicitly sets a graduated feature, stop forcing its on-by-default value.
-    val promotionMarker = promotionMarkerFor(key)
+    val markerKey = graduationForKey(key)?.markerKey
     chronosUiSettingsDataStore.edit { preferences ->
         preferences[booleanPreferencesKey(key)] = value
-        if (promotionMarker != null) {
-            preferences[booleanPreferencesKey(promotionMarker)] = true
+        if (markerKey != null) {
+            preferences[booleanPreferencesKey(markerKey)] = true
         }
     }
     legacyChronosUiPreferences().edit().apply {
         putBoolean(key, value)
-        if (promotionMarker != null) {
-            putBoolean(promotionMarker, true)
+        if (markerKey != null) {
+            putBoolean(markerKey, true)
         }
     }.apply()
 }
@@ -379,6 +394,22 @@ fun Context.chronosUiIntSettingFlow(key: String, defaultValue: Int): Flow<Int> {
         preferences[intPreferencesKey(key)]
             ?: legacyChronosUiPreferences().getInt(key, defaultValue)
     }
+}
+
+/** Read-only observer for a persisted boolean setting — never writes the store back. */
+@Composable
+fun rememberChronosUiBooleanSetting(key: String, defaultValue: Boolean): Boolean {
+    val context = LocalContext.current.applicationContext
+    val value by produceState(
+        initialValue = context.readChronosUiBooleanSetting(key, defaultValue),
+        context,
+        key
+    ) {
+        context.chronosUiBooleanSettingFlow(key, defaultValue).collect { storedValue ->
+            value = storedValue
+        }
+    }
+    return value
 }
 
 @Composable

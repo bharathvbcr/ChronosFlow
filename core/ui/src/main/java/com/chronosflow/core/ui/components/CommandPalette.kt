@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.BottomSheetDefaults
@@ -102,6 +105,17 @@ fun CommandPaletteDialog(
     isExecuting: Boolean = false,
     onQueryChange: ((String) -> Unit)? = null,
     onRunCommand: ((CommandPaletteItem) -> Unit)? = null,
+    onSubmitQuery: ((String) -> Unit)? = null,
+    onAskAssistant: ((String) -> Unit)? = null,
+    assistantIsAsking: Boolean = false,
+    assistantStreamingReply: String? = null,
+    assistantQuestion: String? = null,
+    assistantHasConversation: Boolean = false,
+    assistantReply: String? = null,
+    assistantSourceLabel: String? = null,
+    assistantProposalLabels: List<String> = emptyList(),
+    onConfirmAssistantProposal: ((Int) -> Unit)? = null,
+    onDismissAssistantReply: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var localQuery by remember { mutableStateOf("") }
@@ -178,6 +192,17 @@ fun CommandPaletteDialog(
                         .fillMaxWidth()
                         .focusRequester(queryFocusRequester),
                     singleLine = true,
+                    keyboardOptions = if (onSubmitQuery != null) {
+                        KeyboardOptions(imeAction = ImeAction.Go)
+                    } else {
+                        KeyboardOptions.Default
+                    },
+                    keyboardActions = KeyboardActions(
+                        onGo = {
+                            val submitted = activeQuery.trim()
+                            if (submitted.isNotBlank()) onSubmitQuery?.invoke(submitted)
+                        }
+                    ),
                     shape = RoundedCornerShape(24.dp),
                     leadingIcon = {
                         Icon(
@@ -210,6 +235,52 @@ fun CommandPaletteDialog(
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (onAskAssistant != null) {
+                    TextButton(
+                        onClick = { if (activeQuery.isNotBlank()) onAskAssistant(activeQuery) },
+                        enabled = activeQuery.isNotBlank() && !assistantIsAsking,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = when {
+                                assistantIsAsking && assistantStreamingReply != null -> "Replying…"
+                                assistantIsAsking -> "Thinking…"
+                                assistantHasConversation -> "Ask a follow-up"
+                                else -> "Ask the assistant"
+                            }
+                        )
+                    }
+                }
+                if (assistantIsAsking && assistantStreamingReply != null) {
+                    AssistantReplyPanel(
+                        reply = assistantStreamingReply,
+                        question = assistantQuestion,
+                        sourceLabel = "Gemini Nano — replying live",
+                        proposalLabels = emptyList(),
+                        onConfirm = null,
+                        onDismiss = null
+                    )
+                } else if (assistantReply != null) {
+                    AssistantReplyPanel(
+                        reply = assistantReply,
+                        question = assistantQuestion,
+                        sourceLabel = assistantSourceLabel,
+                        proposalLabels = assistantProposalLabels,
+                        onConfirm = onConfirmAssistantProposal,
+                        onDismiss = onDismissAssistantReply
+                    )
+                    if (onAskAssistant != null) {
+                        ChronosSpeechInputButton(
+                            prompt = "Ask a follow-up, for example make it tomorrow at 2pm.",
+                            label = "Speak a follow-up",
+                            onTranscript = { transcript ->
+                                val followUp = commandPaletteSpeechQuery(transcript)
+                                if (followUp.isNotBlank()) onAskAssistant(followUp)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
                 HorizontalDivider()
                 when {
                     commands.isEmpty() -> {
@@ -222,7 +293,11 @@ fun CommandPaletteDialog(
                         )
                     }
                     filteredCommands.isEmpty() -> {
-                        val noMatchText = "No matching actions for \"${activeQuery.take(48)}\"."
+                        val noMatchText = if (onAskAssistant != null) {
+                            "No matching actions for \"${activeQuery.take(48)}\" — try Ask the assistant above."
+                        } else {
+                            "No matching actions for \"${activeQuery.take(48)}\"."
+                        }
                         Text(
                             text = noMatchText,
                             style = MaterialTheme.typography.bodyMedium,
@@ -505,6 +580,68 @@ internal fun groupCommandsForDisplay(commands: List<CommandPaletteItem>): List<C
                 }
         }
     return entries
+}
+
+@Composable
+private fun AssistantReplyPanel(
+    reply: String,
+    question: String?,
+    sourceLabel: String?,
+    proposalLabels: List<String>,
+    onConfirm: ((Int) -> Unit)?,
+    onDismiss: (() -> Unit)?
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.65f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            question?.takeIf { it.isNotBlank() }?.let { asked ->
+                Text(
+                    text = "You asked: ${asked.take(96)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = reply,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            sourceLabel?.let { label ->
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if ((proposalLabels.isNotEmpty() && onConfirm != null) || onDismiss != null) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    if (onConfirm != null) {
+                        proposalLabels.forEachIndexed { index, label ->
+                            TextButton(onClick = { onConfirm(index) }) {
+                                Text("Run: ${label.take(40)}")
+                            }
+                        }
+                    }
+                    if (onDismiss != null) {
+                        TextButton(onClick = onDismiss) {
+                            Text("Dismiss")
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

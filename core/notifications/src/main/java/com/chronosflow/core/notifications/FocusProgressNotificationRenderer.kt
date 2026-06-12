@@ -59,7 +59,8 @@ class FocusProgressNotificationRenderer @Inject constructor(
         }
 
         return NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_focus_session)
+            .setSmallIcon(R.drawable.ic_chronosflow_notification)
+            .setColor(ContextCompat.getColor(context, R.color.chronosflow_brand_accent))
             .setContentTitle(displayTitle)
             .setContentText(displayText)
             .setSubText(context.getString(R.string.focus_notification_subtext))

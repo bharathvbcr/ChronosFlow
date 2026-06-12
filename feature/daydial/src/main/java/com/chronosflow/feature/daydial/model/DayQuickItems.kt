@@ -14,6 +14,7 @@ import com.chronosflow.core.domain.model.TaskSchedule
 import com.chronosflow.core.domain.model.buildLegacyHabitSchedule
 import com.chronosflow.core.notifications.TaskContextCommand
 import com.chronosflow.core.notifications.TaskContextCommandResolver
+import com.chronosflow.core.ui.components.formatDurationLabel
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
@@ -318,12 +319,5 @@ private fun formatDayQuickMinute(minute: Int): String {
     return "%d:%02d %s".format(displayHour, m, suffix)
 }
 
-private fun formatDayQuickDuration(durationMinutes: Int): String {
-    val hours = durationMinutes / 60
-    val minutes = durationMinutes % 60
-    return when {
-        hours > 0 && minutes > 0 -> "${hours}h ${minutes}m"
-        hours > 0 -> "${hours}h"
-        else -> "${durationMinutes}m"
-    }
-}
+private fun formatDayQuickDuration(durationMinutes: Int): String =
+    formatDurationLabel(durationMinutes)

@@ -10,6 +10,7 @@ import com.chronosflow.core.domain.model.AlarmDeliveryState
 import com.chronosflow.core.domain.model.AlarmRequestType
 import com.chronosflow.core.domain.model.AppLaunchTarget
 import com.chronosflow.core.domain.model.MedicationPlan
+import com.chronosflow.core.domain.model.ProactiveDigestKeys
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.repository.AlarmRequestRepository
 import com.chronosflow.core.domain.repository.HabitRepository
@@ -17,6 +18,7 @@ import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
+import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,10 +38,13 @@ class AlarmDeliveryCoordinator @Inject constructor(
 ) {
     suspend fun deliverFromAlarmIntent(intent: Intent, receiverClass: Class<*>) {
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "ChronosFlow Reminder"
-        val message = intent.getStringExtra(EXTRA_MESSAGE) ?: "It's time for your scheduled task."
+        val defaultMessage = intent.getStringExtra(EXTRA_MESSAGE) ?: "It's time for your scheduled task."
         val requestId = intent.getStringExtra(EXTRA_ID)
 
         val alarmRequest = requestId?.let { alarmRequestRepository.getAlarmRequest(it) }
+        // For the end-of-day review reminder, prefer the proactive digest that Gemini Nano
+        // pre-generated while the app was foregrounded (cached in shared prefs) over the static copy.
+        val message = dailyReviewDigestOverride(alarmRequest?.type) ?: defaultMessage
         val channelId = ReminderNotificationChannels.channelIdFor(
             receiverClass = receiverClass,
             requestType = alarmRequest?.type
@@ -65,7 +70,8 @@ class AlarmDeliveryCoordinator @Inject constructor(
 
         val notificationId = requestId?.hashCode() ?: System.currentTimeMillis().toInt()
         val notification = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_chronos_alarm)
+            .setSmallIcon(R.drawable.ic_chronosflow_notification)
+            .setColor(ContextCompat.getColor(context, R.color.chronosflow_brand_accent))
             .setContentTitle(title)
             .setContentText(message)
             .setColor(accentColorFor(channelId))
@@ -232,7 +238,8 @@ class AlarmDeliveryCoordinator @Inject constructor(
         val notificationId = plan.id.hashCode() + 200
         val message = "Only $remaining ${plan.unit}(s) left of ${plan.name}. Please request a refill soon."
         val builtNotification = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_chronos_alarm)
+            .setSmallIcon(R.drawable.ic_chronosflow_notification)
+            .setColor(ContextCompat.getColor(context, R.color.chronosflow_brand_accent))
             .setContentTitle("Low Medication Supply: ${plan.name}")
             .setContentText(message)
             .setSubText(ReminderNotificationGroups.categoryLabel(isMedication = true, isHabit = false, isTask = false))
@@ -252,6 +259,19 @@ class AlarmDeliveryCoordinator @Inject constructor(
             .build()
         notificationManager.notify(notificationId, builtNotification)
         ReminderNotificationGroups.refreshSummary(context)
+    }
+
+    /**
+     * The cached proactive digest for the daily-review reminder, or null to keep the default copy.
+     * Reads the shared prefs directly (no [com.chronosflow.core.ai] dependency) and only returns a
+     * digest generated for today, so a stale entry never shows on a later day.
+     */
+    private fun dailyReviewDigestOverride(type: AlarmRequestType?): String? {
+        if (type != AlarmRequestType.DAILY_REVIEW) return null
+        val prefs = context.getSharedPreferences(ProactiveDigestKeys.PREFERENCES_NAME, Context.MODE_PRIVATE)
+        val text = prefs.getString(ProactiveDigestKeys.KEY_TEXT, null)?.takeIf { it.isNotBlank() } ?: return null
+        val forDate = prefs.getString(ProactiveDigestKeys.KEY_FOR_DATE, null)
+        return text.takeIf { forDate == LocalDate.now().toString() }
     }
 
     private suspend fun loadTaskForRequest(requestId: String?): Task? {

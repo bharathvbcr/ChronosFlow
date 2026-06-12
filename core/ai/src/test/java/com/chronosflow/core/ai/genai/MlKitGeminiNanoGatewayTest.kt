@@ -186,5 +186,11 @@ class MlKitGeminiNanoGatewayTest {
             val result = if (generatedResponses.size > 1) generatedResponses.removeFirst() else generatedResponses.first()
             return result.getOrThrow()
         }
+
+        override fun generateTextStream(prompt: String): Flow<String> = flow {
+            generateCalls++
+            val result = if (generatedResponses.size > 1) generatedResponses.removeFirst() else generatedResponses.first()
+            emit(result.getOrThrow())
+        }
     }
 }

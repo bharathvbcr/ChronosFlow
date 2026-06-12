@@ -6,7 +6,8 @@ data class GenAiAssistUiSnapshot(
     val bannerTitle: String,
     val bannerMessage: String,
     val privacyModeLabel: String,
-    val aiDisabled: Boolean
+    val aiDisabled: Boolean,
+    val isReady: Boolean = false
 )
 
 fun GenAiAssistCoordinator.assistUiSnapshot(): GenAiAssistUiSnapshot {
@@ -16,7 +17,8 @@ fun GenAiAssistCoordinator.assistUiSnapshot(): GenAiAssistUiSnapshot {
         bannerTitle = GenAiAssistCopy.bannerTitle(mode, status),
         bannerMessage = GenAiAssistCopy.bannerMessage(mode, status),
         privacyModeLabel = GenAiAssistCopy.privacyModeLabel(mode),
-        aiDisabled = mode == PrivacyMode.DISABLED
+        aiDisabled = mode == PrivacyMode.DISABLED,
+        isReady = GenAiAssistCopy.isReady(mode, status)
     )
 }
 

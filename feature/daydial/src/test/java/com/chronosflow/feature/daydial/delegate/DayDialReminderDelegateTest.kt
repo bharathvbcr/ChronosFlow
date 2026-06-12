@@ -47,6 +47,9 @@ class DayDialReminderDelegateTest {
         every { alarmScheduler.scheduleInexactAlarm(any(), any(), any(), any()) } answers {
             throw AssertionError("sleep-window reminders should not be scheduled")
         }
+        every { alarmScheduler.scheduleExactAlarm(any(), any(), any(), any(), any()) } answers {
+            throw AssertionError("sleep-window reminders should not be scheduled")
+        }
         coEvery { alarmRequestRepository.getAlarmRequest(any()) } returns null
         every { habitRepository.observeHabits() } returns flowOf(emptyList())
         val delegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository)
@@ -108,6 +111,9 @@ class DayDialReminderDelegateTest {
         every { alarmScheduler.scheduleInexactAlarm(any(), any(), any(), any()) } answers {
             throw AssertionError("all-day calendar imports should not schedule focus reminders")
         }
+        every { alarmScheduler.scheduleExactAlarm(any(), any(), any(), any(), any()) } answers {
+            throw AssertionError("all-day calendar imports should not schedule focus reminders")
+        }
         every { habitRepository.observeHabits() } returns flowOf(emptyList())
         val delegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository)
 
@@ -143,10 +149,10 @@ class DayDialReminderDelegateTest {
         )
         coEvery { alarmRequestRepository.getAlarmRequest(any()) } returns null
         every {
-            alarmScheduler.scheduleInexactAlarm("daydial:$date:habit-journal:start", any(), "Journal", "Journal starts now")
+            alarmScheduler.scheduleExactAlarm("daydial:$date:habit-journal:start", any(), "Journal", "Journal starts now", any())
         } returns com.chronosflow.core.notifications.AlarmScheduleResult.Scheduled(
             "daydial:$date:habit-journal:start",
-            exact = false
+            exact = true
         )
         val delegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository)
 
@@ -164,11 +170,12 @@ class DayDialReminderDelegateTest {
 
         assertEquals("Scheduled 1 upcoming reminders", delegate.reminderScheduleStatus.value)
         coVerify {
-            alarmScheduler.scheduleInexactAlarm(
+            alarmScheduler.scheduleExactAlarm(
                 "daydial:$date:habit-journal:start",
                 any(),
                 "Journal",
-                "Journal starts now"
+                "Journal starts now",
+                any()
             )
         }
     }

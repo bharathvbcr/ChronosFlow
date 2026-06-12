@@ -1,6 +1,7 @@
 package com.chronosflow.feature.daydial.ui
 
 import android.content.Context
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
@@ -37,14 +40,18 @@ import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -64,6 +71,11 @@ import com.chronosflow.core.notifications.launchTaskContextCommand
 import com.chronosflow.core.domain.planner.DialRing
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosSectionTitle
+import com.chronosflow.core.ui.components.formatDurationLabel
+import com.chronosflow.core.ui.motion.ChronosMotionDefaults
+import com.chronosflow.core.ui.motion.ChronosTransitionDirection
+import com.chronosflow.core.ui.motion.ChronosTransitionFactory
+import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.core.ui.theme.categoryColor
 import com.chronosflow.feature.daydial.ChronosDial
@@ -79,6 +91,7 @@ import com.chronosflow.feature.daydial.model.DayQuickItemUiModel
 import com.chronosflow.feature.daydial.model.DayQuickItemsUiState
 import com.chronosflow.feature.daydial.isAllDayCalendarImport
 import com.chronosflow.feature.daydial.model.DayDialTab
+import com.chronosflow.feature.daydial.rememberPersistentBoolean
 import com.chronosflow.feature.daydial.model.resolveDailyAction
 
 private const val DAY_IN_MINUTES = 1440
@@ -129,6 +142,8 @@ internal fun TodayTab(
     manualMissedBlockIds: Set<String> = emptySet(),
     compactMode: Boolean,
     compactWindowStart: Int,
+    nightStartMinute: Int = 21 * 60,
+    nightEndMinute: Int = 7 * 60,
     glassSurfacesEnabled: Boolean = true,
     highContrastEnabled: Boolean = false,
     showRingGuide: Boolean = true,
@@ -144,13 +159,16 @@ internal fun TodayTab(
     onEmptyAreaSelected: (Int) -> Unit,
     onEmptyRingSelected: (Int, DialRing) -> Unit = { minute, _ -> onEmptyAreaSelected(minute) },
     onDragCancel: () -> Unit,
+    onToggleCompactMode: (() -> Unit)? = null,
+    onWindowBack: () -> Unit = {},
+    onWindowForward: () -> Unit = {},
+    onCenterWindowOnNow: () -> Unit = {},
     onStartFocus: (String) -> Unit,
     onCompleteBlock: (String) -> Unit,
     onUndoMissed: (String) -> Unit = {},
     onShowMissed: () -> Unit,
     onOpenPlanTab: () -> Unit,
     onAiStripAction: (String) -> Unit,
-    onShowRingGuideChanged: (Boolean) -> Unit = {},
     onOpenReview: () -> Unit = {},
     onOpenTasks: () -> Unit = {},
     onOpenHabits: () -> Unit = {},
@@ -166,6 +184,7 @@ internal fun TodayTab(
     onOpenMissedRecovery: () -> Unit,
     showSleepPrompt: Boolean = false,
     onLogSleep: () -> Unit = {},
+    contentTopPadding: Dp = 0.dp,
     contentBottomPadding: Dp = 0.dp
 ) {
     val dailyAction = remember(timeBlocks, activeBlock, nextBlock, missedBlocks) {
@@ -192,7 +211,8 @@ internal fun TodayTab(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(pagePadding),
+                    .padding(start = pagePadding, end = pagePadding, bottom = pagePadding)
+                    .padding(top = contentTopPadding + pagePadding),
                 verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Medium)
             ) {
                 DayDialPageHeader(
@@ -226,8 +246,11 @@ internal fun TodayTab(
                             activeBlock = activeBlock,
                             nextBlock = nextBlock,
                             missedBlocks = missedBlocks,
+                            review = review,
                             compactMode = compactMode,
                             compactWindowStart = compactWindowStart,
+                            nightStartMinute = nightStartMinute,
+                            nightEndMinute = nightEndMinute,
                             selectedBlockId = selectedBlockId,
                             hapticCue = hapticCue,
                             glassSurfacesEnabled = dialGlassEnabled,
@@ -241,8 +264,13 @@ internal fun TodayTab(
                             onBlockResizeCommitted = onBlockResizeCommitted,
                             onEmptyAreaSelected = onEmptyAreaSelected,
                             onEmptyRingSelected = onEmptyRingSelected,
-                            onDragCancel = onDragCancel
+                            onDragCancel = onDragCancel,
+                            onToggleCompactMode = onToggleCompactMode,
+                            onWindowBack = onWindowBack,
+                            onWindowForward = onWindowForward,
+                            onCenterWindowOnNow = onCenterWindowOnNow
                         )
+                        TodayDialLegend(showRingGuide = showRingGuide)
                         DailyReviewHeader(
                             review = review,
                             onPlannedClick = onOpenPlanned,
@@ -250,11 +278,6 @@ internal fun TodayTab(
                             onMissedClick = onOpenMissedRecovery,
                             onOpenReview = onOpenReview,
                             showReviewAction = reviewFeatureEnabled
-                        )
-                        DailyDialRingLegend(
-                            review = review,
-                            isExpanded = showRingGuide,
-                            onExpandedChange = onShowRingGuideChanged
                         )
                         Spacer(Modifier.height(bottomContentPadding))
                     }
@@ -322,7 +345,7 @@ internal fun TodayTab(
                         .padding(horizontal = pagePadding),
                     verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Medium)
                 ) {
-                    Spacer(Modifier.height(compactTodayTopSpacer))
+                    Spacer(Modifier.height(contentTopPadding + compactTodayTopSpacer))
                     DayDialPageHeader(
                         title = DayDialTab.TODAY.label,
                         subtitle = dayDialPrimaryPageSubtitle(DayDialTab.TODAY),
@@ -341,8 +364,11 @@ internal fun TodayTab(
                         activeBlock = activeBlock,
                         nextBlock = nextBlock,
                         missedBlocks = missedBlocks,
+                        review = review,
                         compactMode = compactMode,
                         compactWindowStart = compactWindowStart,
+                        nightStartMinute = nightStartMinute,
+                        nightEndMinute = nightEndMinute,
                         selectedBlockId = selectedBlockId,
                         hapticCue = hapticCue,
                         glassSurfacesEnabled = dialGlassEnabled,
@@ -357,10 +383,15 @@ internal fun TodayTab(
                         onEmptyAreaSelected = onEmptyAreaSelected,
                         onEmptyRingSelected = onEmptyRingSelected,
                         onDragCancel = onDragCancel,
+                        onToggleCompactMode = onToggleCompactMode,
+                        onWindowBack = onWindowBack,
+                        onWindowForward = onWindowForward,
+                        onCenterWindowOnNow = onCenterWindowOnNow,
                         topPadding = compactTodayHeroTopPadding,
                         canvasInset = compactTodayDialCanvasInset,
                         dialRadiusScale = compactTodayDialRadiusScale
                     )
+                    TodayDialLegend(showRingGuide = showRingGuide)
                     DailyReviewHeader(
                         review = review,
                         onPlannedClick = onOpenPlanned,
@@ -394,11 +425,6 @@ internal fun TodayTab(
                         onMedicationMissed = onQuickMedicationMissed,
                         showContextualActions = true,
                         onContextActionFailed = onQuickContextActionFailed
-                    )
-                    DailyDialRingLegend(
-                        review = review,
-                        isExpanded = showRingGuide,
-                        onExpandedChange = onShowRingGuideChanged
                     )
                     TodayNowAndNextSection(
                         activeBlock = activeBlock,
@@ -441,8 +467,11 @@ private fun TodayDialHero(
     nextBlock: TimeBlockUiModel?,
     missedBlocks: List<TimeBlockUiModel>,
     manualMissedBlockIds: Set<String> = emptySet(),
+    review: DailyReview? = null,
     compactMode: Boolean,
     compactWindowStart: Int,
+    nightStartMinute: Int = 21 * 60,
+    nightEndMinute: Int = 7 * 60,
     selectedBlockId: String?,
     hapticCue: PlannerHapticCue,
     glassSurfacesEnabled: Boolean,
@@ -457,21 +486,29 @@ private fun TodayDialHero(
     onEmptyAreaSelected: (Int) -> Unit,
     onEmptyRingSelected: (Int, DialRing) -> Unit,
     onDragCancel: () -> Unit,
+    onToggleCompactMode: (() -> Unit)? = null,
+    onWindowBack: () -> Unit = {},
+    onWindowForward: () -> Unit = {},
+    onCenterWindowOnNow: () -> Unit = {},
     topPadding: Dp = chronosDialSectionVerticalPadding,
     bottomPadding: Dp = chronosDialSectionVerticalPadding,
     canvasInset: Dp = chronosDialCanvasInset,
     dialRadiusScale: Float = 1f
 ) {
     val selectedBlock = timeBlocks.firstOrNull { it.id == selectedBlockId }
-    val centerState = remember(currentMinute, selectedBlock, activeBlock, nextBlock, isViewingToday) {
+    val centerState = remember(currentMinute, selectedBlock, activeBlock, nextBlock, isViewingToday, review, timeBlocks, freeTime) {
         buildDailyDialCenterState(
             currentMinute = currentMinute,
             selectedBlock = selectedBlock,
             activeBlock = activeBlock,
             nextBlock = nextBlock,
-            isViewingToday = isViewingToday
+            isViewingToday = isViewingToday,
+            review = review,
+            totalBlocks = timeBlocks.size,
+            freeTime = freeTime
         )
     }
+    val reduceMotionEnabled = rememberChronosUiSettings().reduceMotionEnabled
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -483,48 +520,155 @@ private fun TodayDialHero(
             ),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
+        // Cross-fading the whole dial between zoom levels avoids interpolating two
+        // incompatible angle systems (absolute 24h vs window-relative 12h).
+        val zoomTransition = ChronosTransitionFactory.fadeScale(
+            durationMillis = if (reduceMotionEnabled) {
+                ChronosMotionDefaults.ReducedDurationMillis
+            } else {
+                ChronosMotionDefaults.DefaultDurationMillis
+            },
+            easing = ChronosMotionDefaults.MaterialStandardEasing,
+            direction = ChronosTransitionDirection.Neutral,
+            // Both directions stay <= 1f so the outgoing dial shrinks-and-fades instead of
+            // growing past the hero box (which clipped the ring + bottom hour label).
+            enterScale = if (reduceMotionEnabled) 1f else 0.94f,
+            exitScale = if (reduceMotionEnabled) 1f else 0.94f
+        )
+        AnimatedContent(
+            targetState = compactMode,
+            transitionSpec = { zoomTransition.asContentTransform() },
+            label = "dialZoomMode",
             modifier = Modifier
                 .fillMaxWidth()
                 .height(dialHeight)
-        ) {
-            ChronosDial(
-                blocks = timeBlocks,
-                freeTimeSegments = freeTime,
-                currentMinute = currentMinute,
-                showNowHand = isViewingToday && isPageActive,
+        ) { windowed ->
+            // AnimatedContent measures its contents with loose constraints to learn
+            // their sizes, so fillMaxSize would let the dial's aspectRatio expand to
+            // the full width and clip the ring top/bottom — pin the height instead.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(dialHeight)
+            ) {
+                ChronosDial(
+                    blocks = timeBlocks,
+                    freeTimeSegments = freeTime,
+                    currentMinute = currentMinute,
+                    showNowHand = isViewingToday && isPageActive,
+                    compactMode = windowed,
+                    compactWindowStart = compactWindowStart,
+                    nightStartMinute = nightStartMinute,
+                    nightEndMinute = nightEndMinute,
+                    selectedBlockId = selectedBlockId,
+                    activeBlockId = activeBlock?.id,
+                    upcomingBlockId = nextBlock?.id,
+                    missedBlockIds = missedBlocks.map { it.id }.toSet(),
+                    hapticCue = hapticCue,
+                    onBlockSelected = onBlockSelected,
+                    onInnerRingBlockActivated = onCompleteBlock,
+                    onBlockDragStarted = onBlockDragStarted,
+                    onBlockMoved = onBlockMoved,
+                    onBlockMoveCommitted = onBlockMoveCommitted,
+                    onBlockResize = onBlockResize,
+                    onBlockResizeCommitted = onBlockResizeCommitted,
+                    onEmptyAreaLongPress = onEmptyAreaSelected,
+                    onEmptyRingLongPress = onEmptyRingSelected,
+                    onDragEnd = onDragCancel,
+                    glassSurfacesEnabled = glassSurfacesEnabled,
+                    showRingGuide = showRingGuide,
+                    canvasInset = canvasInset,
+                    dialRadiusScale = dialRadiusScale,
+                    modifier = Modifier.fillMaxSize()
+                )
+                DailyDialCenterOverlay(
+                    state = centerState,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(horizontal = 24.dp)
+                )
+            }
+        }
+        if (onToggleCompactMode != null) {
+            // The bottom (6 o'clock) hour label is drawn outside the ring, ~25dp below
+            // the dial's box edge, so reserve enough room for it to sit clear of the
+            // 12h/24h controls instead of clipping the dial.
+            Spacer(Modifier.height(28.dp))
+            DialZoomControls(
                 compactMode = compactMode,
                 compactWindowStart = compactWindowStart,
-                selectedBlockId = selectedBlockId,
-                activeBlockId = activeBlock?.id,
-                upcomingBlockId = nextBlock?.id,
-                missedBlockIds = missedBlocks.map { it.id }.toSet(),
-                hapticCue = hapticCue,
-                onBlockSelected = onBlockSelected,
-                onInnerRingBlockActivated = onCompleteBlock,
-                onBlockDragStarted = onBlockDragStarted,
-                onBlockMoved = onBlockMoved,
-                onBlockMoveCommitted = onBlockMoveCommitted,
-                onBlockResize = onBlockResize,
-                onBlockResizeCommitted = onBlockResizeCommitted,
-                onEmptyAreaLongPress = onEmptyAreaSelected,
-                onEmptyRingLongPress = onEmptyRingSelected,
-                onDragEnd = onDragCancel,
-                glassSurfacesEnabled = glassSurfacesEnabled,
-                showRingGuide = showRingGuide,
-                canvasInset = canvasInset,
-                dialRadiusScale = dialRadiusScale,
-                modifier = Modifier.fillMaxSize()
-            )
-            DailyDialCenterOverlay(
-                state = centerState,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(horizontal = 24.dp)
+                currentMinute = currentMinute,
+                isViewingToday = isViewingToday,
+                onToggleCompactMode = onToggleCompactMode,
+                onWindowBack = onWindowBack,
+                onWindowForward = onWindowForward,
+                onCenterWindowOnNow = onCenterWindowOnNow
             )
         }
     }
 }
+
+/**
+ * Zoom controls under the dial: 24h/12h toggle plus, when zoomed, half-window
+ * paging and a "Now" shortcut whenever the current time is outside the window.
+ */
+@Composable
+private fun DialZoomControls(
+    compactMode: Boolean,
+    compactWindowStart: Int,
+    currentMinute: Int,
+    isViewingToday: Boolean,
+    onToggleCompactMode: () -> Unit,
+    onWindowBack: () -> Unit,
+    onWindowForward: () -> Unit,
+    onCenterWindowOnNow: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FilterChip(
+            selected = compactMode,
+            onClick = onToggleCompactMode,
+            label = { Text(if (compactMode) "12h" else "24h") },
+            modifier = Modifier.semantics {
+                contentDescription = dialZoomToggleActionLabel(compactMode)
+            }
+        )
+        if (compactMode) {
+            IconButton(
+                onClick = onWindowBack,
+                modifier = Modifier.semantics { contentDescription = "Show earlier hours" }
+            ) {
+                Icon(Icons.Filled.ChevronLeft, contentDescription = null)
+            }
+            Text(
+                text = dialZoomWindowLabel(compactWindowStart),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            IconButton(
+                onClick = onWindowForward,
+                modifier = Modifier.semantics { contentDescription = "Show later hours" }
+            ) {
+                Icon(Icons.Filled.ChevronRight, contentDescription = null)
+            }
+            if (isViewingToday && !dialZoomMinuteInWindow(currentMinute, compactWindowStart)) {
+                TextButton(onClick = onCenterWindowOnNow) { Text("Now") }
+            }
+        }
+    }
+}
+
+internal fun dialZoomToggleActionLabel(compactMode: Boolean): String =
+    if (compactMode) "Switch to 24 hour dial" else "Zoom dial to 12 hours"
+
+internal fun dialZoomWindowLabel(windowStart: Int): String =
+    "${formatMinute(windowStart)} – ${formatMinute((windowStart + 720) % DAY_IN_MINUTES)}"
+
+internal fun dialZoomMinuteInWindow(minute: Int, windowStart: Int): Boolean =
+    ((minute - windowStart + DAY_IN_MINUTES) % DAY_IN_MINUTES) < 720
 
 @Composable
 private fun TodayDetailsSections(
@@ -1126,7 +1270,7 @@ private fun TodayNowBlockContent(
         trackColor = MaterialTheme.colorScheme.primaryContainer
     )
     Text(
-        text = "$timeLeft min left",
+        text = "${formatDurationLabel(timeLeft)} left",
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.SemiBold
@@ -1268,7 +1412,7 @@ private fun TodayNextBlockRow(
                 )
             }
             Text(
-                text = "in ${gapFromNow}m",
+                text = "in ${formatDurationLabel(gapFromNow)}",
                 style = MaterialTheme.typography.labelMedium,
                 color = nextAccentColor,
                 fontWeight = FontWeight.SemiBold
@@ -1340,10 +1484,10 @@ internal fun todayOpenTimeSummaryLabel(
         openWindowEndMinute = openWindowEndMinute
     )
     if (nextStartMinute != null) {
-        return "Free until ${formatMinute(nextStartMinute)} · ${minutesUntilNext ?: 0}m"
+        return "Free until ${formatMinute(nextStartMinute)} · ${formatDurationLabel(minutesUntilNext ?: 0)}"
     }
     return if (minutesUntilNext != null && minutesUntilNext > 0) {
-        "Free for the rest of the day · ${minutesUntilNext}m"
+        "Free for the rest of the day · ${formatDurationLabel(minutesUntilNext)}"
     } else {
         "Free for the rest of the day"
     }
@@ -1368,4 +1512,18 @@ private fun formatMinute(minute: Int): String {
         else -> h
     }
     return "%d:%02d %s".format(displayHour, m, suffix)
+}
+
+/**
+ * Compact ring legend shown directly under the dial, with a one-time
+ * dismissible tip explaining the rings for first-time users.
+ */
+@Composable
+private fun TodayDialLegend(showRingGuide: Boolean) {
+    if (!showRingGuide) return
+    var legendTipSeen by rememberPersistentBoolean("ring_legend_tip_seen", false)
+    DailyDialInlineLegend()
+    if (!legendTipSeen) {
+        DailyDialLegendTip(onDismiss = { legendTipSeen = true })
+    }
 }

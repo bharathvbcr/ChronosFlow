@@ -26,7 +26,8 @@ fun MoodEnergyCheckInAssistCard(
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         GenAiAssistBanner(
             title = GenAiAssistCopy.bannerTitle(privacyMode, genAiRuntimeStatus),
-            message = GenAiAssistCopy.bannerMessage(privacyMode, genAiRuntimeStatus)
+            message = GenAiAssistCopy.bannerMessage(privacyMode, genAiRuntimeStatus),
+            ready = GenAiAssistCopy.isReady(privacyMode, genAiRuntimeStatus)
         )
         ChronosMoodEnergyCheckInCard(
             onSave = onSave,

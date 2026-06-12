@@ -12,6 +12,17 @@ import org.junit.Test
 class GenAiAssistCopyTest {
 
     @Test
+    fun `isReady is true only when assist needs no action`() {
+        assertFalse(GenAiAssistCopy.isReady(PrivacyMode.DISABLED, GenAiRuntimeStatus(nanoStatus = NanoModelStatus.AVAILABLE)))
+        assertTrue(GenAiAssistCopy.isReady(PrivacyMode.CLOUD_ALLOWED, GenAiRuntimeStatus(cloudConfigured = true)))
+        assertFalse(GenAiAssistCopy.isReady(PrivacyMode.CLOUD_ALLOWED, GenAiRuntimeStatus(cloudConfigured = false)))
+        assertTrue(GenAiAssistCopy.isReady(PrivacyMode.ON_DEVICE_ONLY, GenAiRuntimeStatus(nanoStatus = NanoModelStatus.AVAILABLE)))
+        assertFalse(GenAiAssistCopy.isReady(PrivacyMode.ON_DEVICE_ONLY, GenAiRuntimeStatus(nanoStatus = NanoModelStatus.DOWNLOADING)))
+        assertFalse(GenAiAssistCopy.isReady(PrivacyMode.ON_DEVICE_ONLY, GenAiRuntimeStatus(nanoStatus = NanoModelStatus.DOWNLOADABLE)))
+        assertFalse(GenAiAssistCopy.isReady(PrivacyMode.ON_DEVICE_ONLY, GenAiRuntimeStatus(nanoStatus = NanoModelStatus.UNAVAILABLE)))
+    }
+
+    @Test
     fun `banner title maps each privacy mode branch and nano state`() {
         assertEquals("AI assist disabled", GenAiAssistCopy.bannerTitle(PrivacyMode.DISABLED, GenAiRuntimeStatus()))
         assertEquals("Cloud Gemini enabled", GenAiAssistCopy.bannerTitle(PrivacyMode.CLOUD_ALLOWED, GenAiRuntimeStatus(cloudConfigured = true)))

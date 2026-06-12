@@ -71,21 +71,29 @@ internal class DayDialCoordinatorState {
     fun onCompactModeToggled(selectedBlockStartMinute: Int?) {
         compactModeState.value = !compactModeState.value
         compactWindowStartState.value = if (compactModeState.value) {
-            selectedBlockStartMinute ?: LocalTime.now(ZoneId.systemDefault()).let { it.hour * 60 }
+            val anchorMinute = selectedBlockStartMinute ?: currentMinuteOfDay()
+            compactWindowStartCenteredOn(anchorMinute)
         } else {
             0
         }
     }
 
+    // Half-window steps keep six hours of context visible across each move.
     fun moveWindowBack() {
         if (compactModeState.value) {
-            compactWindowStartState.value = (compactWindowStartState.value - 720 + 1440) % 1440
+            compactWindowStartState.value = (compactWindowStartState.value - 360 + 1440) % 1440
         }
     }
 
     fun moveWindowForward() {
         if (compactModeState.value) {
-            compactWindowStartState.value = (compactWindowStartState.value + 720) % 1440
+            compactWindowStartState.value = (compactWindowStartState.value + 360) % 1440
+        }
+    }
+
+    fun centerWindowOnNow() {
+        if (compactModeState.value) {
+            compactWindowStartState.value = compactWindowStartCenteredOn(currentMinuteOfDay())
         }
     }
 
@@ -115,6 +123,12 @@ internal class DayDialCoordinatorState {
 private fun currentMinuteOfDay(): Int {
     val now = LocalTime.now(ZoneId.systemDefault())
     return now.hour * 60 + now.minute
+}
+
+/** Window start that places the anchor mid-window, snapped to the hour so ticks stay round. */
+internal fun compactWindowStartCenteredOn(anchorMinute: Int): Int {
+    val centered = (anchorMinute - 360 + 1440) % 1440
+    return (centered / 60) * 60
 }
 
 internal fun nextMinuteBoundaryDelayMillis(): Long {

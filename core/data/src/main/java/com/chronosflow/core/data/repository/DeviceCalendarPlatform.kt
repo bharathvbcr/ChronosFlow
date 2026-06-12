@@ -22,13 +22,15 @@ class DeviceCalendarPlatform @Inject constructor() {
         val projection = arrayOf(CalendarContract.Calendars._ID)
         val selection = "${CalendarContract.Calendars.VISIBLE} = 1 AND ${CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL} >= ?"
         val selectionArgs = arrayOf(CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR.toString())
+        // Prefer the account's primary calendar over whichever happens to sort first.
+        val sortOrder = "${CalendarContract.Calendars.IS_PRIMARY} DESC, ${CalendarContract.Calendars._ID} ASC"
 
         return context.contentResolver.query(
             CalendarContract.Calendars.CONTENT_URI,
             projection,
             selection,
             selectionArgs,
-            null
+            sortOrder
         )?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getLong(0) else null
         }

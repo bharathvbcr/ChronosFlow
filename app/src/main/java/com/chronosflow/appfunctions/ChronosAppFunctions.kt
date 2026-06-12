@@ -2,12 +2,14 @@ package com.chronosflow.appfunctions
 
 import android.content.Intent
 import androidx.appfunctions.AppFunctionContext
+import androidx.appfunctions.AppFunctionSerializable
 import androidx.appfunctions.service.AppFunction
 import com.chronosflow.core.domain.model.ActualTimeSegment
 import com.chronosflow.core.domain.model.ActualTimeSource
 import com.chronosflow.core.domain.model.BlockFlexibility
 import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.EnergyIntensity
+import com.chronosflow.core.domain.model.FocusSessionState
 import com.chronosflow.core.domain.model.Goal
 import com.chronosflow.core.domain.model.HabitEvent
 import com.chronosflow.core.domain.model.HabitEventType
@@ -21,6 +23,7 @@ import com.chronosflow.core.domain.model.TimeBlock
 import com.chronosflow.core.domain.planner.PlannerOperationResult
 import com.chronosflow.core.domain.planner.PlannerService
 import com.chronosflow.core.domain.repository.CalendarEventRepository
+import com.chronosflow.core.domain.repository.FocusSessionRepository
 import com.chronosflow.core.domain.repository.GoalRepository
 import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.JournalRepository
@@ -63,7 +66,8 @@ class ChronosAppFunctions @Inject constructor(
     private val sleepTrackRepository: SleepTrackRepository,
     private val recordSleepUseCase: RecordSleepUseCase,
     private val applyRoutineToDateUseCase: ApplyRoutineToDateUseCase,
-    private val plannerService: PlannerService
+    private val plannerService: PlannerService,
+    private val focusSessionRepository: FocusSessionRepository
 ) {
 
     /**
@@ -117,8 +121,14 @@ class ChronosAppFunctions @Inject constructor(
      * Starts an active focus session in ChronosFlow.
      * Call this when the user wants to start working, focusing, or start a Pomodoro/timer.
      *
-     * @param durationMinutes Optional duration of the focus session in minutes.
-     * @return True if the focus session was successfully initiated, false otherwise.
+     * The session is persisted immediately so it is created even when the app is in the
+     * background (the typical case for an agent-initiated call). The live countdown
+     * notification appears as soon as the app can run a foreground service; if the system
+     * blocks a background foreground-service start, the session is still recorded and the
+     * timer (anchored to wall-clock time) surfaces when the app is next opened.
+     *
+     * @param durationMinutes Optional duration of the focus session in minutes (1..1440). Defaults to 25.
+     * @return True if the focus session was successfully created, false otherwise.
      */
     @AppFunction(isDescribedByKDoc = true)
     suspend fun startFocusSession(
@@ -127,15 +137,34 @@ class ChronosAppFunctions @Inject constructor(
     ): Boolean {
         return runAppFunction {
             val context = appFunctionContext.context
-            val durationSeconds = durationMinutes?.takeIf { it in 1..1440 }?.let { it * 60 }
-            if (durationMinutes != null && durationSeconds == null) return@runAppFunction false
+            val minutes = when {
+                durationMinutes == null -> DEFAULT_FOCUS_MINUTES
+                durationMinutes in 1..1440 -> durationMinutes
+                else -> return@runAppFunction false
+            }
+            val durationSeconds = minutes * 60
+            val sessionId = UUID.randomUUID().toString()
+            val now = Instant.now()
+            withContext(Dispatchers.IO) {
+                focusSessionRepository.saveFocusSession(
+                    FocusSessionState.Running(
+                        sessionId = sessionId,
+                        blockId = null,
+                        startedAt = now,
+                        plannedEndAt = now.plusSeconds(durationSeconds.toLong())
+                    )
+                )
+            }
+            // Best-effort live foreground service. Succeeds when the app may start an FGS
+            // (e.g. it is foregrounded); a background-start block is expected and harmless
+            // here because the session above is already persisted and recoverable.
             val intent = Intent(context, FocusService::class.java).apply {
                 action = FocusService.ACTION_START
-                if (durationSeconds != null) {
-                    putExtra(FocusService.EXTRA_TOTAL_SECONDS, durationSeconds)
-                }
+                putExtra(FocusService.EXTRA_SESSION_ID, sessionId)
+                putExtra(FocusService.EXTRA_TOTAL_SECONDS, durationSeconds)
+                putExtra(FocusService.EXTRA_TIME_LEFT_SECONDS, durationSeconds)
             }
-            context.startForegroundService(intent)
+            runCatching { context.startForegroundService(intent) }
             true
         }
     }
@@ -659,6 +688,100 @@ class ChronosAppFunctions @Inject constructor(
         }
     }
 
+    /**
+     * Returns today's planned blocks from the circular day planner (Chronos Dial), ordered by start time.
+     *
+     * @param appFunctionContext The execution context.
+     * @return The list of scheduled blocks for today; empty if nothing is planned.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun getTodaySchedule(
+        appFunctionContext: AppFunctionContext
+    ): List<ScheduledBlock> = withContext(Dispatchers.IO) {
+        timeBlockRepository.getTimeBlocksByDate(LocalDate.now()).first()
+            .sortedBy { it.startMinuteOfDay }
+            .map { block ->
+                ScheduledBlock(
+                    id = block.id,
+                    title = block.title,
+                    category = block.category,
+                    startMinuteOfDay = block.startMinuteOfDay,
+                    durationMinutes = block.durationMinutes
+                )
+            }
+    }
+
+    /**
+     * Lists the user's open (not yet completed) tasks, highest priority first.
+     *
+     * @param appFunctionContext The execution context.
+     * @return The list of open tasks; empty if none remain.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun listOpenTasks(
+        appFunctionContext: AppFunctionContext
+    ): List<TaskSummary> = withContext(Dispatchers.IO) {
+        taskRepository.getAllTasks().first()
+            .filter { !it.isCompleted }
+            .sortedByDescending { it.priority }
+            .map { task ->
+                TaskSummary(
+                    id = task.id,
+                    title = task.title,
+                    priority = task.priority,
+                    preferredDurationMinutes = task.preferredDurationMinutes ?: 0
+                )
+            }
+    }
+
+    /**
+     * Lists the user's active habits.
+     * Provides the habit id required by logHabitCompleted and logHabitSkipped.
+     *
+     * @param appFunctionContext The execution context.
+     * @return The list of active habits; empty if none are configured.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun listHabits(
+        appFunctionContext: AppFunctionContext
+    ): List<HabitSummary> = withContext(Dispatchers.IO) {
+        habitRepository.observeHabits().first()
+            .filter { it.isActive }
+            .map { habit ->
+                HabitSummary(
+                    id = habit.id,
+                    title = habit.title,
+                    cadence = habit.cadence,
+                    streakCount = habit.streakCount
+                )
+            }
+    }
+
+    /**
+     * Lists the user's active medication plans.
+     * Provides the plan id required by logMedicationTaken and logMedicationSkipped.
+     *
+     * @param appFunctionContext The execution context.
+     * @return The list of active medication plans; empty if none are configured.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun listMedications(
+        appFunctionContext: AppFunctionContext
+    ): List<MedicationSummary> = withContext(Dispatchers.IO) {
+        medicationRepository.observeMedicationPlans().first()
+            .filter { it.isActive }
+            .map { plan ->
+                MedicationSummary(
+                    id = plan.id,
+                    name = plan.name,
+                    dosage = listOf(plan.dosage, plan.unit)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" "),
+                    reminderMinuteOfDay = plan.reminderMinuteOfDay
+                )
+            }
+    }
+
     private suspend fun runAppFunction(block: suspend () -> Boolean): Boolean =
         try {
             block()
@@ -669,4 +792,70 @@ class ChronosAppFunctions @Inject constructor(
     private fun String?.requiredText(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
 
     private fun Int.takeIfScore(): Int? = takeIf { it in 1..10 }
+
+    private companion object {
+        const val DEFAULT_FOCUS_MINUTES = 25
+    }
 }
+
+/**
+ * A planned block on the day planner timeline.
+ */
+@AppFunctionSerializable(isDescribedByKDoc = true)
+data class ScheduledBlock(
+    /** Unique id of the block. */
+    val id: String,
+    /** Title of the block. */
+    val title: String,
+    /** Category of the block (e.g. work, study, meals, breaks, routines, sleep). */
+    val category: String,
+    /** Minute of the day the block starts (0 to 1439, where 480 is 8:00 AM). */
+    val startMinuteOfDay: Int,
+    /** Duration of the block in minutes. */
+    val durationMinutes: Int
+)
+
+/**
+ * A summary of an open task.
+ */
+@AppFunctionSerializable(isDescribedByKDoc = true)
+data class TaskSummary(
+    /** Unique id of the task. */
+    val id: String,
+    /** Title of the task. */
+    val title: String,
+    /** Priority from 0 (lowest) to 5 (highest). */
+    val priority: Int,
+    /** Expected duration in minutes, or 0 if unspecified. */
+    val preferredDurationMinutes: Int
+)
+
+/**
+ * A summary of an active habit.
+ */
+@AppFunctionSerializable(isDescribedByKDoc = true)
+data class HabitSummary(
+    /** Unique id of the habit; pass as habitId to logHabitCompleted or logHabitSkipped. */
+    val id: String,
+    /** Title of the habit. */
+    val title: String,
+    /** How often the habit recurs (e.g. daily, weekly). */
+    val cadence: String,
+    /** Current completion streak in days. */
+    val streakCount: Int
+)
+
+/**
+ * A summary of an active medication plan.
+ */
+@AppFunctionSerializable(isDescribedByKDoc = true)
+data class MedicationSummary(
+    /** Unique id of the plan; pass as medicationPlanId to logMedicationTaken or logMedicationSkipped. */
+    val id: String,
+    /** Medication name. */
+    val name: String,
+    /** Dosage amount including unit (e.g. "1 tablet", "500 mg"). */
+    val dosage: String,
+    /** Minute of the day the daily reminder fires (0 to 1439). */
+    val reminderMinuteOfDay: Int
+)

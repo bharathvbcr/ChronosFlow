@@ -8,6 +8,8 @@ import com.chronosflow.core.ai.RoutineAssistSource
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
 import com.chronosflow.core.ai.genai.GenAiAssistCopy
 import com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot
+import com.chronosflow.core.ai.genai.RewriteAssistUiState
+import com.chronosflow.core.ai.genai.RewriteStyle
 import com.chronosflow.core.ai.genai.refreshAssistUiSnapshot
 import com.chronosflow.core.ai.MedicationAssistRequest
 import com.chronosflow.core.ai.MedicationAssistSuggestion
@@ -117,6 +119,9 @@ class MedicationViewModel @Inject constructor(
 
     private val _assistState = MutableStateFlow(MedicationAssistUiState())
     val assistState = _assistState.asStateFlow()
+
+    private val _rewriteState = MutableStateFlow(RewriteAssistUiState())
+    val rewriteState = _rewriteState.asStateFlow()
 
     private suspend fun refreshAdherenceSuggestions(current: List<MedicationPlan>) {
         val active = current.filter { it.isActive }
@@ -488,9 +493,15 @@ class MedicationViewModel @Inject constructor(
                     )
                     return@launch
                 }
-            _assistState.value = if (suggestions.isNotEmpty()) {
+            // On-device spelling clean-up of the captured medication name (ML Kit GenAI Proofreading),
+            // surfaced as an extra Details suggestion. Best-effort: any failure is ignored.
+            val refinedName = runCatching {
+                request.name.takeIf { it.isNotBlank() }?.let { medicationAssistPlanner.refineName(it) }
+            }.getOrNull()
+            val merged = (listOfNotNull(refinedName) + suggestions).distinctBy { it.id }
+            _assistState.value = if (merged.isNotEmpty()) {
                 MedicationAssistUiState(
-                    suggestions = suggestions,
+                    suggestions = merged,
                     assistSnapshot = snapshot,
                     message = snapshot?.takeIf { it.aiDisabled }?.let { GenAiAssistCopy.disabledAssistMessage() }
                 )
@@ -505,6 +516,31 @@ class MedicationViewModel @Inject constructor(
 
     fun clearMedicationAssist() {
         _assistState.value = MedicationAssistUiState()
+    }
+
+    /**
+     * Rewrites the free-text medication notes with the on-device ML Kit GenAI Rewriting feature.
+     * Notes only — name, dose, and frequency are never rewritten. The result is published as a
+     * preview the form must explicitly apply; the field is never replaced automatically.
+     */
+    fun rewriteMedicationNotes(text: String, style: RewriteStyle, styleLabel: String) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            _rewriteState.value = RewriteAssistUiState(isLoading = true, styleLabel = styleLabel)
+            val rewritten = runCatching { medicationAssistPlanner.rewriteNotes(trimmed, style) }.getOrNull()
+            _rewriteState.value = if (rewritten != null) {
+                RewriteAssistUiState(styleLabel = styleLabel, original = text, rewritten = rewritten)
+            } else {
+                RewriteAssistUiState(
+                    message = "Rewrite is unavailable on this device right now — your wording is unchanged."
+                )
+            }
+        }
+    }
+
+    fun clearMedicationRewrite() {
+        _rewriteState.value = RewriteAssistUiState()
     }
 
     private suspend fun scheduleReminders(plan: MedicationPlan): String {

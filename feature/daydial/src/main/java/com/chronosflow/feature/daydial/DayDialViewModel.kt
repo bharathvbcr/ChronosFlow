@@ -9,6 +9,8 @@ import com.chronosflow.core.ai.FocusNextBlockSuggestion
 import com.chronosflow.core.ai.RecommendationQuickAction
 import com.chronosflow.core.ai.MoodEnergyCheckInAssistPlanner
 import com.chronosflow.core.ai.PrivacyMode
+import com.chronosflow.core.domain.diagnostics.AppEventCategory
+import com.chronosflow.core.domain.diagnostics.AppEventLog
 import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.MedicationDoseEvent
 import com.chronosflow.core.domain.model.MedicationDoseEventType
@@ -37,6 +39,7 @@ import com.chronosflow.core.domain.usecase.CompleteHabitUseCase
 import com.chronosflow.core.domain.usecase.CompleteRoutineForDateUseCase
 import com.chronosflow.core.domain.usecase.ToggleTaskCompletionUseCase
 import com.chronosflow.core.notifications.AlarmCapabilityRefresher
+import com.chronosflow.core.notifications.CurrentBlockNotificationCoordinator
 import com.chronosflow.core.notifications.HabitReminderScheduler
 import com.chronosflow.feature.daydial.delegate.DayDialAiDelegate
 import androidx.fragment.app.FragmentActivity
@@ -52,6 +55,7 @@ import com.chronosflow.feature.daydial.delegate.DayDialTrendsDelegate
 import com.chronosflow.feature.daydial.delegate.DayDialReminderDelegate
 import com.chronosflow.feature.daydial.delegate.DayDialReviewDelegate
 import com.chronosflow.feature.daydial.model.DayQuickItemsUiState
+import com.chronosflow.feature.daydial.model.InsightsPeriod
 import com.chronosflow.feature.daydial.model.InsightsTabUiState
 import com.chronosflow.feature.daydial.model.buildDayQuickItemsState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -151,12 +155,19 @@ class DayDialViewModel @Inject constructor(
     private val dataExportRepository: ChronosDataExportRepository,
     private val routineRepository: RoutineRepository,
     private val applyRoutineToDateUseCase: ApplyRoutineToDateUseCase,
-    private val completeRoutineForDateUseCase: CompleteRoutineForDateUseCase
+    private val completeRoutineForDateUseCase: CompleteRoutineForDateUseCase,
+    private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator,
+    private val appEventLog: AppEventLog
 ) : ViewModel() {
+
+    /** Recent in-memory app events surfaced by the developer "View Logs" sheet. */
+    val appEventLogEntries = appEventLog.entries
 
     val appLockSettings = appLockDelegate.settings
     val sensitiveSession = appLockDelegate.sensitiveSession
     internal var dataExportDispatcher: CoroutineDispatcher = Dispatchers.IO
+    internal var calendarSyncDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val calendarAutoSyncGate = CalendarAutoSyncGate()
 
     private val plannerService = PlannerService(repository)
     private val freeTimeCalculator = FreeTimeCalculator()
@@ -259,6 +270,8 @@ class DayDialViewModel @Inject constructor(
     val reviewInsights = reviewDelegate.reviewInsights(viewModelScope, selectedDate)
     private val _insightsTabState = MutableStateFlow(InsightsTabUiState())
     val insightsTabState = _insightsTabState.asStateFlow()
+    private val _insightsPeriod = MutableStateFlow(InsightsPeriod.DAY)
+    private val periodInsights = reviewDelegate.observePeriodInsights(viewModelScope, selectedDate, _insightsPeriod)
     val moodEnergyCheckIns = moodEnergyDelegate.observeCheckIns(viewModelScope, selectedDate)
     val journalEntryForDay = journalDelegate.journalEntry(viewModelScope, selectedDate)
     val sleepTrackForDay = journalDelegate.sleepTrack(viewModelScope, selectedDate)
@@ -267,6 +280,25 @@ class DayDialViewModel @Inject constructor(
     private val minuteTickerJob: Job
 
     init {
+        appEventLog.record(AppEventCategory.SESSION, "Day planner session started")
+        viewModelScope.launch {
+            selectedDate.collect { date ->
+                if (calendarAutoSyncGate.shouldSync(date)) {
+                    // Quiet refresh: the repository no-ops without READ_CALENDAR
+                    // permission and failures must not raise calendar banners —
+                    // the manual sync action reports status when the user asks.
+                    runCatching {
+                        val zone = java.time.ZoneId.systemDefault()
+                        withContext(calendarSyncDispatcher) {
+                            calendarEventRepository.syncFromDeviceCalendar(
+                                date.atStartOfDay(zone).toInstant(),
+                                date.plusDays(1).atStartOfDay(zone).toInstant()
+                            )
+                        }
+                    }
+                }
+            }
+        }
         viewModelScope.launch {
             focusSessionDao.observeRecoverableSession().collect { entity ->
                 val persisted = entity?.toDomain()
@@ -328,6 +360,12 @@ class DayDialViewModel @Inject constructor(
                 }
         }
         refreshTrendSections()
+        viewModelScope.launch {
+            combine(_insightsPeriod, periodInsights) { period, summary -> period to summary }
+                .collect { (period, summary) ->
+                    _insightsTabState.update { it.copy(period = period, periodSummary = summary) }
+                }
+        }
         viewModelScope.launch {
             combine(reviewInsights, selectedDate, timeBlocksDomain) { insights, date, blocks ->
                 Triple(insights, date, blocks)
@@ -570,6 +608,7 @@ class DayDialViewModel @Inject constructor(
             statusMessage = message,
             lastSuccessMessage = message
         )
+        appEventLog.record(AppEventCategory.SYNC, message)
     }
 
     private fun setCalendarFailure(message: String) {
@@ -577,6 +616,7 @@ class DayDialViewModel @Inject constructor(
             isWorking = false,
             statusMessage = message
         )
+        appEventLog.record(AppEventCategory.ERROR, message)
     }
 
     private fun calendarBlockTitle(block: TimeBlock): String = block.title.ifBlank { "this block" }
@@ -632,6 +672,21 @@ class DayDialViewModel @Inject constructor(
     fun moveWindowBack() = coordinatorState.moveWindowBack()
 
     fun moveWindowForward() = coordinatorState.moveWindowForward()
+
+    fun centerWindowOnNow() = coordinatorState.centerWindowOnNow()
+
+    fun setCurrentBlockNotificationEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            currentBlockNotificationCoordinator.setEnabled(enabled)
+        }
+    }
+
+    /** Re-renders the current-block live notification after schedule edits. */
+    fun refreshCurrentBlockNotification() {
+        viewModelScope.launch {
+            currentBlockNotificationCoordinator.refresh()
+        }
+    }
 
     fun onBlockMoved(blockId: String, newStartMinute: Int) =
         blockDelegate.onBlockMoved(viewModelScope, blockId, newStartMinute, ::handlePlannerResult)
@@ -737,8 +792,18 @@ class DayDialViewModel @Inject constructor(
     fun copyPlanFromPreviousDay() =
         blockDelegate.copyPlanFromPreviousDay(viewModelScope, coordinatorState.selectedDateValue, ::handlePlannerResult)
 
-    fun fillEmptyTime() =
-        blockDelegate.fillEmptyTime(viewModelScope, coordinatorState.selectedDateValue, ::handlePlannerResult)
+    /**
+     * Proposes blocks for every qualifying gap (pending tasks and due habits,
+     * breaks last) and stages them as AI suggestions for preview; callers open
+     * the AI sheet so the user can review before anything is applied.
+     */
+    fun fillEmptyTime(addBreaksAutomatically: Boolean = true) =
+        aiDelegate.proposeGapFill(
+            scope = viewModelScope,
+            date = coordinatorState.selectedDateValue,
+            addBreaksAutomatically = addBreaksAutomatically,
+            onResult = ::handlePlannerResult
+        )
 
     fun markCurrentBlockMissed(blockId: String, missed: Boolean) =
         reviewDelegate.markCurrentBlockMissed(viewModelScope, blockId, missed)
@@ -854,7 +919,8 @@ class DayDialViewModel @Inject constructor(
             when (intent.quickAction) {
                 RecommendationQuickAction.FILL_GAPS -> {
                     fillEmptyTime()
-                    onApplied("Filled open time from recommendation")
+                    onOpenAiPlan()
+                    onApplied("Proposed gap fills from recommendation")
                 }
                 RecommendationQuickAction.ADD_BREAK -> {
                     createQuickBlock(title = "Break", durationMinutes = 15, category = "BREAK")
@@ -870,6 +936,10 @@ class DayDialViewModel @Inject constructor(
 
     fun clearAiPlanPrefill() = aiDelegate.clearAiPlanPrefill()
 
+    fun setInsightsPeriod(period: InsightsPeriod) {
+        _insightsPeriod.value = period
+    }
+
     fun refreshInsightsRecommendations() {
         viewModelScope.launch {
             _insightsTabState.update { it.copy(isRefreshing = true) }
@@ -883,6 +953,7 @@ class DayDialViewModel @Inject constructor(
                     reviewInsights = result.reviewInsights,
                     recommendations = result.recommendations,
                     assistSnapshot = result.assistSnapshot,
+                    digest = result.digest,
                     isRefreshing = false
                 )
             }
@@ -892,7 +963,19 @@ class DayDialViewModel @Inject constructor(
     fun startFocusSession(blockId: String, workMinutes: Int = 0, breakMinutes: Int = 0) {
         coordinatorState.selectBlock(blockId)
         focusDelegate.startFocusSession(viewModelScope, plannerService, blockId, workMinutes, breakMinutes)
+        appEventLog.record(AppEventCategory.FOCUS, "Started focus on ${focusBlockTitle(blockId)}")
     }
+
+    /** Logs a developer-visible app event when [label] sheet/surface is opened. */
+    fun recordSheetOpened(label: String) {
+        appEventLog.record(AppEventCategory.SESSION, "Opened $label")
+    }
+
+    /** Clears the in-memory developer event log shown by the "View Logs" sheet. */
+    fun clearAppEventLog() = appEventLog.clear()
+
+    private fun focusBlockTitle(blockId: String): String =
+        timeBlocks.value.firstOrNull { it.id == blockId }?.title?.ifBlank { "block" } ?: "block"
 
     fun pauseFocusSession() = focusDelegate.pauseFocusSession()
 
@@ -913,11 +996,13 @@ class DayDialViewModel @Inject constructor(
             markCurrentBlockMissed(blockId, true)
         }
         coordinatorState.selectBlock(null)
+        appEventLog.record(AppEventCategory.FOCUS, "Skipped focus session")
     }
 
     fun finishFocusSession(note: String = "") {
         focusDelegate.finishFocusSession(viewModelScope, plannerService, note)
         coordinatorState.selectBlock(null)
+        appEventLog.record(AppEventCategory.FOCUS, "Finished focus session")
     }
 
     fun endDayReview(markCompleted: List<String> = emptyList(), markMissed: List<String> = emptyList()) =
@@ -982,12 +1067,15 @@ class DayDialViewModel @Inject constructor(
                 }
             }.onSuccess { export ->
                 _dataExportState.value = export.toState()
+                appEventLog.record(AppEventCategory.EXPORT, "Created data export ${export.file.name}")
                 onReady(export.file)
             }.onFailure { error ->
+                val reason = error.message ?: error::class.java.simpleName
                 _dataExportState.value = DataExportState(
                     summary = "Export failed",
-                    errorMessage = error.message ?: error::class.java.simpleName
+                    errorMessage = reason
                 )
+                appEventLog.record(AppEventCategory.ERROR, "Data export failed: $reason")
             }
         }
     }
@@ -1052,5 +1140,56 @@ class DayDialViewModel @Inject constructor(
 
     fun clearMoodCheckInCoaching() {
         _moodCheckInCoaching.value = null
+    }
+
+    /**
+     * Asks the focus planner which of today's remaining blocks to start next, weighing the latest
+     * mood/energy check-in. Invoked by the Focus tab whenever no session is running; null when the
+     * day has no remaining focus-suitable blocks.
+     */
+    fun refreshNextFocusSuggestion() {
+        viewModelScope.launch {
+            val latestCheckIn = moodEnergyCheckIns.value.lastOrNull()
+            _focusNextBlockSuggestion.value = runCatching {
+                focusNextBlockPlanner.suggestNextBlock(
+                    blocks = timeBlocksDomain.value,
+                    currentMinute = currentMinute.value,
+                    moodScore = latestCheckIn?.moodScore,
+                    energyScore = latestCheckIn?.energyScore
+                )
+            }.getOrNull()
+        }
+    }
+
+    /**
+     * Refreshes the on-device coaching line for the running or paused focus session. Cleared
+     * whenever the session is inactive so stale advice never lingers under the timer.
+     */
+    fun refreshFocusGuidance(remainingSeconds: Long, nextBlockTitle: String? = null) {
+        val session = focusExecutionState.value
+        if (session.status != FocusExecutionStatus.RUNNING && session.status != FocusExecutionStatus.PAUSED) {
+            _focusGuidance.value = null
+            return
+        }
+        viewModelScope.launch {
+            val latestCheckIn = moodEnergyCheckIns.value.lastOrNull()
+            _focusGuidance.value = runCatching {
+                focusGuidancePlanner.suggestGuidance(
+                    focusTitle = session.blockTitle.ifBlank { "Focus session" },
+                    linkedBlockId = session.blockId,
+                    isRunning = session.status == FocusExecutionStatus.RUNNING,
+                    isPaused = session.status == FocusExecutionStatus.PAUSED,
+                    timeLeft = remainingSeconds.toInt().coerceAtLeast(0),
+                    totalSeconds = (session.plannedDurationMinutes * 60).coerceAtLeast(60),
+                    nextBlockTitle = nextBlockTitle,
+                    moodScore = latestCheckIn?.moodScore,
+                    energyScore = latestCheckIn?.energyScore
+                )
+            }.getOrNull()
+        }
+    }
+
+    fun clearFocusGuidance() {
+        _focusGuidance.value = null
     }
 }

@@ -3,7 +3,9 @@ package com.chronosflow.core.ai
 import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.AssistTextGeneration
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
+import com.chronosflow.core.ai.genai.RewriteStyle
 import com.chronosflow.core.domain.model.TaskActionType
+import org.junit.Assert.assertNull
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.mockk.slot
@@ -29,6 +31,45 @@ class TaskAssistPlannerTest {
         assertTrue(prompt.captured.contains("action_phone|Call mom||"))
         assertTrue(prompt.captured.contains("schedule_duration|Quick call|15m"))
         assertTrue(prompt.captured.contains("review launch brief https://docs.example.com/brief"))
+    }
+
+    @Test
+    fun `refineTitle returns proofread title when materially different`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.proofread("emial Alx the reprot") } returns AssistTextGeneration(
+            text = "Email Alex the report",
+            source = AssistGenAiSource.GEMINI_NANO
+        )
+        val planner = TaskAssistPlanner(coordinator)
+
+        val suggestion = planner.refineTitle("emial Alx the reprot")
+
+        assertEquals("Email Alex the report", suggestion?.title)
+        assertEquals(TaskAssistSource.GEMINI_NANO, suggestion?.source)
+    }
+
+    @Test
+    fun `refineTitle returns null when proofread matches input`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.proofread(any()) } returns AssistTextGeneration(
+            text = "Email Alex",
+            source = AssistGenAiSource.GEMINI_NANO
+        )
+        val planner = TaskAssistPlanner(coordinator)
+
+        assertNull(planner.refineTitle("Email Alex"))
+    }
+
+    @Test
+    fun `rewriteText returns rewritten text when available`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.rewrite("write the launch recap", RewriteStyle.SHORTEN) } returns AssistTextGeneration(
+            text = "Recap the launch",
+            source = AssistGenAiSource.GEMINI_NANO
+        )
+        val planner = TaskAssistPlanner(coordinator)
+
+        assertEquals("Recap the launch", planner.rewriteText("write the launch recap", RewriteStyle.SHORTEN))
     }
 
     @Test

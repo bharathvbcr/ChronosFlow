@@ -5,6 +5,7 @@ import com.chronosflow.feature.daydial.model.DayDialTab
 import com.chronosflow.feature.daydial.model.SidebarPage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DayDialTopBarTransitionTest {
@@ -25,16 +26,30 @@ class DayDialTopBarTransitionTest {
     }
 
     @Test
-    fun `sidebar transitions keep top bar center static after normalization`() {
+    fun `sidebar transitions animate the top bar center to the page title`() {
         val primaryState = topBarCenterState(activeSidebarPage = null, currentTab = DayDialTab.TODAY)
         val sidebarState = topBarCenterState(activeSidebarPage = SidebarPage.DAY_TOOLS, currentTab = DayDialTab.TODAY)
 
-        assertEquals(primaryState, sidebarState)
-        assertFalse(
+        assertEquals(SidebarPage.DAY_TOOLS, sidebarState.first)
+        assertTrue(
             shouldAnimateTopBarCenterTransition(
                 initialState = primaryState,
                 targetState = sidebarState
             )
+        )
+    }
+
+    @Test
+    fun `menu button reflects sidebar menu state`() {
+        assertEquals("Menu", dayDialMenuButtonLabel(activeSidebarPage = null, menuExpanded = false))
+        assertEquals("Close menu", dayDialMenuButtonLabel(activeSidebarPage = null, menuExpanded = true))
+        assertEquals(
+            "Back",
+            dayDialMenuButtonLabel(activeSidebarPage = SidebarPage.DAY_TOOLS, menuExpanded = false)
+        )
+        assertEquals(
+            "Back",
+            dayDialMenuButtonLabel(activeSidebarPage = SidebarPage.DAY_TOOLS, menuExpanded = true)
         )
     }
 
@@ -56,13 +71,11 @@ class DayDialTopBarTransitionTest {
     }
 
     @Test
-    fun `sidebar pages share the primary top bar date state`() {
-        val expectedState = null to DayDialTab.TODAY
-
+    fun `sidebar pages surface their own top bar center state regardless of tab`() {
         SidebarPage.entries.forEach { page ->
             DayDialTab.entries.forEach { tab ->
                 assertEquals(
-                    expectedState,
+                    page to DayDialTab.TODAY,
                     topBarCenterState(activeSidebarPage = page, currentTab = tab)
                 )
             }

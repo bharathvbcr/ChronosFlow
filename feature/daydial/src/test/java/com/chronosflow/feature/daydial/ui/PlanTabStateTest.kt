@@ -135,7 +135,7 @@ class PlanTabStateTest {
 
     @Test
     fun `plan schedule attention action copy reflects gaps and overlaps`() {
-        assertEquals("Fix gaps", planScheduleAttentionButtonText(largeGapCount = 2, overlapCount = 0))
+        assertEquals("Fill gaps with tasks", planScheduleAttentionButtonText(largeGapCount = 2, overlapCount = 0))
         assertEquals("Fix schedule", planScheduleAttentionButtonText(largeGapCount = 0, overlapCount = 1))
         assertEquals("Fix schedule", planScheduleAttentionButtonText(largeGapCount = 1, overlapCount = 2))
         assertEquals(

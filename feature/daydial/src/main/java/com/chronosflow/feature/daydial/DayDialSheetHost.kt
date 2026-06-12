@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import com.chronosflow.core.ai.PrivacyMode
 import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
+import com.chronosflow.core.domain.diagnostics.AppEventLogEntry
 import com.chronosflow.core.ui.motion.ChronosMotionDefaults
 import com.chronosflow.core.ui.motion.ChronosTransitionDirection
 import com.chronosflow.core.ui.motion.ChronosTransitionFactory
@@ -46,6 +47,8 @@ internal fun DayDialSheetHost(
     aiPlanGoalPrefill: String? = null,
     aiPlanSuggestedGoals: List<String> = emptyList(),
     focusElapsedSeconds: Long,
+    focusRemainingSeconds: Long,
+    focusSessionActive: Boolean,
     syncStatus: String,
     blockStartReminders: Boolean,
     breakReminders: Boolean,
@@ -58,6 +61,8 @@ internal fun DayDialSheetHost(
     appearanceMode: AppearanceMode,
     reduceMotionEnabled: Boolean,
     highContrastEnabled: Boolean,
+    appEventLog: List<AppEventLogEntry>,
+    onClearLogs: () -> Unit,
     calendarPermissionStatus: CalendarPermissionStatus,
     showCalendarPermissionRationale: Boolean,
     calendarConnectionState: CalendarConnectionState,
@@ -186,6 +191,8 @@ internal fun DayDialSheetHost(
                     aiPlanGoalPrefill = aiPlanGoalPrefill,
                     aiPlanSuggestedGoals = aiPlanSuggestedGoals,
                     focusElapsedSeconds = focusElapsedSeconds,
+                    focusRemainingSeconds = focusRemainingSeconds,
+                    focusSessionActive = focusSessionActive,
                     syncStatus = syncStatus,
                     blockStartReminders = blockStartReminders,
                     breakReminders = breakReminders,
@@ -198,6 +205,8 @@ internal fun DayDialSheetHost(
                     appearanceMode = appearanceMode,
                     reduceMotionEnabled = reduceMotionEnabled,
                     highContrastEnabled = highContrastEnabled,
+                    appEventLog = appEventLog,
+                    onClearLogs = onClearLogs,
                     calendarPermissionStatus = calendarPermissionStatus,
                     showCalendarPermissionRationale = showCalendarPermissionRationale,
                     calendarConnectionState = calendarConnectionState,

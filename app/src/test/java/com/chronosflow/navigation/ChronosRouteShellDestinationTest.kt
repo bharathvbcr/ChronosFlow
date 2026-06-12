@@ -21,6 +21,23 @@ import org.junit.Test
 
 class ChronosRouteShellDestinationTest {
     @Test
+    fun `today badge shows viewed day of month when dial is off today`() {
+        val today = java.time.LocalDate.of(2026, 6, 10)
+
+        assertEquals("14", todayBadgeValue(today.plusDays(4), today, missedCount = 3))
+        assertEquals("9", todayBadgeValue(today.minusDays(1), today, missedCount = 0))
+    }
+
+    @Test
+    fun `today badge falls back to missed count when viewing today or unreported`() {
+        val today = java.time.LocalDate.of(2026, 6, 10)
+
+        assertEquals("3", todayBadgeValue(today, today, missedCount = 3))
+        assertEquals("3", todayBadgeValue(null, today, missedCount = 3))
+        assertNull(todayBadgeValue(today, today, missedCount = 0))
+    }
+
+    @Test
     fun `compact shell overlays bottom chrome without shrinking destinations`() {
         val navigationBarInset = 24.dp
 
@@ -135,23 +152,23 @@ class ChronosRouteShellDestinationTest {
     }
 
     @Test
-    fun `supporting shell destinations open unified day sidebar targets`() {
+    fun `supporting shell destinations open their full feature screens directly`() {
         val destinations = ChronosRoute.expandedShellDestinations().associateBy { it.id }
 
         assertEquals(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TASKS),
+            ChronosRoute.Tasks.route,
             destinations.getValue(ChronosRoute.SHELL_TASKS).route
         )
         assertEquals(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_HABITS),
+            ChronosRoute.Habits.route,
             destinations.getValue(ChronosRoute.SHELL_HABITS).route
         )
         assertEquals(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_MEDICATION),
+            ChronosRoute.Medication.route,
             destinations.getValue(ChronosRoute.SHELL_MEDICATION).route
         )
         assertEquals(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_REVIEW),
+            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS),
             destinations.getValue(ChronosRoute.SHELL_REVIEW).route
         )
     }
@@ -194,10 +211,11 @@ class ChronosRouteShellDestinationTest {
             initialLocalDayTarget(ChronosRoute.Day.TARGET_TASKS)
         )
         assertEquals(
-            ChronosRoute.Day.TARGET_REVIEW,
-            initialLocalDayTarget(ChronosRoute.Day.TARGET_REVIEW)
+            ChronosRoute.Day.TARGET_TEMPLATES,
+            initialLocalDayTarget(ChronosRoute.Day.TARGET_TEMPLATES)
         )
         assertNull(initialLocalDayTarget(ChronosRoute.Day.TARGET_TODAY))
+        // Review resolves to the Insights tab, which is not a sidebar launch page.
         assertNull(initialLocalDayTarget(ChronosRoute.Day.TARGET_INSIGHTS))
     }
 
@@ -760,6 +778,10 @@ class ChronosRouteShellDestinationTest {
             ChronosRoute.shellDestinationFor(SECTION_DAY, ChronosRoute.Day.TARGET_INSIGHTS).id
         )
         assertEquals(
+            ChronosRoute.SHELL_TODAY,
+            ChronosRoute.shellDestinationFor(SECTION_DAY, ChronosRoute.Day.TARGET_TODAY).id
+        )
+        assertEquals(
             ChronosRoute.SHELL_TASKS,
             ChronosRoute.shellDestinationFor(SECTION_DAY, ChronosRoute.Day.TARGET_TASKS).id
         )
@@ -770,10 +792,6 @@ class ChronosRouteShellDestinationTest {
         assertEquals(
             ChronosRoute.SHELL_MEDICATION,
             ChronosRoute.shellDestinationFor(SECTION_DAY, ChronosRoute.Day.TARGET_MEDICATION).id
-        )
-        assertEquals(
-            ChronosRoute.SHELL_REVIEW,
-            ChronosRoute.shellDestinationFor(SECTION_DAY, ChronosRoute.Day.TARGET_REVIEW).id
         )
         assertEquals(
             ChronosRoute.SHELL_FOCUS,
@@ -893,6 +911,20 @@ class ChronosRouteShellDestinationTest {
     }
 
     @Test
+    fun `today reset route does not restore a stale day state`() {
+        // Double-tapping the Today tab navigates to "today-reset"; it must apply fresh
+        // (launchSingleTop, no restoreState/saveState) so selectDate(now) runs. If it
+        // restored a saved Day back stack, the stale target/ViewModel would clobber the
+        // reset and the dial would stay on the previously viewed date.
+        val policy = navigationPolicyForRoute(ChronosRoute.Day.createRoute("today-reset"))
+
+        assertTrue("Expected launchSingleTop for today-reset", policy.launchSingleTop)
+        assertFalse("Expected no restoreState for today-reset", policy.restoreState)
+        assertFalse("Expected no saveState for today-reset", policy.saveState)
+        assertEquals(ChronosRoute.Day.route, policy.popUpToRoute)
+    }
+
+    @Test
     fun `stable shell routes save and restore back stack state`() {
         val stableRoutes = listOf(
             ChronosRoute.Day.createRoute(),
@@ -976,14 +1008,14 @@ class ChronosRouteShellDestinationTest {
     }
 
     @Test
-    fun `top level sections open unified day sidebar targets`() {
+    fun `top level sections open their full feature screens directly`() {
         assertEquals(ChronosRoute.Day.createRoute(), ChronosRoute.topLevelRouteFor(SECTION_DAY))
         assertEquals(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_FOCUS_PLANNER), ChronosRoute.topLevelRouteFor(SECTION_FOCUS))
-        assertEquals(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TASKS), ChronosRoute.topLevelRouteFor(SECTION_TASKS))
-        assertEquals(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_HABITS), ChronosRoute.topLevelRouteFor(SECTION_HABITS))
-        assertEquals(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_MEDICATION), ChronosRoute.topLevelRouteFor(SECTION_MEDICATION))
+        assertEquals(ChronosRoute.Tasks.route, ChronosRoute.topLevelRouteFor(SECTION_TASKS))
+        assertEquals(ChronosRoute.Habits.route, ChronosRoute.topLevelRouteFor(SECTION_HABITS))
+        assertEquals(ChronosRoute.Medication.route, ChronosRoute.topLevelRouteFor(SECTION_MEDICATION))
         assertEquals(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_REVIEW),
+            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS),
             ChronosRoute.topLevelRouteFor(SECTION_REVIEW)
         )
     }

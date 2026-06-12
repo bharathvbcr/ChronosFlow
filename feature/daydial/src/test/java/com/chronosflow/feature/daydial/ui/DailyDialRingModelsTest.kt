@@ -1,6 +1,8 @@
 package com.chronosflow.feature.daydial.ui
 
 import androidx.compose.ui.graphics.Color
+import com.chronosflow.feature.daydial.DailyReview
+import com.chronosflow.feature.daydial.TimeRangeUi
 import com.chronosflow.feature.daydial.model.TimeBlockUiModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -34,7 +36,7 @@ class DailyDialRingModelsTest {
 
         assertEquals("Standup", state.title)
         assertEquals("10:00 AM - 10:30 AM", state.timeWindow)
-        assertEquals("Starts in 25 min", state.status)
+        assertEquals("Starts in 25m", state.status)
         assertEquals("Selected meeting block", state.supporting)
         assertEquals("Drag to move. Handles resize.", state.actionHint)
         assertEquals("Meeting", state.categoryLabel)
@@ -57,7 +59,7 @@ class DailyDialRingModelsTest {
             nextBlock = null
         )
 
-        assertEquals("Ended 90 min ago", state.status)
+        assertEquals("Ended 1h 30m ago", state.status)
     }
 
     @Test
@@ -86,7 +88,7 @@ class DailyDialRingModelsTest {
 
         assertEquals("Deep Work", state.title)
         assertEquals("9:00 AM - 10:00 AM", state.timeWindow)
-        assertEquals("Ends in 35 min", state.status)
+        assertEquals("Ends in 35m", state.status)
         assertEquals("Next: Review at 10:30 AM", state.supporting)
         assertEquals("Tap block for details", state.actionHint)
         assertEquals("Work", state.categoryLabel)
@@ -111,7 +113,7 @@ class DailyDialRingModelsTest {
 
         assertEquals("Open time", state.title)
         assertEquals("5:20 PM", state.timeWindow)
-        assertEquals("Free for 40 min", state.status)
+        assertEquals("Free for 40m", state.status)
         assertEquals("Next: Workout at 6:00 PM", state.supporting)
         assertEquals("Tap a ring to add a block", state.actionHint)
         assertEquals("Open window", state.categoryLabel)
@@ -140,36 +142,57 @@ class DailyDialRingModelsTest {
     }
 
     @Test
-    fun `expanded legend state keeps explanatory copy and minimize action`() {
-        val state = buildDailyDialRingLegendState(isExpanded = true)
-
-        assertEquals("Ring guide", state.title)
-        assertEquals(
-            "Outer is fixed time, middle is your plan, inner is action-oriented routines. Tap any lane to add in context.",
-            state.description
+    fun `center progress line summarizes completion and remaining free time`() {
+        val state = buildDailyDialCenterState(
+            currentMinute = 10 * 60,
+            selectedBlock = null,
+            activeBlock = null,
+            nextBlock = null,
+            isViewingToday = true,
+            review = DailyReview(plannedMinutes = 240, actualMinutes = 90, missedMinutes = 0, completedBlocks = 3),
+            totalBlocks = 7,
+            freeTime = listOf(
+                TimeRangeUi(8 * 60, 9 * 60),
+                TimeRangeUi(9 * 60 + 30, 12 * 60)
+            )
         )
-        assertEquals("Minimize", state.actionLabel)
+
+        assertEquals("3 of 7 done · 2h free", state.progressLine)
     }
 
     @Test
-    fun `collapsed legend state removes explanatory copy and exposes restore action`() {
-        val state = buildDailyDialRingLegendState(isExpanded = false)
+    fun `center progress line is suppressed while a block is selected`() {
+        val selected = block("b1", "Deep work", 9 * 60, 60, "WORK")
+        val state = buildDailyDialCenterState(
+            currentMinute = 10 * 60,
+            selectedBlock = selected,
+            activeBlock = selected,
+            nextBlock = null,
+            isViewingToday = true,
+            review = DailyReview(plannedMinutes = 240, actualMinutes = 90, missedMinutes = 0, completedBlocks = 3),
+            totalBlocks = 7,
+            freeTime = emptyList()
+        )
 
-        assertEquals("Ring guide", state.title)
-        assertNull(state.description)
-        assertEquals("Show", state.actionLabel)
+        assertNull(state.progressLine)
     }
 
     @Test
-    fun `legend toggle action label names expanded state change`() {
+    fun `remaining free minutes only counts time after now`() {
         assertEquals(
-            "Show ring guide details",
-            dailyDialRingLegendToggleActionLabel(isExpanded = false)
+            120,
+            remainingFreeMinutes(
+                listOf(TimeRangeUi(8 * 60, 9 * 60), TimeRangeUi(9 * 60 + 30, 12 * 60)),
+                currentMinute = 10 * 60
+            )
         )
-        assertEquals(
-            "Minimize ring guide details",
-            dailyDialRingLegendToggleActionLabel(isExpanded = true)
-        )
+    }
+
+    @Test
+    fun `legend items keep distinct accent colors for the inline legend dots`() {
+        val items = dailyDialLegendItems()
+
+        assertEquals(3, items.map { it.accentColor }.distinct().size)
     }
 
     @Test

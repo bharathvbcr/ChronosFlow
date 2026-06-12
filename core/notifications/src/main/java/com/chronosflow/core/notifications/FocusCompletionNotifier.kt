@@ -80,7 +80,8 @@ object FocusCompletionNotifier {
         manager.notify(
             NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_focus_session)
+                .setSmallIcon(R.drawable.ic_chronosflow_notification)
+                .setColor(ContextCompat.getColor(context, R.color.chronosflow_brand_accent))
                 .setContentTitle(title)
                 .setContentText(text)
                 .setColor(ContextCompat.getColor(context, R.color.notification_accent))

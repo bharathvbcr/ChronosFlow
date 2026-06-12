@@ -98,7 +98,6 @@ dependencies {
     implementation(project(":feature:habits"))
     implementation(project(":feature:goals"))
     implementation(project(":feature:medication"))
-    implementation(project(":feature:review"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -123,6 +122,8 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.material3)
+    // Wearable Data Layer: mirrors the widget day summary to the paired watch's tiles.
+    implementation(libs.play.services.wearable)
 
     // AppFunctions
     implementation(libs.androidx.appfunctions)

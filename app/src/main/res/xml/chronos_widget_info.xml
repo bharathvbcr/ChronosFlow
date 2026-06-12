@@ -3,7 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:minWidth="110dp"
     android:minHeight="110dp"
-    android:description="@string/chronos_widget_description"
+    android:description="@string/widget_desc_focus"
     android:previewImage="@drawable/widget_chronos_preview"
     android:previewLayout="@layout/widget_chronos_preview"
     android:resizeMode="horizontal|vertical"

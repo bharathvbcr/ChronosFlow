@@ -1,0 +1,40 @@
+<!--
+    ChronosFlow brand mark for status-bar / notification small icons. Same dial
+    geometry as the launcher's monochrome (themed) layer, sized for 24dp: the
+    system tints it, so only the white silhouette + alpha matter.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Track ring -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeAlpha="0.4"
+        android:strokeWidth="8"
+        android:fillColor="#00000000"
+        android:pathData="M54,28 A26,26 0 1 1 54,80 A26,26 0 1 1 54,28" />
+    <!-- Progress arc -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,28 A26,26 0 1 1 41,76.5" />
+    <!-- Now hand -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,54 L41,76.5" />
+    <!-- Tip dot on the ring -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,76.5 a5,5 0 1 0 10,0 a5,5 0 1 0 -10,0 z" />
+    <!-- Center hub -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,54 a4,4 0 1 0 8,0 a4,4 0 1 0 -8,0 z" />
+</vector>

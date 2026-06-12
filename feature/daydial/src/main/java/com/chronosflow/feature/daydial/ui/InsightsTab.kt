@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -40,23 +41,29 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.chronosflow.core.ai.AssistDigest
 import com.chronosflow.core.ai.InsightRecommendation
 import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.GenAiAssistCopy
 import com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot
 import com.chronosflow.core.domain.model.ReviewInsight
 import com.chronosflow.core.domain.model.ReviewInsightSeverity
+import com.chronosflow.core.domain.model.TimeBlock
 import com.chronosflow.core.ui.components.ChronosEmptyState
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosMetricTile
 import com.chronosflow.core.ui.components.ChronosSectionTitle
 import com.chronosflow.core.ui.components.GenAiAssistBanner
+import com.chronosflow.core.ui.components.formatDurationLabel
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
 import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.feature.daydial.DailyReview
 import com.chronosflow.feature.daydial.TimeBlockUiModel
 import com.chronosflow.feature.daydial.model.DayDialTab
+import com.chronosflow.feature.daydial.model.InsightCategoryBreakdownRow
+import com.chronosflow.feature.daydial.model.InsightsPeriod
+import com.chronosflow.feature.daydial.model.InsightsPeriodSummary
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -92,10 +99,12 @@ internal fun InsightsTab(
     reviewInsights: List<ReviewInsight>,
     recommendations: List<InsightRecommendation>,
     assistSnapshot: GenAiAssistUiSnapshot?,
+    digest: AssistDigest? = null,
     isRefreshing: Boolean,
     onRefreshRecommendations: () -> Unit,
     onApplyRecommendation: (InsightRecommendation) -> Unit,
     onOpenFullReview: () -> Unit = {},
+    contentTopPadding: Dp = 0.dp,
     contentBottomPadding: Dp = 0.dp,
     onCreatePlan: () -> Unit = {},
     trendRangeDays: Int = 14,
@@ -105,11 +114,18 @@ internal fun InsightsTab(
     sleepTrack: com.chronosflow.core.domain.model.SleepTrack? = null,
     onTrendRangeSelected: (Int) -> Unit = {},
     onOpenJournal: () -> Unit = {},
-    onOpenSleepLog: () -> Unit = {}
+    onOpenSleepLog: () -> Unit = {},
+    period: InsightsPeriod = InsightsPeriod.DAY,
+    periodSummary: InsightsPeriodSummary? = null,
+    onPeriodSelected: (InsightsPeriod) -> Unit = {}
 ) {
-    val periodPlanned = review.plannedMinutes
-    val periodActual = review.actualMinutes.coerceAtLeast(0)
-    val periodMissed = review.missedMinutes.coerceAtLeast(0)
+    // For DAY the live selected-day inputs are used; week/month swap in the aggregated rollup.
+    val effectiveReview = periodSummary?.review ?: review
+    val effectiveMissedCount = periodSummary?.missedCount ?: missedCount
+    val effectiveCategoryRows = periodSummary?.categoryRows ?: insightCategoryBreakdownRows(timeBlocks)
+    val periodPlanned = effectiveReview.plannedMinutes
+    val periodActual = effectiveReview.actualMinutes.coerceAtLeast(0)
+    val periodMissed = effectiveReview.missedMinutes.coerceAtLeast(0)
     val periodDrift = periodActual - periodPlanned
     val shouldShowNoPlan = hasNoPlannedDayMinutes(periodPlanned)
     val isPlanSet = !shouldShowNoPlan
@@ -123,8 +139,8 @@ internal fun InsightsTab(
     val actualAccent = noPlanAwareActualMetricColor(periodActual, isPlanSet)
     val executionNarrative = executionScoreNarrative(completion, isPlanSet)
     val executionAction = executionScoreAction(completion, isPlanSet)
-    val missedSummary = missedBlocksSummaryText(isPlanSet, missedCount)
-    val categoryRows = insightCategoryBreakdownRows(timeBlocks)
+    val missedSummary = missedBlocksSummaryText(isPlanSet, effectiveMissedCount)
+    val categoryRows = effectiveCategoryRows
     val orderedInsights = reviewInsights.sortedWith(
         compareBy({ insightSeveritySort(it) }, { it.type.name })
     )
@@ -141,16 +157,17 @@ internal fun InsightsTab(
             .padding(horizontal = pagePadding),
         verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Standard)
     ) {
-        Spacer(Modifier.height(pagePadding))
+        Spacer(Modifier.height(contentTopPadding + pagePadding))
         DayDialPageHeader(
             title = DayDialTab.INSIGHTS.label,
             subtitle = dayDialPrimaryPageSubtitle(DayDialTab.INSIGHTS),
             icon = DayDialTab.INSIGHTS.icon
         )
 
-        ChronosEmptyState(
-            title = "Scope",
-            message = "This tab shows selected-day execution data only. Weekly and monthly rollups are coming in a future update.",
+        InsightsPeriodSelector(
+            period = period,
+            isLoading = periodSummary?.isLoading == true,
+            onPeriodSelected = onPeriodSelected,
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -427,8 +444,27 @@ internal fun InsightsTab(
             GenAiAssistBanner(
                 title = snapshot.bannerTitle,
                 message = snapshot.bannerMessage,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                ready = snapshot.isReady
             )
+        }
+
+        digest?.takeIf { it.text.isNotBlank() }?.let { dayDigest ->
+            ChronosSectionTitle(title = "Day digest")
+            ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
+                    Text(
+                        text = dayDigest.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = GenAiAssistCopy.assistSourceLabel(dayDigest.source),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
 
         ChronosSectionTitle(title = "AI recommendations")
@@ -463,6 +499,65 @@ internal fun InsightsTab(
         )
         Spacer(Modifier.height(bottomContentPadding))
     }
+}
+
+@Composable
+private fun InsightsPeriodSelector(
+    period: InsightsPeriod,
+    isLoading: Boolean,
+    onPeriodSelected: (InsightsPeriod) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ChronosListCard(modifier = modifier) {
+        Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Rollup",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .height(16.dp)
+                            .width(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
+            ) {
+                InsightsPeriod.values().forEach { option ->
+                    FilterChip(
+                        selected = option == period,
+                        onClick = { onPeriodSelected(option) },
+                        label = { Text(option.label) }
+                    )
+                }
+            }
+            Text(
+                text = insightsPeriodScopeNote(period),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+internal fun insightsPeriodScopeNote(period: InsightsPeriod): String = when (period) {
+    InsightsPeriod.DAY ->
+        "Showing the selected day. Weekly and monthly rollups are one tap away."
+    InsightsPeriod.WEEK ->
+        "Execution metrics cover the last 7 days. Review insights and recommendations below stay scoped to the selected day."
+    InsightsPeriod.MONTH ->
+        "Execution metrics cover the last 30 days. Review insights and recommendations below stay scoped to the selected day."
 }
 
 @Composable
@@ -768,12 +863,8 @@ private fun RecommendationRow(
     }
 }
 
-private fun formatInsightMinutes(minutes: Int): String {
-    val safeMinutes = minutes.coerceAtLeast(0)
-    val hours = safeMinutes / 60
-    val remainingMinutes = safeMinutes % 60
-    return if (hours > 0) "${hours}h ${remainingMinutes}m" else "${remainingMinutes}m"
-}
+private fun formatInsightMinutes(minutes: Int): String =
+    formatDurationLabel(minutes.coerceAtLeast(0))
 
 private fun formatDriftMinutes(driftMinutes: Int): String {
     val sign = if (driftMinutes > 0) "+" else if (driftMinutes < 0) "−" else ""
@@ -837,30 +928,33 @@ private fun insightSeveritySort(insight: ReviewInsight): Int = when (insight.sev
     ReviewInsightSeverity.INFO -> 2
 }
 
-internal data class InsightCategoryBreakdownRow(
-    val category: String,
-    val minutes: Int,
-    val share: Float,
-    val progress: Float
-)
-
 internal fun insightCategoryBreakdownRows(
     timeBlocks: List<TimeBlockUiModel>
+): List<InsightCategoryBreakdownRow> =
+    categoryBreakdownRows(timeBlocks.map { inferInsightCategory(it) to it.durationMinutes })
+
+internal fun insightCategoryBreakdownRowsFromBlocks(
+    blocks: List<TimeBlock>
+): List<InsightCategoryBreakdownRow> =
+    categoryBreakdownRows(blocks.map { inferInsightCategory(it) to it.durationMinutes })
+
+private fun categoryBreakdownRows(
+    categoryMinutePairs: List<Pair<String, Int>>
 ): List<InsightCategoryBreakdownRow> {
-    val categoryMinutes = timeBlocks
-        .groupingBy { inferInsightCategory(it) }
-        .fold(0) { acc, block -> acc + block.durationMinutes }
+    val categoryMinutes = categoryMinutePairs
+        .groupingBy { it.first }
+        .fold(0) { acc, pair -> acc + pair.second }
     val maxCategoryMinutes = categoryMinutes.values.maxOrNull()?.coerceAtLeast(1) ?: return emptyList()
     val totalMinutes = categoryMinutes.values.sum().coerceAtLeast(1)
 
     return categoryMinutes.entries
         .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-        .map { (category, categoryMinutes) ->
+        .map { (category, minutes) ->
             InsightCategoryBreakdownRow(
                 category = category,
-                minutes = categoryMinutes,
-                share = categoryMinutes.toFloat() / totalMinutes.toFloat(),
-                progress = categoryMinutes.toFloat() / maxCategoryMinutes.toFloat()
+                minutes = minutes,
+                share = minutes.toFloat() / totalMinutes.toFloat(),
+                progress = minutes.toFloat() / maxCategoryMinutes.toFloat()
             )
         }
 }
@@ -873,6 +967,14 @@ private fun driftAccent(driftMinutes: Int): androidx.compose.ui.graphics.Color =
 }
 
 private fun inferInsightCategory(block: TimeBlockUiModel): String = when {
+    block.taskId != null -> "Task"
+    block.habitId != null -> "Habit"
+    block.medicationPlanId != null -> "Medication"
+    block.calendarEventId != null -> "Calendar"
+    else -> "Block"
+}
+
+private fun inferInsightCategory(block: TimeBlock): String = when {
     block.taskId != null -> "Task"
     block.habitId != null -> "Habit"
     block.medicationPlanId != null -> "Medication"

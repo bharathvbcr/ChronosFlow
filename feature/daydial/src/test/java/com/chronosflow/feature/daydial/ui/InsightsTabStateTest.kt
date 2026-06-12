@@ -1,11 +1,36 @@
 package com.chronosflow.feature.daydial.ui
 
 import androidx.compose.ui.graphics.Color
+import com.chronosflow.core.domain.model.BlockFlexibility
+import com.chronosflow.core.domain.model.BlockProvenance
+import com.chronosflow.core.domain.model.EnergyIntensity
+import com.chronosflow.core.domain.model.TimeBlock
 import com.chronosflow.feature.daydial.model.TimeBlockUiModel
+import java.time.Instant
+import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class InsightsTabStateTest {
+
+    @Test
+    fun `domain-block category breakdown aggregates across a period`() {
+        val rows = insightCategoryBreakdownRowsFromBlocks(
+            blocks = listOf(
+                domainBlock(id = "task-mon", durationMinutes = 60, taskId = "task-1"),
+                domainBlock(id = "task-tue", durationMinutes = 30, taskId = "task-1"),
+                domainBlock(id = "habit-wed", durationMinutes = 30, habitId = "habit-1")
+            )
+        )
+
+        assertEquals("Task", rows[0].category)
+        assertEquals(90, rows[0].minutes)
+        assertEquals(0.75f, rows[0].share, 0.001f)
+        assertEquals(1f, rows[0].progress, 0.001f)
+        assertEquals("Habit", rows[1].category)
+        assertEquals(30, rows[1].minutes)
+    }
+
     @Test
     fun `category breakdown keeps per-block minutes without saturating progress`() {
         val rows = insightCategoryBreakdownRows(
@@ -243,4 +268,35 @@ class InsightsTabStateTest {
             calendarEventId = calendarEventId
         )
     }
+
+    private fun domainBlock(
+        id: String,
+        durationMinutes: Int,
+        taskId: String? = null,
+        habitId: String? = null,
+        calendarEventId: Long? = null
+    ): TimeBlock = TimeBlock(
+        id = id,
+        date = LocalDate.of(2026, 6, 10),
+        title = id,
+        category = "WORK",
+        startMinuteOfDay = 9 * 60,
+        durationMinutes = durationMinutes,
+        timezone = "UTC",
+        provenance = BlockProvenance.USER_CREATED,
+        flexibility = BlockFlexibility.MOVABLE,
+        energyLevel = EnergyIntensity.MODERATE,
+        source = "USER_CREATED",
+        taskId = taskId,
+        calendarEventId = calendarEventId,
+        medicationPlanId = null,
+        habitId = habitId,
+        isLocked = false,
+        isProtected = false,
+        recurrenceRuleId = null,
+        actualStartMinuteOfDay = null,
+        actualEndMinuteOfDay = null,
+        createdAt = Instant.parse("2026-06-10T08:00:00Z"),
+        updatedAt = Instant.parse("2026-06-10T08:00:00Z")
+    )
 }

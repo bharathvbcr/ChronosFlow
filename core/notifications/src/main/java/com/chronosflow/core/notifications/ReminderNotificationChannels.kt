@@ -10,6 +10,7 @@ import com.chronosflow.core.domain.model.AlarmRequestType
 object ReminderNotificationChannels {
     const val DEFAULT_CHANNEL_ID = "chronos_reminders"
     const val CRITICAL_CHANNEL_ID = "chronos_reminders_critical"
+    const val CURRENT_BLOCK_CHANNEL_ID = "chronos_current_block"
 
     fun ensureCreated(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -31,8 +32,16 @@ object ReminderNotificationChannels {
             description = "Medication doses and urgent task deadlines"
             group = NotificationChannelGroups.REMINDERS
         }
+        val currentBlockChannel = NotificationChannel(
+            CURRENT_BLOCK_CHANNEL_ID,
+            "Current block",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Silent live progress for the time block happening now"
+        }
         manager.createNotificationChannel(defaultChannel)
         manager.createNotificationChannel(criticalChannel)
+        manager.createNotificationChannel(currentBlockChannel)
     }
 
     fun channelIdFor(

@@ -43,10 +43,18 @@ class DeviceCalendarPlatformTest {
     }
 
     @Test
-    fun `find writable calendar id returns first row`() {
+    fun `find writable calendar id prefers the primary calendar`() {
         val cursor: Cursor = mockk()
         every { context.contentResolver } returns contentResolver
-        every { contentResolver.query(CalendarContract.Calendars.CONTENT_URI, any(), any(), any(), isNull()) } returns cursor
+        every {
+            contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI,
+                any(),
+                any(),
+                any(),
+                "${CalendarContract.Calendars.IS_PRIMARY} DESC, ${CalendarContract.Calendars._ID} ASC"
+            )
+        } returns cursor
         every { cursor.moveToFirst() } returns true
         every { cursor.getLong(0) } returns 77L
         every { cursor.close() } just runs
@@ -65,7 +73,7 @@ class DeviceCalendarPlatformTest {
     fun `find writable calendar id returns null when no rows exist`() {
         val cursor: Cursor = mockk()
         every { context.contentResolver } returns contentResolver
-        every { contentResolver.query(CalendarContract.Calendars.CONTENT_URI, any(), any(), any(), isNull()) } returns cursor
+        every { contentResolver.query(CalendarContract.Calendars.CONTENT_URI, any(), any(), any(), any()) } returns cursor
         every { cursor.moveToFirst() } returns false
         every { cursor.close() } just runs
 

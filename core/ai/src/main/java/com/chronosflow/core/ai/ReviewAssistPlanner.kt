@@ -1,6 +1,8 @@
 package com.chronosflow.core.ai
 
+import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
+import com.chronosflow.core.ai.genai.SummaryStyle
 import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.ReviewInsight
 import javax.inject.Inject
@@ -18,6 +20,12 @@ data class WeeklyReviewContext(
     val completionPercent: Int
         get() = if (plannedMinutes == 0) 0 else ((actualMinutes.toFloat() / plannedMinutes) * 100).toInt()
 }
+
+/** A short, glanceable review digest plus the AI source that produced it. */
+data class AssistDigest(
+    val text: String,
+    val source: AssistGenAiSource
+)
 
 class ReviewAssistPlanner @Inject constructor(
     private val genAiAssistCoordinator: GenAiAssistCoordinator
@@ -38,6 +46,31 @@ class ReviewAssistPlanner @Inject constructor(
                 fallbackNextStep = baseline.nextStep
             )
         } ?: baseline
+    }
+
+    /**
+     * Condense the day's [insights] into a short glanceable digest using the on-device ML Kit GenAI
+     * Summarization feature. Falls back to a deterministic local digest when AI is disabled,
+     * unavailable, or there is too little text to summarize.
+     */
+    suspend fun suggestDigest(insights: List<ReviewInsight>): AssistDigest {
+        val local = localDigest(insights)
+        if (insights.size < MIN_INSIGHTS_TO_SUMMARIZE) return local
+        val corpus = insights.joinToString(separator = "\n") { "- ${it.title}: ${it.detail}" }
+        val generation = genAiAssistCoordinator.summarize(corpus, SummaryStyle.THREE_BULLETS)
+        return generation.text
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { AssistDigest(text = it, source = generation.source) }
+            ?: local
+    }
+
+    private fun localDigest(insights: List<ReviewInsight>): AssistDigest {
+        val text = when {
+            insights.isEmpty() -> "No standout patterns today — keep the current rhythm."
+            else -> insights.take(3).joinToString(separator = "\n") { "• ${it.title}" }
+        }
+        return AssistDigest(text = text, source = AssistGenAiSource.LOCAL)
     }
 
     private fun buildPrompt(
@@ -89,5 +122,9 @@ class ReviewAssistPlanner @Inject constructor(
             nextStep = nextStep,
             source = com.chronosflow.core.ai.genai.AssistGenAiSource.LOCAL
         )
+    }
+
+    private companion object {
+        const val MIN_INSIGHTS_TO_SUMMARIZE = 2
     }
 }

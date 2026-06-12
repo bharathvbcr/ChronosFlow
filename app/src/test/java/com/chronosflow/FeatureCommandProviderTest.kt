@@ -5,7 +5,6 @@ import com.chronosflow.feature.daydial.dayDialCommandProvider
 import com.chronosflow.feature.focus.focusCommandProvider
 import com.chronosflow.feature.habits.habitCommandProvider
 import com.chronosflow.feature.medication.medicationCommandProvider
-import com.chronosflow.feature.review.reviewCommandProvider
 import com.chronosflow.feature.tasks.taskCommandProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -20,8 +19,7 @@ class FeatureCommandProviderTest {
             focusCommandProvider(onOpenFocus = {}),
             taskCommandProvider {},
             habitCommandProvider {},
-            medicationCommandProvider {},
-            reviewCommandProvider {}
+            medicationCommandProvider {}
         ).flatMap { provider -> provider.commands() }
 
         assertEquals(
@@ -29,7 +27,6 @@ class FeatureCommandProviderTest {
                 "daydial.open",
                 "daydial.plan",
                 "daydial.focus-planner",
-                "daydial.insights",
                 "daydial.journal",
                 "daydial.sleep",
                 "daydial.review",
@@ -42,8 +39,7 @@ class FeatureCommandProviderTest {
                 "focus.open",
                 "tasks.open",
                 "habits.open",
-                "medication.open",
-                "review.open"
+                "medication.open"
             ),
             commands.map { it.id }
         )
@@ -59,8 +55,7 @@ class FeatureCommandProviderTest {
             focusCommandProvider(onOpenFocus = {}),
             taskCommandProvider {},
             habitCommandProvider {},
-            medicationCommandProvider {},
-            reviewCommandProvider {}
+            medicationCommandProvider {}
         ).flatMap { provider -> provider.commands() }
 
         assertTrue(commands.all { !it.group.isNullOrBlank() })
@@ -68,10 +63,10 @@ class FeatureCommandProviderTest {
         assertEquals(CommandPaletteGroups.DAY, commands.single { it.id == "daydial.open" }.group)
         assertEquals(CommandPaletteGroups.PLAN, commands.single { it.id == "daydial.plan" }.group)
         assertEquals(CommandPaletteGroups.FOCUS, commands.single { it.id == "focus.open" }.group)
-        assertEquals(CommandPaletteGroups.SUPPORTING, commands.single { it.id == "review.open" }.group)
+        assertEquals(CommandPaletteGroups.SUPPORTING, commands.single { it.id == "daydial.review" }.group)
         assertEquals("Today", commands.single { it.id == "daydial.open" }.shortcutLabel)
         assertEquals(
-            listOf(80, 80, 75, 70, 65),
+            listOf(85, 80, 75, 70),
             commands
                 .filter { it.group == CommandPaletteGroups.SUPPORTING }
                 .map { it.priority }
@@ -87,10 +82,9 @@ class FeatureCommandProviderTest {
                 onOpenDayDial = { invoked += "day" },
                 onOpenPlan = { invoked += "plan" },
                 onOpenFocusPlanner = { invoked += "focus-planner" },
-                onOpenInsights = { invoked += "insights" },
                 onOpenJournal = { invoked += "journal" },
                 onOpenSleepLog = { invoked += "sleep" },
-                onOpenReview = { invoked += "day-review" },
+                onOpenReview = { invoked += "review" },
                 onOpenPlanningTools = { invoked += "tools" },
                 onOpenTemplates = { invoked += "templates" },
                 onOpenAiSettings = { invoked += "ai-settings" },
@@ -101,8 +95,7 @@ class FeatureCommandProviderTest {
             focusCommandProvider(onOpenFocus = { invoked += "focus" }),
             taskCommandProvider { invoked += "tasks" },
             habitCommandProvider { invoked += "habits" },
-            medicationCommandProvider { invoked += "medication" },
-            reviewCommandProvider { invoked += "review" }
+            medicationCommandProvider { invoked += "medication" }
         )
 
         providers.flatMap { provider -> provider.commands() }.forEach { command -> command.onRun() }
@@ -112,10 +105,9 @@ class FeatureCommandProviderTest {
                 "day",
                 "plan",
                 "focus-planner",
-                "insights",
                 "journal",
                 "sleep",
-                "day-review",
+                "review",
                 "tools",
                 "templates",
                 "ai-settings",
@@ -125,8 +117,7 @@ class FeatureCommandProviderTest {
                 "focus",
                 "tasks",
                 "habits",
-                "medication",
-                "review"
+                "medication"
             ),
             invoked
         )

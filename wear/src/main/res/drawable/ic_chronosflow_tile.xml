@@ -1,0 +1,42 @@
+<!-- ChronosFlow dial mark used as the tile-picker icon for the wear tile service. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:strokeColor="#6C63FF"
+        android:strokeAlpha="0.35"
+        android:strokeWidth="8"
+        android:fillColor="#00000000"
+        android:pathData="M54,28 A26,26 0 1 1 54,80 A26,26 0 1 1 54,28" />
+    <path
+        android:strokeColor="#18B8A6"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,28 A26,26 0 1 1 41,76.5" />
+    <path
+        android:strokeColor="#F7C948"
+        android:strokeAlpha="0.3"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,54 L41,76.5" />
+    <path
+        android:strokeColor="#F7C948"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,54 L41,76.5" />
+    <path
+        android:fillColor="#F7C948"
+        android:fillAlpha="0.25"
+        android:pathData="M33,76.5 a8,8 0 1 0 16,0 a8,8 0 1 0 -16,0 z" />
+    <path
+        android:fillColor="#F7C948"
+        android:pathData="M36,76.5 a5,5 0 1 0 10,0 a5,5 0 1 0 -10,0 z" />
+    <path
+        android:fillColor="#F7C948"
+        android:pathData="M50,54 a4,4 0 1 0 8,0 a4,4 0 1 0 -8,0 z" />
+</vector>

@@ -4,6 +4,8 @@ import app.cash.turbine.test
 import com.chronosflow.core.ai.TaskAssistPlanner
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
 import com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot
+import com.chronosflow.core.ai.genai.RewriteAssistUiState
+import com.chronosflow.core.ai.genai.RewriteStyle
 import com.chronosflow.core.ai.genai.refreshAssistUiSnapshot
 import com.chronosflow.core.ai.TaskAssistRequest
 import com.chronosflow.core.ai.TaskAssistSchedulePayload
@@ -595,5 +597,46 @@ class TaskViewModelTest {
 
         assertEquals(false, viewModel.assistState.value.isLoading)
         assertEquals(suggestions, viewModel.assistState.value.suggestions)
+    }
+
+    @Test
+    fun `rewriteTaskDescription publishes a preview the form applies explicitly`() = runTest {
+        coEvery {
+            taskAssistPlanner.rewriteText("Email the launch team about the rollout plan", RewriteStyle.SHORTEN)
+        } returns "Email launch team re: rollout plan"
+
+        viewModel.rewriteTaskDescription(
+            text = "Email the launch team about the rollout plan",
+            style = RewriteStyle.SHORTEN,
+            styleLabel = "Shorten"
+        )
+
+        val state = viewModel.rewriteState.value
+        assertEquals(false, state.isLoading)
+        assertEquals("Shorten", state.styleLabel)
+        assertEquals("Email the launch team about the rollout plan", state.original)
+        assertEquals("Email launch team re: rollout plan", state.rewritten)
+    }
+
+    @Test
+    fun `rewriteTaskDescription reports when the rewrite tool is unavailable`() = runTest {
+        coEvery { taskAssistPlanner.rewriteText(any(), any()) } returns null
+
+        viewModel.rewriteTaskDescription(
+            text = "Email the launch team about the rollout plan",
+            style = RewriteStyle.PROFESSIONAL,
+            styleLabel = "Polish"
+        )
+
+        val state = viewModel.rewriteState.value
+        assertEquals(null, state.rewritten)
+        assertEquals(
+            "Rewrite is unavailable on this device right now — your wording is unchanged.",
+            state.message
+        )
+
+        viewModel.clearTaskRewrite()
+
+        assertEquals(RewriteAssistUiState(), viewModel.rewriteState.value)
     }
 }

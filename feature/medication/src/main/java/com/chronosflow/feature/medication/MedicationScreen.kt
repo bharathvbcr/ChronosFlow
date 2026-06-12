@@ -65,14 +65,14 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chronosflow.core.ai.MedicationAssistRequest
 import com.chronosflow.core.domain.model.MedicationPlan
-import com.chronosflow.core.ui.components.ChronosScreenBackdrop
 import com.chronosflow.core.ui.components.ChronosScreenScaffold
 import com.chronosflow.core.ui.components.ChronosEmptyState
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosConfirmBottomSheet
 import com.chronosflow.core.ui.components.ChronosMetricTile
+import com.chronosflow.core.ui.components.ChronosCommandPaletteAction
+import com.chronosflow.core.ui.components.ChronosPageHeader
 import com.chronosflow.core.ui.components.ChronosQuickAddChips
-import com.chronosflow.core.ui.components.ChronosSectionHeader
 import com.chronosflow.core.ui.components.formatDisplayMinute
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
 import com.chronosflow.core.ui.settings.rememberChronosUiSettings
@@ -84,6 +84,7 @@ import com.chronosflow.core.ui.theme.ChronosSpacing
 fun MedicationScreen(
     viewModel: MedicationViewModel = hiltViewModel(),
     onBack: (() -> Unit)? = null,
+    onOpenCommandPalette: (() -> Unit)? = null,
     openAddSheet: Boolean = false,
     initialAddCapture: String? = null
 ) {
@@ -94,6 +95,7 @@ fun MedicationScreen(
     val assistState by viewModel.assistState.collectAsStateWithLifecycle()
     val adherenceSuggestions by viewModel.adherenceSuggestions.collectAsStateWithLifecycle()
     val adherenceAssistSnapshot by viewModel.adherenceAssistSnapshot.collectAsStateWithLifecycle()
+    val rewriteState by viewModel.rewriteState.collectAsStateWithLifecycle()
     val activePlans = plans.filter { it.isActive }
     val snackbarHostState = remember { SnackbarHostState() }
     var sheetTarget by remember { mutableStateOf<MedicationSheetTarget?>(null) }
@@ -137,102 +139,101 @@ fun MedicationScreen(
     ChronosScreenScaffold(
         title = "Medication",
         onBack = onBack,
+        actions = { ChronosCommandPaletteAction(onOpenCommandPalette) },
         snackbarHost = { ChronosSnackbarHost(snackbarHostState) }
     ) { padding ->
-        ChronosScreenBackdrop(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 4.dp,
+                bottom = padding.calculateBottomPadding() + shellBottomInset + ChronosSpacing.Medium
+            ),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                contentPadding = PaddingValues(top = 4.dp, bottom = shellBottomInset + ChronosSpacing.Medium),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                item {
-                    ChronosSectionHeader(
-                        title = "Medication",
-                        subtitle = "Track active plans and create exact reminder requests for critical doses."
+            item {
+                ChronosPageHeader(
+                    title = "Medication tracking",
+                    subtitle = "Track active plans and create exact reminder requests for critical doses.",
+                    icon = Icons.Default.Medication
+                )
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    ChronosMetricTile("Active", activePlans.size.toString(), Modifier.weight(1f))
+                    ChronosMetricTile("Missed", plans.sumOf { it.missedCount }.toString(), Modifier.weight(1f))
+                }
+            }
+            item {
+                FilledTonalButton(
+                    onClick = { sheetTarget = MedicationSheetTarget.Add() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Add medication", fontWeight = FontWeight.SemiBold)
+                }
+            }
+            item {
+                MedicationAdherenceChart(plans = plans)
+            }
+            if (showExactAlarmPermissionAction) {
+                item(key = "med_attention_exact_alarm") {
+                    MedicationAttentionCard(
+                        title = "Exact alarms are off",
+                        message = "Reminders use a 10-minute fallback until exact alarms are enabled.",
+                        actionLabel = "Settings",
+                        onAction = viewModel::openExactAlarmSettings,
+                        modifier = Modifier.animateItem(),
+                        onDismiss = viewModel::dismissExactAlarmPermissionAction
                     )
                 }
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                        ChronosMetricTile("Active", activePlans.size.toString(), Modifier.weight(1f))
-                        ChronosMetricTile("Missed", plans.sumOf { it.missedCount }.toString(), Modifier.weight(1f))
-                    }
+            }
+            if (adherenceSuggestions.isNotEmpty()) {
+                item(key = "med_adherence_panel") {
+                    MedicationAdherencePanel(
+                        suggestions = adherenceSuggestions,
+                        assistSnapshot = adherenceAssistSnapshot,
+                        onApply = viewModel::applyAdherenceSuggestion,
+                        onDismiss = viewModel::dismissAdherenceSuggestion,
+                        modifier = Modifier.animateItem()
+                    )
                 }
-                item {
-                    FilledTonalButton(
-                        onClick = { sheetTarget = MedicationSheetTarget.Add() },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Add medication", fontWeight = FontWeight.SemiBold)
-                    }
+            }
+            if (activePlans.isEmpty()) {
+                item(key = "med_empty_state") {
+                    ChronosEmptyState(
+                        title = "No medication plans",
+                        message = "Add a plan to schedule a reminder and track adherence.",
+                        modifier = Modifier
+                            .animateItem()
+                            .fillMaxWidth()
+                    )
                 }
-                item {
-                    MedicationAdherenceChart(plans = plans)
+                item(key = "med_empty_quick_add") {
+                    ChronosQuickAddChips(
+                        label = "Start quickly",
+                        options = listOf("Vitamin D", "Blood pressure", "Evening dose", "Inhaler"),
+                        onSelect = { name ->
+                            sheetTarget = MedicationSheetTarget.Add(prefillName = name)
+                        },
+                        modifier = Modifier.animateItem()
+                    )
                 }
-                if (showExactAlarmPermissionAction) {
-                    item(key = "med_attention_exact_alarm") {
-                        MedicationAttentionCard(
-                            title = "Exact alarms are off",
-                            message = "Reminders use a 10-minute fallback until exact alarms are enabled.",
-                            actionLabel = "Settings",
-                            onAction = viewModel::openExactAlarmSettings,
-                            modifier = Modifier.animateItem(),
-                            onDismiss = viewModel::dismissExactAlarmPermissionAction
-                        )
-                    }
-                }
-                if (adherenceSuggestions.isNotEmpty()) {
-                    item(key = "med_adherence_panel") {
-                        MedicationAdherencePanel(
-                            suggestions = adherenceSuggestions,
-                            assistSnapshot = adherenceAssistSnapshot,
-                            onApply = viewModel::applyAdherenceSuggestion,
-                            onDismiss = viewModel::dismissAdherenceSuggestion,
-                            modifier = Modifier.animateItem()
-                        )
-                    }
-                }
-                if (activePlans.isEmpty()) {
-                    item(key = "med_empty_state") {
-                        ChronosEmptyState(
-                            title = "No medication plans",
-                            message = "Add a plan to schedule a reminder and track adherence.",
-                            modifier = Modifier
-                                .animateItem()
-                                .fillMaxWidth()
-                        )
-                    }
-                    item(key = "med_empty_quick_add") {
-                        ChronosQuickAddChips(
-                            label = "Start quickly",
-                            options = listOf("Vitamin D", "Blood pressure", "Evening dose", "Inhaler"),
-                            onSelect = { name ->
-                                sheetTarget = MedicationSheetTarget.Add(prefillName = name)
-                            },
-                            modifier = Modifier.animateItem()
-                        )
-                    }
-                } else {
-                    items(activePlans, key = { it.id }) { plan ->
-                        MedicationRow(
-                            modifier = Modifier.animateItem(),
-                            plan = plan,
-                            onEdit = { sheetTarget = MedicationSheetTarget.Edit(plan) },
-                            onTaken = { viewModel.markDoseTaken(plan) },
-                            onMissed = { viewModel.markDoseMissed(plan) },
-                            onSnooze = { minutes -> viewModel.snoozeReminder(plan, minutes) },
-                            onSkip = { viewModel.skipDoseToday(plan) },
-                            onPause = { viewModel.pausePlan(plan, days = 1) },
-                            onResume = { viewModel.resumePlan(plan) },
-                            onArchive = { planToArchive = plan },
-                            onOpenContext = { planContextTarget = plan }
-                        )
-                    }
+            } else {
+                items(activePlans, key = { it.id }) { plan ->
+                    MedicationRow(
+                        modifier = Modifier.animateItem(),
+                        plan = plan,
+                        onEdit = { sheetTarget = MedicationSheetTarget.Edit(plan) },
+                        onTaken = { viewModel.markDoseTaken(plan) },
+                        onMissed = { viewModel.markDoseMissed(plan) },
+                        onSnooze = { minutes -> viewModel.snoozeReminder(plan, minutes) },
+                        onSkip = { viewModel.skipDoseToday(plan) },
+                        onPause = { viewModel.pausePlan(plan, days = 1) },
+                        onResume = { viewModel.resumePlan(plan) },
+                        onArchive = { planToArchive = plan },
+                        onOpenContext = { planContextTarget = plan }
+                    )
                 }
             }
         }
@@ -295,7 +296,10 @@ fun MedicationScreen(
         },
         assistState = assistState,
         onRequestAssist = viewModel::requestMedicationAssist,
-        onClearAssist = viewModel::clearMedicationAssist
+        onClearAssist = viewModel::clearMedicationAssist,
+        rewriteState = rewriteState,
+        onRequestRewrite = viewModel::rewriteMedicationNotes,
+        onClearRewrite = viewModel::clearMedicationRewrite
     )
 
     planContextTarget?.let { plan ->

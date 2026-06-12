@@ -13,12 +13,6 @@ import androidx.fragment.app.FragmentActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -28,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import com.chronosflow.core.ui.shell.ChronosShellChromeSuppression
@@ -35,7 +30,6 @@ import com.chronosflow.core.ui.shell.ChronosShellOverlayController
 import com.chronosflow.core.ui.shell.LocalChronosShellOverlayController
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -44,9 +38,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.chronosflow.core.ai.genai.GenAiAssistCopy
 import com.chronosflow.core.ui.components.CommandPaletteDialog
 import com.chronosflow.core.ui.components.CommandPaletteItem
 import com.chronosflow.core.ui.motion.ChronosMotionDefaults
@@ -55,15 +49,18 @@ import com.chronosflow.core.ui.motion.ChronosTransitionFactory
 import com.chronosflow.core.ui.motion.ChronosTransitionSet
 import com.chronosflow.core.ui.security.AppLockOverlay
 import com.chronosflow.core.ui.settings.ChronosFeatureFlags
+import com.chronosflow.core.ui.settings.ChronosUiSettingsKeys
+import com.chronosflow.core.ui.settings.rememberChronosUiBooleanSetting
 import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 import com.chronosflow.core.ui.settings.resolveChronosDarkTheme
+import com.chronosflow.core.ui.settings.writeChronosUiBooleanSetting
 import com.chronosflow.core.ui.theme.ChronosTheme
+import com.chronosflow.onboarding.ChronosOnboarding
 import com.chronosflow.feature.daydial.dayDialCommandProvider
 import com.chronosflow.feature.focus.focusCommandProvider
 import com.chronosflow.feature.goals.goalCommandProvider
 import com.chronosflow.feature.habits.habitCommandProvider
 import com.chronosflow.feature.medication.medicationCommandProvider
-import com.chronosflow.feature.review.reviewCommandProvider
 import com.chronosflow.feature.tasks.taskCommandProvider
 import com.chronosflow.core.notifications.EXTRA_INITIAL_SECTION
 import com.chronosflow.core.notifications.NotificationLaunch
@@ -71,7 +68,6 @@ import com.chronosflow.core.notifications.consumeNotificationLaunchExtras
 import com.chronosflow.core.notifications.parseNotificationLaunch
 import com.chronosflow.navigation.ChronosNavigationShell
 import com.chronosflow.navigation.ChronosRoute
-import com.chronosflow.navigation.navigateDayTarget
 import com.chronosflow.navigation.quickCreateCommandProvider
 import com.chronosflow.navigation.guardedMedicationOpener
 import com.chronosflow.navigation.navigateFromNotificationLaunch
@@ -82,6 +78,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal const val STARTUP_SHELL_DEFER_MILLIS = 350L
@@ -117,6 +114,12 @@ class MainActivity : FragmentActivity() {
                 delay(STARTUP_SHELL_DEFER_MILLIS)
                 showFullShell = true
             }
+            val appContext = applicationContext
+            val onboardingScope = rememberCoroutineScope()
+            val onboardingCompleted = rememberChronosUiBooleanSetting(
+                ChronosUiSettingsKeys.KEY_ONBOARDING_COMPLETED,
+                false
+            )
             val uiSettings = rememberChronosUiSettings()
             ChronosTheme(
                 darkTheme = resolveChronosDarkTheme(uiSettings.appearanceMode),
@@ -132,13 +135,26 @@ class MainActivity : FragmentActivity() {
                     contentColor = MaterialTheme.colorScheme.onSurface
                 ) {
                     if (showFullShell) {
-                        ChronosFlowApp(
-                            launchIntent = launchIntentState.value,
-                            launchGeneration = launchGeneration.intValue,
-                            featureFlags = uiSettings.featureFlags,
-                            reduceMotionEnabled = uiSettings.reduceMotionEnabled,
-                            onNotificationLaunchHandled = ::consumeNotificationLaunch
-                        )
+                        if (!onboardingCompleted) {
+                            ChronosOnboarding(
+                                onComplete = {
+                                    onboardingScope.launch {
+                                        appContext.writeChronosUiBooleanSetting(
+                                            ChronosUiSettingsKeys.KEY_ONBOARDING_COMPLETED,
+                                            true
+                                        )
+                                    }
+                                }
+                            )
+                        } else {
+                            ChronosFlowApp(
+                                launchIntent = launchIntentState.value,
+                                launchGeneration = launchGeneration.intValue,
+                                featureFlags = uiSettings.featureFlags,
+                                reduceMotionEnabled = uiSettings.reduceMotionEnabled,
+                                onNotificationLaunchHandled = ::consumeNotificationLaunch
+                            )
+                        }
                     }
                 }
             }
@@ -228,11 +244,9 @@ private fun ChronosFlowApp(
             onOpenDay = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TODAY)) },
             onOpenTasks = openTasksSidebar,
             onOpenReview = {
-                if (featureFlags.reviewEnabled) {
-                    navController.navigateSingleTop(ChronosRoute.ReviewDetail.route)
-                } else {
-                    navController.navigateDayTarget(ChronosRoute.Day.TARGET_REVIEW)
-                }
+                navController.navigateSingleTop(
+                    ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS)
+                )
             },
             onOpenFocus = {
                 navController.navigateSingleTop(
@@ -350,10 +364,7 @@ private fun ChronosFlowApp(
                     onOpenDayDial = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TODAY)) },
                     onOpenPlan = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_PLAN)) },
                     onOpenFocusPlanner = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_FOCUS_PLANNER)) },
-                    onOpenInsights = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS)) },
-                    onOpenReview = {
-                        navController.navigateDayTarget(ChronosRoute.Day.TARGET_REVIEW)
-                    },
+                    onOpenReview = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS)) },
                     onOpenPlanningTools = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_DAY_TOOLS)) },
                     onOpenTemplates = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TEMPLATES)) },
                     onOpenAiSettings = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_AI_SETTINGS)) },
@@ -378,13 +389,6 @@ private fun ChronosFlowApp(
                 }
                 if (featureFlags.medicationEnabled) {
                     add(medicationCommandProvider(onOpenMedication = openMedicationSidebarIfEnabled))
-                }
-                if (featureFlags.reviewEnabled) {
-                    add(
-                        reviewCommandProvider {
-                            navController.navigateSingleTop(ChronosRoute.ReviewDetail.route)
-                        }
-                    )
                 }
             }.flatMap { provider -> provider.commands() }
         }
@@ -461,18 +465,6 @@ private fun ChronosFlowApp(
             externalDayTarget = initialDayTargetForNotificationLaunch(notificationPlan.notificationLaunch),
             externalDayTargetGeneration = launchGeneration
         )
-        val currentRoute = currentBackStackEntry?.destination?.route
-        if (shouldShowFloatingCommandPaletteAction(currentRoute)) {
-            IconButton(
-                onClick = openCommandPalette,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(top = 4.dp, end = 4.dp)
-            ) {
-                Icon(Icons.Default.Search, contentDescription = "Open command palette")
-            }
-        }
     }
     AnimatedVisibility(
         visible = appLockState.appLockEnabled && appLockState.isAppLocked,
@@ -535,6 +527,7 @@ private fun CommandPaletteHost(
 ) {
     val commandSearchViewModel = hiltViewModel<CommandSearchViewModel>()
     val commandUiState by commandSearchViewModel.uiState.collectAsStateWithLifecycle()
+    val assistantPanel by commandSearchViewModel.assistantPanel.collectAsStateWithLifecycle()
 
     LaunchedEffect(commands, assistantActions) {
         commandSearchViewModel.dispatch(LauncherAction.OnOpen, assistantActions, commands)
@@ -550,8 +543,39 @@ private fun CommandPaletteHost(
         },
         onRunCommand = {
             commandSearchViewModel.dispatch(LauncherAction.OnExecute(it.id), assistantActions, commands)
+            // The ask row converses in-place; every other command closes the palette.
+            if (it.id != ASSISTANT_ASK_COMMAND_ID) onClosed()
+        },
+        onSubmitQuery = { query ->
+            // Keyboard Go: run the best quick-capture create for capture-shaped text, otherwise
+            // the top-ranked visible command.
+            val ranCapture = commandSearchViewModel.runBestCaptureCommand(query, assistantActions)
+            if (ranCapture) {
+                onClosed()
+            } else {
+                commandUiState.results.maxByOrNull { it.priority }?.let { top ->
+                    commandSearchViewModel.dispatch(LauncherAction.OnExecute(top.id), assistantActions, commands)
+                    if (top.id != ASSISTANT_ASK_COMMAND_ID) onClosed()
+                }
+            }
+        },
+        onAskAssistant = { query ->
+            commandSearchViewModel.askAssistant(query, commands, assistantActions)
+        },
+        assistantIsAsking = assistantPanel.isAsking,
+        assistantStreamingReply = assistantPanel.streamingReply,
+        assistantQuestion = assistantPanel.question,
+        assistantHasConversation = assistantPanel.history.isNotEmpty(),
+        assistantReply = assistantPanel.reply?.reply,
+        assistantSourceLabel = assistantPanel.reply?.source?.let { GenAiAssistCopy.assistSourceLabel(it) },
+        assistantProposalLabels = assistantPanel.reply?.proposedCommands?.map { it.title }.orEmpty(),
+        onConfirmAssistantProposal = { index ->
+            assistantPanel.reply?.proposedCommands?.getOrNull(index)?.let { command ->
+                commandSearchViewModel.runAssistantProposal(command)
+            }
             onClosed()
         },
+        onDismissAssistantReply = { commandSearchViewModel.clearAssistant() },
         onDismiss = {
             commandSearchViewModel.dispatch(LauncherAction.OnClose, assistantActions, commands)
             onClosed()
@@ -596,6 +620,3 @@ internal fun startRouteForNotificationLaunch(launch: NotificationLaunch?): Strin
 
 internal fun initialDayTargetForNotificationLaunch(launch: NotificationLaunch?): String? =
     if (launch?.section == ChronosRoute.Day.section) launch.dayTarget else null
-
-internal fun shouldShowFloatingCommandPaletteAction(currentRoute: String?): Boolean =
-    currentRoute != null && currentRoute != ChronosRoute.Day.route

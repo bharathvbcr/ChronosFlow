@@ -1,6 +1,7 @@
 package com.chronosflow.core.ai
 
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
+import com.chronosflow.core.ai.genai.RewriteStyle
 import com.chronosflow.core.ai.genai.toRoutineAssistSource
 import java.util.Locale
 import javax.inject.Inject
@@ -153,6 +154,27 @@ class HabitAssistPlanner @Inject constructor(
             if (parsed.isNotEmpty()) return parsed
         }
         return localSuggestions(request)
+    }
+
+    /**
+     * On-demand wording clean-up for a typed or dictated habit [title] using the on-device ML Kit
+     * GenAI Proofreading feature. Returns a [HabitAssistSuggestion.Title] only when the model produced
+     * a materially different, non-empty name; otherwise null so the field is left untouched.
+     */
+    suspend fun refineTitle(title: String): HabitAssistSuggestion.Title? {
+        val trimmed = title.trim()
+        if (trimmed.length < MIN_ROUTINE_REFINE_LENGTH) return null
+        val generation = genAiAssistCoordinator.proofread(trimmed)
+        val cleaned = generation.text?.trim().orEmpty().take(MAX_ROUTINE_TITLE_LENGTH)
+        if (cleaned.isBlank() || cleaned.equals(trimmed, ignoreCase = true)) return null
+        val source = generation.source.toRoutineAssistSource()
+        return HabitAssistSuggestion.Title(
+            id = "${source.name.lowercase(Locale.getDefault())}:habit:proofread",
+            label = cleaned,
+            reason = "Tidied spelling and grammar on-device.",
+            source = source,
+            title = cleaned
+        )
     }
 
     private fun buildPrompt(request: HabitAssistRequest): String = buildString {
@@ -504,6 +526,41 @@ class MedicationAssistPlanner @Inject constructor(
             if (parsed.isNotEmpty()) return parsed
         }
         return localSuggestions(request)
+    }
+
+    /**
+     * On-demand spelling clean-up for a typed or dictated medication [name] using the on-device ML
+     * Kit GenAI Proofreading feature, surfaced as a name-only [MedicationAssistSuggestion.Details].
+     * Returns null when the model produced nothing materially different so the field stays as typed —
+     * deliberately proofread-only (no rewriting) to avoid altering a real drug or brand name.
+     */
+    suspend fun refineName(name: String): MedicationAssistSuggestion.Details? {
+        val trimmed = name.trim()
+        if (trimmed.length < MIN_ROUTINE_REFINE_LENGTH) return null
+        val generation = genAiAssistCoordinator.proofread(trimmed)
+        val cleaned = generation.text?.trim().orEmpty().take(MAX_ROUTINE_TITLE_LENGTH)
+        if (cleaned.isBlank() || cleaned.equals(trimmed, ignoreCase = true)) return null
+        val source = generation.source.toRoutineAssistSource()
+        return MedicationAssistSuggestion.Details(
+            id = "${source.name.lowercase(Locale.getDefault())}:medication:proofread",
+            label = cleaned,
+            reason = "Tidied the medication name spelling on-device.",
+            source = source,
+            name = cleaned
+        )
+    }
+
+    /**
+     * On-demand tone/length rewrite of the free-text medication [notes] using the on-device ML Kit
+     * GenAI Rewriting feature. Notes only — the name, dose, and frequency fields are never rewritten
+     * so real drug names and amounts stay exactly as typed. Returns null when AI is unavailable or
+     * produced nothing usefully different so callers keep the original.
+     */
+    suspend fun rewriteNotes(notes: String, style: RewriteStyle): String? {
+        val trimmed = notes.trim()
+        if (trimmed.length < MIN_ROUTINE_REFINE_LENGTH) return null
+        val rewritten = genAiAssistCoordinator.rewrite(trimmed, style).text?.trim().orEmpty()
+        return rewritten.takeIf { it.isNotBlank() && !it.equals(trimmed, ignoreCase = true) }
     }
 
     private fun buildPrompt(request: MedicationAssistRequest): String = buildString {
@@ -1408,6 +1465,7 @@ private fun defaultRoutineReasonFor(source: RoutineAssistSource): String = when 
 private const val MAX_ROUTINE_TITLE_LENGTH = 72
 private const val MAX_MEDICATION_NOTE_LENGTH = 120
 private const val MAX_SUGGESTIONS = 6
+private const val MIN_ROUTINE_REFINE_LENGTH = 3
 
 private val MEDICATION_DOSAGE_PATTERN = Regex(
     """\b(½|1/2|\d+(?:\.\d+)?)\s*(mg|mcg|micrograms?|ug|g|ml|milliliters?|teaspoons?|tsps?|tsp|tablespoons?|tbsps?|tbsp|iu|international\s+units?|units?|tablets?|tabs?|capsules?|caps?|drops?|puffs?|sprays?|doses?|dose)\b""",

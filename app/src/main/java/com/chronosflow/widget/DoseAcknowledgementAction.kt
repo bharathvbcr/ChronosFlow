@@ -23,7 +23,7 @@ class DoseAcknowledgementAction : ActionCallback {
         withContext(Dispatchers.IO) {
             entryPoint.recordMedicationWidgetActionUseCase()(planId, taken)
         }
-        ChronosGlanceWidgetReceiver.refreshAll(context)
+        ChronosWidgetHub.refreshAll(context)
     }
 
     companion object {

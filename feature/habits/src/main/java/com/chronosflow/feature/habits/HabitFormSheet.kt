@@ -45,7 +45,11 @@ import com.chronosflow.core.domain.model.Habit
 import com.chronosflow.core.domain.model.HabitRecurrencePeriodUnit
 import com.chronosflow.core.domain.model.HabitSchedule
 import com.chronosflow.core.domain.model.normalizeAppLaunchTarget
+import com.chronosflow.core.ui.components.ChronosAssistSuggestionChips
 import com.chronosflow.core.ui.components.GenAiAssistBanner
+import com.chronosflow.core.ui.components.withSelectedOption
+import com.chronosflow.core.ui.settings.ChronosUiSettingsKeys
+import com.chronosflow.core.ui.settings.rememberChronosUiBooleanSetting
 import com.chronosflow.core.ui.components.ChronosSpeechInputButton
 import com.chronosflow.core.ui.components.ChronosFormBottomSheet
 import com.chronosflow.core.ui.components.ChronosModalActionLabels
@@ -196,26 +200,78 @@ internal fun HabitFormSheet(
     var recurrenceCustomExpanded by rememberSaveable(habitKey) {
         mutableStateOf(resolveHabitRecurrenceQuickPreset(initialRecurrenceState) == "Custom")
     }
-    var windowPreset by rememberSaveable(habitKey) {
+    // Blank/zero = no explicit choice yet. A fresh Add form's window then follows the
+    // capture context ("morning run" → Morning window) instead of the all-day default;
+    // Edit forms and prefills that carry a window always pin to that window.
+    val windowFollowsContext = initialHabit == null &&
+        prefillDraft.windowPreset == null &&
+        prefillDraft.startMinute == null &&
+        prefillDraft.endMinute == null
+    var windowPresetOverride by rememberSaveable(habitKey) {
         mutableStateOf(
-            initialHabit?.let { resolveHabitWindowPreset(it.windowStartMinute, it.windowEndMinute) } ?: "All day"
-                .let { prefillDraft.windowPreset ?: it }
+            if (windowFollowsContext) {
+                ""
+            } else {
+                initialHabit?.let { resolveHabitWindowPreset(it.windowStartMinute, it.windowEndMinute) } ?: "All day"
+                    .let { prefillDraft.windowPreset ?: it }
+            }
         )
     }
-    var start by rememberSaveable(habitKey) {
-        mutableStateOf(formatDisplayMinute(initialHabit?.windowStartMinute ?: prefillDraft.startMinute ?: 8 * 60))
+    var startOverride by rememberSaveable(habitKey) {
+        mutableStateOf(
+            if (windowFollowsContext) {
+                ""
+            } else {
+                formatDisplayMinute(initialHabit?.windowStartMinute ?: prefillDraft.startMinute ?: 8 * 60)
+            }
+        )
     }
-    var end by rememberSaveable(habitKey) {
-        mutableStateOf(formatDisplayMinute(initialHabit?.windowEndMinute ?: prefillDraft.endMinute ?: 20 * 60))
+    var endOverride by rememberSaveable(habitKey) {
+        mutableStateOf(
+            if (windowFollowsContext) {
+                ""
+            } else {
+                formatDisplayMinute(initialHabit?.windowEndMinute ?: prefillDraft.endMinute ?: 20 * 60)
+            }
+        )
     }
-    var windowDuration by rememberSaveable(habitKey) {
+    var windowDurationOverride by rememberSaveable(habitKey) {
         mutableIntStateOf(
-            (
-                (initialHabit?.windowEndMinute ?: prefillDraft.endMinute ?: 20 * 60) -
-                    (initialHabit?.windowStartMinute ?: prefillDraft.startMinute ?: 8 * 60)
-                )
-                .coerceIn(15, 240)
+            if (windowFollowsContext) {
+                0
+            } else {
+                (
+                    (initialHabit?.windowEndMinute ?: prefillDraft.endMinute ?: 20 * 60) -
+                        (initialHabit?.windowStartMinute ?: prefillDraft.startMinute ?: 8 * 60)
+                    )
+                    .coerceIn(15, 240)
+            }
         )
+    }
+    val contextualWindowDefault = if (windowFollowsContext) {
+        contextualHabitDefaultWindow(
+            title = listOf(habitTitle, habitCaptureContext).joinToString(" "),
+            suggestions = assistState.suggestions
+        )
+    } else {
+        null
+    }
+    val windowPreset = windowPresetOverride.ifBlank {
+        contextualWindowDefault
+            ?.let { resolveHabitWindowPreset(it.first, it.second) }
+            ?: "All day"
+    }
+    val start = startOverride.ifBlank {
+        formatDisplayMinute(contextualWindowDefault?.first ?: 8 * 60)
+    }
+    val end = endOverride.ifBlank {
+        formatDisplayMinute(contextualWindowDefault?.second ?: 20 * 60)
+    }
+    val windowDuration = if (windowDurationOverride > 0) {
+        windowDurationOverride
+    } else {
+        (contextualWindowDefault?.let { (windowStart, windowEnd) -> windowEnd - windowStart } ?: (12 * 60))
+            .coerceIn(15, 240)
     }
     var difficulty by rememberSaveable(habitKey) {
         mutableStateOf((initialHabit?.difficulty ?: prefillDraft.difficulty ?: 2).toFloat())
@@ -282,7 +338,18 @@ internal fun HabitFormSheet(
     val appliedSuggestionIds = remember(habitKey, assistState.suggestions) {
         mutableStateListOf<String>()
     }
-    val visibleAssistSuggestions = assistState.suggestions.filterNot { it.id in appliedSuggestionIds }
+    val redundantAssistSuggestionIds = redundantHabitAssistSuggestionIds(
+        suggestions = assistState.suggestions,
+        currentTitle = habitTitle,
+        currentRecurrencePreset = selectedRecurrencePreset,
+        currentStartMinute = parsedStart,
+        currentEndMinute = parsedEnd,
+        currentDifficulty = difficultyInt,
+        currentIsBundled = isBundled
+    )
+    val visibleAssistSuggestions = assistState.suggestions.filterNot {
+        it.id in appliedSuggestionIds || it.id in redundantAssistSuggestionIds
+    }
     val contextualAssistSuggestions = assistState.suggestions
     val habitContextQuery = listOf(habitTitle, habitCaptureContext)
         .map { it.trim() }
@@ -391,10 +458,10 @@ internal fun HabitFormSheet(
                 scheduleExpanded = true
             }
             is HabitAssistSuggestion.Window -> {
-                start = formatDisplayMinute(suggestion.startMinute)
-                end = formatDisplayMinute(suggestion.endMinute)
-                windowDuration = (suggestion.endMinute - suggestion.startMinute).coerceIn(15, 240)
-                windowPreset = resolveHabitWindowPreset(suggestion.startMinute, suggestion.endMinute)
+                startOverride = formatDisplayMinute(suggestion.startMinute)
+                endOverride = formatDisplayMinute(suggestion.endMinute)
+                windowDurationOverride = (suggestion.endMinute - suggestion.startMinute).coerceIn(15, 240)
+                windowPresetOverride = resolveHabitWindowPreset(suggestion.startMinute, suggestion.endMinute)
                 windowExpanded = true
             }
             is HabitAssistSuggestion.Difficulty -> {
@@ -406,12 +473,44 @@ internal fun HabitFormSheet(
                 effortExpanded = true
             }
         }
-        if (suggestion.id !in appliedSuggestionIds) {
-            appliedSuggestionIds.add(suggestion.id)
+        supersededHabitAssistSuggestionIds(suggestion, assistState.suggestions).forEach { id ->
+            if (id !in appliedSuggestionIds) {
+                appliedSuggestionIds.add(id)
+            }
         }
         if (assistState.suggestions.all { it.id in appliedSuggestionIds }) {
             onClearAssist?.invoke()
         }
+    }
+
+    fun applyAllAssistSuggestions() {
+        assistState.suggestions.forEach { suggestion ->
+            if (suggestion.id !in appliedSuggestionIds) {
+                applyHabitAssistSuggestion(suggestion)
+            }
+        }
+    }
+
+    val openingRecurrencePreset = remember(habitKey) { selectedRecurrencePreset }
+    val openingDifficulty = remember(habitKey) { difficultyInt }
+    val openingIsBundled = remember(habitKey) { isBundled }
+    val autoApplyAssistEnabled = rememberChronosUiBooleanSetting(
+        ChronosUiSettingsKeys.KEY_ASSIST_AUTO_APPLY,
+        false
+    )
+    LaunchedEffect(assistState.suggestions, autoApplyAssistEnabled) {
+        if (!autoApplyAssistEnabled || target !is HabitSheetTarget.Add) return@LaunchedEffect
+        val autoApplicableIds = autoApplicableHabitAssistSuggestionIds(
+            suggestions = visibleAssistSuggestions,
+            titleBlank = habitTitle.isBlank(),
+            recurrenceUntouched = selectedRecurrencePreset == openingRecurrencePreset,
+            windowUntouched = startOverride.isBlank() && endOverride.isBlank(),
+            difficultyUntouched = difficultyInt == openingDifficulty,
+            dayPlanUntouched = isBundled == openingIsBundled
+        )
+        assistState.suggestions
+            .filter { it.id in autoApplicableIds }
+            .forEach(::applyHabitAssistSuggestion)
     }
 
     ChronosFormBottomSheet(
@@ -542,10 +641,10 @@ internal fun HabitFormSheet(
                             transcriptDraft.startMinute != null &&
                             transcriptDraft.endMinute != null
                     ) {
-                        windowPreset = transcriptDraft.windowPreset
-                        start = formatDisplayMinute(transcriptDraft.startMinute)
-                        end = formatDisplayMinute(transcriptDraft.endMinute)
-                        windowDuration = (transcriptDraft.endMinute - transcriptDraft.startMinute)
+                        windowPresetOverride = transcriptDraft.windowPreset
+                        startOverride = formatDisplayMinute(transcriptDraft.startMinute)
+                        endOverride = formatDisplayMinute(transcriptDraft.endMinute)
+                        windowDurationOverride = (transcriptDraft.endMinute - transcriptDraft.startMinute)
                             .coerceIn(15, 240)
                         windowExpanded = true
                     }
@@ -605,9 +704,9 @@ internal fun HabitFormSheet(
                 ) {
                     Text(
                         when {
-                            assistState.isLoading -> "Parsing habit..."
-                            visibleAssistSuggestions.isNotEmpty() -> "Refresh AI suggestions"
-                            else -> "Parse habit with AI"
+                            assistState.isLoading -> "Drafting suggestions…"
+                            visibleAssistSuggestions.isNotEmpty() -> "Refresh suggestions"
+                            else -> "Suggest habit setup with AI"
                         }
                     )
                 }
@@ -616,7 +715,8 @@ internal fun HabitFormSheet(
                 GenAiAssistBanner(
                     title = snapshot.bannerTitle,
                     message = snapshot.bannerMessage +
-                        " Typed or Android speech input becomes editable suggestions for the habit name, cadence, window, difficulty, and starter plan. Gemini Nano is enough for this structured parsing; you apply each suggestion yourself."
+                        " Type or dictate the habit and AI drafts editable suggestions — name, cadence, time window, effort, and starter plan. Nothing changes until you tap a suggestion.",
+                    ready = snapshot.isReady
                 )
             }
             assistState.message?.let { message ->
@@ -626,10 +726,16 @@ internal fun HabitFormSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            if (visibleAssistSuggestions.isNotEmpty()) {
-                HabitAssistSuggestionChips(
+            if (visibleAssistSuggestions.isNotEmpty() || assistState.isLoading) {
+                ChronosAssistSuggestionChips(
                     suggestions = visibleAssistSuggestions,
-                    onSuggestion = ::applyHabitAssistSuggestion
+                    isLoading = assistState.isLoading,
+                    onApply = ::applyHabitAssistSuggestion,
+                    label = { it.label },
+                    reason = { it.reason },
+                    sourceLabel = { GenAiAssistCopy.routineAssistSourceLabel(it.source) },
+                    loadingLabel = "Drafting AI suggestions…",
+                    onApplyAll = ::applyAllAssistSuggestions
                 )
             }
         }
@@ -674,12 +780,12 @@ internal fun HabitFormSheet(
                         habitTitle = template.title
                         recurrenceState = buildHabitRecurrenceEditorState(template.cadence, null)
                         recurrenceCustomExpanded = false
-                        start = formatDisplayMinute(template.startMinute)
-                        end = formatDisplayMinute(template.endMinute)
-                        windowDuration = (template.endMinute - template.startMinute).coerceIn(15, 240)
+                        startOverride = formatDisplayMinute(template.startMinute)
+                        endOverride = formatDisplayMinute(template.endMinute)
+                        windowDurationOverride = (template.endMinute - template.startMinute).coerceIn(15, 240)
                         difficulty = template.difficulty.toFloat()
                         isBundled = template.isBundled
-                        windowPreset = resolveHabitWindowPreset(template.startMinute, template.endMinute)
+                        windowPresetOverride = resolveHabitWindowPreset(template.startMinute, template.endMinute)
                     }
                 }
             )
@@ -738,12 +844,12 @@ internal fun HabitFormSheet(
                                     habitTitle = history.title
                                     recurrenceState = buildHabitRecurrenceEditorState(history.cadence, history.schedule)
                                     recurrenceCustomExpanded = resolveHabitRecurrenceQuickPreset(recurrenceState) == "Custom"
-                                    start = formatDisplayMinute(history.startMinute)
-                                    end = formatDisplayMinute(history.endMinute)
+                                    startOverride = formatDisplayMinute(history.startMinute)
+                                    endOverride = formatDisplayMinute(history.endMinute)
                                     difficulty = history.difficulty.toFloat()
                                     isBundled = history.isBundled
-                                    windowDuration = (history.endMinute - history.startMinute).coerceIn(15, 240)
-                                    windowPreset = resolveHabitWindowPreset(history.startMinute, history.endMinute)
+                                    windowDurationOverride = (history.endMinute - history.startMinute).coerceIn(15, 240)
+                                    windowPresetOverride = resolveHabitWindowPreset(history.startMinute, history.endMinute)
                                 }
                             }
                         },
@@ -764,12 +870,12 @@ internal fun HabitFormSheet(
                                     habitTitle = history.title
                                     recurrenceState = buildHabitRecurrenceEditorState(history.cadence, history.schedule)
                                     recurrenceCustomExpanded = resolveHabitRecurrenceQuickPreset(recurrenceState) == "Custom"
-                                    start = formatDisplayMinute(history.startMinute)
-                                    end = formatDisplayMinute(history.endMinute)
+                                    startOverride = formatDisplayMinute(history.startMinute)
+                                    endOverride = formatDisplayMinute(history.endMinute)
                                     difficulty = history.difficulty.toFloat()
                                     isBundled = history.isBundled
-                                    windowDuration = (history.endMinute - history.startMinute).coerceIn(15, 240)
-                                    windowPreset = resolveHabitWindowPreset(history.startMinute, history.endMinute)
+                                    windowDurationOverride = (history.endMinute - history.startMinute).coerceIn(15, 240)
+                                    windowPresetOverride = resolveHabitWindowPreset(history.startMinute, history.endMinute)
                                 }
                             }
                         },
@@ -882,7 +988,7 @@ internal fun HabitFormSheet(
                     selectedPreset = selectedRecurrencePreset,
                     title = habitContextQuery,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(selectedRecurrencePreset),
                 selected = selectedRecurrencePreset,
                 onSelected = { preset ->
                     if (preset == "Custom") {
@@ -1070,14 +1176,14 @@ internal fun HabitFormSheet(
                     selectedPreset = windowPreset,
                     title = habitContextQuery,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(windowPreset),
                 selected = windowPreset,
                 onSelected = { preset ->
-                    windowPreset = preset
+                    windowPresetOverride = preset
                     habitWindowPresets[preset]?.let { (presetStart, presetEnd) ->
-                        start = formatDisplayMinute(presetStart)
-                        end = formatDisplayMinute(presetEnd)
-                        windowDuration = (presetEnd - presetStart).coerceIn(15, 240)
+                        startOverride = formatDisplayMinute(presetStart)
+                        endOverride = formatDisplayMinute(presetEnd)
+                        windowDurationOverride = (presetEnd - presetStart).coerceIn(15, 240)
                     }
                 }
             )
@@ -1085,33 +1191,35 @@ internal fun HabitFormSheet(
                 startText = start,
                 endText = end,
                 onStartChange = {
-                    start = it
-                    windowPreset = "Custom"
+                    startOverride = it
+                    windowPresetOverride = "Custom"
                 },
                 onEndChange = {
-                    end = it
-                    windowPreset = "Custom"
+                    endOverride = it
+                    windowPresetOverride = "Custom"
                 },
                 parsedStart = parsedStart,
                 parsedEnd = parsedEnd,
                 showFineTuneFields = windowPreset == "Custom",
                 onNudgeStart = { delta ->
-                    start = nudgeMinuteText(start, delta, parsedStart ?: 8 * 60)
-                    windowPreset = "Custom"
-                    parseFlexibleMinute(start)?.let { s ->
-                        end = formatDisplayMinute(applyDurationToWindow(s, windowDuration))
+                    val nudgedStart = nudgeMinuteText(start, delta, parsedStart ?: 8 * 60)
+                    startOverride = nudgedStart
+                    windowPresetOverride = "Custom"
+                    parseFlexibleMinute(nudgedStart)?.let { s ->
+                        endOverride = formatDisplayMinute(applyDurationToWindow(s, windowDuration))
                     }
                 },
                 onNudgeEnd = { delta ->
-                    end = nudgeMinuteText(end, delta, parsedEnd ?: 20 * 60)
-                    windowPreset = "Custom"
+                    endOverride = nudgeMinuteText(end, delta, parsedEnd ?: 20 * 60)
+                    windowPresetOverride = "Custom"
                 },
                 durationMinutes = windowDuration,
                 onDurationChange = { minutes ->
-                    windowDuration = minutes.coerceIn(15, 240)
-                    windowPreset = "Custom"
+                    val clampedDuration = minutes.coerceIn(15, 240)
+                    windowDurationOverride = clampedDuration
+                    windowPresetOverride = "Custom"
                     parsedStart?.let { s ->
-                        end = formatDisplayMinute(applyDurationToWindow(s, windowDuration))
+                        endOverride = formatDisplayMinute(applyDurationToWindow(s, clampedDuration))
                     }
                 }
             )
@@ -1126,7 +1234,8 @@ internal fun HabitFormSheet(
         ) {
             ChronosOptionChips(
                 label = "Quick effort",
-                options = contextualHabitDifficultyOptions(habitContextQuery, contextualAssistSuggestions),
+                options = contextualHabitDifficultyOptions(habitContextQuery, contextualAssistSuggestions)
+                    .withSelectedOption(habitDifficultyOptions.getValue(difficultyInt)),
                 selected = habitDifficultyOptions.getValue(difficultyInt),
                 onSelected = { label ->
                     difficulty = habitDifficultyOptions.entries.first { it.value == label }.key.toFloat()
@@ -1138,7 +1247,7 @@ internal fun HabitFormSheet(
                     title = habitContextQuery,
                     isBundled = isBundled,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(habitDayPlanOptionLabel(isBundled)),
                 selected = habitDayPlanOptionLabel(isBundled),
                 onSelected = { label ->
                     isBundled = habitDayPlanOptionValue(label)
@@ -1879,25 +1988,41 @@ internal fun contextualHabitRecurrenceOptions(
         .take(optionLimit)
 }
 
+internal fun contextualHabitWindowSignal(title: String): String? {
+    val normalizedTitle = title.lowercase()
+    return when {
+        Regex("""\b(morning|am|wake|walk)\b""").containsMatchIn(normalizedTitle) -> "Morning"
+        Regex("""\b(lunch|noon|midday)\b""").containsMatchIn(normalizedTitle) || normalizedTitle.hasNutritionTemplateContext() -> "Midday"
+        normalizedTitle.contains("afternoon") -> "Afternoon"
+        Regex("""\b(evening|night|pm|journal|read|bedtime|sleep|floss)\b""").containsMatchIn(normalizedTitle) ||
+            normalizedTitle.hasWorkoutTemplateContext() ||
+            normalizedTitle.hasDentalTemplateContext() ||
+            normalizedTitle.hasLearningTemplateContext() -> "Evening"
+        Regex("""\b(meditate|meditation|mindful)\b""").containsMatchIn(normalizedTitle) -> "Morning"
+        Regex("""\b(all day)\b""").containsMatchIn(normalizedTitle) || normalizedTitle.hasHydrationTemplateContext() -> "All day"
+        else -> null
+    }
+}
+
+// While the window is untouched in a fresh Add form, it follows the capture context
+// ("morning run" → Morning window) instead of the all-day default — an AI Window
+// suggestion wins over keyword cues; null means no signal (keep the default).
+internal fun contextualHabitDefaultWindow(
+    title: String,
+    suggestions: List<HabitAssistSuggestion>
+): Pair<Int, Int>? {
+    suggestions.firstNotNullOfOrNull { suggestion ->
+        (suggestion as? HabitAssistSuggestion.Window)?.let { it.startMinute to it.endMinute }
+    }?.let { return it }
+    return contextualHabitWindowSignal(title)?.let { habitWindowPresets[it] }
+}
+
 internal fun contextualHabitWindowOptions(
     selectedPreset: String,
     title: String,
     suggestions: List<HabitAssistSuggestion>
 ): List<String> {
-    val normalizedTitle = title.lowercase()
-    val capturedWindows = buildList {
-        when {
-            Regex("""\b(morning|am|wake|walk)\b""").containsMatchIn(normalizedTitle) -> add("Morning")
-            Regex("""\b(lunch|noon|midday)\b""").containsMatchIn(normalizedTitle) || normalizedTitle.hasNutritionTemplateContext() -> add("Midday")
-            normalizedTitle.contains("afternoon") -> add("Afternoon")
-            Regex("""\b(evening|night|pm|journal|read|bedtime|sleep|floss)\b""").containsMatchIn(normalizedTitle) ||
-                normalizedTitle.hasWorkoutTemplateContext() ||
-                normalizedTitle.hasDentalTemplateContext() ||
-                normalizedTitle.hasLearningTemplateContext() -> add("Evening")
-            Regex("""\b(meditate|meditation|mindful)\b""").containsMatchIn(normalizedTitle) -> add("Morning")
-            Regex("""\b(all day)\b""").containsMatchIn(normalizedTitle) || normalizedTitle.hasHydrationTemplateContext() -> add("All day")
-        }
-    }
+    val capturedWindows = listOfNotNull(contextualHabitWindowSignal(title))
     val suggestedWindows = suggestions.mapNotNull { suggestion ->
         (suggestion as? HabitAssistSuggestion.Window)?.let { window ->
             resolveHabitWindowPreset(window.startMinute, window.endMinute)
@@ -2058,48 +2183,87 @@ private val HABIT_LAUNCH_VALUE_PATTERN = Regex(
     """(?<!\w)(?:package:[^\s<>()\[\]]+|component:[^\s<>()\[\]]+|intent:[^\s<>()\[\]]+|[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+|[a-z][a-z0-9+.-]*://[^\s<>()\[\]]+)(?!\w)"""
 )
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun HabitAssistSuggestionChips(
+// Every habit suggestion kind replaces the value of the field(s) it targets, so
+// applying one dismisses the remaining same-kind alternatives as stale.
+internal fun supersededHabitAssistSuggestionIds(
+    applied: HabitAssistSuggestion,
+    suggestions: List<HabitAssistSuggestion>
+): Set<String> = suggestions
+    .filter { it::class == applied::class }
+    .map { it.id }
+    .toSet() + applied.id
+
+// With the auto-apply setting on, a fresh Add form fills itself from the first
+// suggestion of each kind — but only while the targeted fields are untouched, so
+// manual input always wins.
+internal fun autoApplicableHabitAssistSuggestionIds(
     suggestions: List<HabitAssistSuggestion>,
-    onSuggestion: (HabitAssistSuggestion) -> Unit
-) {
-    FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        suggestions.forEach { suggestion ->
-            val sourceLabel = GenAiAssistCopy.routineAssistSourceLabel(suggestion.source)
-            FilterChip(
-                modifier = Modifier.semantics(mergeDescendants = true) {
-                    contentDescription = "Apply suggestion: ${suggestion.label}. $sourceLabel. ${suggestion.reason}"
-                },
-                selected = false,
-                onClick = { onSuggestion(suggestion) },
-                label = {
-                    Column {
-                        Text(suggestion.label)
-                        Text(
-                            text = "Tap to apply",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = sourceLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = suggestion.reason,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            )
+    titleBlank: Boolean,
+    recurrenceUntouched: Boolean,
+    windowUntouched: Boolean,
+    difficultyUntouched: Boolean,
+    dayPlanUntouched: Boolean
+): Set<String> {
+    var titleOpen = titleBlank
+    var recurrenceOpen = recurrenceUntouched
+    var windowOpen = windowUntouched
+    var difficultyOpen = difficultyUntouched
+    var dayPlanOpen = dayPlanUntouched
+    val ids = mutableSetOf<String>()
+    suggestions.forEach { suggestion ->
+        when (suggestion) {
+            is HabitAssistSuggestion.Title -> if (titleOpen) {
+                ids += suggestion.id
+                titleOpen = false
+            }
+            is HabitAssistSuggestion.Recurrence -> if (recurrenceOpen) {
+                ids += suggestion.id
+                recurrenceOpen = false
+            }
+            is HabitAssistSuggestion.Window -> if (windowOpen) {
+                ids += suggestion.id
+                windowOpen = false
+            }
+            is HabitAssistSuggestion.Difficulty -> if (difficultyOpen) {
+                ids += suggestion.id
+                difficultyOpen = false
+            }
+            is HabitAssistSuggestion.DayPlan -> if (dayPlanOpen) {
+                ids += suggestion.id
+                dayPlanOpen = false
+            }
         }
     }
+    return ids
+}
+
+// A suggestion the form already satisfies is a no-op pill — hide it so the row only
+// offers changes. Keeps pills honest after a sibling is applied or a field is edited
+// by hand, without an extra Gemini round-trip.
+internal fun redundantHabitAssistSuggestionIds(
+    suggestions: List<HabitAssistSuggestion>,
+    currentTitle: String,
+    currentRecurrencePreset: String,
+    currentStartMinute: Int?,
+    currentEndMinute: Int?,
+    currentDifficulty: Int,
+    currentIsBundled: Boolean
+): Set<String> {
+    fun String.normalized() = trim().lowercase()
+    return suggestions.filter { suggestion ->
+        when (suggestion) {
+            is HabitAssistSuggestion.Title ->
+                suggestion.title.normalized() == currentTitle.normalized()
+            is HabitAssistSuggestion.Recurrence ->
+                suggestion.cadence.normalized() == currentRecurrencePreset.normalized()
+            is HabitAssistSuggestion.Window ->
+                suggestion.startMinute == currentStartMinute && suggestion.endMinute == currentEndMinute
+            is HabitAssistSuggestion.Difficulty ->
+                suggestion.difficulty == currentDifficulty
+            is HabitAssistSuggestion.DayPlan ->
+                suggestion.isBundled == currentIsBundled
+        }
+    }.map { it.id }.toSet()
 }
 
 private fun contextualHabitTemplateOptions(

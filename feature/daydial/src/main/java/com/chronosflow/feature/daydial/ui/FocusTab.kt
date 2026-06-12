@@ -35,6 +35,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +69,7 @@ import com.chronosflow.core.ui.components.FocusCategoryChip
 import com.chronosflow.core.ui.components.FocusSessionIconButton
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
 import com.chronosflow.core.ui.components.FocusTimerRing
+import com.chronosflow.core.ui.components.formatDurationLabel
 import com.chronosflow.core.ui.components.formatFocusCountdown
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.core.ui.theme.categoryColor
@@ -160,11 +162,15 @@ internal fun FocusTab(
     moodCheckInCoaching: AssistNarrative? = null,
     focusGuidance: AssistNarrative? = null,
     focusNextBlockSuggestion: FocusNextBlockSuggestion? = null,
+    onRequestNextFocusSuggestion: () -> Unit = {},
+    onRefreshFocusGuidance: (Long) -> Unit = {},
+    onClearFocusGuidance: () -> Unit = {},
     genAiRuntimeStatus: GenAiRuntimeStatus = GenAiRuntimeStatus(),
     cachedMoodScore: Int? = null,
     cachedEnergyScore: Int? = null,
     linkedBlockManuallyMissed: Boolean = false,
     onSaveMoodEnergyCheckIn: (Int, Int, Int, Int) -> Unit = { _, _, _, _ -> },
+    contentTopPadding: Dp = 0.dp,
     contentBottomPadding: Dp = 0.dp
 ) {
     val scrollState = rememberScrollState()
@@ -189,6 +195,16 @@ internal fun FocusTab(
         cachedMoodScore = cachedMoodScore,
         cachedEnergyScore = cachedEnergyScore
     )
+    LaunchedEffect(sessionActive, selectedReadyBlock?.id) {
+        if (!sessionActive) onRequestNextFocusSuggestion()
+    }
+    LaunchedEffect(sessionActive, focusSession.status, focusSession.blockId) {
+        if (sessionActive) {
+            onRefreshFocusGuidance(remainingSeconds)
+        } else {
+            onClearFocusGuidance()
+        }
+    }
     val pagePadding = ChronosSpacing.Standard
     val bottomContentPadding = dayDialScrollableBottomPadding(
         contentBottomPadding = contentBottomPadding,
@@ -203,7 +219,9 @@ internal fun FocusTab(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Medium)
     ) {
-        Spacer(Modifier.height(pagePadding))
+        // The tab scrolls full-bleed under the floating glass bar, so the bar
+        // inset arrives as scroll padding rather than a hard layout edge.
+        Spacer(Modifier.height(contentTopPadding + pagePadding))
         DayDialPageHeader(
             title = DayDialTab.FOCUS.label,
             subtitle = dayDialPrimaryPageSubtitle(DayDialTab.FOCUS),
@@ -231,7 +249,7 @@ internal fun FocusTab(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "${formatFocusMinute(block.startMinuteOfDay)} – ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${block.durationMinutes}m",
+                        text = "${formatFocusMinute(block.startMinuteOfDay)} – ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${formatDurationLabel(block.durationMinutes)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -886,7 +904,7 @@ internal fun focusCaptureDraftMessage(capture: String?): String {
     return buildList {
         add(title)
         start?.let { add(formatFocusMinute(it)) }
-        duration?.let { add("${it}m") }
+        duration?.let { add(formatDurationLabel(it)) }
     }.joinToString(" · ")
 }
 
@@ -1035,7 +1053,7 @@ internal fun focusTabNextStepUiState(
             urgent = false
         )
         minutesUntilNext > 0 -> FocusTabNextStepUiState(
-            label = "${minutesUntilNext}m tight handoff to $nextTitle",
+            label = "${formatDurationLabel(minutesUntilNext)} tight handoff to $nextTitle",
             urgent = true
         )
         minutesUntilNext == 0 -> FocusTabNextStepUiState(
@@ -1043,7 +1061,7 @@ internal fun focusTabNextStepUiState(
             urgent = true
         )
         else -> FocusTabNextStepUiState(
-            label = "Overlaps $nextTitle by ${-minutesUntilNext}m",
+            label = "Overlaps $nextTitle by ${formatDurationLabel(-minutesUntilNext)}",
             urgent = true
         )
     }
@@ -1077,10 +1095,10 @@ internal fun focusSessionResumedDismissActionLabel(): String =
     "Dismiss session resumed notice"
 
 private fun focusTabWindowLabel(block: TimeBlockUiModel): String =
-    "${formatFocusMinute(block.startMinuteOfDay)} - ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${block.durationMinutes}m"
+    "${formatFocusMinute(block.startMinuteOfDay)} - ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${formatDurationLabel(block.durationMinutes)}"
 
 private fun focusTabWindowLabel(block: FocusTabBriefingBlock): String =
-    "${formatFocusMinute(block.startMinuteOfDay)} - ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${block.durationMinutes}m"
+    "${formatFocusMinute(block.startMinuteOfDay)} - ${formatFocusMinute(block.startMinuteOfDay + block.durationMinutes)} · ${formatDurationLabel(block.durationMinutes)}"
 
 private fun focusTabPaceLabel(
     sessionActive: Boolean,

@@ -5,8 +5,12 @@ import app.cash.turbine.test
 import com.chronosflow.core.ai.ChronosAIPlanner
 import com.chronosflow.core.ai.EnergyCorrelationEngine
 import com.chronosflow.core.ai.DeepWorkAssistPlanner
+import com.chronosflow.core.ai.FocusGuidancePlanner
+import com.chronosflow.core.ai.FocusNextBlockPlanner
 import com.chronosflow.core.ai.InsightsRecommendationsPlanner
 import com.chronosflow.core.ai.MoodEnergyCheckInAssistPlanner
+import com.chronosflow.core.ai.genai.AssistGenAiSource
+import com.chronosflow.core.ai.genai.AssistTextGeneration
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
 import com.chronosflow.core.data.backup.ChronosDataExportFile
@@ -14,8 +18,11 @@ import com.chronosflow.core.data.backup.ChronosDataExportRepository
 import com.chronosflow.core.data.dao.FocusSessionDao
 import com.chronosflow.core.data.focus.ManualMissedBlockRegistry
 import com.chronosflow.core.data.privacy.AssistantPreferences
+import com.chronosflow.core.domain.diagnostics.AppEventLog
 import com.chronosflow.core.domain.model.AlarmRequestType
 import com.chronosflow.core.domain.model.BlockFlexibility
+import com.chronosflow.core.domain.planner.FreeTimeCalculator
+import com.chronosflow.core.domain.planner.GapFillPlanner
 import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.EnergyIntensity
@@ -88,6 +95,12 @@ class DayDialViewModelTest {
     private val repository: TimeBlockRepository = mockk()
     private val calendarEventRepository: CalendarEventRepository = mockk(relaxed = true)
     private val aiPlanner: ChronosAIPlanner = mockk()
+    private val genAiAssistCoordinatorForFocus = mockk<GenAiAssistCoordinator> {
+        coEvery { generateAssistText(any()) } returns AssistTextGeneration(
+            text = null,
+            source = AssistGenAiSource.LOCAL
+        )
+    }
     private val alarmScheduler: AlarmScheduler = mockk(relaxed = true)
     private val alarmRequestRepository: AlarmRequestRepository = mockk(relaxed = true)
     private val reviewRepository: ReviewRepository = mockk(relaxed = true)
@@ -172,7 +185,10 @@ class DayDialViewModelTest {
                 mockk(relaxed = true),
                 mockk(relaxed = true),
                 applyAiPlanUseCase,
-                assistantPreferences
+                assistantPreferences,
+                GapFillPlanner(FreeTimeCalculator()),
+                taskRepository,
+                habitRepository
             ),
             reminderDelegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository),
             reviewDelegate = DayDialReviewDelegate(
@@ -193,14 +209,15 @@ class DayDialViewModelTest {
                 InsightsRecommendationsPlanner(mockk<GenAiAssistCoordinator>(relaxed = true)),
                 mockk(relaxed = true),
                 mockk<GenAiAssistCoordinator>(relaxed = true),
+                mockk(relaxed = true),
                 manualMissedBlockRegistry
             ),
             moodEnergyDelegate = DayDialMoodEnergyDelegate(moodEnergyRepository, mockk(relaxed = true)),
             journalDelegate = mockk(relaxed = true),
             trendsDelegate = mockk(relaxed = true),
             moodEnergyCheckInAssistPlanner = mockk<MoodEnergyCheckInAssistPlanner>(relaxed = true),
-            focusNextBlockPlanner = mockk(relaxed = true),
-            focusGuidancePlanner = mockk(relaxed = true),
+            focusNextBlockPlanner = FocusNextBlockPlanner(genAiAssistCoordinatorForFocus),
+            focusGuidancePlanner = FocusGuidancePlanner(genAiAssistCoordinatorForFocus),
             proactiveAssistCache = mockk(relaxed = true),
             appLockDelegate = appLockDelegate,
             alarmCapabilityRefresher = alarmCapabilityRefresher,
@@ -211,7 +228,9 @@ class DayDialViewModelTest {
             dataExportRepository = dataExportRepository,
             routineRepository = mockk(relaxed = true),
             applyRoutineToDateUseCase = mockk(relaxed = true),
-            completeRoutineForDateUseCase = mockk(relaxed = true)
+            completeRoutineForDateUseCase = mockk(relaxed = true),
+            currentBlockNotificationCoordinator = mockk(relaxed = true),
+            appEventLog = AppEventLog()
         )
         viewModel.dataExportDispatcher = testDispatcher
         viewModel.cancelMinuteTickerForTest()
@@ -227,6 +246,24 @@ class DayDialViewModelTest {
     fun `initial state is correct`() = runTest {
         assertEquals(LocalDate.now(), viewModel.selectedDate.value)
         assertEquals(null, viewModel.selectedBlockId.value)
+    }
+
+    @Test
+    fun `refreshNextFocusSuggestion stays null without focus-suitable blocks`() = runTest {
+        viewModel.refreshNextFocusSuggestion()
+
+        assertEquals(null, viewModel.focusNextBlockSuggestion.value)
+    }
+
+    @Test
+    fun `refreshFocusGuidance clears coaching while no session is active`() = runTest {
+        viewModel.refreshFocusGuidance(remainingSeconds = 600L)
+
+        assertEquals(null, viewModel.focusGuidance.value)
+
+        viewModel.clearFocusGuidance()
+
+        assertEquals(null, viewModel.focusGuidance.value)
     }
 
     @Test
@@ -321,6 +358,26 @@ class DayDialViewModelTest {
         val initial = viewModel.compactMode.value
         viewModel.onCompactModeToggled()
         assertEquals(!initial, viewModel.compactMode.value)
+    }
+
+    @Test
+    fun `window paging steps half a window in each direction`() = runTest {
+        viewModel.onCompactModeToggled()
+        val start = viewModel.compactWindowStart.value
+
+        viewModel.moveWindowForward()
+        assertEquals((start + 360) % 1440, viewModel.compactWindowStart.value)
+
+        viewModel.moveWindowBack()
+        viewModel.moveWindowBack()
+        assertEquals((start - 360 + 1440) % 1440, viewModel.compactWindowStart.value)
+    }
+
+    @Test
+    fun `compact window centering snaps the anchor to mid-window hours`() {
+        assertEquals(8 * 60, compactWindowStartCenteredOn(14 * 60 + 25))
+        assertEquals(18 * 60, compactWindowStartCenteredOn(25))
+        assertEquals(0, compactWindowStartCenteredOn(6 * 60))
     }
 
     @Test

@@ -173,7 +173,7 @@ class FocusTabStateTest {
         assertEquals(
             FocusTabDraftUiState(
                 title = "Focus draft ready",
-                message = "launch brief · 1:00 PM · 90m"
+                message = "launch brief · 1:00 PM · 1h 30m"
             ),
             focusTabDraftUiState(
                 capture = "focus at 1pm for 1 hour 30 minutes on launch brief",

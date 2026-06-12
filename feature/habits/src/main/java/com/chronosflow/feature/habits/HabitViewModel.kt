@@ -363,9 +363,15 @@ class HabitViewModel @Inject constructor(
                     )
                     return@launch
                 }
-            _assistState.value = if (suggestions.isNotEmpty()) {
+            // On-device proofread of the captured habit name (ML Kit GenAI Proofreading), surfaced as
+            // an extra Title suggestion alongside the generated ones. Best-effort: failures are ignored.
+            val refinedTitle = runCatching {
+                request.title.takeIf { it.isNotBlank() }?.let { habitAssistPlanner.refineTitle(it) }
+            }.getOrNull()
+            val merged = (listOfNotNull(refinedTitle) + suggestions).distinctBy { it.id }
+            _assistState.value = if (merged.isNotEmpty()) {
                 HabitAssistUiState(
-                    suggestions = suggestions,
+                    suggestions = merged,
                     assistSnapshot = snapshot,
                     message = snapshot?.takeIf { it.aiDisabled }?.let { GenAiAssistCopy.disabledAssistMessage() }
                 )

@@ -35,6 +35,12 @@ class DayDialScrollPaddingTest {
     }
 
     @Test
+    fun `sidebar pages reserve the floating top bar inset as scroll padding`() {
+        assertEquals(16.dp, sidebarPageLayoutTopPadding(contentTopPadding = 0.dp))
+        assertEquals(110.dp, sidebarPageLayoutTopPadding(contentTopPadding = 94.dp))
+    }
+
+    @Test
     fun `viewport bottom padding is capped so compact content stays visible`() {
         assertEquals(0.dp, dayDialScrollableViewportBottomPadding(0.dp))
         assertEquals(32.dp, dayDialScrollableViewportBottomPadding(32.dp))

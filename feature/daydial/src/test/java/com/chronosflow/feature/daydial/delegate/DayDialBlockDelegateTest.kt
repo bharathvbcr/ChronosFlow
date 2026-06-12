@@ -393,6 +393,62 @@ class DayDialBlockDelegateTest {
     }
 
     @Test
+    fun `updateBlockTitle refreshes the linked export for user blocks`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = InMemoryTimeBlockRepository(
+            listOf(
+                timeBlock(
+                    id = "block-1",
+                    date = date,
+                    startMinute = 9 * 60,
+                    durationMinutes = 60,
+                    calendarEventId = 42L
+                )
+            )
+        )
+        every { sleepScheduleRepository.getSleepSchedule() } returns SleepSchedule.default()
+        coEvery { calendarEventRepository.updateExportedTimeBlock(any()) } returns true
+        val delegate = DayDialBlockDelegate(
+            repository = repository,
+            sleepScheduleRepository = sleepScheduleRepository,
+            moveBlockUseCase = moveBlockUseCase,
+            resizeBlockUseCase = resizeBlockUseCase,
+            calendarEventRepository = calendarEventRepository,
+        )
+
+        delegate.updateBlockTitle(scope = this, blockId = "block-1", title = "Renamed work")
+
+        coVerify { calendarEventRepository.updateExportedTimeBlock(match { it.id == "block-1" }) }
+    }
+
+    @Test
+    fun `updateBlockTitle never writes back to imported device calendar events`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = InMemoryTimeBlockRepository(
+            listOf(
+                timeBlock(
+                    id = "calendar-import-99",
+                    date = date,
+                    startMinute = 9 * 60,
+                    durationMinutes = 60,
+                    provenance = BlockProvenance.CALENDAR_IMPORTED,
+                    calendarEventId = 99L
+                )
+            )
+        )
+        every { sleepScheduleRepository.getSleepSchedule() } returns SleepSchedule.default()
+        val delegate = DayDialBlockDelegate(
+            repository = repository,
+            sleepScheduleRepository = sleepScheduleRepository,
+            moveBlockUseCase = moveBlockUseCase,
+            resizeBlockUseCase = resizeBlockUseCase,
+            calendarEventRepository = calendarEventRepository,
+        )
+
+        delegate.updateBlockTitle(scope = this, blockId = "calendar-import-99", title = "Edited locally")
+
+        coVerify(exactly = 0) { calendarEventRepository.updateExportedTimeBlock(any()) }
+    }
+
+    @Test
     fun `clearCurrentDay removes exported calendar links before clearing local blocks`() = runTest(UnconfinedTestDispatcher()) {
         val otherDate = date.plusDays(1)
         val repository = InMemoryTimeBlockRepository(

@@ -17,7 +17,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,15 +26,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.chronosflow.core.ui.components.ChronosDurationSlider
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosTimePickerField
+import com.chronosflow.core.ui.components.formatDurationLabel
+import com.chronosflow.core.ui.components.snapDurationMinutes
 import com.chronosflow.core.ui.theme.categoryColor
 import java.util.Locale
-import kotlin.math.roundToInt
 
-private const val BlockEditorMinDurationMinutes = 5
-private const val BlockEditorMaxDurationMinutes = 240
-private const val BlockEditorDurationStepMinutes = 5
+internal const val BlockEditorMinDurationMinutes = 5
+internal const val BlockEditorMaxDurationMinutes = 480
 
 @Composable
 internal fun DayDialBlockEditorFields(
@@ -92,16 +92,11 @@ internal fun DayDialBlockEditorFields(
             )
         }
 
-        Text(
-            text = "Adjust Duration",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Slider(
-            value = durationMinutes.toFloat(),
-            onValueChange = { onDurationTextChange(snapBlockEditorDuration(it).toString()) },
-            valueRange = BlockEditorMinDurationMinutes.toFloat()..BlockEditorMaxDurationMinutes.toFloat(),
-            steps = blockEditorDurationSliderSteps()
+        ChronosDurationSlider(
+            durationMinutes = durationMinutes,
+            onDurationChange = { onDurationTextChange(it.toString()) },
+            range = BlockEditorMinDurationMinutes..BlockEditorMaxDurationMinutes,
+            label = "Adjust Duration"
         )
 
         Text(
@@ -132,15 +127,8 @@ internal fun parseEditorMinute(value: String): Int? {
     return hour * 60 + minute
 }
 
-internal fun blockEditorDurationSliderSteps(): Int =
-    ((BlockEditorMaxDurationMinutes - BlockEditorMinDurationMinutes) / BlockEditorDurationStepMinutes) - 1
-
-internal fun snapBlockEditorDuration(value: Float): Int {
-    val snapped = BlockEditorMinDurationMinutes +
-        (((value - BlockEditorMinDurationMinutes) / BlockEditorDurationStepMinutes).roundToInt() *
-            BlockEditorDurationStepMinutes)
-    return snapped.coerceIn(BlockEditorMinDurationMinutes, BlockEditorMaxDurationMinutes)
-}
+internal fun snapBlockEditorDuration(value: Float): Int =
+    snapDurationMinutes(value, BlockEditorMinDurationMinutes..BlockEditorMaxDurationMinutes)
 
 internal fun blockEditorDurationFromEnd(startMinute: Int, endMinute: Int): Int {
     val rawDuration = ((endMinute - startMinute) % 1440 + 1440) % 1440
@@ -179,7 +167,7 @@ private fun BlockTimeRangeSummary(
                 color = MaterialTheme.colorScheme.primaryContainer
             ) {
                 Text(
-                    text = "${durMin}m",
+                    text = formatDurationLabel(durMin),
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,

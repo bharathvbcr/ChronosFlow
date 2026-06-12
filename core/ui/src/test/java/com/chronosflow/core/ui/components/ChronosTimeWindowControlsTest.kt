@@ -13,6 +13,12 @@ class ChronosTimeWindowControlsTest {
     }
 
     @Test
+    fun `formatDurationLabel drops zero minute remainder`() {
+        assertEquals("2h", formatDurationLabel(120))
+        assertEquals("5h", formatDurationLabel(300))
+    }
+
+    @Test
     fun `formatDurationLabel handles pure minutes`() {
         assertEquals("45m", formatDurationLabel(45))
     }

@@ -67,6 +67,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- "Open on phone" handoff from the Wear app (RemoteActivityHelper). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="chronosflow" android:host="open" />
+            </intent-filter>
         </activity>
 
         <activity
@@ -122,6 +129,11 @@
             android:enabled="true"
             android:exported="false" />
 
+        <receiver
+            android:name="com.chronosflow.core.notifications.CurrentBlockBoundaryReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -149,6 +161,7 @@
 
         <receiver
             android:name="com.chronosflow.widget.ChronosGlanceWidgetReceiver"
+            android:label="Focus"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
@@ -158,6 +171,72 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/chronos_widget_info" />
         </receiver>
+
+        <receiver
+            android:name="com.chronosflow.widget.AgendaWidgetReceiver"
+            android:label="Today's Schedule"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/chronos_agenda_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.chronosflow.widget.TasksWidgetReceiver"
+            android:label="Tasks"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/chronos_tasks_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.chronosflow.widget.HabitsWidgetReceiver"
+            android:label="Habits"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/chronos_habits_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.chronosflow.widget.MedicationWidgetReceiver"
+            android:label="Medication"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/chronos_medication_widget_info" />
+        </receiver>
+
+        <!-- Receives watch-originated actions (focus controls, habit/task/dose) over the
+             Wearable MessageClient and replays them through the widget action use cases. -->
+        <service
+            android:name="com.chronosflow.widget.WearActionListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/chronos/action" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

@@ -55,7 +55,10 @@ class AiReviewSheetTest {
 
         composeTestRule.onNodeWithText("Accept").performClick()
         composeTestRule.onNodeWithText("Reject").performClick()
-        composeTestRule.onNodeWithText("Modify").performClick()
+        // Editing is folded behind the Adjust section; expand it to reach Save changes.
+        composeTestRule.onNodeWithText("Adjust").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Save changes").performClick()
 
         assertEquals(
             listOf("accept:suggestion-1", "reject:suggestion-1", "modify:suggestion-1:Deep work:540:60"),

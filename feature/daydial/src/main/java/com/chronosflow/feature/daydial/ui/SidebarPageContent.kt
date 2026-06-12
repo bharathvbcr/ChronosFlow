@@ -21,25 +21,32 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
-import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Flag
-import androidx.compose.material.icons.filled.Medication
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.SettingsSuggest
+import com.chronosflow.core.ui.components.ChronosCollapsibleSection
+import com.chronosflow.core.ui.components.ChronosFlowLogo
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosMetricTile
 import com.chronosflow.core.ui.components.ChronosSectionTitle
 import com.chronosflow.core.ui.components.ChronosWarningBanner
 import com.chronosflow.core.ui.theme.ChronosSpacing
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,8 +64,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -69,10 +77,13 @@ import com.chronosflow.core.ai.PrivacyMode
 import com.chronosflow.core.ai.genai.GenAiAssistCopy
 import com.chronosflow.core.ui.components.ChronosTimeWindowControls
 import com.chronosflow.core.ui.components.formatDisplayMinute
+import com.chronosflow.core.ui.components.formatDurationLabel
 import com.chronosflow.core.ui.components.nudgeMinuteText
 import com.chronosflow.core.ui.components.parseFlexibleMinute
 import com.chronosflow.core.ui.settings.ChronosBackdropTheme
 import com.chronosflow.core.ui.settings.ChronosFeatureFlags
+import com.chronosflow.core.ui.settings.ChronosUiSettingsKeys
+import com.chronosflow.core.ui.settings.rememberPersistentUiBooleanSetting
 import com.chronosflow.feature.daydial.CalendarConnectionState
 import com.chronosflow.feature.daydial.CalendarPermissionStatus
 import com.chronosflow.feature.daydial.DataExportPanel
@@ -89,6 +100,8 @@ import com.chronosflow.feature.daydial.model.AppearanceMode
 import com.chronosflow.feature.daydial.delegate.AppLockSettingsState
 import com.chronosflow.feature.daydial.model.SidebarPage
 import com.chronosflow.feature.daydial.model.TemplateBlueprint
+import com.chronosflow.feature.daydial.rememberPersistentBoolean
+import com.chronosflow.feature.daydial.rememberPersistentString
 import com.chronosflow.core.ui.theme.categoryColor
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -132,14 +145,25 @@ internal fun sidebarPageLayoutBottomPadding(contentBottomPadding: Dp): Dp =
         pageBottomPadding = SidebarPageLayoutHorizontalPadding
     )
 
-private fun backdropThemeSwatch(theme: ChronosBackdropTheme): Color =
+// Pages scroll full-bleed under the floating glass top bar, so the bar inset
+// becomes scroll padding instead of a hard layout edge.
+internal fun sidebarPageLayoutTopPadding(contentTopPadding: Dp): Dp =
+    contentTopPadding + SidebarPageLayoutHorizontalPadding
+
+// Each swatch echoes the theme's actual palette so the picker previews the
+// gradient feel instead of a single flat color.
+internal fun backdropThemeSwatchBrush(theme: ChronosBackdropTheme): Brush =
+    Brush.horizontalGradient(backdropThemeSwatchColors(theme))
+
+internal fun backdropThemeSwatchColors(theme: ChronosBackdropTheme): List<Color> =
     when (theme) {
-        ChronosBackdropTheme.LIQUID -> Color(0xFF8B5CF6)
-        ChronosBackdropTheme.SMOKE -> Color(0xFF94A3B8)
-        ChronosBackdropTheme.WATER_DROPS -> Color(0xFF38BDF8)
-        ChronosBackdropTheme.AURORA -> Color(0xFF22C55E)
-        ChronosBackdropTheme.SUNSET_GLOW -> Color(0xFFF59E0B)
-        ChronosBackdropTheme.NEBULA -> Color(0xFF6366F1)
+        ChronosBackdropTheme.LIQUID -> listOf(Color(0xFF8B5CF6), Color(0xFF38BDF8))
+        ChronosBackdropTheme.SMOKE -> listOf(Color(0xFF94A3B8), Color(0xFF475569))
+        ChronosBackdropTheme.WATER_DROPS -> listOf(Color(0xFF38BDF8), Color(0xFFBAE6FD))
+        ChronosBackdropTheme.AURORA -> listOf(Color(0xFF22C55E), Color(0xFF38BDF8))
+        ChronosBackdropTheme.SUNSET_GLOW -> listOf(Color(0xFFF59E0B), Color(0xFFEF4444))
+        ChronosBackdropTheme.NEBULA -> listOf(Color(0xFF6366F1), Color(0xFFEC4899))
+        ChronosBackdropTheme.MINIMAL -> listOf(Color(0xFFE2E8F0), Color(0xFFCBD5E1))
     }
 
 @Composable
@@ -152,11 +176,9 @@ internal fun SidebarPageContent(
     review: DailyReview,
     privacyMode: PrivacyMode,
     previewOnDeviceModel: Boolean,
-    compactMode: Boolean,
     onSelectDate: (LocalDate) -> Unit,
     onPrivacyModeSelected: (PrivacyMode) -> Unit,
     onPreviewOnDeviceModelChanged: (Boolean) -> Unit,
-    onCompactModeToggled: () -> Unit,
     planningStyle: String,
     onPlanningStyleSelected: (String) -> Unit,
     protectFocusBlocks: Boolean,
@@ -236,6 +258,7 @@ internal fun SidebarPageContent(
     onOpenImport: () -> Unit,
     onOpenWeeklySummary: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onOpenLogs: () -> Unit,
     selectedBlockId: String?,
     onOpenFocusScreen: () -> Unit,
     onOpenTasks: () -> Unit,
@@ -265,6 +288,7 @@ internal fun SidebarPageContent(
     onQuickMedicationTaken: (String, Int?) -> Unit,
     onQuickMedicationMissed: (String, Int?) -> Unit,
     onOpenBlock: (String?) -> Unit,
+    contentTopPadding: Dp = 0.dp,
     contentBottomPadding: Dp = 0.dp,
     showMessage: (String) -> Unit
 ) {
@@ -284,22 +308,25 @@ internal fun SidebarPageContent(
     }
     SidebarPageLayout(
         page = page,
+        contentTopPadding = contentTopPadding,
         contentBottomPadding = contentBottomPadding
     ) {
-            var hideCompletedItems by rememberSaveable { mutableStateOf(true) }
+            // Filter choices persist across sessions; "connected only" stays session
+            // state because it tracks the live permission grant.
+            var hideCompletedItems by rememberPersistentBoolean("calendar.hideCompleted", true)
             var connectedSourcesOnly by rememberSaveable { mutableStateOf(false) }
             var didAutoApplyConnectedFilter by rememberSaveable { mutableStateOf(false) }
-            var visibleTimelineSources by remember {
-                mutableStateOf(setOf("Calendar", "All-day calendar", "Task", "Habit", "Medication", "Plan"))
-            }
-            val timelineSourceOptions = listOf(
-                "Calendar",
-                "All-day calendar",
-                "Task",
-                "Habit",
-                "Medication",
-                "Plan"
+            var visibleTimelineSourcesValue by rememberPersistentString(
+                "calendar.timelineSources",
+                CalendarTimelineSourceLabels.joinToString(",")
             )
+            val visibleTimelineSources = remember(visibleTimelineSourcesValue) {
+                parseTimelineSources(visibleTimelineSourcesValue)
+            }
+            val setVisibleTimelineSources: (Set<String>) -> Unit = { sources ->
+                visibleTimelineSourcesValue =
+                    CalendarTimelineSourceLabels.filter { it in sources }.joinToString(",")
+            }
             LaunchedEffect(calendarPermissionStatus.readGranted) {
                 if (!calendarPermissionStatus.readGranted && connectedSourcesOnly) {
                     connectedSourcesOnly = false
@@ -325,99 +352,96 @@ internal fun SidebarPageContent(
                             "Missed",
                             missedBlocks.size.toString(),
                             Modifier.width(140.dp),
-                            accent = MaterialTheme.colorScheme.error
+                            accent = MaterialTheme.colorScheme.error,
+                            onClick = onOpenMissed
                         )
                         ChronosMetricTile(
                             "Planned",
                             formatMinutesToLabel(review.plannedMinutes),
-                            Modifier.width(140.dp)
+                            Modifier.width(140.dp),
+                            onClick = onOpenReview
                         )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    ActionGrid(
-                        buildList {
-                            if (featureFlags.aiAdvisorEnabled) {
-                                add("Generate Plan" to onGeneratePlan)
-                            }
-                            add("Rebalance Day" to onRebalance)
-                            add("Fill Empty Time" to onFillGaps)
-                            add("Save Template" to onSaveTemplate)
-                            add("Restore previous" to onRestorePrevious)
-                            add("Review Missed" to onOpenMissed)
-                            add("Clear Day" to onClearDay)
-                        }
-                    )
-                }
-                SidebarPage.TASKS -> {
-                    SidebarHubPanel(
-                        description = "Open task capture, priorities, and completion tracking.",
-                        buttonLabel = "Open Tasks",
-                        icon = Icons.Default.Checklist,
-                        onClick = onOpenTasks
-                    )
-                }
-                SidebarPage.FOCUS_TIMER -> {
-                    SidebarHubPanel(
-                        description = "Open the Focus Planner to review upcoming focus blocks and start a session.",
-                        buttonLabel = "Open Focus Planner",
-                        icon = Icons.Default.Timer,
-                        onClick = { onOpenFocusScreen() }
-                    )
-                }
-                SidebarPage.HABITS -> {
-                    SidebarHubPanel(
-                        description = "Open habit streaks, recurring routines, and completion history.",
-                        buttonLabel = "Open Habits",
-                        icon = Icons.Default.Favorite,
-                        onClick = onOpenHabits
-                    )
-                }
-                SidebarPage.GOALS -> {
-                    SidebarHubPanel(
-                        description = "Open long-term goals, their progress, and the work linked to them.",
-                        buttonLabel = "Open Goals",
-                        icon = Icons.Default.Flag,
-                        onClick = onOpenGoals
-                    )
-                }
-                SidebarPage.MEDICATION -> {
-                    SidebarHubPanel(
-                        description = "Open medication schedules, dose tracking, and reminder reliability.",
-                        buttonLabel = "Open Meds",
-                        icon = Icons.Default.Medication,
-                        onClick = onOpenMedication
-                    )
-                }
-                SidebarPage.REVIEW -> {
-                    Text("Compare your planned day against actual focus execution.")
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            ChronosSectionTitle(title = "Today's progress")
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ChronosSectionTitle(title = "Plan", subtitle = "Shape today's schedule")
+                            if (featureFlags.aiAdvisorEnabled) {
+                                Button(onClick = onGeneratePlan, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Generate Plan")
+                                }
+                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Planned", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                                    Text(formatMinutesToLabel(review.plannedMinutes), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                                FilledTonalButton(onClick = onFillGaps, modifier = Modifier.weight(1f)) {
+                                    Text("Fill gaps")
                                 }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Actual", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
-                                    Text(formatMinutesToLabel(review.actualMinutes), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Missed", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
-                                    Text(formatMinutesToLabel(review.missedMinutes), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                                FilledTonalButton(onClick = onRebalance, modifier = Modifier.weight(1f)) {
+                                    Text("Rebalance")
                                 }
                             }
                         }
                     }
-                    Button(onClick = onOpenReview, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.Assessment, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Open Daily Review")
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ChronosSectionTitle(title = "Manage", subtitle = "Templates, recovery, and review")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(onClick = onSaveTemplate, modifier = Modifier.weight(1f)) {
+                                    Text("Save template")
+                                }
+                                OutlinedButton(onClick = onRestorePrevious, modifier = Modifier.weight(1f)) {
+                                    Text("Restore previous")
+                                }
+                            }
+                            OutlinedButton(onClick = onOpenMissed, modifier = Modifier.fillMaxWidth()) {
+                                Text(dayToolsReviewMissedLabel(missedBlocks.size))
+                            }
+                        }
+                    }
+                    // Destructive action sits apart from the routine tools and asks first:
+                    // clearCurrentDay bypasses undo history, so this genuinely can't be undone.
+                    var showClearDayConfirm by rememberSaveable { mutableStateOf(false) }
+                    OutlinedButton(
+                        onClick = { showClearDayConfirm = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) { Text("Clear Day") }
+                    if (showClearDayConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showClearDayConfirm = false },
+                            title = { Text("Clear this day?") },
+                            text = { Text(clearDayConfirmationMessage(timeBlocks.size, selectedDate)) },
+                            confirmButton = {
+                                TextButton(
+                                    onClick = {
+                                        showClearDayConfirm = false
+                                        onClearDay()
+                                    }
+                                ) {
+                                    Text("Clear day", color = MaterialTheme.colorScheme.error)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showClearDayConfirm = false }) { Text("Cancel") }
+                            }
+                        )
                     }
                 }
+                SidebarPage.TASKS -> SidebarDirectLaunchEffect(page, onOpenTasks)
+                SidebarPage.FOCUS_TIMER -> SidebarDirectLaunchEffect(page, onOpenFocusScreen)
+                SidebarPage.HABITS -> SidebarDirectLaunchEffect(page, onOpenHabits)
+                SidebarPage.GOALS -> SidebarDirectLaunchEffect(page, onOpenGoals)
+                SidebarPage.MEDICATION -> SidebarDirectLaunchEffect(page, onOpenMedication)
+                // Review has no in-shell page: the drawer routes it to the Review tab,
+                // and no launch target maps here, so this branch is unreachable. Kept as a
+                // no-op only to preserve the exhaustive when over SidebarPage.
+                SidebarPage.REVIEW -> Unit
                 SidebarPage.TEMPLATES -> {
                     ChronosSectionTitle(title = "Routines", subtitle = "Apply, edit, or duplicate reusable day blueprints")
                     templates.forEach { template ->
@@ -552,33 +576,40 @@ internal fun SidebarPageContent(
                                 }
                             }
                             Spacer(Modifier.height(12.dp))
-                            DailyReviewHeader(review)
+                            DailyReviewHeader(
+                                review = review,
+                                onPlannedClick = onOpenPlannedBreakdown,
+                                onActualClick = onOpenActualLog,
+                                onMissedClick = onOpenMissedRecovery,
+                                onOpenReview = onOpenReview,
+                                showReviewAction = featureFlags.reviewEnabled
+                            )
                         }
                     }
-                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ChronosSectionTitle(
-                                title = "Device calendar",
-                                subtitle = "Import Android events and keep exported blocks linked"
-                            )
-                            val exportAccessPermanentlyDenied =
-                                calendarPermissionStatus.readGranted && calendarPermissionStatus.permanentlyDenied
-                            val exportAccessNeedsRationale =
-                                calendarPermissionStatus.readGranted &&
-                                    !calendarPermissionStatus.writeGranted &&
-                                    showCalendarPermissionRationale
-                            val connectionLabel = when {
-                                calendarPermissionStatus.allGranted -> "Imports and exports connected"
-                                exportAccessPermanentlyDenied -> "Imports connected; exports off"
-                                calendarPermissionStatus.readGranted -> "Imports connected; exports need write access"
-                                else -> "Not connected"
-                            }
-                            Text(
-                                "Connection: $connectionLabel",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                    val exportAccessPermanentlyDenied =
+                        calendarPermissionStatus.readGranted && calendarPermissionStatus.permanentlyDenied
+                    val exportAccessNeedsRationale =
+                        calendarPermissionStatus.readGranted &&
+                            !calendarPermissionStatus.writeGranted &&
+                            showCalendarPermissionRationale
+                    val connectionLabel = when {
+                        calendarPermissionStatus.allGranted -> "Imports and exports connected"
+                        exportAccessPermanentlyDenied -> "Imports connected; exports off"
+                        calendarPermissionStatus.readGranted -> "Imports connected; exports need write access"
+                        else -> "Not connected"
+                    }
+                    // One status line by default; permission plumbing expands on demand
+                    // (and automatically while a permission rationale is showing).
+                    var calendarSyncExpanded by rememberSaveable { mutableStateOf(false) }
+                    LaunchedEffect(showCalendarPermissionRationale) {
+                        if (showCalendarPermissionRationale) calendarSyncExpanded = true
+                    }
+                    ChronosCollapsibleSection(
+                        title = "Calendar sync",
+                        summary = connectionLabel,
+                        expanded = calendarSyncExpanded,
+                        onExpandedChange = { calendarSyncExpanded = it }
+                    ) {
                             Text(
                                 calendarConnectionStatusMessage(calendarPermissionStatus, calendarConnectionState),
                                 style = MaterialTheme.typography.bodySmall,
@@ -683,7 +714,6 @@ internal fun SidebarPageContent(
                                     }
                                 }
                             }
-                        }
                     }
                     ChronosSectionTitle(
                         title = "Detailed calendar",
@@ -714,45 +744,89 @@ internal fun SidebarPageContent(
                         }
 
                         Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
+                            // Three presets cover the common views; the filter menu keeps
+                            // per-source toggles and modifiers for power users.
+                            val currentPreset = presetForTimelineSources(visibleTimelineSources)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                FilterChip(
-                                    selected = hideCompletedItems,
-                                    onClick = { hideCompletedItems = !hideCompletedItems },
-                                    label = { Text("Hide completed") }
-                                )
-                                FilterChip(
-                                    selected = connectedSourcesOnly,
-                                    onClick = {
-                                        if (calendarPermissionStatus.readGranted) {
-                                            didAutoApplyConnectedFilter = true
-                                            connectedSourcesOnly = !connectedSourcesOnly
+                                SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
+                                    CalendarTimelinePreset.segments.forEachIndexed { index, preset ->
+                                        SegmentedButton(
+                                            selected = currentPreset == preset,
+                                            onClick = {
+                                                timelineSourcesForPreset(preset)?.let(setVisibleTimelineSources)
+                                            },
+                                            shape = SegmentedButtonDefaults.itemShape(
+                                                index = index,
+                                                count = CalendarTimelinePreset.segments.size
+                                            ),
+                                            label = { Text(preset.label) }
+                                        )
+                                    }
+                                }
+                                Box {
+                                    var filterMenuOpen by rememberSaveable { mutableStateOf(false) }
+                                    IconButton(
+                                        onClick = { filterMenuOpen = true },
+                                        modifier = Modifier.semantics {
+                                            contentDescription = "Timeline filters"
                                         }
-                                    },
-                                    enabled = calendarPermissionStatus.readGranted,
-                                    label = { Text("Connected calendar only") }
-                                )
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                timelineSourceOptions.forEach { source ->
-                                    FilterChip(
-                                        selected = visibleTimelineSources.contains(source),
-                                        onClick = {
-                                            visibleTimelineSources = if (visibleTimelineSources.contains(source)) {
-                                                visibleTimelineSources - source
-                                            } else {
-                                                visibleTimelineSources + source
+                                    ) {
+                                        Icon(Icons.Default.FilterList, contentDescription = null)
+                                    }
+                                    DropdownMenu(
+                                        expanded = filterMenuOpen,
+                                        onDismissRequest = { filterMenuOpen = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Hide completed") },
+                                            leadingIcon = {
+                                                Checkbox(checked = hideCompletedItems, onCheckedChange = null)
+                                            },
+                                            onClick = { hideCompletedItems = !hideCompletedItems }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Connected calendar only") },
+                                            enabled = calendarPermissionStatus.readGranted,
+                                            leadingIcon = {
+                                                Checkbox(
+                                                    checked = connectedSourcesOnly,
+                                                    onCheckedChange = null,
+                                                    enabled = calendarPermissionStatus.readGranted
+                                                )
+                                            },
+                                            onClick = {
+                                                if (calendarPermissionStatus.readGranted) {
+                                                    didAutoApplyConnectedFilter = true
+                                                    connectedSourcesOnly = !connectedSourcesOnly
+                                                }
                                             }
-                                        },
-                                        label = { Text(source) }
-                                    )
+                                        )
+                                        HorizontalDivider()
+                                        CalendarTimelineSourceLabels.forEach { source ->
+                                            DropdownMenuItem(
+                                                text = { Text(source) },
+                                                leadingIcon = {
+                                                    Checkbox(
+                                                        checked = source in visibleTimelineSources,
+                                                        onCheckedChange = null
+                                                    )
+                                                },
+                                                onClick = {
+                                                    setVisibleTimelineSources(
+                                                        if (source in visibleTimelineSources) {
+                                                            visibleTimelineSources - source
+                                                        } else {
+                                                            visibleTimelineSources + source
+                                                        }
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                             if (timelineItems.isEmpty()) {
@@ -819,6 +893,19 @@ internal fun SidebarPageContent(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = backdropMutedText
                             )
+                            var autoApplyAssist by rememberPersistentUiBooleanSetting(
+                                ChronosUiSettingsKeys.KEY_ASSIST_AUTO_APPLY,
+                                false
+                            )
+                            CheckboxSetting(
+                                "Auto-apply form suggestions",
+                                autoApplyAssist
+                            ) { autoApplyAssist = it }
+                            Text(
+                                "New Task, Habit, and Medication forms fill empty fields from AI suggestions automatically. Fields you have already set are never overwritten.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = backdropMutedText
+                            )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                 listOf("Strict", "Balanced", "Flexible").forEach { style ->
                                     FilterChip(
@@ -870,6 +957,14 @@ internal fun SidebarPageContent(
                     }
                 }
                 SidebarPage.NOTIFICATIONS -> {
+                    val notificationsContext = LocalContext.current
+                    if (blockStartReminders && !canScheduleExactAlarmsCompat(notificationsContext)) {
+                        ChronosWarningBanner(
+                            title = "Reminders may arrive late",
+                            message = "Exact alarms are off, so block reminders can be delayed by up to " +
+                                "10 minutes. Allow exact alarms below for on-time reminders."
+                        )
+                    }
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChronosSectionTitle(title = "Notifications", subtitle = "Reminders and quiet hours")
@@ -877,6 +972,23 @@ internal fun SidebarPageContent(
                             CheckboxSetting("Break reminders", breakReminders, onBreakRemindersChanged)
                             CheckboxSetting("Missed block alerts", missedAlerts, onMissedAlertsChanged)
                             CheckboxSetting("End-of-day review", endDayReviewReminder, onEndDayReviewReminderChanged)
+                            var currentBlockLive by rememberPersistentBoolean(
+                                "notifications.currentBlockLive",
+                                false
+                            )
+                            CheckboxSetting(
+                                "Current block notification",
+                                currentBlockLive,
+                                onCheckedChange = { currentBlockLive = it }
+                            )
+                            if (currentBlockLive && !canPostPromotedNotificationsCompat(notificationsContext)) {
+                                Text(
+                                    text = "Live updates won't show in the status bar — allow " +
+                                        "promoted notifications for ChronosFlow in system notification settings.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                             CheckboxSetting("Sleep schedule", sleepScheduleEnabled, onSleepScheduleEnabledChanged)
                             ChronosTimeWindowControls(
                                 startText = sleepStartText,
@@ -969,7 +1081,7 @@ internal fun SidebarPageContent(
                             }
                             ChronosSectionTitle(
                                 title = "Backdrop",
-                                subtitle = "Choose the ambient background style"
+                                subtitle = "Choose the ambient background style · applies live behind this panel"
                             )
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -985,9 +1097,9 @@ internal fun SidebarPageContent(
                                         leadingIcon = {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(14.dp)
+                                                    .size(width = 22.dp, height = 14.dp)
                                                     .clip(RoundedCornerShape(999.dp))
-                                                    .background(backdropThemeSwatch(theme))
+                                                    .background(backdropThemeSwatchBrush(theme))
                                             )
                                         }
                                     )
@@ -997,11 +1109,8 @@ internal fun SidebarPageContent(
                             CheckboxSetting("Glass surfaces", glassSurfacesEnabled, onGlassSurfacesChanged)
                             CheckboxSetting("Reduce motion", reduceMotionEnabled, onReduceMotionChanged)
                             CheckboxSetting("High contrast", highContrastEnabled, onHighContrastChanged)
-                            FilterChip(
-                                selected = compactMode,
-                                onClick = onCompactModeToggled,
-                                label = { Text(if (compactMode) "12h zoom on" else "24h dial") }
-                            )
+                            var showRingGuide by rememberPersistentBoolean("show_ring_guide", true)
+                            CheckboxSetting("Ring guides", showRingGuide, onCheckedChange = { showRingGuide = it })
                         }
                     }
                 }
@@ -1062,18 +1171,24 @@ internal fun SidebarPageContent(
                             }
                         }
                     }
-                    ActionGrid(listOf("View Diagnostics" to onOpenDiagnostics, "View Logs" to onOpenDiagnostics))
+                    ActionGrid(listOf("View Diagnostics" to onOpenDiagnostics, "View Logs" to onOpenLogs))
                 }
                 SidebarPage.ABOUT -> {
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("ChronosFlow", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "Day planner, focus execution, and actual-time insights.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = backdropMutedText
-                            )
-                            Text("Version 0.1.0", style = MaterialTheme.typography.labelMedium, color = backdropMutedText)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            ChronosFlowLogo(modifier = Modifier.size(56.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("ChronosFlow", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "Day planner, focus execution, and actual-time insights.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = backdropMutedText
+                                )
+                                Text("Version 0.1.0", style = MaterialTheme.typography.labelMedium, color = backdropMutedText)
+                            }
                         }
                     }
                 }
@@ -1084,9 +1199,11 @@ internal fun SidebarPageContent(
 @Composable
 private fun SidebarPageLayout(
     page: SidebarPage,
+    contentTopPadding: Dp,
     contentBottomPadding: Dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val topContentPadding = sidebarPageLayoutTopPadding(contentTopPadding)
     val bottomContentPadding = sidebarPageLayoutBottomPadding(contentBottomPadding)
     CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
         Column(
@@ -1096,7 +1213,7 @@ private fun SidebarPageLayout(
                 .padding(horizontal = SidebarPageLayoutHorizontalPadding),
             verticalArrangement = Arrangement.spacedBy(SidebarPageLayoutVerticalSpacing)
         ) {
-            Spacer(Modifier.height(SidebarPageLayoutHorizontalPadding))
+            Spacer(Modifier.height(topContentPadding))
             DayDialPageHeader(
                 title = page.label,
                 subtitle = dayDialSidebarPageSubtitle(page),
@@ -1108,34 +1225,77 @@ private fun SidebarPageLayout(
     }
 }
 
+// Hub destinations open their full screens directly; this only fires when a
+// stale launch target or restored state still lands on the retired stub page.
 @Composable
-private fun SidebarHubPanel(
-    description: String,
-    buttonLabel: String,
-    icon: ImageVector,
-    onClick: () -> Unit
-) {
-    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Button(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-                Icon(icon, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(buttonLabel)
-            }
-        }
+private fun SidebarDirectLaunchEffect(page: SidebarPage, onOpen: () -> Unit) {
+    LaunchedEffect(page) { onOpen() }
+}
+
+private fun formatMinutesToLabel(minutes: Int): String =
+    formatDurationLabel(minutes)
+
+private fun canPostPromotedNotificationsCompat(context: android.content.Context): Boolean {
+    // Promoted (live update) notifications exist from API 37; older versions fall back
+    // to a regular ongoing notification, so there is nothing to warn about.
+    if (android.os.Build.VERSION.SDK_INT < 37) return true
+    return try {
+        val manager =
+            context.getSystemService(android.app.NotificationManager::class.java)
+        manager?.canPostPromotedNotifications() ?: true
+    } catch (_: SecurityException) {
+        true
     }
 }
 
-private fun formatMinutesToLabel(minutes: Int): String {
-    val h = minutes / 60
-    val m = minutes % 60
-    return if (h > 0) "${h}h ${m}m" else "${m}m"
+private fun canScheduleExactAlarmsCompat(context: android.content.Context): Boolean {
+    if (android.os.Build.VERSION.SDK_INT < 31) return true
+    return try {
+        val alarmManager =
+            context.getSystemService(android.content.Context.ALARM_SERVICE) as? android.app.AlarmManager
+        alarmManager?.canScheduleExactAlarms() ?: true
+    } catch (_: SecurityException) {
+        false
+    }
 }
+
+internal val CalendarTimelineSourceLabels =
+    listOf("Calendar", "All-day calendar", "Task", "Habit", "Medication", "Plan")
+
+internal enum class CalendarTimelinePreset(val label: String) {
+    ALL("All"),
+    SCHEDULE("Schedule"),
+    CALENDAR("Calendar"),
+    CUSTOM("Custom");
+
+    companion object {
+        /** Presets offered in the segmented control; CUSTOM only describes manual mixes. */
+        val segments = listOf(ALL, SCHEDULE, CALENDAR)
+    }
+}
+
+internal fun timelineSourcesForPreset(preset: CalendarTimelinePreset): Set<String>? = when (preset) {
+    CalendarTimelinePreset.ALL -> CalendarTimelineSourceLabels.toSet()
+    CalendarTimelinePreset.SCHEDULE -> setOf("Task", "Habit", "Medication", "Plan")
+    CalendarTimelinePreset.CALENDAR -> setOf("Calendar", "All-day calendar")
+    CalendarTimelinePreset.CUSTOM -> null
+}
+
+internal fun presetForTimelineSources(sources: Set<String>): CalendarTimelinePreset =
+    CalendarTimelinePreset.segments.firstOrNull { timelineSourcesForPreset(it) == sources }
+        ?: CalendarTimelinePreset.CUSTOM
+
+internal fun parseTimelineSources(value: String): Set<String> =
+    value.split(",")
+        .map(String::trim)
+        .filter { it in CalendarTimelineSourceLabels }
+        .toSet()
+
+internal fun dayToolsReviewMissedLabel(missedCount: Int): String =
+    if (missedCount > 0) "Review missed ($missedCount)" else "Review missed"
+
+internal fun clearDayConfirmationMessage(blockCount: Int, selectedDate: LocalDate): String =
+    "Delete $blockCount block${if (blockCount == 1) "" else "s"} for $selectedDate? This can't be undone."
 
 internal fun calendarMonthNavigationLabel(selectedDate: LocalDate, monthOffset: Int): String {
     val targetMonth = selectedDate.plusMonths(monthOffset.toLong())

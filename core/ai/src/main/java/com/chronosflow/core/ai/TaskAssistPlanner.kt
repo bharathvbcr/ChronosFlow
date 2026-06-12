@@ -2,6 +2,7 @@ package com.chronosflow.core.ai
 
 import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
+import com.chronosflow.core.ai.genai.RewriteStyle
 import com.chronosflow.core.ai.genai.toTaskAssistSource
 import com.chronosflow.core.domain.model.TaskActionType
 import com.chronosflow.core.domain.model.normalizeAppLaunchValue
@@ -98,6 +99,39 @@ class TaskAssistPlanner @Inject constructor(
             if (parsed.isNotEmpty()) return parsed
         }
         return localSuggestions(request)
+    }
+
+    /**
+     * On-demand wording clean-up for a typed or dictated task [title] using the on-device ML Kit
+     * GenAI Proofreading feature. Returns a [TaskAssistSuggestion.Title] only when the model produced
+     * a materially different, non-empty title; otherwise null so the field is left untouched.
+     */
+    suspend fun refineTitle(title: String): TaskAssistSuggestion.Title? {
+        val trimmed = title.trim()
+        if (trimmed.length < MIN_REFINE_LENGTH) return null
+        val generation = genAiAssistCoordinator.proofread(trimmed)
+        val cleaned = generation.text?.trim().orEmpty().take(MAX_TITLE_SUGGESTION_LENGTH)
+        if (cleaned.isBlank() || cleaned.equals(trimmed, ignoreCase = true)) return null
+        val source = generation.source.toTaskAssistSource()
+        return TaskAssistSuggestion.Title(
+            id = "${source.name.lowercase(Locale.getDefault())}:proofread",
+            label = cleaned,
+            reason = "Tidied spelling and grammar on-device.",
+            source = source,
+            title = cleaned
+        )
+    }
+
+    /**
+     * On-demand tone/length rewrite of a task [text] (typically the description) using the on-device
+     * ML Kit GenAI Rewriting feature. Returns the rewritten text, or null when AI is unavailable or
+     * produced nothing usefully different so callers keep the original.
+     */
+    suspend fun rewriteText(text: String, style: RewriteStyle): String? {
+        val trimmed = text.trim()
+        if (trimmed.length < MIN_REFINE_LENGTH) return null
+        val rewritten = genAiAssistCoordinator.rewrite(trimmed, style).text?.trim().orEmpty()
+        return rewritten.takeIf { it.isNotBlank() && !it.equals(trimmed, ignoreCase = true) }
     }
 
     private fun buildPrompt(request: TaskAssistRequest): String {
@@ -945,6 +979,7 @@ class TaskAssistPlanner @Inject constructor(
     private companion object {
         const val MAX_SUGGESTIONS = 6
         const val MAX_TITLE_SUGGESTION_LENGTH = 72
+        const val MIN_REFINE_LENGTH = 3
         const val MINUTES_PER_DAY = 24 * 60
         val DATE_FORMATTERS = listOf(
             DateTimeFormatter.ISO_LOCAL_DATE,

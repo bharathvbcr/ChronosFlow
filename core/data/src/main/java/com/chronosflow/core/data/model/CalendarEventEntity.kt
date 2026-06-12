@@ -2,11 +2,13 @@ package com.chronosflow.core.data.model
 
 import androidx.room.Entity
 import androidx.room.Index
-import androidx.room.PrimaryKey
 import java.time.Instant
 
 @Entity(
     tableName = "calendar_events",
+    // Composite key: recurring instances share the device EVENT_ID, so keying
+    // by id alone keeps only the last instance of the sync window.
+    primaryKeys = ["id", "startAt"],
     indices = [
         Index("startAt"),
         Index("endAt"),
@@ -14,7 +16,7 @@ import java.time.Instant
     ]
 )
 data class CalendarEventEntity(
-    @PrimaryKey val id: Long,
+    val id: Long,
     val title: String,
     val description: String?,
     val startAt: Instant,

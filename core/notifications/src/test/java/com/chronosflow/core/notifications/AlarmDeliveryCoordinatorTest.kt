@@ -9,6 +9,7 @@ import com.chronosflow.core.domain.model.AlarmReliability
 import com.chronosflow.core.domain.model.AlarmRequest
 import com.chronosflow.core.domain.model.AlarmRequestType
 import com.chronosflow.core.domain.model.MedicationPlan
+import com.chronosflow.core.domain.model.ProactiveDigestKeys
 import com.chronosflow.core.domain.repository.AlarmRequestRepository
 import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.TaskRepository
@@ -27,6 +28,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowNotificationManager
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 
 @RunWith(RobolectricTestRunner::class)
@@ -101,6 +103,58 @@ class AlarmDeliveryCoordinatorTest {
         // Verify alarm cancelled (removed from system scheduler)
         coVerify { alarmScheduler.cancelAlarm(requestId) }
     }
+
+    @Test
+    fun `daily review reminder shows today's cached proactive digest`() = runTest {
+        val requestId = "daydial:${LocalDate.now()}:day:review"
+        context.getSharedPreferences(ProactiveDigestKeys.PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(ProactiveDigestKeys.KEY_TEXT, "3 blocks done; 2 tasks left to close out.")
+            .putString(ProactiveDigestKeys.KEY_FOR_DATE, LocalDate.now().toString())
+            .apply()
+        coEvery { alarmRequestRepository.getAlarmRequest(requestId) } returns reviewRequest(requestId)
+
+        coordinator.deliverFromAlarmIntent(reviewIntent(requestId), AlarmReceiver::class.java)
+
+        val notification = shadowNotificationManager.allNotifications.single()
+        assertEquals("3 blocks done; 2 tasks left to close out.", shadowOf(notification).contentText)
+    }
+
+    @Test
+    fun `daily review reminder keeps default copy when cached digest is stale`() = runTest {
+        val requestId = "daydial:${LocalDate.now()}:day:review"
+        context.getSharedPreferences(ProactiveDigestKeys.PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(ProactiveDigestKeys.KEY_TEXT, "Yesterday's digest.")
+            .putString(ProactiveDigestKeys.KEY_FOR_DATE, LocalDate.now().minusDays(1).toString())
+            .apply()
+        coEvery { alarmRequestRepository.getAlarmRequest(requestId) } returns reviewRequest(requestId)
+
+        coordinator.deliverFromAlarmIntent(reviewIntent(requestId), AlarmReceiver::class.java)
+
+        val notification = shadowNotificationManager.allNotifications.single()
+        assertEquals("Review planned, actual, and missed blocks.", shadowOf(notification).contentText)
+    }
+
+    private fun reviewIntent(requestId: String): Intent = Intent().apply {
+        putExtra(AlarmDeliveryCoordinator.EXTRA_ID, requestId)
+        putExtra(AlarmDeliveryCoordinator.EXTRA_TITLE, "Daily review")
+        putExtra(AlarmDeliveryCoordinator.EXTRA_MESSAGE, "Review planned, actual, and missed blocks.")
+    }
+
+    private fun reviewRequest(requestId: String): AlarmRequest = AlarmRequest(
+        id = requestId,
+        type = AlarmRequestType.DAILY_REVIEW,
+        scheduledFor = Instant.now(),
+        title = "Daily review",
+        message = "Review planned, actual, and missed blocks.",
+        medicationPlanId = null,
+        blockId = null,
+        reliability = AlarmReliability.INEXACT,
+        deliveryState = AlarmDeliveryState.PENDING,
+        createdAt = Instant.now(),
+        updatedAt = Instant.now()
+    )
 
     @Test
     fun `deliverLowSupplyWarning posts critical notification`() {

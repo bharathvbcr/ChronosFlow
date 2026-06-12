@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,16 +50,11 @@ fun ChronosTimeWindowControls(
             )
         }
         if (duration != null && onDurationChange != null) {
-            Text(
-                text = "Window length · ${formatDurationLabel(duration)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Slider(
-                value = duration.toFloat().coerceIn(durationRangeMinutes.first.toFloat(), durationRangeMinutes.last.toFloat()),
-                onValueChange = { onDurationChange(it.toInt()) },
-                valueRange = durationRangeMinutes.first.toFloat()..durationRangeMinutes.last.toFloat(),
-                steps = ((durationRangeMinutes.last - durationRangeMinutes.first) / 15) - 1
+            ChronosDurationSlider(
+                durationMinutes = duration,
+                onDurationChange = onDurationChange,
+                range = durationRangeMinutes,
+                label = "Window length"
             )
         }
         Row(
@@ -147,7 +141,11 @@ fun ChronosTimeWindowSummary(
 fun formatDurationLabel(minutes: Int): String {
     val h = minutes / 60
     val m = minutes % 60
-    return if (h > 0) "${h}h ${m}m" else "${m}m"
+    return when {
+        h > 0 && m > 0 -> "${h}h ${m}m"
+        h > 0 -> "${h}h"
+        else -> "${m}m"
+    }
 }
 
 fun nudgeMinuteText(currentText: String, deltaMinutes: Int, fallbackMinute: Int = 8 * 60): String {

@@ -163,7 +163,8 @@ fun ChronosQuickAddChips(
     label: String,
     options: List<String>,
     onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    selected: String = ""
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -174,7 +175,7 @@ fun ChronosQuickAddChips(
         ChronosOptionChips(
             label = "",
             options = options,
-            selected = "",
+            selected = selected,
             onSelected = onSelect,
             optionLabel = { it }
         )

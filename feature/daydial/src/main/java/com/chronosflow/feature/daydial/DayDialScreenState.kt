@@ -13,6 +13,7 @@ import com.chronosflow.core.ai.FocusNextBlockSuggestion
 import com.chronosflow.core.ai.PrivacyMode
 import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
+import com.chronosflow.core.domain.diagnostics.AppEventLogEntry
 import com.chronosflow.core.domain.model.JournalEntry
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.core.domain.model.SleepSchedule
@@ -66,7 +67,8 @@ internal data class DayDialViewModelState(
     val focusNextBlockSuggestion: FocusNextBlockSuggestion?,
     val journalEntry: JournalEntry?,
     val sleepTrack: SleepTrack?,
-    val insightsTabState: InsightsTabUiState
+    val insightsTabState: InsightsTabUiState,
+    val appEventLog: List<AppEventLogEntry>
 )
 
 @Composable
@@ -110,6 +112,7 @@ internal fun rememberDayDialViewModelState(viewModel: DayDialViewModel): DayDial
     val journalEntry by viewModel.journalEntryForDay.collectAsStateWithLifecycle()
     val sleepTrack by viewModel.sleepTrackForDay.collectAsStateWithLifecycle()
     val insightsTabState by viewModel.insightsTabState.collectAsStateWithLifecycle()
+    val appEventLog by viewModel.appEventLogEntries.collectAsStateWithLifecycle()
 
     return DayDialViewModelState(
         timeBlocks = timeBlocks,
@@ -150,7 +153,8 @@ internal fun rememberDayDialViewModelState(viewModel: DayDialViewModel): DayDial
         focusNextBlockSuggestion = focusNextBlockSuggestion,
         journalEntry = journalEntry,
         sleepTrack = sleepTrack,
-        insightsTabState = insightsTabState
+        insightsTabState = insightsTabState,
+        appEventLog = appEventLog
     )
 }
 
@@ -310,7 +314,7 @@ internal fun rememberDayDialSettingsState(): DayDialSettingsState {
         ),
         reviewFeatureEnabledState = rememberPersistentBoolean(
             ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED,
-            false
+            true
         ),
         journalFeatureEnabledState = rememberPersistentBoolean(
             ChronosUiSettingsKeys.KEY_FEATURE_JOURNAL_ENABLED,
@@ -322,7 +326,7 @@ internal fun rememberDayDialSettingsState(): DayDialSettingsState {
         ),
         aiAdvisorFeatureEnabledState = rememberPersistentBoolean(
             ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED,
-            false
+            true
         ),
         syncStatusState = rememberPersistentString("sync_status", "No checkpoint this session")
     )

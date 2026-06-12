@@ -37,7 +37,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import com.chronosflow.core.ui.shell.ChronosShellChromeSuppression
+import com.chronosflow.core.ui.shell.ChronosShellViewedDateReporter
 import com.chronosflow.core.ai.PrivacyMode
+import com.chronosflow.core.domain.diagnostics.AppEventLogEntry
 import com.chronosflow.core.ui.components.ChronosBackdrop
 import com.chronosflow.core.ui.shell.ChronosSnackbarHost
 import com.chronosflow.core.ui.shell.LocalChronosShellBottomInset
@@ -47,6 +49,7 @@ import com.chronosflow.feature.daydial.model.DayQuickItemsUiState
 import com.chronosflow.feature.daydial.model.SheetTarget
 import com.chronosflow.feature.daydial.model.SidebarPage
 import com.chronosflow.feature.daydial.ui.SidebarPageContent
+import com.chronosflow.feature.daydial.ui.isFocusSessionActiveForTab
 import java.io.File
 import java.time.LocalDate
 
@@ -56,6 +59,7 @@ private const val LAUNCH_TARGET_INSIGHTS = "insights"
 @OptIn(ExperimentalMaterial3Api::class)
 fun DayDialScreen(
     launchTarget: String? = null,
+    launchTargetGeneration: Int = 0,
     initialFocusCapture: String? = null,
     requestedPrimaryTab: DayDialTab? = null,
     contentPadding: PaddingValues = PaddingValues(),
@@ -88,6 +92,7 @@ fun DayDialScreen(
     DayDialDataScreen(
         viewModel = dataViewModel,
         launchTarget = launchTarget,
+        launchTargetGeneration = launchTargetGeneration,
         initialFocusCapture = initialFocusCapture,
         requestedPrimaryTab = requestedPrimaryTab,
         contentPadding = contentPadding,
@@ -107,6 +112,7 @@ fun DayDialScreen(
 private fun DayDialDataScreen(
     viewModel: DayDialViewModel,
     launchTarget: String? = null,
+    launchTargetGeneration: Int = 0,
     initialFocusCapture: String? = null,
     requestedPrimaryTab: DayDialTab? = null,
     contentPadding: PaddingValues = PaddingValues(),
@@ -248,9 +254,12 @@ private fun DayDialDataScreen(
     // Apply the launch target in the same composition pass so the AnimatedContent
     // transition starts immediately — LaunchedEffect would add a ~16ms coroutine-hop
     // delay before uiState.currentTab changed, causing a frozen frame before the slide.
-    val lastAppliedTarget = remember { mutableStateOf<String?>("__unset__") }
-    if (lastAppliedTarget.value != launchTarget) {
-        lastAppliedTarget.value = launchTarget
+    // Key on target + generation so repeating the same target (e.g. double-tapping
+    // the Today tab again after browsing to another date) re-applies it.
+    val lastAppliedTarget = remember { mutableStateOf("__unset__") }
+    val launchTargetKey = "$launchTarget#$launchTargetGeneration"
+    if (lastAppliedTarget.value != launchTargetKey) {
+        lastAppliedTarget.value = launchTargetKey
         applyLaunchTarget(launchTarget, uiState, viewModel)
     }
 
@@ -319,10 +328,34 @@ private fun DayDialDataScreen(
         }
     }
 
+    // Open the end-of-day review as a local sheet so the in-content Review button
+    // fires on every tap and reflects the date currently in view, instead of routing
+    // through a single-top navigation that no-ops on a repeat tap and would reset the
+    // screen back to today. Clearing the active sidebar page first means the retired
+    // Review stub page (SidebarPage.REVIEW) never lingers as a blank surface behind the
+    // sheet — dismissing the sheet returns to the Today dial, not an empty page.
+    val openReviewSheet = {
+        uiState.activeSidebarPage = null
+        uiState.activeSheet = SheetTarget.EndOfDayReview
+    }
+
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val snackbarHostState = remember { SnackbarHostState() }
     val isViewingToday = vmState.selectedDate == LocalDate.now()
+    ChronosShellViewedDateReporter(vmState.selectedDate)
+    val currentBlockNotificationEnabled by rememberPersistentBoolean(
+        "notifications.currentBlockLive",
+        false
+    )
+    LaunchedEffect(currentBlockNotificationEnabled) {
+        viewModel.setCurrentBlockNotificationEnabled(currentBlockNotificationEnabled)
+    }
+    LaunchedEffect(vmState.timeBlocks) {
+        if (currentBlockNotificationEnabled) {
+            viewModel.refreshCurrentBlockNotification()
+        }
+    }
     val activeBlock = remember(sortedBlocks, vmState.currentMinute, isViewingToday) {
         findActiveBlock(sortedBlocks, vmState.currentMinute, forToday = isViewingToday)
     }
@@ -434,7 +467,7 @@ private fun DayDialDataScreen(
         onOpenHabits = onOpenHabits,
             onOpenGoals = onOpenGoals,
         onOpenMedication = onOpenMedication,
-        onOpenReview = onOpenReview,
+        onOpenReview = openReviewSheet,
         onSelectPrimaryTab = selectPrimaryTab,
         onOpenCommandPalette = onOpenCommandPalette
     )
@@ -460,6 +493,8 @@ private fun DayDialDataScreen(
             aiPlanGoalPrefill = vmState.aiPlanGoalPrefill,
             aiPlanSuggestedGoals = vmState.aiPlanSuggestedGoals,
             focusElapsedSeconds = focusElapsedSeconds,
+            focusRemainingSeconds = focusRemainingSeconds,
+            focusSessionActive = isFocusSessionActiveForTab(vmState.focusSession),
             syncStatus = settings.syncStatus,
             blockStartReminders = settings.blockStartReminders,
             breakReminders = settings.breakReminders,
@@ -472,6 +507,8 @@ private fun DayDialDataScreen(
             appearanceMode = appearanceMode,
             reduceMotionEnabled = settings.reduceMotionEnabled,
             highContrastEnabled = settings.highContrastEnabled,
+            appEventLog = vmState.appEventLog,
+            onClearLogs = viewModel::clearAppEventLog,
             calendarPermissionStatus = calendarPermissionStatus,
             showCalendarPermissionRationale = showCalendarPermissionRationale,
             calendarConnectionState = vmState.calendarConnectionState,
@@ -576,16 +613,19 @@ private fun applyLaunchTarget(
             uiState.activeSidebarPage = null
             uiState.activeSheet = SheetTarget.SleepLog(LocalDate.now())
         }
+        // "review"/"review-sheet" are legacy aliases for pinned shortcuts and old
+        // notifications; they now resolve to the unified Review page (the Insights tab),
+        // consistent with every other review entry point.
+        LAUNCH_TARGET_INSIGHTS, "review-sheet", "review" -> {
+            uiState.currentTab = DayDialTab.INSIGHTS
+            uiState.activeSidebarPage = null
+        }
         "plan" -> {
             uiState.currentTab = DayDialTab.PLAN
             uiState.activeSidebarPage = null
         }
         "focus-planner" -> {
             uiState.currentTab = DayDialTab.FOCUS
-            uiState.activeSidebarPage = null
-        }
-        LAUNCH_TARGET_INSIGHTS -> {
-            uiState.currentTab = DayDialTab.INSIGHTS
             uiState.activeSidebarPage = null
         }
     }
@@ -597,7 +637,6 @@ internal fun sidebarPageForLaunchTarget(target: String?): SidebarPage? =
         "tasks" -> SidebarPage.TASKS
         "habits" -> SidebarPage.HABITS
         "medication" -> SidebarPage.MEDICATION
-        "review" -> SidebarPage.REVIEW
         "templates" -> SidebarPage.TEMPLATES
         "ai-settings" -> SidebarPage.AI_SETTINGS
         "privacy-sync" -> SidebarPage.PRIVACY_SYNC
@@ -693,10 +732,10 @@ private fun DayDialLightweightSidebarScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues)
                 ) {
                     SidebarPageContent(
                         page = activeSidebarPage,
+                        contentTopPadding = paddingValues.calculateTopPadding(),
                         selectedDate = selectedDate,
                         timeBlocks = emptyList(),
                         templates = emptyList(),
@@ -709,11 +748,9 @@ private fun DayDialLightweightSidebarScreen(
                         ),
                         privacyMode = PrivacyMode.ON_DEVICE_ONLY,
                         previewOnDeviceModel = false,
-                        compactMode = false,
                         onSelectDate = {},
                         onPrivacyModeSelected = {},
                         onPreviewOnDeviceModelChanged = {},
-                        onCompactModeToggled = {},
                         planningStyle = settings.planningStyle,
                         onPlanningStyleSelected = { settings.planningStyle = it },
                         protectFocusBlocks = settings.protectFocusBlocks,
@@ -795,6 +832,7 @@ private fun DayDialLightweightSidebarScreen(
                         onOpenImport = {},
                         onOpenWeeklySummary = {},
                         onOpenDiagnostics = {},
+                        onOpenLogs = {},
                         selectedBlockId = null,
                         onOpenFocusScreen = onOpenFocusScreen,
                         onOpenTasks = onOpenTasks,
@@ -824,7 +862,7 @@ private fun DayDialLightweightSidebarScreen(
                         onQuickMedicationTaken = { _, _ -> },
                         onQuickMedicationMissed = { _, _ -> },
                         onOpenBlock = {},
-                        contentBottomPadding = contentBottomPadding,
+                        contentBottomPadding = contentBottomPadding + paddingValues.calculateBottomPadding(),
                         showMessage = {}
                     )
                 }

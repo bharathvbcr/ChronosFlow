@@ -2,8 +2,6 @@ package com.chronosflow.feature.medication
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -12,7 +10,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -39,6 +36,7 @@ import com.chronosflow.core.domain.model.MedicationSchedule
 import com.chronosflow.core.domain.model.PlannerRecurrence
 import com.chronosflow.core.domain.model.PlannerRecurrenceType
 import com.chronosflow.core.ui.components.GenAiAssistBanner
+import com.chronosflow.core.ui.components.ChronosAssistSuggestionChips
 import com.chronosflow.core.ui.components.ChronosSpeechInputButton
 import com.chronosflow.core.ui.components.ChronosFormBottomSheet
 import com.chronosflow.core.ui.components.ChronosModalActionLabels
@@ -51,6 +49,10 @@ import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosOptionChips
 import com.chronosflow.core.ui.components.ChronosTimePickerField
 import com.chronosflow.core.ui.components.formatDisplayMinute
+import com.chronosflow.core.ui.components.formatDurationLabel
+import com.chronosflow.core.ui.components.withSelectedOption
+import com.chronosflow.core.ui.settings.ChronosUiSettingsKeys
+import com.chronosflow.core.ui.settings.rememberChronosUiBooleanSetting
 import com.chronosflow.core.ui.components.nudgeMinuteText
 import com.chronosflow.core.ui.components.parseFlexibleMinute
 import androidx.compose.foundation.layout.Row
@@ -59,6 +61,9 @@ import androidx.compose.material3.OutlinedButton
 import com.chronosflow.core.ai.MedicationAssistRequest
 import com.chronosflow.core.ai.MedicationAssistSuggestion
 import com.chronosflow.core.ai.genai.GenAiAssistCopy
+import com.chronosflow.core.ai.genai.RewriteAssistUiState
+import com.chronosflow.core.ai.genai.RewriteStyle
+import com.chronosflow.core.ui.components.ChronosTextRewriteRow
 import java.time.DayOfWeek
 import java.time.LocalDate
 import kotlinx.coroutines.delay
@@ -131,7 +136,10 @@ internal fun MedicationFormSheet(
     onDuplicate: ((MedicationPlan) -> Unit)? = null,
     assistState: MedicationAssistUiState = MedicationAssistUiState(),
     onRequestAssist: ((MedicationAssistRequest) -> Unit)? = null,
-    onClearAssist: (() -> Unit)? = null
+    onClearAssist: (() -> Unit)? = null,
+    rewriteState: RewriteAssistUiState = RewriteAssistUiState(),
+    onRequestRewrite: ((text: String, style: RewriteStyle, styleLabel: String) -> Unit)? = null,
+    onClearRewrite: (() -> Unit)? = null
 ) {
     if (target == null) return
     val initialPlan = (target as? MedicationSheetTarget.Edit)?.plan
@@ -140,6 +148,9 @@ internal fun MedicationFormSheet(
         medicationTranscriptDraft(prefillName.orEmpty())
     }
     val planKey = initialPlan?.id ?: "new-${prefillName.orEmpty()}"
+    LaunchedEffect(planKey) {
+        onClearRewrite?.invoke()
+    }
     val initialSafetyProfile = initialPlan?.safetyProfile
     val initialRecurrence = initialPlan?.schedule?.recurrence
     val initialReminderMinutes = initialRecurrence?.normalizedTimesOfDayMinutes.orEmpty()
@@ -165,13 +176,18 @@ internal fun MedicationFormSheet(
     var route by rememberSaveable(planKey) {
         mutableStateOf(initialPlan?.safetyProfile?.route ?: inferMedicationRoute(medicationForm))
     }
-    var reminderPreset by rememberSaveable(planKey) {
+    // Blank = no explicit choice yet. In a fresh Add form the reminder then follows
+    // the capture context ("melatonin before bed" → Night) instead of sitting on the
+    // 8:00 AM fallback; Edit forms always pin to the stored reminder.
+    var reminderPresetOverride by rememberSaveable(planKey) {
         mutableStateOf(
-            resolveMedicationReminderPreset(primaryInitialReminder)
+            if (initialPlan == null) "" else resolveMedicationReminderPreset(primaryInitialReminder)
         )
     }
-    var reminder by rememberSaveable(planKey) {
-        mutableStateOf(formatDisplayMinute(primaryInitialReminder))
+    var reminderOverride by rememberSaveable(planKey) {
+        mutableStateOf(
+            if (initialPlan == null) "" else formatDisplayMinute(primaryInitialReminder)
+        )
     }
     var mealTiming by rememberSaveable(planKey) {
         mutableStateOf(
@@ -203,6 +219,21 @@ internal fun MedicationFormSheet(
     }
     var historyQuery by rememberSaveable(planKey) { mutableStateOf("") }
     var medicationCaptureContext by rememberSaveable(planKey) { mutableStateOf(prefillName.orEmpty()) }
+    val contextualReminderDefaultMinute = if (initialPlan == null) {
+        contextualMedicationDefaultReminderMinute(
+            name = listOf(name, medicationCaptureContext).joinToString(" "),
+            notes = notes,
+            suggestions = assistState.suggestions
+        )
+    } else {
+        null
+    }
+    val reminder = reminderOverride.ifBlank {
+        formatDisplayMinute(contextualReminderDefaultMinute ?: primaryInitialReminder)
+    }
+    val reminderPreset = reminderPresetOverride.ifBlank {
+        resolveMedicationReminderPreset(contextualReminderDefaultMinute ?: primaryInitialReminder)
+    }
     var frequency by rememberSaveable(planKey) {
         mutableStateOf(
             if (initialIsPrn) {
@@ -282,7 +313,24 @@ internal fun MedicationFormSheet(
         }
     }
 
-    val visibleAssistSuggestions = assistState.suggestions.filterNot { it.id in appliedSuggestionIds }
+    val redundantAssistSuggestionIds = redundantMedicationAssistSuggestionIds(
+        suggestions = assistState.suggestions,
+        currentName = name,
+        currentDosage = dosage,
+        currentUnit = unit,
+        currentFrequency = frequency,
+        currentPrimaryReminderMinute = parsedReminder,
+        currentSecondaryReminderMinute = parsedSecondary,
+        currentMealTiming = mealTiming,
+        currentHasRefillTracking = hasRefillTracking,
+        currentRefillCount = parsedRefillCount,
+        currentNotes = notes,
+        currentForm = medicationForm,
+        currentRoute = route
+    )
+    val visibleAssistSuggestions = assistState.suggestions.filterNot {
+        it.id in appliedSuggestionIds || it.id in redundantAssistSuggestionIds
+    }
     val contextualAssistSuggestions = assistState.suggestions
     val medicationContextQuery = listOf(name, medicationCaptureContext)
         .map { it.trim() }
@@ -464,8 +512,8 @@ internal fun MedicationFormSheet(
                 doseExpanded = true
             }
             is MedicationAssistSuggestion.Reminder -> {
-                reminder = formatDisplayMinute(suggestion.primaryMinute)
-                reminderPreset = resolveMedicationReminderPreset(suggestion.primaryMinute)
+                reminderOverride = formatDisplayMinute(suggestion.primaryMinute)
+                reminderPresetOverride = resolveMedicationReminderPreset(suggestion.primaryMinute)
                 suggestion.secondaryMinute?.let { secondaryReminder = formatDisplayMinute(it) }
                 frequency = suggestion.frequency ?: if (suggestion.secondaryMinute != null) "Twice daily" else "Once daily"
                 if (medicationReminderCount(frequency) > 1) {
@@ -499,12 +547,40 @@ internal fun MedicationFormSheet(
                 safetyExpanded = true
             }
         }
-        if (suggestion.id !in appliedSuggestionIds) {
-            appliedSuggestionIds.add(suggestion.id)
+        supersededMedicationAssistSuggestionIds(suggestion, assistState.suggestions).forEach { id ->
+            if (id !in appliedSuggestionIds) {
+                appliedSuggestionIds.add(id)
+            }
         }
         if (assistState.suggestions.all { it.id in appliedSuggestionIds }) {
             onClearAssist?.invoke()
         }
+    }
+
+    fun applyAllAssistSuggestions() {
+        assistState.suggestions.forEach { suggestion ->
+            if (suggestion.id !in appliedSuggestionIds) {
+                applyMedicationAssistSuggestion(suggestion)
+            }
+        }
+    }
+
+    val openingMealTiming = remember(planKey) { mealTiming }
+    val autoApplyAssistEnabled = rememberChronosUiBooleanSetting(
+        ChronosUiSettingsKeys.KEY_ASSIST_AUTO_APPLY,
+        false
+    )
+    LaunchedEffect(assistState.suggestions, autoApplyAssistEnabled) {
+        if (!autoApplyAssistEnabled || target !is MedicationSheetTarget.Add) return@LaunchedEffect
+        val autoApplicableIds = autoApplicableMedicationAssistSuggestionIds(
+            suggestions = visibleAssistSuggestions,
+            doseUnset = dosage.isBlank(),
+            reminderUntouched = reminderOverride.isBlank(),
+            mealTimingUntouched = mealTiming == openingMealTiming
+        )
+        assistState.suggestions
+            .filter { it.id in autoApplicableIds }
+            .forEach(::applyMedicationAssistSuggestion)
     }
 
     ChronosFormBottomSheet(
@@ -726,9 +802,9 @@ internal fun MedicationFormSheet(
                 ) {
                     Text(
                         when {
-                            assistState.isLoading -> "Parsing medication..."
-                            visibleAssistSuggestions.isNotEmpty() -> "Refresh AI suggestions"
-                            else -> "Parse medication fields"
+                            assistState.isLoading -> "Drafting suggestions…"
+                            visibleAssistSuggestions.isNotEmpty() -> "Refresh suggestions"
+                            else -> "Suggest medication fields with AI"
                         }
                     )
                 }
@@ -737,7 +813,8 @@ internal fun MedicationFormSheet(
                 GenAiAssistBanner(
                     title = snapshot.bannerTitle,
                     message = snapshot.bannerMessage +
-                        " Typed or Android speech input becomes editable suggestions for name, dose, cadence, timing, form, route, and refill cues. Gemini Nano is enough for extraction, but it is not medical advice; review before saving."
+                        " Type or dictate the medication and AI drafts editable fields — name, dose, timing, form, route, and refill cues. This is extraction only, never medical advice; review before saving.",
+                    ready = snapshot.isReady
                 )
             }
             assistState.message?.let { message ->
@@ -747,10 +824,16 @@ internal fun MedicationFormSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            if (visibleAssistSuggestions.isNotEmpty()) {
-                MedicationAssistSuggestionChips(
+            if (visibleAssistSuggestions.isNotEmpty() || assistState.isLoading) {
+                ChronosAssistSuggestionChips(
                     suggestions = visibleAssistSuggestions,
-                    onSuggestion = ::applyMedicationAssistSuggestion
+                    isLoading = assistState.isLoading,
+                    onApply = ::applyMedicationAssistSuggestion,
+                    label = { it.label },
+                    reason = { it.reason },
+                    sourceLabel = { GenAiAssistCopy.routineAssistSourceLabel(it.source) },
+                    loadingLabel = "Drafting AI suggestions…",
+                    onApplyAll = ::applyAllAssistSuggestions
                 )
             }
         }
@@ -796,8 +879,8 @@ internal fun MedicationFormSheet(
                         unit = template.unit
                         medicationForm = inferMedicationForm(template.unit, template.name)
                         route = inferMedicationRoute(medicationForm)
-                        reminder = formatDisplayMinute(template.reminderMinute)
-                        reminderPreset = resolveMedicationReminderPreset(template.reminderMinute)
+                        reminderOverride = formatDisplayMinute(template.reminderMinute)
+                        reminderPresetOverride = resolveMedicationReminderPreset(template.reminderMinute)
                         frequency = template.frequency
                         reminderWindowMinutes = template.windowMinutes
                         if (template.frequency == "Twice daily") {
@@ -879,8 +962,8 @@ internal fun MedicationFormSheet(
                                     unit = history.unit
                                     medicationForm = inferMedicationForm(history.unit, history.name)
                                     route = inferMedicationRoute(medicationForm)
-                                    reminder = formatDisplayMinute(history.reminderMinute)
-                                    reminderPreset = resolveMedicationReminderPreset(history.reminderMinute)
+                                    reminderOverride = formatDisplayMinute(history.reminderMinute)
+                                    reminderPresetOverride = resolveMedicationReminderPreset(history.reminderMinute)
                                     frequency = history.frequencyLabel
                                     secondaryReminder = formatDisplayMinute(
                                         history.secondaryReminderMinute ?: ((history.reminderMinute + 12 * 60) % (24 * 60))
@@ -922,8 +1005,8 @@ internal fun MedicationFormSheet(
                                     unit = history.unit
                                     medicationForm = inferMedicationForm(history.unit, history.name)
                                     route = inferMedicationRoute(medicationForm)
-                                    reminder = formatDisplayMinute(history.reminderMinute)
-                                    reminderPreset = resolveMedicationReminderPreset(history.reminderMinute)
+                                    reminderOverride = formatDisplayMinute(history.reminderMinute)
+                                    reminderPresetOverride = resolveMedicationReminderPreset(history.reminderMinute)
                                     frequency = history.frequencyLabel
                                     secondaryReminder = formatDisplayMinute(
                                         history.secondaryReminderMinute ?: ((history.reminderMinute + 12 * 60) % (24 * 60))
@@ -1073,7 +1156,7 @@ internal fun MedicationFormSheet(
                     name = medicationContextQuery,
                     dosage = dosage,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(dosage),
                 selected = dosage,
                 onSelected = { dosage = it }
             )
@@ -1095,7 +1178,7 @@ internal fun MedicationFormSheet(
                     name = medicationContextQuery,
                     selectedUnit = unit,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(unit),
                 selected = unit,
                 onSelected = {
                     unit = it
@@ -1129,7 +1212,7 @@ internal fun MedicationFormSheet(
                     notes = notes,
                     frequency = frequency,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(frequency),
                 selected = frequency,
                 onSelected = { choice ->
                     frequency = choice
@@ -1159,7 +1242,7 @@ internal fun MedicationFormSheet(
                         notes = notes,
                         selectedMealTiming = mealTiming,
                         suggestions = contextualAssistSuggestions
-                    ),
+                    ).withSelectedOption(mealTiming),
                     selected = mealTiming,
                     onSelected = { choice ->
                         mealTiming = choice
@@ -1170,12 +1253,15 @@ internal fun MedicationFormSheet(
             }
             ChronosOptionChips(
                 label = "Reminder window",
-                options = medicationReminderWindowOptions.map { "$it min" },
-                selected = "$normalizedReminderWindowMinutes min",
-                onSelected = { label ->
-                    reminderWindowMinutes = label.substringBefore(' ').toIntOrNull()
+                options = medicationReminderWindowOptions.map(Int::toString),
+                selected = normalizedReminderWindowMinutes.toString(),
+                onSelected = { value ->
+                    reminderWindowMinutes = value.toIntOrNull()
                         ?.coerceIn(5, 240)
                         ?: normalizedReminderWindowMinutes
+                },
+                optionLabel = { value ->
+                    value.toIntOrNull()?.let(::formatDurationLabel) ?: value
                 }
             )
             ChronosOptionChips(
@@ -1184,12 +1270,12 @@ internal fun MedicationFormSheet(
                     name = name,
                     notes = notes,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(reminderPreset),
                 selected = reminderPreset,
                 onSelected = { preset ->
-                    reminderPreset = preset
+                    reminderPresetOverride = preset
                     medicationReminderPresets[preset]?.let { minute ->
-                        reminder = formatDisplayMinute(minute)
+                        reminderOverride = formatDisplayMinute(minute)
                     }
                 },
                 optionLabel = { preset ->
@@ -1210,15 +1296,15 @@ internal fun MedicationFormSheet(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 FilledTonalButton(
                     onClick = {
-                        reminder = nudgeMinuteText(reminder, -30, parsedReminder ?: 8 * 60)
-                        reminderPreset = "Custom"
+                        reminderOverride = nudgeMinuteText(reminder, -30, parsedReminder ?: 8 * 60)
+                        reminderPresetOverride = "Custom"
                     },
                     modifier = Modifier.weight(1f)
                 ) { Text("−30m") }
                 FilledTonalButton(
                     onClick = {
-                        reminder = nudgeMinuteText(reminder, 30, parsedReminder ?: 8 * 60)
-                        reminderPreset = "Custom"
+                        reminderOverride = nudgeMinuteText(reminder, 30, parsedReminder ?: 8 * 60)
+                        reminderPresetOverride = "Custom"
                     },
                     modifier = Modifier.weight(1f)
                 ) { Text("+30m") }
@@ -1245,8 +1331,8 @@ internal fun MedicationFormSheet(
                     value = parsedReminder?.let(::formatDisplayMinute) ?: reminder.ifBlank { "Pick a time" },
                     selectedMinute = parsedReminder,
                     onTimeSelected = { minute ->
-                        reminder = formatDisplayMinute(minute)
-                        reminderPreset = "Custom"
+                        reminderOverride = formatDisplayMinute(minute)
+                        reminderPresetOverride = "Custom"
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1255,14 +1341,17 @@ internal fun MedicationFormSheet(
                 if (parsedReminder != null) {
                     ChronosOptionChips(
                         label = "Spacing",
-                        options = medicationSecondarySpacingOptions.map { "$it hours" },
+                        options = medicationSecondarySpacingOptions.map(Int::toString),
                         selected = medicationSecondarySpacingOptions
                             .firstOrNull { hours ->
                                 parsedSecondary == ((parsedReminder + hours * 60) % (24 * 60))
-                            }?.let { "$it hours" }.orEmpty(),
-                        onSelected = { label ->
-                            val hours = label.substringBefore(' ').toIntOrNull() ?: 12
+                            }?.toString().orEmpty(),
+                        onSelected = { value ->
+                            val hours = value.toIntOrNull() ?: 12
                             secondaryReminder = formatDisplayMinute((parsedReminder + hours * 60) % (24 * 60))
+                        },
+                        optionLabel = { value ->
+                            value.toIntOrNull()?.let { hours -> formatDurationLabel(hours * 60) } ?: value
                         }
                     )
                 }
@@ -1305,7 +1394,7 @@ internal fun MedicationFormSheet(
                     notes = notes,
                     selectedMealTiming = mealTiming,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(mealTiming),
                 selected = mealTiming,
                 onSelected = { choice ->
                     mealTiming = choice
@@ -1327,7 +1416,7 @@ internal fun MedicationFormSheet(
                         .joinToString(" "),
                     selectedForm = medicationForm,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(medicationForm),
                 selected = medicationForm,
                 onSelected = {
                     medicationForm = it
@@ -1341,7 +1430,7 @@ internal fun MedicationFormSheet(
                         .joinToString(" "),
                     selectedRoute = route,
                     suggestions = contextualAssistSuggestions
-                ),
+                ).withSelectedOption(route),
                 selected = route,
                 onSelected = { route = it }
             )
@@ -1391,7 +1480,7 @@ internal fun MedicationFormSheet(
                     options = contextualMedicationRefillCountOptions(
                         selectedRefillDoses = refillDoses,
                         suggestions = contextualAssistSuggestions
-                    ),
+                    ).withSelectedOption(refillDoses),
                     selected = refillDoses,
                     onSelected = { refillDoses = it }
                 )
@@ -1418,6 +1507,19 @@ internal fun MedicationFormSheet(
                 minLines = 2,
                 maxLines = 4
             )
+            if (onRequestRewrite != null) {
+                ChronosTextRewriteRow(
+                    text = notes,
+                    rewriteState = rewriteState,
+                    onRequestRewrite = onRequestRewrite,
+                    onApplyRewrite = { rewritten ->
+                        notes = rewritten
+                        onClearRewrite?.invoke()
+                    },
+                    onDismissRewrite = { onClearRewrite?.invoke() },
+                    fieldName = "notes"
+                )
+            }
         }
     }
 }
@@ -2427,48 +2529,93 @@ internal fun contextualMedicationRefillCountOptions(
         .take(optionLimit)
 }
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun MedicationAssistSuggestionChips(
+// Every medication suggestion kind replaces the value of the field(s) it targets, so
+// applying one dismisses the remaining same-kind alternatives as stale.
+internal fun supersededMedicationAssistSuggestionIds(
+    applied: MedicationAssistSuggestion,
+    suggestions: List<MedicationAssistSuggestion>
+): Set<String> = suggestions
+    .filter { it::class == applied::class }
+    .map { it.id }
+    .toSet() + applied.id
+
+// With the auto-apply setting on, a fresh Add form fills itself from the first
+// suggestion of each kind — but only while the targeted fields are untouched, so
+// manual input always wins. Notes, refill tracking, and form/route stay manual.
+internal fun autoApplicableMedicationAssistSuggestionIds(
     suggestions: List<MedicationAssistSuggestion>,
-    onSuggestion: (MedicationAssistSuggestion) -> Unit
-) {
-    FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        suggestions.forEach { suggestion ->
-            val sourceLabel = GenAiAssistCopy.routineAssistSourceLabel(suggestion.source)
-            FilterChip(
-                modifier = Modifier.semantics(mergeDescendants = true) {
-                    contentDescription = "Apply suggestion: ${suggestion.label}. $sourceLabel. ${suggestion.reason}"
-                },
-                selected = false,
-                onClick = { onSuggestion(suggestion) },
-                label = {
-                    Column {
-                        Text(suggestion.label)
-                        Text(
-                            text = "Tap to apply",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = sourceLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = suggestion.reason,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            )
+    doseUnset: Boolean,
+    reminderUntouched: Boolean,
+    mealTimingUntouched: Boolean
+): Set<String> {
+    var detailsOpen = doseUnset
+    var reminderOpen = reminderUntouched
+    var mealTimingOpen = mealTimingUntouched
+    val ids = mutableSetOf<String>()
+    suggestions.forEach { suggestion ->
+        when (suggestion) {
+            is MedicationAssistSuggestion.Details -> if (detailsOpen) {
+                ids += suggestion.id
+                detailsOpen = false
+            }
+            is MedicationAssistSuggestion.Reminder -> if (reminderOpen) {
+                ids += suggestion.id
+                reminderOpen = false
+            }
+            is MedicationAssistSuggestion.MealTiming -> if (mealTimingOpen) {
+                ids += suggestion.id
+                mealTimingOpen = false
+            }
+            is MedicationAssistSuggestion.RefillTracking,
+            is MedicationAssistSuggestion.Notes,
+            is MedicationAssistSuggestion.FormRoute -> Unit
         }
     }
+    return ids
+}
+
+// A suggestion the form already satisfies is a no-op pill — hide it so the row only
+// offers changes. Keeps pills honest after a sibling is applied or a field is edited
+// by hand, without an extra Gemini round-trip.
+internal fun redundantMedicationAssistSuggestionIds(
+    suggestions: List<MedicationAssistSuggestion>,
+    currentName: String,
+    currentDosage: String,
+    currentUnit: String,
+    currentFrequency: String,
+    currentPrimaryReminderMinute: Int?,
+    currentSecondaryReminderMinute: Int?,
+    currentMealTiming: String,
+    currentHasRefillTracking: Boolean,
+    currentRefillCount: Int?,
+    currentNotes: String,
+    currentForm: String,
+    currentRoute: String
+): Set<String> {
+    fun String.normalized() = trim().lowercase()
+    fun String?.matches(current: String) = this == null || normalized() == current.normalized()
+    return suggestions.filter { suggestion ->
+        when (suggestion) {
+            is MedicationAssistSuggestion.Reminder ->
+                suggestion.primaryMinute == currentPrimaryReminderMinute &&
+                    (suggestion.secondaryMinute == null || suggestion.secondaryMinute == currentSecondaryReminderMinute) &&
+                    suggestion.frequency.matches(currentFrequency)
+            is MedicationAssistSuggestion.MealTiming ->
+                suggestion.mealTiming.normalized() == currentMealTiming.normalized()
+            is MedicationAssistSuggestion.RefillTracking ->
+                currentHasRefillTracking && suggestion.dosesLeft == currentRefillCount
+            is MedicationAssistSuggestion.Notes ->
+                suggestion.notes.normalized() == currentNotes.normalized()
+            is MedicationAssistSuggestion.FormRoute ->
+                suggestion.form.normalized() == currentForm.normalized() &&
+                    suggestion.route.normalized() == currentRoute.normalized()
+            is MedicationAssistSuggestion.Details ->
+                suggestion.name.matches(currentName) &&
+                    suggestion.dosage.matches(currentDosage) &&
+                    suggestion.unit.matches(currentUnit) &&
+                    suggestion.frequency.matches(currentFrequency)
+        }
+    }.map { it.id }.toSet()
 }
 
 private fun contextualMedicationTemplateOptions(
@@ -2697,6 +2844,29 @@ private fun buildMedicationNotes(mealTiming: String, userNotes: String): String?
 
 private fun resolveMedicationReminderPreset(minuteOfDay: Int): String =
     medicationReminderPresets.entries.firstOrNull { it.value == minuteOfDay }?.key ?: "Custom"
+
+// While the reminder is untouched in an Add form, its default follows the capture
+// context instead of the 8:00 AM fallback — an AI Reminder suggestion wins over
+// keyword cues; null means no signal (keep the fallback).
+internal fun contextualMedicationDefaultReminderMinute(
+    name: String,
+    notes: String,
+    suggestions: List<MedicationAssistSuggestion>
+): Int? {
+    suggestions.firstNotNullOfOrNull { suggestion ->
+        (suggestion as? MedicationAssistSuggestion.Reminder)?.primaryMinute
+    }?.let { return it }
+    val normalized = "$name $notes".lowercase()
+    val preset = when {
+        "morning" in normalized || "breakfast" in normalized -> "Morning"
+        "noon" in normalized || "lunch" in normalized -> "Noon"
+        "afternoon" in normalized -> "Afternoon"
+        "evening" in normalized || "dinner" in normalized -> "Evening"
+        "night" in normalized || "bed" in normalized || "bedtime" in normalized -> "Night"
+        else -> null
+    }
+    return preset?.let { medicationReminderPresets[it] }
+}
 
 private fun inferMealTiming(initialPlan: MedicationPlan?): String = when {
         initialPlan?.takeWithFood == true -> "With food"

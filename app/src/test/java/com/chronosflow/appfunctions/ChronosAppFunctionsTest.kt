@@ -2,8 +2,13 @@ package com.chronosflow.appfunctions
 
 import androidx.appfunctions.AppFunctionContext
 import com.chronosflow.core.domain.model.ActualTimeSegment
+import com.chronosflow.core.domain.model.BlockFlexibility
+import com.chronosflow.core.domain.model.BlockProvenance
+import com.chronosflow.core.domain.model.EnergyIntensity
+import com.chronosflow.core.domain.model.Habit
 import com.chronosflow.core.domain.model.HabitEvent
 import com.chronosflow.core.domain.model.MedicationDoseEvent
+import com.chronosflow.core.domain.model.MedicationPlan
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TimeBlock
@@ -11,6 +16,7 @@ import com.chronosflow.core.domain.planner.PlannerOperationResult
 import com.chronosflow.core.domain.planner.PlannerService
 import com.chronosflow.core.domain.repository.CalendarEventRepository
 import com.chronosflow.core.domain.repository.GoalRepository
+import com.chronosflow.core.domain.repository.FocusSessionRepository
 import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.JournalRepository
 import com.chronosflow.core.domain.repository.MedicationRepository
@@ -24,9 +30,13 @@ import com.chronosflow.core.domain.usecase.ApplyRoutineToDateUseCase
 import com.chronosflow.core.domain.usecase.RecordSleepUseCase
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
-import kotlinx.coroutines.test.runTest
+import java.time.Instant
 import java.time.LocalDate
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,6 +57,7 @@ class ChronosAppFunctionsTest {
     private val recordSleepUseCase: RecordSleepUseCase = mockk(relaxed = true)
     private val applyRoutineToDateUseCase: ApplyRoutineToDateUseCase = mockk(relaxed = true)
     private val plannerService: PlannerService = mockk()
+    private val focusSessionRepository: FocusSessionRepository = mockk(relaxed = true)
 
     private val appFunctionContext: AppFunctionContext = mockk(relaxed = true)
 
@@ -64,7 +75,8 @@ class ChronosAppFunctionsTest {
         sleepTrackRepository = sleepTrackRepository,
         recordSleepUseCase = recordSleepUseCase,
         applyRoutineToDateUseCase = applyRoutineToDateUseCase,
-        plannerService = plannerService
+        plannerService = plannerService,
+        focusSessionRepository = focusSessionRepository
     )
 
     @Test
@@ -364,4 +376,160 @@ class ChronosAppFunctionsTest {
 
         assertFalse(result)
     }
+    fun getTodayScheduleReturnsBlocksSortedByStart() = runTest {
+        every { timeBlockRepository.getTimeBlocksByDate(any()) } returns flowOf(
+            listOf(
+                timeBlock(id = "b2", title = "Lunch", category = "meals", start = 720, duration = 60),
+                timeBlock(id = "b1", title = "Deep Work", category = "work", start = 540, duration = 90)
+            )
+        )
+
+        val result = appFunctions.getTodaySchedule(appFunctionContext)
+
+        assertEquals(listOf("b1", "b2"), result.map { it.id })
+        assertEquals("Deep Work", result.first().title)
+        assertEquals(540, result.first().startMinuteOfDay)
+        assertEquals(90, result.first().durationMinutes)
+    }
+
+    @Test
+    fun listOpenTasksExcludesCompletedAndSortsByPriority() = runTest {
+        every { taskRepository.getAllTasks() } returns flowOf(
+            listOf(
+                task(id = "t1", title = "Low", completed = false, priority = 1, durationMinutes = null),
+                task(id = "t2", title = "Done", completed = true, priority = 5, durationMinutes = 30),
+                task(id = "t3", title = "High", completed = false, priority = 4, durationMinutes = 15)
+            )
+        )
+
+        val result = appFunctions.listOpenTasks(appFunctionContext)
+
+        assertEquals(listOf("t3", "t1"), result.map { it.id })
+        assertEquals(4, result.first().priority)
+        assertEquals(15, result.first().preferredDurationMinutes)
+        // Null preferred duration is normalized to 0.
+        assertEquals(0, result.last().preferredDurationMinutes)
+    }
+
+    @Test
+    fun listHabitsReturnsOnlyActive() = runTest {
+        every { habitRepository.observeHabits() } returns flowOf(
+            listOf(
+                habit(id = "h1", title = "Read", cadence = "daily", streak = 3, active = true),
+                habit(id = "h2", title = "Retired", cadence = "weekly", streak = 0, active = false)
+            )
+        )
+
+        val result = appFunctions.listHabits(appFunctionContext)
+
+        assertEquals(listOf("h1"), result.map { it.id })
+        assertEquals("Read", result.first().title)
+        assertEquals(3, result.first().streakCount)
+    }
+
+    @Test
+    fun listMedicationsReturnsOnlyActiveWithCombinedDosage() = runTest {
+        every { medicationRepository.observeMedicationPlans() } returns flowOf(
+            listOf(
+                medication(id = "m1", name = "Vitamin D", dosage = "1", unit = "tablet", reminder = 480, active = true),
+                medication(id = "m2", name = "Retired", dosage = "2", unit = "ml", reminder = 600, active = false)
+            )
+        )
+
+        val result = appFunctions.listMedications(appFunctionContext)
+
+        assertEquals(listOf("m1"), result.map { it.id })
+        assertEquals("1 tablet", result.first().dosage)
+        assertEquals(480, result.first().reminderMinuteOfDay)
+    }
+
+    private fun timeBlock(
+        id: String,
+        title: String,
+        category: String,
+        start: Int,
+        duration: Int
+    ): TimeBlock = TimeBlock(
+        id = id,
+        date = LocalDate.now(),
+        title = title,
+        category = category,
+        startMinuteOfDay = start,
+        durationMinutes = duration,
+        timezone = "UTC",
+        provenance = BlockProvenance.USER_CREATED,
+        flexibility = BlockFlexibility.MOVABLE,
+        energyLevel = EnergyIntensity.fromLevel(2),
+        source = "test",
+        taskId = null,
+        calendarEventId = null,
+        medicationPlanId = null,
+        habitId = null,
+        isLocked = false,
+        isProtected = false,
+        recurrenceRuleId = null,
+        actualStartMinuteOfDay = null,
+        actualEndMinuteOfDay = null,
+        createdAt = Instant.EPOCH,
+        updatedAt = Instant.EPOCH
+    )
+
+    private fun task(
+        id: String,
+        title: String,
+        completed: Boolean,
+        priority: Int,
+        durationMinutes: Int?
+    ): Task = Task(
+        id = id,
+        title = title,
+        description = null,
+        isCompleted = completed,
+        priority = priority,
+        dueDate = null,
+        createdAt = Instant.EPOCH,
+        updatedAt = Instant.EPOCH,
+        preferredDurationMinutes = durationMinutes
+    )
+
+    private fun habit(
+        id: String,
+        title: String,
+        cadence: String,
+        streak: Int,
+        active: Boolean
+    ): Habit = Habit(
+        id = id,
+        title = title,
+        cadence = cadence,
+        windowStartMinute = 0,
+        windowEndMinute = 60,
+        difficulty = 1,
+        isBundled = false,
+        streakCount = streak,
+        lastCompletedDate = null,
+        isActive = active
+    )
+
+    private fun medication(
+        id: String,
+        name: String,
+        dosage: String,
+        unit: String,
+        reminder: Int,
+        active: Boolean
+    ): MedicationPlan = MedicationPlan(
+        id = id,
+        name = name,
+        dosage = dosage,
+        unit = unit,
+        notes = null,
+        startAt = null,
+        endAt = null,
+        reminderMinuteOfDay = reminder,
+        takeWithFood = false,
+        missedCount = 0,
+        refillNeededAfterDoses = null,
+        isActive = active
+    )
 }

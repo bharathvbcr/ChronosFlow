@@ -111,7 +111,11 @@ class DayDialReminderDelegate @Inject constructor(
                     .plusMinutes(minuteOfDay.coerceIn(0, 1439).toLong())
                     .toInstant()
                 nextReminderIds.add(id)
-                val result = if (type == AlarmRequestType.MEDICATION) {
+                // Block-start and medication reminders are time-critical, so they use
+                // exact alarms (degrading to a windowed alarm when the user hasn't
+                // granted exact-alarm access). Break/missed/review nudges stay inexact
+                // per platform guidance to use inexact alarms whenever possible.
+                val result = if (type == AlarmRequestType.MEDICATION || type == AlarmRequestType.BLOCK_START) {
                     alarmScheduler.scheduleExactAlarm(id, instant, title, message)
                 } else {
                     alarmScheduler.scheduleInexactAlarm(id, instant, title, message)
@@ -258,61 +262,6 @@ class DayDialReminderDelegate @Inject constructor(
         return "daydial:${date}:$blockId:$type"
     }
 
-    private fun isHabitReminderDueOnDate(
-        habit: Habit,
-        date: LocalDate
-    ): Boolean {
-        val schedule = habit.schedule ?: buildLegacyHabitSchedule(
-            habitId = habit.id,
-            cadence = habit.cadence,
-            windowStartMinute = habit.windowStartMinute,
-            windowEndMinute = habit.windowEndMinute,
-            plannerVisible = habit.isBundled
-        )
-        val recurrenceDue = when (val rule = schedule.resolvedRecurrenceRule) {
-            is HabitRecurrenceRule.Scheduled -> recurrenceOccursOn(
-                date = date,
-                recurrence = rule.recurrence,
-                startDate = habit.recentEvents.minOfOrNull { it.eventDate } ?: habit.lastCompletedDate ?: date
-            )
-            is HabitRecurrenceRule.Quota -> true
-        }
-        val completed = habit.lastCompletedDate == date ||
-            habit.recentEvents.any { it.eventDate == date && it.type == HabitEventType.COMPLETED }
-        val skipped = schedule.skipDate == date ||
-            habit.recentEvents.any { it.eventDate == date && it.type == HabitEventType.SKIPPED }
-        val paused = schedule.pausedUntil?.let { !it.isBefore(date) } == true
-
-        return recurrenceDue && !completed && !skipped && !paused
-    }
-
-    private fun recurrenceOccursOn(
-        date: LocalDate,
-        recurrence: PlannerRecurrence,
-        startDate: LocalDate
-    ): Boolean = when (recurrence.type) {
-        PlannerRecurrenceType.DAILY,
-        PlannerRecurrenceType.MULTIPLE_TIMES_DAILY -> true
-        PlannerRecurrenceType.WEEKDAYS -> date.dayOfWeek in weekdaySet
-        PlannerRecurrenceType.WEEKENDS -> date.dayOfWeek in weekendSet
-        PlannerRecurrenceType.SELECTED_WEEKDAYS ->
-            recurrence.weekdays.isEmpty() || date.dayOfWeek in recurrence.weekdays
-        PlannerRecurrenceType.EVERY_N_DAYS -> {
-            val days = ChronoUnit.DAYS.between(startDate, date)
-            days >= 0 && days % recurrence.interval.coerceAtLeast(1) == 0L
-        }
-        PlannerRecurrenceType.WEEKLY_INTERVAL -> {
-            val allowedDays = recurrence.weekdays.ifEmpty { setOf(startDate.dayOfWeek) }
-            val weeks = ChronoUnit.WEEKS.between(startDate.weekStart(), date.weekStart())
-            weeks >= 0 && weeks % recurrence.interval.coerceAtLeast(1) == 0L &&
-                date.dayOfWeek in allowedDays
-        }
-        PlannerRecurrenceType.PRN -> false
-    }
-
-    private fun LocalDate.weekStart(): LocalDate =
-        minusDays((dayOfWeek.value - DayOfWeek.MONDAY.value).toLong())
-
     private suspend fun persistAlarmRequest(
         id: String,
         type: AlarmRequestType,
@@ -359,6 +308,63 @@ class DayDialReminderDelegate @Inject constructor(
         )
     }
 }
+
+// Shared with DayDialAiDelegate's gap filler so "due today" means the same
+// thing for reminders and for gap-fill habit placement.
+internal fun isHabitReminderDueOnDate(
+    habit: Habit,
+    date: LocalDate
+): Boolean {
+    val schedule = habit.schedule ?: buildLegacyHabitSchedule(
+        habitId = habit.id,
+        cadence = habit.cadence,
+        windowStartMinute = habit.windowStartMinute,
+        windowEndMinute = habit.windowEndMinute,
+        plannerVisible = habit.isBundled
+    )
+    val recurrenceDue = when (val rule = schedule.resolvedRecurrenceRule) {
+        is HabitRecurrenceRule.Scheduled -> recurrenceOccursOn(
+            date = date,
+            recurrence = rule.recurrence,
+            startDate = habit.recentEvents.minOfOrNull { it.eventDate } ?: habit.lastCompletedDate ?: date
+        )
+        is HabitRecurrenceRule.Quota -> true
+    }
+    val completed = habit.lastCompletedDate == date ||
+        habit.recentEvents.any { it.eventDate == date && it.type == HabitEventType.COMPLETED }
+    val skipped = schedule.skipDate == date ||
+        habit.recentEvents.any { it.eventDate == date && it.type == HabitEventType.SKIPPED }
+    val paused = schedule.pausedUntil?.let { !it.isBefore(date) } == true
+
+    return recurrenceDue && !completed && !skipped && !paused
+}
+
+private fun recurrenceOccursOn(
+    date: LocalDate,
+    recurrence: PlannerRecurrence,
+    startDate: LocalDate
+): Boolean = when (recurrence.type) {
+    PlannerRecurrenceType.DAILY,
+    PlannerRecurrenceType.MULTIPLE_TIMES_DAILY -> true
+    PlannerRecurrenceType.WEEKDAYS -> date.dayOfWeek in weekdaySet
+    PlannerRecurrenceType.WEEKENDS -> date.dayOfWeek in weekendSet
+    PlannerRecurrenceType.SELECTED_WEEKDAYS ->
+        recurrence.weekdays.isEmpty() || date.dayOfWeek in recurrence.weekdays
+    PlannerRecurrenceType.EVERY_N_DAYS -> {
+        val days = ChronoUnit.DAYS.between(startDate, date)
+        days >= 0 && days % recurrence.interval.coerceAtLeast(1) == 0L
+    }
+    PlannerRecurrenceType.WEEKLY_INTERVAL -> {
+        val allowedDays = recurrence.weekdays.ifEmpty { setOf(startDate.dayOfWeek) }
+        val weeks = ChronoUnit.WEEKS.between(startDate.weekStart(), date.weekStart())
+        weeks >= 0 && weeks % recurrence.interval.coerceAtLeast(1) == 0L &&
+            date.dayOfWeek in allowedDays
+    }
+    PlannerRecurrenceType.PRN -> false
+}
+
+private fun LocalDate.weekStart(): LocalDate =
+    minusDays((dayOfWeek.value - DayOfWeek.MONDAY.value).toLong())
 
 private val weekdaySet = setOf(
     DayOfWeek.MONDAY,

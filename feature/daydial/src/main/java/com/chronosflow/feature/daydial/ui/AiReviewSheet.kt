@@ -3,11 +3,9 @@ package com.chronosflow.feature.daydial.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -16,9 +14,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -28,10 +26,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.chronosflow.core.ui.components.ChronosCollapsibleSection
+import com.chronosflow.core.ui.components.ChronosDurationSlider
+import com.chronosflow.core.ui.components.formatDurationLabel
+import com.chronosflow.feature.daydial.BlockEditorMaxDurationMinutes
+import com.chronosflow.feature.daydial.BlockEditorMinDurationMinutes
 import com.chronosflow.feature.daydial.TimeBlockUiModel
+
+/** Shared minimum height so every suggestion action renders at the same size. */
+private val AiReviewActionHeight = 44.dp
 
 @Composable
 fun AiReviewSheet(
@@ -57,24 +61,27 @@ fun AiReviewSheet(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = onDismissAll,
-                    modifier = Modifier.semantics {
-                        contentDescription = aiReviewDismissAllActionLabel(suggestions.size)
-                    },
-                    shape = RoundedCornerShape(20.dp)
-                ) { Text("Dismiss All") }
+                    modifier = Modifier
+                        .heightIn(min = AiReviewActionHeight)
+                        .semantics {
+                            contentDescription = aiReviewDismissAllActionLabel(suggestions.size)
+                        }
+                ) { Text("Dismiss All", maxLines = 1) }
                 Button(
                     onClick = onApplyAll,
-                    modifier = Modifier.semantics {
-                        contentDescription = aiReviewApplyAllActionLabel(suggestions.size)
-                    },
-                    shape = RoundedCornerShape(20.dp)
-                ) { Text("Apply All") }
+                    modifier = Modifier
+                        .heightIn(min = AiReviewActionHeight)
+                        .semantics {
+                            contentDescription = aiReviewApplyAllActionLabel(suggestions.size)
+                        }
+                ) { Text("Apply All", maxLines = 1) }
             }
         }
         suggestions.forEach { suggestion ->
             var title by rememberSaveable(suggestion.id) { mutableStateOf(suggestion.title) }
             var start by rememberSaveable(suggestion.id) { mutableStateOf(formatReviewMinute(suggestion.startMinuteOfDay)) }
-            var duration by rememberSaveable(suggestion.id) { mutableStateOf(suggestion.durationMinutes.toString()) }
+            var durationMinutes by rememberSaveable(suggestion.id) { mutableIntStateOf(suggestion.durationMinutes) }
+            var adjusting by rememberSaveable(suggestion.id) { mutableStateOf(false) }
 
             val diff = rememberAiSuggestionDiff(suggestion)
 
@@ -97,61 +104,71 @@ fun AiReviewSheet(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    OutlinedTextField(
-                        value = title,
-                        onValueChange = { title = it },
-                        label = { Text("Title") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Editing is a deliberate, secondary step: the fields stay folded
+                    // away so each card leads with one clear Accept/Reject decision.
+                    ChronosCollapsibleSection(
+                        title = "Adjust",
+                        summary = "$title · ${formatDurationLabel(durationMinutes)} at $start",
+                        expanded = adjusting,
+                        onExpandedChange = { adjusting = it }
+                    ) {
+                        OutlinedTextField(
+                            value = title,
+                            onValueChange = { title = it },
+                            label = { Text("Title") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         OutlinedTextField(
                             value = start,
                             onValueChange = { start = it },
                             label = { Text("Start") },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        OutlinedTextField(
-                            value = duration,
-                            onValueChange = { duration = it },
-                            label = { Text("Minutes") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f)
+                        ChronosDurationSlider(
+                            durationMinutes = durationMinutes,
+                            onDurationChange = { durationMinutes = it },
+                            range = BlockEditorMinDurationMinutes..BlockEditorMaxDurationMinutes
                         )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(
-                            onClick = { onReject(suggestion.id) },
-                            modifier = Modifier.semantics {
-                                contentDescription = aiReviewRejectActionLabel(suggestion)
-                            }
-                        ) { Text("Reject") }
-                        Spacer(Modifier.width(8.dp))
-                        OutlinedButton(
+                        Button(
                             onClick = {
                                 onModify(
                                     suggestion.id,
                                     title,
                                     parseReviewMinute(start) ?: suggestion.startMinuteOfDay,
-                                    duration.toIntOrNull() ?: suggestion.durationMinutes
+                                    durationMinutes
                                 )
                             },
-                            modifier = Modifier.semantics {
-                                contentDescription = aiReviewModifyActionLabel(suggestion)
-                            },
-                            shape = RoundedCornerShape(20.dp)
-                        ) { Text("Modify") }
-                        Spacer(Modifier.width(8.dp))
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = AiReviewActionHeight)
+                                .semantics {
+                                    contentDescription = aiReviewModifyActionLabel(suggestion)
+                                }
+                        ) { Text("Save changes", maxLines = 1, fontWeight = FontWeight.SemiBold) }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = { onReject(suggestion.id) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = AiReviewActionHeight)
+                                .semantics {
+                                    contentDescription = aiReviewRejectActionLabel(suggestion)
+                                }
+                        ) { Text("Reject", maxLines = 1, fontWeight = FontWeight.SemiBold) }
                         Button(
                             onClick = { onAccept(suggestion.id) },
-                            modifier = Modifier.semantics {
-                                contentDescription = aiReviewAcceptActionLabel(suggestion)
-                            },
-                            shape = RoundedCornerShape(20.dp)
-                        ) { Text("Accept") }
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = AiReviewActionHeight)
+                                .semantics {
+                                    contentDescription = aiReviewAcceptActionLabel(suggestion)
+                                }
+                        ) { Text("Accept", maxLines = 1, fontWeight = FontWeight.SemiBold) }
                     }
                 }
             }
@@ -227,7 +244,7 @@ private fun rememberAiSuggestionDiff(suggestion: TimeBlockUiModel): AiSuggestion
     }
     return AiSuggestionDiff(
         label = label,
-        summary = "${suggestion.durationMinutes}m at ${formatReviewMinute(suggestion.startMinuteOfDay)}",
+        summary = "${formatDurationLabel(suggestion.durationMinutes)} at ${formatReviewMinute(suggestion.startMinuteOfDay)}",
         explanation = explanation,
         accentColor = accent,
         containerColor = accent.copy(alpha = 0.08f)

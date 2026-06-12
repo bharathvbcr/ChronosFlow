@@ -67,6 +67,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -510,6 +511,9 @@ internal fun ChronosNavigationShell(
     var localDayTarget by rememberSaveable {
         mutableStateOf(initialLocalDayTarget(initialDayTarget))
     }
+    // Bumped on every Today double-tap so the day screen re-applies "today-reset"
+    // even when the route (and thus the launch target string) is unchanged.
+    var todayResetGeneration by rememberSaveable { mutableIntStateOf(0) }
     var pendingPrimaryDayTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var lastSection by rememberSaveable { mutableStateOf(currentSection) }
     var lastRouteDayTarget by rememberSaveable { mutableStateOf(currentDayTarget) }
@@ -700,6 +704,7 @@ internal fun ChronosNavigationShell(
                             reducedMotion = uiSettings.reduceMotionEnabled,
                             requestedPrimaryTab = requestedPrimaryTab,
                             shellDayTarget = renderedDayTarget,
+                            dayLaunchTargetGeneration = todayResetGeneration,
                             onDayPrimaryTabSelected = onDayPrimaryTabSelected,
                             modifier = Modifier
                                 .fillMaxSize()
@@ -741,6 +746,7 @@ internal fun ChronosNavigationShell(
                                     onDoubleClick = { destination ->
                                         if (destination.id == ChronosRoute.SHELL_TODAY) {
                                             localDayTarget = ChronosRoute.Day.TARGET_TODAY
+                                            todayResetGeneration += 1
                                             navController.navigateShellRoute(
                                                 activity = activity,
                                                 appLockViewModel = appLockViewModel,
@@ -774,6 +780,7 @@ internal fun ChronosNavigationShell(
                                         onDoubleClick = { destination ->
                                             if (destination.id == ChronosRoute.SHELL_TODAY) {
                                                 localDayTarget = ChronosRoute.Day.TARGET_TODAY
+                                                todayResetGeneration += 1
                                                 navController.navigateShellRoute(
                                                     activity = activity,
                                                     appLockViewModel = appLockViewModel,
@@ -799,6 +806,7 @@ internal fun ChronosNavigationShell(
                                         reducedMotion = uiSettings.reduceMotionEnabled,
                                         requestedPrimaryTab = requestedPrimaryTab,
                                         shellDayTarget = renderedDayTarget,
+                            dayLaunchTargetGeneration = todayResetGeneration,
                                         onDayPrimaryTabSelected = onDayPrimaryTabSelected,
                                         modifier = Modifier
                                             .weight(1f)
@@ -835,6 +843,7 @@ internal fun ChronosNavigationShell(
                                 reducedMotion = uiSettings.reduceMotionEnabled,
                                 requestedPrimaryTab = requestedPrimaryTab,
                                 shellDayTarget = renderedDayTarget,
+                            dayLaunchTargetGeneration = todayResetGeneration,
                                 onDayPrimaryTabSelected = onDayPrimaryTabSelected,
                                 modifier = Modifier.fillMaxSize()
                             )
@@ -914,6 +923,7 @@ private fun ChronosCompactFloatingBottomBar(
                 .padding(horizontal = 8.dp, vertical = 6.dp)
                 .onGloballyPositioned { barCoordinates = it }
         ) {
+            val dayDialViewedDate = LocalChronosShellOverlayController.current?.dayDialViewedDate
             if (selectedBounds != null && indicatorWidth > 0f) {
                 Box(
                     modifier = Modifier
@@ -940,7 +950,7 @@ private fun ChronosCompactFloatingBottomBar(
                     ChronosCompactNavigationItem(
                         destination = destination,
                         selected = selectedId == destination.id,
-                        badgeValue = badgeValueFor(destination.id, shellState),
+                        badgeValue = badgeValueFor(destination.id, shellState, dayDialViewedDate),
                         reducedMotion = reducedMotion,
                         onClick = { onNavigate(destination) },
                         onDoubleClick = { onDoubleClick(destination) },
@@ -1409,7 +1419,9 @@ private fun ChronosAdaptiveNavigationRail(
                     icon = {
                         BadgedBox(
                             badge = {
-                                badgeValueFor(destination.id, shellState)?.let {
+                                val dayDialViewedDate =
+                                    LocalChronosShellOverlayController.current?.dayDialViewedDate
+                                badgeValueFor(destination.id, shellState, dayDialViewedDate)?.let {
                                     Badge { Text(it) }
                                 }
                             }
@@ -1432,14 +1444,38 @@ private fun ChronosAdaptiveNavigationRail(
     }
 }
 
-private fun badgeValueFor(destinationId: String, shellState: ChronosShellState): String? {
+private fun badgeValueFor(
+    destinationId: String,
+    shellState: ChronosShellState,
+    dayDialViewedDate: java.time.LocalDate? = null
+): String? {
     return when (destinationId) {
-        ChronosRoute.SHELL_TODAY -> numericBadge(shellState.missedBlocksCount)
+        ChronosRoute.SHELL_TODAY -> todayBadgeValue(
+            viewedDate = dayDialViewedDate,
+            today = java.time.LocalDate.now(),
+            missedCount = shellState.missedBlocksCount
+        )
         ChronosRoute.SHELL_FOCUS -> if (shellState.focusActive) "•" else null
         ChronosRoute.SHELL_REVIEW -> numericBadge(shellState.unreadInsightsCount)
         else -> null
     }
 }
+
+/**
+ * The viewed-date indicator outranks the missed-count badge: when the dial shows a
+ * date other than today, the badge shows that day-of-month so the off-today state
+ * is visible from the bottom bar.
+ */
+internal fun todayBadgeValue(
+    viewedDate: java.time.LocalDate?,
+    today: java.time.LocalDate,
+    missedCount: Int
+): String? =
+    if (viewedDate != null && viewedDate != today) {
+        viewedDate.dayOfMonth.toString()
+    } else {
+        numericBadge(missedCount)
+    }
 
 private fun numericBadge(count: Int): String? {
     return when {

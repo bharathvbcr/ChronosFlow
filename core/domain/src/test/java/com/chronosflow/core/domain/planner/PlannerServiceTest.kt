@@ -114,6 +114,35 @@ class PlannerServiceTest {
         assertTrue(result is PlannerOperationResult.Applied)
         // flex should be moved after fixed (at 120)
         coVerify { repository.saveTimeBlock(match { it.id == "flex" && it.startMinuteOfDay == 120 }) }
+        assertEquals(listOf("flex"), (result as PlannerOperationResult.Applied).affectedBlockIds)
+        assertTrue(result.message.startsWith("Moved 1 block:"))
+    }
+
+    @Test
+    fun `rebalanceDay reports nothing to do when every block already fits`() = runTest {
+        val first = timeBlock(id = "a", startMinute = 0, durationMinutes = 60).copy(flexibility = BlockFlexibility.MOVABLE)
+        val second = timeBlock(id = "b", startMinute = 65, durationMinutes = 60).copy(flexibility = BlockFlexibility.MOVABLE)
+
+        every { repository.getTimeBlocksByDate(date) } returns flowOf(listOf(first, second))
+        coEvery { repository.saveTimeBlock(any()) } returns Unit
+
+        val result = service.rebalanceDay(date)
+
+        assertTrue(result is PlannerOperationResult.Rejected)
+        assertEquals("Everything already fits — nothing to rebalance", result.message)
+    }
+
+    @Test
+    fun `rebalance summary names moved blocks and caps the list`() {
+        val moved = (1..5).map { index ->
+            timeBlock(id = "b$index", startMinute = index * 60, durationMinutes = 30)
+                .copy(title = "Block $index")
+        }
+
+        assertEquals(
+            "Moved 5 blocks: Block 1 → 1:00, Block 2 → 2:00, Block 3 → 3:00 and 2 more",
+            rebalanceSummaryMessage(moved)
+        )
     }
 
     @Test

@@ -9,7 +9,6 @@ import com.chronosflow.core.domain.model.TimeBlock
 import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
-import java.util.UUID
 import javax.inject.Inject
 
 class DailyReviewCalculator @Inject constructor() {
@@ -32,7 +31,7 @@ class DailyReviewCalculator @Inject constructor() {
             missedBlocks.forEach { block ->
                 add(
                     ReviewInsight(
-                        id = UUID.randomUUID().toString(),
+                        id = "missed-block-${block.id}-$date",
                         type = ReviewInsightType.MISSED_BLOCK,
                         title = "Missed ${block.title}",
                         detail = "${block.durationMinutes} planned minutes were not matched to actual time.",
@@ -44,7 +43,7 @@ class DailyReviewCalculator @Inject constructor() {
             if (kotlin.math.abs(driftMinutes) >= 30) {
                 add(
                     ReviewInsight(
-                        id = UUID.randomUUID().toString(),
+                        id = "drift-$date",
                         type = ReviewInsightType.DRIFT,
                         title = "Schedule drift",
                         detail = "Actual time differed from the plan by $driftMinutes minutes.",

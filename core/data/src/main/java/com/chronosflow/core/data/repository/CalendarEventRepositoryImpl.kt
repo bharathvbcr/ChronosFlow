@@ -58,7 +58,15 @@ class CalendarEventRepositoryImpl @Inject constructor(
         val syncZone = ZoneId.systemDefault()
         val startDate = start.atZone(syncZone).toLocalDate()
         val endDate = end.minusMillis(1).atZone(syncZone).toLocalDate()
+        // Expand the window to full local days: the imported-block wipe below is
+        // date-granular, so a mid-day window start would otherwise delete events
+        // imported earlier the same day without re-importing them.
+        val windowStart = startDate.atStartOfDay(syncZone).toInstant()
+        val windowEnd = endDate.plusDays(1).atStartOfDay(syncZone).toInstant()
         timeBlockDao.deleteImportedBlocksBetween(startDate, endDate)
+        // The mirror table is a snapshot of the synced window; clearing it first
+        // drops events that were deleted or moved on the device.
+        calendarEventDao.deleteEventsBetween(windowStart, windowEnd)
 
         val contentResolver = appContext.contentResolver
         val projection = arrayOf(
@@ -73,7 +81,7 @@ class CalendarEventRepositoryImpl @Inject constructor(
         )
 
         val cursor = contentResolver.query(
-            calendarPlatform.instancesUri(start, end),
+            calendarPlatform.instancesUri(windowStart, windowEnd),
             projection,
             null,
             null,
@@ -103,7 +111,7 @@ class CalendarEventRepositoryImpl @Inject constructor(
                     isAllDay = allDay
                 )
                 saveCalendarEvent(domainEvent)
-                domainEvent.toImportedTimeBlocks(start, end, syncZone).forEach { importedBlock ->
+                domainEvent.toImportedTimeBlocks(windowStart, windowEnd, syncZone).forEach { importedBlock ->
                     timeBlockDao.insertTimeBlock(importedBlock.toEntity())
                 }
             }
@@ -167,37 +175,56 @@ class CalendarEventRepositoryImpl @Inject constructor(
             return emptyList()
         }
 
-        val localStart = clippedStart.atZone(syncZone)
-        val durationMinutes = Duration.between(clippedStart, clippedEnd)
-            .toMinutes()
-            .coerceAtLeast(1)
-            .coerceAtMost(1440)
-            .toInt()
+        // Split events crossing local midnight into one block per day so each
+        // dial day shows its own segment instead of one block overflowing 24h.
+        val firstDate = clippedStart.atZone(syncZone).toLocalDate()
+        val lastDate = clippedEnd.minusMillis(1).atZone(syncZone).toLocalDate()
+        return generateSequence(firstDate) { date ->
+            date.plusDays(1).takeUnless { it.isAfter(lastDate) }
+        }.mapNotNull { date ->
+            val dayStart = date.atStartOfDay(syncZone).toInstant()
+            val dayEnd = date.plusDays(1).atStartOfDay(syncZone).toInstant()
+            val segmentStart = maxOf(clippedStart, dayStart)
+            val segmentEnd = minOf(clippedEnd, dayEnd)
+            if (!segmentStart.isBefore(segmentEnd)) {
+                return@mapNotNull null
+            }
 
-        return listOf(TimeBlock(
-            id = "calendar-import-$id-${localStart.toLocalDate()}",
-            date = localStart.toLocalDate(),
-            title = title,
-            category = CALENDAR_EVENT_CATEGORY,
-            startMinuteOfDay = localStart.hour * 60 + localStart.minute,
-            durationMinutes = durationMinutes,
-            timezone = syncZone.id,
-            provenance = BlockProvenance.CALENDAR_IMPORTED,
-            flexibility = BlockFlexibility.FIXED,
-            energyLevel = classifyImportedEventEnergy(title, description),
-            source = BlockProvenance.CALENDAR_IMPORTED.name,
-            taskId = null,
-            calendarEventId = id,
-            medicationPlanId = null,
-            habitId = null,
-            isLocked = true,
-            isProtected = true,
-            recurrenceRuleId = null,
-            actualStartMinuteOfDay = null,
-            actualEndMinuteOfDay = null,
-            createdAt = clippedStart,
-            updatedAt = clippedEnd
-        ))
+            val localStart = segmentStart.atZone(syncZone)
+            val startMinuteOfDay = localStart.hour * 60 + localStart.minute
+            val durationMinutes = Duration.between(segmentStart, segmentEnd)
+                .toMinutes()
+                .coerceAtLeast(1)
+                .coerceAtMost(1440)
+                .toInt()
+
+            TimeBlock(
+                // The start minute keeps same-day instances of one recurring
+                // event (which share the device EVENT_ID) from colliding.
+                id = "calendar-import-$id-$date-$startMinuteOfDay",
+                date = date,
+                title = title,
+                category = CALENDAR_EVENT_CATEGORY,
+                startMinuteOfDay = startMinuteOfDay,
+                durationMinutes = durationMinutes,
+                timezone = syncZone.id,
+                provenance = BlockProvenance.CALENDAR_IMPORTED,
+                flexibility = BlockFlexibility.FIXED,
+                energyLevel = classifyImportedEventEnergy(title, description),
+                source = BlockProvenance.CALENDAR_IMPORTED.name,
+                taskId = null,
+                calendarEventId = id,
+                medicationPlanId = null,
+                habitId = null,
+                isLocked = true,
+                isProtected = true,
+                recurrenceRuleId = null,
+                actualStartMinuteOfDay = null,
+                actualEndMinuteOfDay = null,
+                createdAt = segmentStart,
+                updatedAt = segmentEnd
+            )
+        }.toList()
     }
 
     private fun CalendarEvent.toImportedAllDayTimeBlocks(

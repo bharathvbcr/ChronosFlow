@@ -91,7 +91,7 @@ import com.chronosflow.core.data.util.Converters
         RoutineEntity::class,
         RoutineStepEntity::class
     ],
-    version = 17,
+    version = 18,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -844,6 +844,34 @@ abstract class ChronosDatabase : RoomDatabase() {
                     """
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_routine_steps_routineId ON routine_steps(routineId)")
+            }
+        }
+
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // calendar_events is a disposable snapshot of the device calendar
+                // (regenerated on every sync), so recreate it with the composite
+                // primary key instead of migrating rows.
+                db.execSQL("DROP TABLE IF EXISTS `calendar_events`")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `calendar_events` (
+                        `id` INTEGER NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `description` TEXT,
+                        `startAt` INTEGER NOT NULL,
+                        `endAt` INTEGER NOT NULL,
+                        `timezone` TEXT NOT NULL,
+                        `location` TEXT,
+                        `externalId` TEXT,
+                        `isAllDay` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`, `startAt`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_calendar_events_startAt` ON `calendar_events` (`startAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_calendar_events_endAt` ON `calendar_events` (`endAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_calendar_events_externalId` ON `calendar_events` (`externalId`)")
             }
         }
     }

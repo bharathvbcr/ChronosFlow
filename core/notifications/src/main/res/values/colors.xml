@@ -5,4 +5,6 @@
     <color name="notification_accent">#7257B8</color>
     <!-- Warmer tint for critical reminders (medication doses, urgent deadlines). -->
     <color name="notification_accent_critical">#E0573E</color>
+    <!-- ChronosFlow brand accent; tints the dial small icon across all notifications. -->
+    <color name="chronosflow_brand_accent">#6C63FF</color>
 </resources>

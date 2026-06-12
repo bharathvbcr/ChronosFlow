@@ -1,27 +1,52 @@
+<!--
+    ChronosFlow mark, mirroring the day dial: a dial ring with a teal progress
+    arc and the dial's "now" hand — one continuous yellow hand from the center
+    hub to its tip dot on the ring (with a soft glow), exactly like ChronosDial
+    renders it. All geometry stays inside the adaptive-icon safe zone
+    (radius ~33 of the 108dp viewport).
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Track ring -->
     <path
-        android:fillColor="#101620"
-        android:pathData="M54,4a50,50 0,1 0,0.1 0z" />
+        android:strokeColor="#6C63FF"
+        android:strokeAlpha="0.35"
+        android:strokeWidth="8"
+        android:fillColor="#00000000"
+        android:pathData="M54,28 A26,26 0 1 1 54,80 A26,26 0 1 1 54,28" />
+    <!-- Progress arc: top, sweeping 210° clockwise -->
     <path
-        android:fillColor="#18B8A6"
-        android:pathData="M54,13a41,41 0,1 0,0.1 0z" />
+        android:strokeColor="#18B8A6"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,28 A26,26 0 1 1 41,76.5" />
+    <!-- Now hand: glow, hand, then tip halo + dot anchored on the ring -->
     <path
-        android:fillColor="#101620"
-        android:pathData="M54,22a32,32 0,1 0,0.1 0z" />
+        android:strokeColor="#F7C948"
+        android:strokeAlpha="0.3"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,54 L41,76.5" />
+    <path
+        android:strokeColor="#F7C948"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,54 L41,76.5" />
     <path
         android:fillColor="#F7C948"
-        android:pathData="M50,27h8v31h-8z" />
+        android:fillAlpha="0.25"
+        android:pathData="M33,76.5 a8,8 0 1 0 16,0 a8,8 0 1 0 -16,0 z" />
     <path
         android:fillColor="#F7C948"
-        android:pathData="M54,54l24,14 -4,7 -24,-14z" />
+        android:pathData="M36,76.5 a5,5 0 1 0 10,0 a5,5 0 1 0 -10,0 z" />
+    <!-- Center hub, same color as the hand -->
     <path
-        android:fillColor="#F5F7FA"
-        android:pathData="M54,45a9,9 0,1 0,0.1 0z" />
-    <path
-        android:fillColor="#6C63FF"
-        android:pathData="M23,55c0,-18 13,-32 31,-32v10c-12,0 -21,10 -21,22s9,22 21,22c8,0 15,-4 19,-10l9,5c-6,9 -16,15 -28,15 -18,0 -31,-14 -31,-32z" />
+        android:fillColor="#F7C948"
+        android:pathData="M50,54 a4,4 0 1 0 8,0 a4,4 0 1 0 -8,0 z" />
 </vector>

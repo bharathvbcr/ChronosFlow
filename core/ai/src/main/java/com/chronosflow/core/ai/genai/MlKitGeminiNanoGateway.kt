@@ -6,9 +6,12 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.min
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withTimeout
 
@@ -108,6 +111,12 @@ class MlKitGeminiNanoGateway @Inject constructor(
             }
         }
         return Result.failure(lastError ?: IllegalStateException("Gemini Nano inference failed."))
+    }
+
+    override fun generateTextStream(prompt: String): Flow<String> = flow {
+        if (!foregroundGate.isAppInForeground()) return@flow
+        if (ensureReadyForInference() != NanoModelStatus.AVAILABLE) return@flow
+        emitAll(client.generateTextStream(prompt))
     }
 
     private fun statusMessageFor(

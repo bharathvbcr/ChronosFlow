@@ -54,6 +54,16 @@ object GenAiAssistCopy {
         }.trim()
     }
 
+    /**
+     * True when assist is healthy and needs no user action (model ready / cloud configured).
+     * Callers use this to minimise the status banner to a compact line instead of a full notice.
+     */
+    fun isReady(mode: PrivacyMode, status: GenAiRuntimeStatus): Boolean = when (mode) {
+        PrivacyMode.DISABLED -> false
+        PrivacyMode.CLOUD_ALLOWED -> status.cloudConfigured
+        PrivacyMode.ON_DEVICE_ONLY -> status.nanoStatus == NanoModelStatus.AVAILABLE
+    }
+
     fun privacyModeLabel(mode: PrivacyMode): String = when (mode) {
         PrivacyMode.ON_DEVICE_ONLY -> "Gemini Nano (on-device)"
         PrivacyMode.CLOUD_ALLOWED -> "Cloud Gemini"

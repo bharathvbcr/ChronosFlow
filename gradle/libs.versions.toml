@@ -30,10 +30,15 @@ glance = "1.1.1"
 appsearch = "1.2.0-alpha01"
 sqlcipher = "4.16.0"
 mlkitGenaiPrompt = "1.0.0-beta2"
+mlkitGenaiFeatures = "1.0.0-beta1"
 generativeai = "0.9.0"
 orgJson = "20260522"
 wear-tiles = "1.6.0"
 wear-protolayout = "1.4.0"
+wear-ongoing = "1.0.0"
+wearCompose = "1.6.2"
+wearRemoteInteractions = "1.2.0"
+playServicesWearable = "18.2.0"
 work = "2.11.2"
 firebaseBom = "34.14.0"
 appfunctions = "1.0.0-alpha09"
@@ -43,6 +48,13 @@ haze = "1.7.2"
 androidx-wear-tiles = { module = "androidx.wear.tiles:tiles", version.ref = "wear-tiles" }
 androidx-wear-protolayout = { module = "androidx.wear.protolayout:protolayout", version.ref = "wear-protolayout" }
 androidx-wear-protolayout-material = { module = "androidx.wear.protolayout:protolayout-material", version.ref = "wear-protolayout" }
+androidx-wear-ongoing = { module = "androidx.wear:wear-ongoing", version.ref = "wear-ongoing" }
+androidx-wear-compose-material3 = { module = "androidx.wear.compose:compose-material3", version.ref = "wearCompose" }
+androidx-wear-compose-foundation = { module = "androidx.wear.compose:compose-foundation", version.ref = "wearCompose" }
+androidx-wear-compose-navigation = { module = "androidx.wear.compose:compose-navigation", version.ref = "wearCompose" }
+androidx-wear-compose-ui-tooling = { module = "androidx.wear.compose:compose-ui-tooling", version.ref = "wearCompose" }
+androidx-wear-remote-interactions = { module = "androidx.wear:wear-remote-interactions", version.ref = "wearRemoteInteractions" }
+play-services-wearable = { module = "com.google.android.gms:play-services-wearable", version.ref = "playServicesWearable" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -92,6 +104,9 @@ androidx-appsearch = { module = "androidx.appsearch:appsearch", version.ref = "a
 androidx-appsearch-local-storage = { module = "androidx.appsearch:appsearch-local-storage", version.ref = "appsearch" }
 sqlcipher-android = { module = "net.zetetic:sqlcipher-android", version.ref = "sqlcipher" }
 mlkit-genai-prompt = { module = "com.google.mlkit:genai-prompt", version.ref = "mlkitGenaiPrompt" }
+mlkit-genai-summarization = { module = "com.google.mlkit:genai-summarization", version.ref = "mlkitGenaiFeatures" }
+mlkit-genai-proofreading = { module = "com.google.mlkit:genai-proofreading", version.ref = "mlkitGenaiFeatures" }
+mlkit-genai-rewriting = { module = "com.google.mlkit:genai-rewriting", version.ref = "mlkitGenaiFeatures" }
 google-generativeai = { module = "com.google.ai.client.generativeai:generativeai", version.ref = "generativeai" }
 org-json = { module = "org.json:json", version.ref = "orgJson" }
 androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }
