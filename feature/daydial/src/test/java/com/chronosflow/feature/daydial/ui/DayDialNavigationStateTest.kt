@@ -296,8 +296,11 @@ class DayDialNavigationStateTest {
         assertEquals(
             listOf(
                 DeveloperFeatureFlagRow(DeveloperFeatureFlag.HABITS, "Habits page", true),
+                DeveloperFeatureFlagRow(DeveloperFeatureFlag.GOALS, "Goals page", true),
                 DeveloperFeatureFlagRow(DeveloperFeatureFlag.MEDICATION, "Meds page", false),
                 DeveloperFeatureFlagRow(DeveloperFeatureFlag.REVIEW, "Review page", true),
+                DeveloperFeatureFlagRow(DeveloperFeatureFlag.JOURNAL, "Journal entry", true),
+                DeveloperFeatureFlagRow(DeveloperFeatureFlag.SLEEP, "Sleep log", true),
                 DeveloperFeatureFlagRow(DeveloperFeatureFlag.AI_ADVISOR, "AI advisor", true)
             ),
             rows
