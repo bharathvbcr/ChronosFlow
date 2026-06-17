@@ -92,7 +92,6 @@ dependencies {
         ":feature:tasks:assembleDebug",
         ":feature:habits:assembleDebug",
         ":feature:medication:assembleDebug",
-        ":feature:review:assembleDebug",
         ":wear:assembleDebug"
     )
 }
