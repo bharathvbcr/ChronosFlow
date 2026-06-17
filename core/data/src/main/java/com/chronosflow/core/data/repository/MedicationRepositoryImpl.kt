@@ -16,6 +16,7 @@ import com.chronosflow.core.domain.model.deriveMedicationAnalytics
 import com.chronosflow.core.domain.repository.MedicationRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import java.time.Instant
 import javax.inject.Inject
 
@@ -152,11 +153,11 @@ class MedicationRepositoryImpl @Inject constructor(
         medicationDoseEventDao.insertEvent(event.toEntity())
     }
 
-    override suspend fun getDoseEventsBetween(
+    override fun observeDoseEventsBetween(
         start: java.time.LocalDate,
         end: java.time.LocalDate
-    ): List<MedicationDoseEvent> =
-        medicationDoseEventDao.getEventsBetween(start, end).map { it.toDomain() }
+    ): Flow<List<MedicationDoseEvent>> =
+        medicationDoseEventDao.observeEventsBetween(start, end).map { events -> events.map { it.toDomain() } }
 
     override suspend fun deleteMedicationPlan(plan: MedicationPlan) =
         medicationDao.deleteMedicationPlan(plan.toEntity())

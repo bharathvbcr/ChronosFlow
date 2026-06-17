@@ -28,7 +28,10 @@ internal fun DayDialRing(
     modifier: Modifier = Modifier
 ) {
     val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-    val blockColor = MaterialTheme.colorScheme.primaryDim.copy(alpha = 0.65f)
+    // Past blocks fade to a neutral grey (done/elapsed), upcoming ones stay primary-tinted, and the
+    // one happening now is full primary — so the ring reads "how much of the day is behind me".
+    val pastColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)
+    val upcomingColor = MaterialTheme.colorScheme.primaryDim.copy(alpha = 0.65f)
     val currentColor = MaterialTheme.colorScheme.primary
     val markerColor = MaterialTheme.colorScheme.tertiary
 
@@ -54,8 +57,13 @@ internal fun DayDialRing(
             val sweep = (block.endMinute - block.startMinute).coerceAtLeast(0) / 1440f * 360f
             if (sweep <= 0f) return@forEach
             val isCurrent = nowMinute >= block.startMinute && nowMinute < block.endMinute
+            val color = when {
+                isCurrent -> currentColor
+                block.endMinute <= nowMinute -> pastColor
+                else -> upcomingColor
+            }
             drawArc(
-                color = if (isCurrent) currentColor else blockColor,
+                color = color,
                 startAngle = angleOf(block.startMinute),
                 sweepAngle = sweep.coerceAtMost(360f),
                 useCenter = false,

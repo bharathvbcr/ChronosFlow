@@ -56,7 +56,7 @@ fun ChronosTimePickerField(
     val context = LocalContext.current
     var showSheet by remember { mutableStateOf(false) }
 
-    OutlinedButton(
+    ChronosOutlinedButton(
         onClick = {
             if (showPicker != null) {
                 // If overridden (e.g. by unit tests), call the mock picker callback
@@ -105,7 +105,7 @@ fun ChronosDatePickerField(
     val context = LocalContext.current
     var showSheet by remember { mutableStateOf(false) }
 
-    OutlinedButton(
+    ChronosOutlinedButton(
         onClick = {
             if (showPicker != null) {
                 // If overridden (e.g. by unit tests), call the mock picker callback
@@ -181,13 +181,13 @@ fun ChronosDatePickerBottomSheet(
                     .padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                OutlinedButton(
+                ChronosOutlinedButton(
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(cancelButtonLabel, fontWeight = FontWeight.SemiBold)
                 }
-                Button(
+                ChronosButton(
                     onClick = {
                         datePickerState.selectedDateMillis?.let { ms ->
                             val date = java.time.Instant.ofEpochMilli(ms)
@@ -251,7 +251,7 @@ fun ChronosTimePickerBottomSheet(
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                TextButton(onClick = { isInputMode = !isInputMode }) {
+                ChronosTextButton(onClick = { isInputMode = !isInputMode }) {
                     Text(
                         text = if (isInputMode) "Show clock" else "Use keyboard",
                         fontWeight = FontWeight.SemiBold
@@ -278,13 +278,13 @@ fun ChronosTimePickerBottomSheet(
                     .padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                OutlinedButton(
+                ChronosOutlinedButton(
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(cancelButtonLabel, fontWeight = FontWeight.SemiBold)
                 }
-                Button(
+                ChronosButton(
                     onClick = {
                         onTimeSelected(timePickerState.hour * 60 + timePickerState.minute)
                         onDismiss()

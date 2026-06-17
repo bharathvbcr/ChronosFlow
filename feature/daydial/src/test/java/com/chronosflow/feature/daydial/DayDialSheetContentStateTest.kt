@@ -3,9 +3,12 @@ package com.chronosflow.feature.daydial
 import androidx.compose.ui.graphics.Color
 import com.chronosflow.core.domain.model.ALL_DAY_CALENDAR_EVENT_CATEGORY
 import com.chronosflow.core.domain.model.BlockProvenance
+import com.chronosflow.feature.daydial.model.DailyReview
 import com.chronosflow.feature.daydial.model.SheetTarget
 import com.chronosflow.feature.daydial.model.TimeBlockUiModel
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DayDialSheetContentStateTest {
@@ -63,6 +66,145 @@ class DayDialSheetContentStateTest {
                 endDayReviewReminder = false
             )
         )
+    }
+
+    @Test
+    fun `reminders need notification access only when enabled and notifications are off`() {
+        // A reminder is on but notifications can't be delivered → needs access.
+        assertTrue(
+            focusRemindersNeedNotificationAccess(
+                blockStartReminders = true,
+                breakReminders = false,
+                missedAlerts = false,
+                endDayReviewReminder = false,
+                notificationsReady = false
+            )
+        )
+        // Notifications ready → no prompt even with reminders on.
+        assertFalse(
+            focusRemindersNeedNotificationAccess(
+                blockStartReminders = true,
+                breakReminders = true,
+                missedAlerts = true,
+                endDayReviewReminder = true,
+                notificationsReady = true
+            )
+        )
+        // No reminders enabled → nothing to alert, so no prompt.
+        assertFalse(
+            focusRemindersNeedNotificationAccess(
+                blockStartReminders = false,
+                breakReminders = false,
+                missedAlerts = false,
+                endDayReviewReminder = false,
+                notificationsReady = false
+            )
+        )
+    }
+
+    @Test
+    fun `daily goal label reports progress, completion, and none-set`() {
+        assertEquals(
+            "1h 30m of 2h daily goal (75%)",
+            focusDailyGoalLabel(actualMinutes = 90, goalMinutes = 120)
+        )
+        assertEquals(
+            "Daily goal reached — 2h 🎉",
+            focusDailyGoalLabel(actualMinutes = 130, goalMinutes = 120)
+        )
+        assertEquals(null, focusDailyGoalLabel(actualMinutes = 90, goalMinutes = 0))
+    }
+
+    @Test
+    fun `daily goal option label shows off or duration`() {
+        assertEquals("Off", focusDailyGoalOptionLabel(0))
+        assertEquals("1h", focusDailyGoalOptionLabel(60))
+        assertEquals("3h", focusDailyGoalOptionLabel(180))
+    }
+
+    @Test
+    fun `daily goal action label describes the target`() {
+        assertEquals("Turn off the daily focus goal", sheetDailyGoalActionLabel(0))
+        assertEquals("Set daily focus goal to 2h", sheetDailyGoalActionLabel(120))
+    }
+
+    @Test
+    fun `focus session finish label projects wall-clock end time`() {
+        // 2:30 PM + 25 min = 2:55 PM
+        assertEquals("Ends 2:55 PM", focusSessionFinishLabel(currentMinuteOfDay = 14 * 60 + 30, remainingSeconds = 25 * 60))
+        // 8:00 AM + 90 min = 9:30 AM
+        assertEquals("Ends 9:30 AM", focusSessionFinishLabel(currentMinuteOfDay = 8 * 60, remainingSeconds = 90 * 60))
+        // zero remaining ends at the current minute
+        assertEquals("Ends 8:00 AM", focusSessionFinishLabel(currentMinuteOfDay = 8 * 60, remainingSeconds = 0))
+    }
+
+    @Test
+    fun `focus session finish label wraps past midnight`() {
+        // 11:50 PM + 20 min = 12:10 AM next day
+        assertEquals("Ends 12:10 AM", focusSessionFinishLabel(currentMinuteOfDay = 23 * 60 + 50, remainingSeconds = 20 * 60))
+        // noon boundary
+        assertEquals("Ends 12:05 PM", focusSessionFinishLabel(currentMinuteOfDay = 11 * 60 + 55, remainingSeconds = 10 * 60))
+    }
+
+    @Test
+    fun `today focus line summarizes logged time and completed blocks`() {
+        assertEquals(
+            "1h 30m focused · 2 blocks done",
+            focusSettingsTodayFocusLine(
+                DailyReview(plannedMinutes = 180, actualMinutes = 90, missedMinutes = 0, completedBlocks = 2)
+            )
+        )
+        assertEquals(
+            "0m focused · 1 block done",
+            focusSettingsTodayFocusLine(
+                DailyReview(plannedMinutes = 60, actualMinutes = 0, missedMinutes = 0, completedBlocks = 1)
+            )
+        )
+    }
+
+    @Test
+    fun `today progress line reports percent of planned or none planned`() {
+        assertEquals(
+            "50% of 3h planned",
+            focusSettingsTodayProgressLine(
+                DailyReview(plannedMinutes = 180, actualMinutes = 90, missedMinutes = 0, completedBlocks = 2)
+            )
+        )
+        assertEquals(
+            "No focus blocks planned yet today.",
+            focusSettingsTodayProgressLine(
+                DailyReview(plannedMinutes = 0, actualMinutes = 0, missedMinutes = 0, completedBlocks = 0)
+            )
+        )
+    }
+
+    @Test
+    fun `default break preset caption distinguishes no-breaks from split presets`() {
+        assertEquals(
+            "New focus sessions start as a single block with no breaks.",
+            focusDefaultBreakPresetCaption(0)
+        )
+        assertEquals(
+            "New focus sessions default to the 25 · 5 work·break split.",
+            focusDefaultBreakPresetCaption(1)
+        )
+    }
+
+    @Test
+    fun `default break preset caption falls back to no-breaks for out-of-range index`() {
+        assertEquals(
+            "New focus sessions start as a single block with no breaks.",
+            focusDefaultBreakPresetCaption(-1)
+        )
+        assertEquals(
+            "New focus sessions start as a single block with no breaks.",
+            focusDefaultBreakPresetCaption(99)
+        )
+    }
+
+    @Test
+    fun `default break preset action label names the preset`() {
+        assertEquals("Set default break preset to 50 · 10", sheetDefaultBreakPresetActionLabel("50 · 10"))
     }
 
     @Test

@@ -6,8 +6,11 @@ import com.chronosflow.core.notifications.EXTRA_DAY_TARGET
 import com.chronosflow.core.notifications.EXTRA_INITIAL_SECTION
 import com.chronosflow.core.notifications.NotificationLaunch
 import com.chronosflow.core.notifications.SECTION_MEDICATION
+import com.chronosflow.core.notifications.SECTION_TASKS
+import com.chronosflow.core.notifications.TASK_LAUNCH_TARGET_ADD
 import com.chronosflow.navigation.ChronosRoute
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,7 +28,6 @@ class NotificationNavigationPlanTest {
 
         val plan = buildNotificationNavigationPlan(intent)
 
-        assertEquals(ChronosRoute.Day.createRoute(), plan.startRoute)
         assertEquals(NotificationLaunch(section = SECTION_MEDICATION), plan.notificationLaunch)
     }
 
@@ -37,7 +39,40 @@ class NotificationNavigationPlanTest {
 
         val plan = buildNotificationNavigationPlan(intent)
 
-        assertEquals(ChronosRoute.Day.createRoute(), plan.startRoute)
         assertNull(plan.notificationLaunch)
+    }
+
+    @Test
+    fun `shared text from another app opens task capture sheet`() {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "Pick up dry cleaning tomorrow")
+        }
+
+        val plan = buildNotificationNavigationPlan(intent)
+        val launch = plan.notificationLaunch
+
+        assertNotNull(launch)
+        assertEquals(SECTION_TASKS, launch!!.section)
+        assertEquals(TASK_LAUNCH_TARGET_ADD, launch.target)
+        assertEquals("Pick up dry cleaning tomorrow", launch.capture)
+        // The capture must route to the Tasks add sheet, pre-filled.
+        val route = ChronosRoute.routeForNotificationLaunch(launch) as ChronosRoute.Tasks
+        assertEquals(ChronosRoute.TARGET_ADD, route.target)
+        assertEquals("Pick up dry cleaning tomorrow", route.capture)
+    }
+
+    @Test
+    fun `process-text selection opens task capture sheet`() {
+        val intent = Intent(Intent.ACTION_PROCESS_TEXT).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_PROCESS_TEXT, "Call the dentist")
+        }
+
+        val launch = buildNotificationNavigationPlan(intent).notificationLaunch
+
+        assertNotNull(launch)
+        assertEquals(SECTION_TASKS, launch!!.section)
+        assertEquals("Call the dentist", launch.capture)
     }
 }

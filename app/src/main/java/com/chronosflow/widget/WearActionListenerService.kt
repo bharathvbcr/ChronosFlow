@@ -27,8 +27,17 @@ class WearActionListenerService : WearableListenerService() {
             applicationContext,
             WidgetActionEntryPoint::class.java
         )
+        // The watch is talking to us, so keep the background refresh loop armed even for users
+        // with no home-screen widgets — otherwise their watch tiles/complications go stale while
+        // both apps are closed (the loop is otherwise only scheduled by widgets).
+        entryPoint.wearLinkStatusStore().recordWatchActivity()
+        WidgetRefreshWorker.ensureScheduled(applicationContext)
         runBlocking {
             when (type) {
+                WearActionContract.TYPE_SYNC -> {
+                    // The watch opened with a missing/stale mirror and asked for a fresh push.
+                    // refreshAll below re-publishes, so no other work is needed here.
+                }
                 WearActionContract.TYPE_FOCUS -> {
                     val dispatcher = entryPoint.focusWidgetCommandDispatcher()
                     if (WearActionContract.isFocusStart(arg)) {
@@ -43,6 +52,11 @@ class WearActionListenerService : WearableListenerService() {
                     entryPoint.toggleTaskCompletionUseCase()(arg)
                 WearActionContract.TYPE_DOSE ->
                     entryPoint.recordMedicationWidgetActionUseCase()(arg, true)
+                WearActionContract.TYPE_BLOCK -> {
+                    val block = entryPoint.timeBlockRepository().getTimeBlockById(arg)
+                        ?: return@runBlocking
+                    entryPoint.timeBlockCompletionHandler().complete(block)
+                }
                 else -> return@runBlocking
             }
             ChronosWidgetHub.refreshAll(applicationContext)

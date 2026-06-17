@@ -29,13 +29,6 @@ class FocusNotificationCompatibilityTest {
     }
 
     @Test
-    fun `metric style is gated to api 37`() {
-        assertFalse(canUseMetricStyleForSdk(35))
-        assertFalse(canUseMetricStyleForSdk(36))
-        assertTrue(canUseMetricStyleForSdk(37))
-    }
-
-    @Test
     fun `redacted decision hides session details`() {
         val decision = resolveLiveUpdateDecision(
             sdkInt = 36,

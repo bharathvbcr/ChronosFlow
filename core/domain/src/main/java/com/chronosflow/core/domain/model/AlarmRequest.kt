@@ -23,6 +23,9 @@ enum class AlarmRequestType {
     FOCUS_BLOCK,
     BLOCK_START,
     DAILY_REVIEW,
+    // Evening nudge to log the night's sleep and capture the day's journal. Kept distinct from
+    // DAILY_REVIEW so its call-to-action copy isn't replaced by the cached review digest.
+    LOG_REMINDER,
     URGENT_TASK
 }
 

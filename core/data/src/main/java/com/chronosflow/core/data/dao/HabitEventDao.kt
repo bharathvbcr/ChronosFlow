@@ -16,7 +16,7 @@ interface HabitEventDao {
     suspend fun getEventsForHabit(habitId: String): List<HabitEventEntity>
 
     @Query("SELECT * FROM habit_events WHERE eventDate BETWEEN :start AND :end ORDER BY eventDate ASC")
-    suspend fun getEventsBetween(start: java.time.LocalDate, end: java.time.LocalDate): List<HabitEventEntity>
+    fun observeEventsBetween(start: java.time.LocalDate, end: java.time.LocalDate): Flow<List<HabitEventEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvent(event: HabitEventEntity)

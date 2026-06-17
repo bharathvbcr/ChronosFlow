@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import com.chronosflow.core.data.dao.HabitDao
 import com.chronosflow.core.data.dao.HabitEventDao
 import com.chronosflow.core.data.dao.HabitScheduleDao
+import com.chronosflow.core.data.mapper.toEntity
 import com.chronosflow.core.data.model.HabitEntity
 import com.chronosflow.core.domain.model.Habit
 import com.chronosflow.core.domain.model.HabitEvent
@@ -66,6 +67,31 @@ class HabitRepositoryImplTest {
         coVerify { habitDao.insertHabit(any()) }
         coVerify { habitScheduleDao.upsertSchedule(any()) }
         coVerify { habitDao.deleteHabit(any()) }
+    }
+
+    @Test
+    fun `observe habit events between maps entities to domain`() = runTest {
+        val start = LocalDate.parse("2026-01-01")
+        val end = LocalDate.parse("2026-01-07")
+        val event = HabitEvent(
+            id = "evt-1",
+            habitId = "habit-1",
+            type = HabitEventType.COMPLETED,
+            eventDate = LocalDate.parse("2026-01-03"),
+            recordedAt = Instant.parse("2026-01-03T12:00:00Z"),
+            reason = null,
+            startMinuteOfDay = 480,
+            endMinuteOfDay = 540
+        )
+        every { habitEventDao.observeEventsBetween(start, end) } returns flowOf(listOf(event.toEntity()))
+
+        repository.observeHabitEventsBetween(start, end).test {
+            val events = awaitItem()
+            assertEquals(1, events.size)
+            assertEquals("evt-1", events[0].id)
+            assertEquals(HabitEventType.COMPLETED, events[0].type)
+            awaitComplete()
+        }
     }
 
     @Test

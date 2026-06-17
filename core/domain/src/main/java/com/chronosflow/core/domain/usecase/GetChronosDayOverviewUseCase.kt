@@ -9,6 +9,7 @@ import com.chronosflow.core.domain.model.DayOverviewTask
 import com.chronosflow.core.domain.model.FocusSessionState
 import com.chronosflow.core.domain.model.MedicationDoseEventType
 import com.chronosflow.core.domain.model.Task
+import com.chronosflow.core.domain.model.occupiesScheduleTime
 import com.chronosflow.core.domain.model.WidgetFocusState
 import com.chronosflow.core.domain.repository.FocusSessionRepository
 import com.chronosflow.core.domain.repository.HabitRepository
@@ -41,14 +42,22 @@ class GetChronosDayOverviewUseCase @Inject constructor(
     ): ChronosDayOverview {
         val blocks = timeBlockRepository.getTimeBlocksByDate(today).first()
             .sortedBy { it.startMinuteOfDay }
-            .filter { nowMinuteOfDay < it.startMinuteOfDay + it.durationMinutes }
+            // Exclude all-day calendar notes (they'd otherwise read as the "current block" all
+            // day), blocks the user already completed, and blocks whose planned window has
+            // elapsed — so nothing finished or non-scheduling lingers as the widget/tile current block.
+            .filter {
+                it.occupiesScheduleTime() &&
+                    it.actualEndMinuteOfDay == null &&
+                    nowMinuteOfDay < it.startMinuteOfDay + it.durationMinutes
+            }
             .map { block ->
                 DayOverviewBlock(
                     id = block.id,
                     title = block.title,
                     startMinuteOfDay = block.startMinuteOfDay,
                     endMinuteOfDay = block.startMinuteOfDay + block.durationMinutes,
-                    isCurrent = nowMinuteOfDay >= block.startMinuteOfDay
+                    isCurrent = nowMinuteOfDay >= block.startMinuteOfDay,
+                    category = block.category
                 )
             }
 

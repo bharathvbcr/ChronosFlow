@@ -11,6 +11,8 @@ interface CalendarEventRepository {
     suspend fun saveCalendarEvent(event: CalendarEvent)
     suspend fun deleteCalendarEvent(event: CalendarEvent)
     suspend fun syncFromDeviceCalendar(start: Instant, end: Instant)
+    /** Epoch millis of the last successful device-calendar sync (null if never), as a live stream. */
+    fun observeLastDeviceSyncAtMillis(): Flow<Long?>
     suspend fun exportTimeBlock(timeBlock: TimeBlock): Long?
     suspend fun updateExportedTimeBlock(timeBlock: TimeBlock): Boolean
     suspend fun deleteExportedTimeBlock(calendarEventId: Long): Boolean

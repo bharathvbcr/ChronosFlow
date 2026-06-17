@@ -5,6 +5,8 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.chronosflow.core.data.dao.AppUsageDao
+import com.chronosflow.core.data.dao.AppUsageOverrideDao
 import com.chronosflow.core.data.dao.CalendarEventDao
 import com.chronosflow.core.data.dao.DayPlanDao
 import com.chronosflow.core.data.dao.AlarmDao
@@ -28,6 +30,8 @@ import com.chronosflow.core.data.dao.TaskScheduleDao
 import com.chronosflow.core.data.dao.TimeBlockDao
 import com.chronosflow.core.data.model.ActualTimeSegmentEntity
 import com.chronosflow.core.data.model.AlarmRequestEntity
+import com.chronosflow.core.data.model.AppUsageDayEntity
+import com.chronosflow.core.data.model.AppUsageOverrideEntity
 import com.chronosflow.core.data.model.CalendarEventEntity
 import com.chronosflow.core.data.model.DailyReviewEntity
 import com.chronosflow.core.data.model.DayPlanEntity
@@ -89,9 +93,11 @@ import com.chronosflow.core.data.util.Converters
         JournalEntryEntity::class,
         SleepTrackEntity::class,
         RoutineEntity::class,
-        RoutineStepEntity::class
+        RoutineStepEntity::class,
+        AppUsageDayEntity::class,
+        AppUsageOverrideEntity::class
     ],
-    version = 18,
+    version = 21,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -117,6 +123,8 @@ abstract class ChronosDatabase : RoomDatabase() {
     abstract fun journalEntryDao(): JournalEntryDao
     abstract fun sleepTrackDao(): SleepTrackDao
     abstract fun routineDao(): RoutineDao
+    abstract fun appUsageDao(): AppUsageDao
+    abstract fun appUsageOverrideDao(): AppUsageOverrideDao
 
     companion object {
         val MIGRATION_2_3 = object : Migration(2, 3) {
@@ -872,6 +880,48 @@ abstract class ChronosDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_calendar_events_startAt` ON `calendar_events` (`startAt`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_calendar_events_endAt` ON `calendar_events` (`endAt`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_calendar_events_externalId` ON `calendar_events` (`externalId`)")
+            }
+        }
+
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Provenance for sleep rows: existing rows were all hand-logged, so default to MANUAL.
+                // The Health Connect importer stamps its rows HEALTH_CONNECT and only refreshes those.
+                db.execSQL("ALTER TABLE sleep_tracks ADD COLUMN source TEXT NOT NULL DEFAULT 'MANUAL'")
+            }
+        }
+
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // New, additive table for daily screen-time aggregates imported from UsageStatsManager.
+                // No existing data is touched.
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `app_usage_days` (
+                        `date` TEXT NOT NULL,
+                        `productiveMinutes` INTEGER NOT NULL,
+                        `distractingMinutes` INTEGER NOT NULL,
+                        `neutralMinutes` INTEGER NOT NULL,
+                        PRIMARY KEY(`date`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_app_usage_days_date` ON `app_usage_days` (`date`)")
+            }
+        }
+
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Additive table for user reclassifications of apps (e.g. tag a social app productive).
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `app_usage_overrides` (
+                        `packageName` TEXT NOT NULL,
+                        `category` TEXT NOT NULL,
+                        PRIMARY KEY(`packageName`)
+                    )
+                    """.trimIndent()
+                )
             }
         }
     }

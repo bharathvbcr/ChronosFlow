@@ -6,6 +6,7 @@ import java.time.LocalDate
 
 interface JournalRepository {
     fun observeForDate(date: LocalDate): Flow<List<JournalEntry>>
+    fun observeForDateRange(start: LocalDate, end: LocalDate): Flow<List<JournalEntry>>
     suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<JournalEntry>
     suspend fun getById(id: String): JournalEntry?
 

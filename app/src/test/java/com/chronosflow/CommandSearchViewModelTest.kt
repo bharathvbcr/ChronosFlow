@@ -88,7 +88,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `semantic corpus refresh waits until palette opens`() = runTest {
+    fun `semantic corpus refresh waits until palette opens`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
 
         coVerify(exactly = 0) { corpusRefresher.refresh(null, any<Clock>()) }
@@ -99,7 +99,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `task semantic hits become runnable assistant commands`() = runTest {
+    fun `task semantic hits become runnable assistant commands`() = runTest(testDispatcher) {
         val viewModel = CommandSearchViewModel(
             semanticIndex = semanticIndex,
             appSearchBridge = appSearchBridge,
@@ -128,7 +128,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `launcher open and query actions update command ui state`() = runTest {
+    fun `launcher open and query actions update command ui state`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         val commands = listOf(
             command(id = "daydial.open", title = "Open today", group = CommandPaletteGroups.DAY),
@@ -148,7 +148,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `launcher query does not turn generic navigation search into capture command`() = runTest {
+    fun `launcher query does not turn generic navigation search into capture command`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         val commands = listOf(command(id = "daydial.ai-settings", title = "Open settings"))
 
@@ -159,7 +159,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `launcher query offers create command from medication capture`() = runTest {
+    fun `launcher query offers create command from medication capture`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         var capturedMedication = ""
         val actions = AssistantCommandActions(
@@ -185,7 +185,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `launcher query offers create command from task capture`() = runTest {
+    fun `launcher query offers create command from task capture`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         var capturedTask = ""
         val actions = AssistantCommandActions(
@@ -205,7 +205,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `launcher capture command title previews long input but executes full text`() = runTest {
+    fun `launcher capture command title previews long input but executes full text`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         val longCapture = "call mom tomorrow about the full medication list and ask her to send the appointment details"
         var capturedTask = ""
@@ -226,7 +226,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `launcher query offers create command from habit capture`() = runTest {
+    fun `launcher query offers create command from habit capture`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         var capturedHabit = ""
         val actions = AssistantCommandActions(
@@ -246,7 +246,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `launcher query offers create command from focus capture`() = runTest {
+    fun `launcher query offers create command from focus capture`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         var capturedFocus = ""
         val actions = AssistantCommandActions(
@@ -267,7 +267,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `quick capture runs the same create commands without opening palette`() = runTest {
+    fun `quick capture runs the same create commands without opening palette`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         val captures = mutableListOf<String>()
         val actions = AssistantCommandActions(
@@ -295,7 +295,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `palette open surfaces the cached daily digest`() = runTest {
+    fun `palette open surfaces the cached daily digest`() = runTest(testDispatcher) {
         every { proactiveAssistGenerator.cachedCopy(any(), any(), any()) } returns ProactiveAssistContent(
             text = "2 block(s) done; 3 task(s) still open for today.",
             source = AssistGenAiSource.GEMINI_NANO,
@@ -318,7 +318,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `palette open shows no digest row without a fresh cached copy`() = runTest {
+    fun `palette open shows no digest row without a fresh cached copy`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
 
         viewModel.dispatch(LauncherAction.OnOpen)
@@ -327,9 +327,9 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `question queries surface an ask row that converses in place`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        every { coordinator.generateAssistTextStream(any()) } returns flowOf("You have room after lunch.")
+    fun `question queries surface an ask row that converses in place`() = runTest(testDispatcher) {
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        every { coordinator.generateAssistTextStream(any(), any(), any()) } returns flowOf("You have room after lunch.")
         val viewModel = CommandSearchViewModel(
             semanticIndex = semanticIndex,
             appSearchBridge = appSearchBridge,
@@ -364,7 +364,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `capture subtitle leads with confidence phrasing and prefill markers`() = runTest {
+    fun `capture subtitle leads with confidence phrasing and prefill markers`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         val actions = AssistantCommandActions(onCaptureMedication = {})
 
@@ -401,9 +401,9 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `searchCommandsAsync boosts the AI-confirmed capture command`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+    fun `searchCommandsAsync boosts the AI-confirmed capture command`() = runTest(testDispatcher) {
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = "capture.create.medication",
             source = AssistGenAiSource.GEMINI_NANO
         )
@@ -431,7 +431,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `quick capture preview exposes the inferred create kind`() = runTest {
+    fun `quick capture preview exposes the inferred create kind`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
 
         assertEquals("task", viewModel.previewBestCaptureCommand("call mom tomorrow")?.label)
@@ -442,7 +442,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `quick capture preview and submit respect disabled habit and medication features`() = runTest {
+    fun `quick capture preview and submit respect disabled habit and medication features`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         val actions = AssistantCommandActions(
             habitsEnabled = false,
@@ -459,7 +459,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `quick capture ignores generic command category text`() = runTest {
+    fun `quick capture ignores generic command category text`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
 
         assertFalse(viewModel.runBestCaptureCommand("task"))
@@ -467,7 +467,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `launcher capture commands respect disabled habit and medication features`() = runTest {
+    fun `launcher capture commands respect disabled habit and medication features`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         val actions = AssistantCommandActions(
             habitsEnabled = false,
@@ -485,7 +485,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `launcher section action filters visible results`() = runTest {
+    fun `launcher section action filters visible results`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         val commands = listOf(
             command(id = "daydial.open", title = "Open today", group = CommandPaletteGroups.DAY),
@@ -504,7 +504,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `launcher execute action runs command and closes palette`() = runTest {
+    fun `launcher execute action runs command and closes palette`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         var executed = false
         val commands = listOf(
@@ -519,7 +519,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `prebuilt command ids execute their configured callbacks`() = runTest {
+    fun `prebuilt command ids execute their configured callbacks`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         val executed = mutableListOf<String>()
         val commands = listOf(
@@ -539,7 +539,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `launcher close and clear actions have explicit transitions`() = runTest {
+    fun `launcher close and clear actions have explicit transitions`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         val commands = listOf(command(id = "tasks.open", title = "Search tasks"))
 
@@ -571,9 +571,9 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `askAssistant resolves a proposed action to a runnable command`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        every { coordinator.generateAssistTextStream(any()) } returns flowOf(
+    fun `askAssistant resolves a proposed action to a runnable command`() = runTest(testDispatcher) {
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        every { coordinator.generateAssistTextStream(any(), any(), any()) } returns flowOf(
             "Starting",
             "Starting a focus session.\nACTION: focus.start"
         )
@@ -602,10 +602,10 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `askAssistant falls back to the non-streaming path when the stream is empty`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        every { coordinator.generateAssistTextStream(any()) } returns emptyFlow()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+    fun `askAssistant falls back to the non-streaming path when the stream is empty`() = runTest(testDispatcher) {
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        every { coordinator.generateAssistTextStream(any(), any(), any()) } returns emptyFlow()
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = "Starting a focus session.\nACTION: focus.start",
             source = AssistGenAiSource.CLOUD_GEMINI
         )
@@ -628,10 +628,10 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `askAssistant keeps conversation history across follow-up questions`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
+    fun `askAssistant keeps conversation history across follow-up questions`() = runTest(testDispatcher) {
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
         val prompts = mutableListOf<String>()
-        every { coordinator.generateAssistTextStream(capture(prompts)) } answers {
+        every { coordinator.generateAssistTextStream(capture(prompts), any(), any()) } answers {
             flowOf("Sure — a focus session helps.\nACTION: focus.start")
         }
         val viewModel = CommandSearchViewModel(
@@ -656,9 +656,9 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `askAssistant proposes a quick-capture create command for capture-shaped queries`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        every { coordinator.generateAssistTextStream(any()) } returns flowOf(
+    fun `askAssistant proposes a quick-capture create command for capture-shaped queries`() = runTest(testDispatcher) {
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        every { coordinator.generateAssistTextStream(any(), any(), any()) } returns flowOf(
             "I can draft that task for you.\nACTION: capture.create.task"
         )
         val viewModel = CommandSearchViewModel(
@@ -690,9 +690,9 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `askAssistant rebuilds capture proposals from the conversation payload`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        every { coordinator.generateAssistTextStream(any()) } returns flowOf(
+    fun `askAssistant rebuilds capture proposals from the conversation payload`() = runTest(testDispatcher) {
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        every { coordinator.generateAssistTextStream(any(), any(), any()) } returns flowOf(
             "I'll fold that in.\nACTION: capture.create.task | call mom tomorrow at 2pm"
         )
         val viewModel = CommandSearchViewModel(
@@ -725,9 +725,9 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `askAssistant resolves multiple proposals into runnable commands`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        every { coordinator.generateAssistTextStream(any()) } returns flowOf(
+    fun `askAssistant resolves multiple proposals into runnable commands`() = runTest(testDispatcher) {
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        every { coordinator.generateAssistTextStream(any(), any(), any()) } returns flowOf(
             "Two good options.\nACTION: focus.start\nACTION: tasks.open"
         )
         val viewModel = CommandSearchViewModel(
@@ -756,7 +756,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `recently executed commands are boosted when the palette reopens`() = runTest {
+    fun `recently executed commands are boosted when the palette reopens`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         val commands = listOf(
             command(id = "daydial.open", title = "Open today", group = CommandPaletteGroups.DAY),
@@ -775,7 +775,7 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `per-query rows are never recorded as recent commands`() = runTest {
+    fun `per-query rows are never recorded as recent commands`() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         var captured = ""
         val actions = AssistantCommandActions(onCaptureTask = { captured = it })
@@ -789,9 +789,9 @@ class CommandSearchViewModelTest {
     }
 
     @Test
-    fun `clearAssistant resets the conversation`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        every { coordinator.generateAssistTextStream(any()) } returns flowOf("Hello there.")
+    fun `clearAssistant resets the conversation`() = runTest(testDispatcher) {
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        every { coordinator.generateAssistTextStream(any(), any(), any()) } returns flowOf("Hello there.")
         val viewModel = CommandSearchViewModel(
             semanticIndex = semanticIndex,
             appSearchBridge = appSearchBridge,

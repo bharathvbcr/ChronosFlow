@@ -5,6 +5,8 @@ import androidx.wear.protolayout.ResourceBuilders
 import androidx.wear.tiles.RequestBuilders
 import androidx.wear.tiles.TileBuilders
 import androidx.wear.tiles.TileService
+import com.chronosflow.wear.presentation.WearFormat
+import com.chronosflow.wear.presentation.WearStartPage
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 
@@ -20,8 +22,16 @@ class ChronosHabitsTileProvider : TileService() {
             ChronosTileUi.title(this, "Habits"),
             ChronosTileUi.spacer(6f)
         )
+        // "done today" is day-relative, so flag a mirror that's gone stale (e.g. across midnight).
+        WearFormat.syncAgeLabel(summary.receivedAtMillis, System.currentTimeMillis())?.let { label ->
+            rows += ChronosTileUi.caption(this, "⚠ $label", ChronosTileUi.WARN_COLOR)
+            rows += ChronosTileUi.spacer(4f)
+        }
         if (summary.habitsTotal == 0) {
-            rows += ChronosTileUi.body(this, EMPTY_LABEL)
+            rows += ChronosTileUi.body(
+                this,
+                if (summary.receivedAtMillis == 0L) SYNC_LABEL else EMPTY_LABEL
+            )
         } else {
             rows += ChronosTileUi.caption(this, "${summary.habitsDone}/${summary.habitsTotal} done today")
             rows += ChronosTileUi.spacer(4f)
@@ -30,7 +40,14 @@ class ChronosHabitsTileProvider : TileService() {
             }
         }
 
-        return Futures.immediateFuture(ChronosTileUi.tile(ChronosTileUi.column(*rows.toTypedArray())))
+        return Futures.immediateFuture(
+            ChronosTileUi.tile(
+                ChronosTileUi.column(
+                    ChronosTileUi.launchModifiers(this, WearStartPage.HABITS),
+                    *rows.toTypedArray()
+                )
+            )
+        )
     }
 
     private fun habitLine(habit: com.chronosflow.wear.model.WearHabit): String = buildString {
@@ -48,5 +65,6 @@ class ChronosHabitsTileProvider : TileService() {
 
     companion object {
         const val EMPTY_LABEL = "No active habits"
+        const val SYNC_LABEL = "Open phone to sync"
     }
 }

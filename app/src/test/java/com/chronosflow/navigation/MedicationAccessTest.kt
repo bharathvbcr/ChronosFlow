@@ -1,31 +1,27 @@
 package com.chronosflow.navigation
 
-import androidx.fragment.app.FragmentActivity
-import androidx.navigation.NavHostController
-import androidx.navigation.NavOptionsBuilder
-import com.chronosflow.AppLockViewModel
-import com.chronosflow.core.data.security.SensitiveArea
-import io.mockk.mockk
-import io.mockk.verify
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MedicationAccessTest {
     @Test
-    fun `guarded medication opener enters medication route without pre auth no op`() {
-        val activity = mockk<FragmentActivity>(relaxed = true)
-        val appLockViewModel = mockk<AppLockViewModel>(relaxed = true)
-        val navController = mockk<NavHostController>(relaxed = true)
+    fun `medication routes are recognised by section`() {
+        assertTrue(isMedicationRoute(ChronosRoute.Medication()))
+        assertTrue(isMedicationRoute(ChronosRoute.Medication(target = ChronosRoute.TARGET_ADD)))
+        assertFalse(isMedicationRoute(ChronosRoute.Day()))
+        assertFalse(isMedicationRoute(ChronosRoute.Tasks()))
+    }
 
-        guardedMedicationOpener(activity, appLockViewModel, navController).invoke()
+    @Test
+    fun `medication add capture is carried on the type-safe route`() {
+        val route = ChronosRoute.Medication(
+            target = ChronosRoute.TARGET_ADD,
+            capture = "vitamin d 1000 iu morning"
+        )
 
-        verify(exactly = 0) {
-            appLockViewModel.requiresSensitiveAuth(SensitiveArea.MEDICATION)
-        }
-        verify {
-            navController.navigate(
-                ChronosRoute.Medication.route,
-                any<NavOptionsBuilder.() -> Unit>()
-            )
-        }
+        assertEquals(ChronosRoute.TARGET_ADD, route.target)
+        assertEquals("vitamin d 1000 iu morning", route.capture)
     }
 }

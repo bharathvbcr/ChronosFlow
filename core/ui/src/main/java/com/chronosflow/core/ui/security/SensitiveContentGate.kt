@@ -1,5 +1,7 @@
 package com.chronosflow.core.ui.security
 
+import com.chronosflow.core.ui.components.ChronosButton
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -76,7 +78,7 @@ fun SensitiveContentGate(
                 modifier = Modifier.padding(bottom = 12.dp)
             )
         }
-        Button(onClick = onUnlock, enabled = canAuthenticate) {
+        ChronosButton(onClick = onUnlock, enabled = canAuthenticate) {
             Text("Unlock to continue")
         }
     }

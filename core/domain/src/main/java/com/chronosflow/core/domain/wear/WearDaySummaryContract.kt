@@ -27,11 +27,38 @@ object WearDaySummaryContract {
     /** Int: minute-of-day when the current block ends; may exceed 1439 across midnight. */
     const val KEY_NOW_END_MINUTE = "now_end_minute"
 
-    /** String: title of the next upcoming block; absent when the day is done. */
+    /**
+     * String: id of the block happening right now, letting the watch mark it complete via
+     * [WearActionContract.TYPE_BLOCK]. A bare id carries no sensitive text, so it flows even when
+     * titles are redacted. Absent when nothing is scheduled now.
+     */
+    const val KEY_NOW_BLOCK_ID = "now_block_id"
+
+    /**
+     * String: raw category of the block happening now (e.g. "WORK", "BREAK"). Carries no sensitive
+     * free text, so it flows even when titles are redacted; lets the watch gate the "Start focus"
+     * affordance ([com.chronosflow.core.domain.model.BlockCategories.supportsFocus]).
+     */
+    const val KEY_NOW_CATEGORY = "now_category"
+
+    /**
+     * String: title of the next upcoming *event* (the next non-break block); absent when no further
+     * event today. Paired with [KEY_NEXT_START_MINUTE]. Breaks are carried separately in
+     * [KEY_NEXT_BREAK_START_MINUTE] so the watch can show the break/event split the phone does.
+     */
     const val KEY_NEXT_TITLE = "next_title"
 
-    /** Int: minute-of-day when the next block starts. */
+    /** Int: minute-of-day when the next event starts. */
     const val KEY_NEXT_START_MINUTE = "next_start_minute"
+
+    /**
+     * Int: minute-of-day when the next *break* starts; absent (key not set) when none is upcoming.
+     * Times aren't sensitive, so this flows even when titles are redacted.
+     */
+    const val KEY_NEXT_BREAK_START_MINUTE = "next_break_start_minute"
+
+    /** String: title of the next break; dropped when titles are redacted (the start time still flows). */
+    const val KEY_NEXT_BREAK_TITLE = "next_break_title"
 
     /** Int: total number of open tasks. */
     const val KEY_OPEN_TASK_COUNT = "open_task_count"

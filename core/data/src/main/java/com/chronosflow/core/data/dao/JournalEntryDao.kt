@@ -16,6 +16,9 @@ interface JournalEntryDao {
     @Query("SELECT * FROM journal_entries WHERE entryDate BETWEEN :start AND :end ORDER BY entryDate DESC, createdAt DESC")
     suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<JournalEntryEntity>
 
+    @Query("SELECT * FROM journal_entries WHERE entryDate BETWEEN :start AND :end ORDER BY entryDate DESC, createdAt DESC")
+    fun observeForDateRange(start: LocalDate, end: LocalDate): Flow<List<JournalEntryEntity>>
+
     @Query("SELECT * FROM journal_entries WHERE id = :id")
     suspend fun getById(id: String): JournalEntryEntity?
 

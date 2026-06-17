@@ -11,15 +11,18 @@ import com.chronosflow.core.domain.model.BlockFlexibility
 import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.SleepSchedule
+import com.chronosflow.core.domain.model.SleepTrack
 import com.chronosflow.core.domain.planner.FreeTimeCalculator
 import com.chronosflow.core.domain.planner.GapFillPlanner
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
+import com.chronosflow.core.domain.repository.SleepTrackRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
 import com.chronosflow.core.domain.usecase.ApplyAiPlanUseCase
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import java.time.LocalDate
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -36,6 +39,7 @@ class DayDialAiDelegateTest {
 
     private val repository: TimeBlockRepository = mockk()
     private val sleepScheduleRepository: SleepScheduleRepository = mockk()
+    private val sleepTrackRepository: SleepTrackRepository = mockk(relaxed = true)
     private val aiPlanner: ChronosAIPlanner = mockk()
     private val applyAiPlanUseCase: ApplyAiPlanUseCase = mockk()
     private val assistantPreferences: AssistantPreferences = mockk(relaxed = true)
@@ -59,7 +63,8 @@ class DayDialAiDelegateTest {
         assistantPreferences = assistantPreferences,
         gapFillPlanner = GapFillPlanner(FreeTimeCalculator()),
         taskRepository = mockk(relaxed = true),
-        habitRepository = mockk(relaxed = true)
+        habitRepository = mockk(relaxed = true),
+        sleepTrackRepository = sleepTrackRepository
     )
 
     @Test
@@ -76,7 +81,8 @@ class DayDialAiDelegateTest {
             assistantPreferences = assistantPreferences,
             gapFillPlanner = GapFillPlanner(FreeTimeCalculator()),
             taskRepository = mockk(relaxed = true),
-            habitRepository = mockk(relaxed = true)
+            habitRepository = mockk(relaxed = true),
+            sleepTrackRepository = mockk(relaxed = true)
         )
 
         persistedDelegate.privacyMode.test {
@@ -107,7 +113,8 @@ class DayDialAiDelegateTest {
             assistantPreferences = assistantPreferences,
             gapFillPlanner = GapFillPlanner(FreeTimeCalculator()),
             taskRepository = mockk(relaxed = true),
-            habitRepository = mockk(relaxed = true)
+            habitRepository = mockk(relaxed = true),
+            sleepTrackRepository = mockk(relaxed = true)
         )
 
         persistedDelegate.previewOnDeviceModel.test {
@@ -278,6 +285,61 @@ class DayDialAiDelegateTest {
 
         coVerify(exactly = 1) { applyAiPlanUseCase(match { it.size == 2 }) }
     }
+
+    @Test
+    fun requestPlanFoldsRecoveryHintIntoPreferencesAfterAPoorNight() = runTest(UnconfinedTestDispatcher()) {
+        val today = LocalDate.now()
+        val preferences = slot<String>()
+        coEvery { repository.getTimeBlocksByDate(today) } returns flowOf(emptyList())
+        coEvery { sleepTrackRepository.getForDateRange(any(), any()) } returns
+            listOf(poorNight(today))
+        coEvery {
+            aiPlanner.generateReviewBackedDayPlan(capture(preferences), any(), any(), any(), any())
+        } returns structuredSuggestion()
+
+        delegate.requestPlan(
+            scope = this,
+            date = today,
+            goals = listOf("protect focus"),
+            reviewProvider = { reviewSummary(today) }
+        )
+
+        delegate.suggestedBlocks.test { awaitItem() }
+        assertTrue(preferences.captured.contains("keep today lighter", ignoreCase = true))
+    }
+
+    @Test
+    fun requestPlanLeavesPreferencesUntouchedWhenNoNightLogged() = runTest(UnconfinedTestDispatcher()) {
+        val today = LocalDate.now()
+        val preferences = slot<String>()
+        coEvery { repository.getTimeBlocksByDate(today) } returns flowOf(emptyList())
+        coEvery { sleepTrackRepository.getForDateRange(any(), any()) } returns emptyList()
+        coEvery {
+            aiPlanner.generateReviewBackedDayPlan(capture(preferences), any(), any(), any(), any())
+        } returns structuredSuggestion()
+
+        delegate.requestPlan(
+            scope = this,
+            date = today,
+            goals = listOf("protect focus"),
+            reviewProvider = { reviewSummary(today) }
+        )
+
+        delegate.suggestedBlocks.test { awaitItem() }
+        assertEquals("protect focus", preferences.captured)
+    }
+
+    private fun poorNight(date: LocalDate): SleepTrack = SleepTrack(
+        id = "night-$date",
+        date = date,
+        plannedStartMinute = null,
+        plannedEndMinute = null,
+        actualStartMinute = null,
+        actualEndMinute = null,
+        sleepQuality = 1,
+        windDownNotes = null,
+        interruptedCount = 0
+    )
 
     private fun structuredSuggestion(
         reason: String = "Review-backed plan",

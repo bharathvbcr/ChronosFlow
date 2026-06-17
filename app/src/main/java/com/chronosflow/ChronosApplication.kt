@@ -13,14 +13,22 @@ import com.chronosflow.appfunctions.ChronosAppFunctions
 import com.chronosflow.assist.ProactiveAssistForegroundRefresher
 import com.chronosflow.core.data.backup.ChronosAutoBackupManager
 import com.chronosflow.core.data.backup.ChronosPortableBackupInitializer
+import com.chronosflow.core.data.health.HealthConnectSleepSyncManager
+import com.chronosflow.core.data.usage.ScreenTimeSyncManager
+import com.chronosflow.core.data.sync.CalendarBackgroundSyncManager
 import com.chronosflow.core.notifications.AlarmCapabilityRefresher
 import com.chronosflow.core.notifications.FocusNotificationManager
 import com.chronosflow.core.notifications.ReminderNotificationChannels
 import com.chronosflow.core.notifications.ReminderReconcileScheduler
+import com.chronosflow.core.ui.settings.ChronosUiSettingsCache
 import com.chronosflow.widget.WidgetBackgroundSync
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 import javax.inject.Provider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 internal const val APPLICATION_STARTUP_WORK_DEFER_MILLIS = 60_000L
 internal const val NOTIFICATION_CHANNEL_SETUP_DEFER_MILLIS = 5_000L
@@ -31,9 +39,15 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
     @Inject lateinit var chronosAppFunctions: Provider<ChronosAppFunctions>
     @Inject lateinit var portableBackupInitializer: Provider<ChronosPortableBackupInitializer>
     @Inject lateinit var autoBackupManager: Provider<ChronosAutoBackupManager>
+    @Inject lateinit var healthConnectSleepSyncManager: Provider<HealthConnectSleepSyncManager>
+    @Inject lateinit var screenTimeSyncManager: Provider<ScreenTimeSyncManager>
+    @Inject lateinit var calendarBackgroundSyncManager: Provider<CalendarBackgroundSyncManager>
     @Inject lateinit var proactiveAssistForegroundRefresher: Provider<ProactiveAssistForegroundRefresher>
 
     private val startupHandler = Handler(Looper.getMainLooper())
+
+    // Long-lived scope for process-wide background work that must outlive any single screen.
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override val appFunctionConfiguration: AppFunctionConfiguration
         get() = AppFunctionConfiguration.Builder()
@@ -47,6 +61,8 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
 
     override fun onCreate() {
         super.onCreate()
+        // Seed the UI-settings cache once so Compose reads never block on DataStore (no startup flash).
+        applicationScope.launch { ChronosUiSettingsCache.keepFresh(this@ChronosApplication) }
         WidgetBackgroundSync.register(this)
         scheduleDeferredNotificationChannelSetup()
         scheduleDeferredStartupWork()
@@ -74,6 +90,9 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
                 ReminderReconcileScheduler.enqueue(this)
                 portableBackupInitializer.get().start()
                 autoBackupManager.get().ensureScheduled()
+                healthConnectSleepSyncManager.get().ensureScheduled()
+                screenTimeSyncManager.get().ensureScheduled()
+                calendarBackgroundSyncManager.get().ensureScheduled()
                 proactiveAssistForegroundRefresher.get().register()
                 setupProfiling()
                 monitorProcessExitHealth()

@@ -27,7 +27,6 @@ class ChronosPlaintextDatabaseMigrator @Inject constructor(
         val plaintextFile = context.getDatabasePath(ChronosSecureDatabaseProvider.DATABASE_NAME)
         val encryptedFile = context.getDatabasePath(secureProvider.resolvedName(ChronosSecureDatabaseProvider.DATABASE_NAME))
         if (!plaintextFile.exists()) return DatabaseMigrationResult.SKIPPED
-        if (encryptedFile.exists()) return DatabaseMigrationResult.SKIPPED
 
         val prefs = context.getSharedPreferences(MIGRATION_PREFS, Context.MODE_PRIVATE)
         if (prefs.getBoolean(PREF_MIGRATION_COMPLETE, false)) {
@@ -55,11 +54,11 @@ class ChronosPlaintextDatabaseMigrator @Inject constructor(
                 ChronosDatabase.MIGRATION_14_15,
                 ChronosDatabase.MIGRATION_15_16,
                 ChronosDatabase.MIGRATION_16_17,
-                ChronosDatabase.MIGRATION_17_18
+                ChronosDatabase.MIGRATION_17_18,
+                ChronosDatabase.MIGRATION_18_19
             )
             .build()
 
-        val passphrase = secureProvider.obtainPassphraseBytes()
         val encryptedBuilder = secureProvider.databaseBuilder(
             migrations = arrayOf(
                 ChronosDatabase.MIGRATION_2_3,
@@ -77,17 +76,33 @@ class ChronosPlaintextDatabaseMigrator @Inject constructor(
                 ChronosDatabase.MIGRATION_14_15,
                 ChronosDatabase.MIGRATION_15_16,
                 ChronosDatabase.MIGRATION_16_17,
-                ChronosDatabase.MIGRATION_17_18
+                ChronosDatabase.MIGRATION_17_18,
+                ChronosDatabase.MIGRATION_18_19
             )
         )
         val encryptedDb = secureProvider.create(encryptedBuilder)
 
+        var destinationVerifiedEmpty = false
         return try {
             val source = plaintextDb.openHelper.writableDatabase
             val destination = encryptedDb.openHelper.writableDatabase
+            val tables = userTableNames(source)
+
+            // A previous attempt may have failed after the encrypted database was
+            // created, after which the user kept writing into it. Never overwrite
+            // a destination that already holds data.
+            if (tables.any { table -> tableCount(destination, table) > 0 }) {
+                prefs.edit()
+                    .putBoolean(PREF_MIGRATION_COMPLETE, true)
+                    .putLong(PREF_MIGRATION_AT, System.currentTimeMillis())
+                    .apply()
+                return DatabaseMigrationResult.SKIPPED
+            }
+            destinationVerifiedEmpty = true
+
             destination.beginTransaction()
             try {
-                TABLE_NAMES.forEach { table ->
+                tables.forEach { table ->
                     copyTable(source, destination, table)
                 }
                 destination.setTransactionSuccessful()
@@ -95,7 +110,7 @@ class ChronosPlaintextDatabaseMigrator @Inject constructor(
                 destination.endTransaction()
             }
 
-            val verified = TABLE_NAMES.all { table ->
+            val verified = tables.all { table ->
                 tableCount(source, table) == tableCount(destination, table)
             }
             if (!verified) {
@@ -115,13 +130,25 @@ class ChronosPlaintextDatabaseMigrator @Inject constructor(
                 .apply()
             DatabaseMigrationResult.MIGRATED
         } catch (_: Exception) {
-            if (encryptedFile.exists()) encryptedFile.delete()
+            // Only remove the destination when this run created or partially
+            // filled it; a destination with pre-existing data is never touched.
+            if (destinationVerifiedEmpty && encryptedFile.exists()) encryptedFile.delete()
             DatabaseMigrationResult.FAILED
         } finally {
             runCatching { plaintextDb.close() }
             runCatching { encryptedDb.close() }
         }
     }
+
+    private fun userTableNames(db: SupportSQLiteDatabase): List<String> =
+        db.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(0)
+                    if (isUserTable(name)) add(name)
+                }
+            }
+        }
 
     private fun copyTable(
         source: SupportSQLiteDatabase,
@@ -164,32 +191,11 @@ class ChronosPlaintextDatabaseMigrator @Inject constructor(
         private const val PREF_MIGRATION_COMPLETE = "plaintext_to_encrypted_complete"
         private const val PREF_MIGRATION_AT = "plaintext_to_encrypted_at"
 
-        val TABLE_NAMES = listOf(
-            "tasks",
-            "time_blocks",
-            "day_plans",
-            "recurrence_rules",
-            "habits",
-            "habit_schedules",
-            "habit_events",
-            "medication_plans",
-            "medication_schedules",
-            "medication_dose_events",
-            "medication_safety_profiles",
-            "daily_reviews",
-            "review_insights",
-            "actual_time_segments",
-            "alarm_requests",
-            "focus_sessions",
-            "calendar_events",
-            "mood_energy_check_ins",
-            "task_checklist_items",
-            "task_contact_snapshots",
-            "task_contact_methods",
-            "task_actions",
-            "task_attachments",
-            "task_schedules",
-            "task_reminder_rules"
-        )
+        /**
+         * The copy set is read from sqlite_master at migration time so new entities
+         * are always included; only SQLite/Room bookkeeping tables are skipped.
+         */
+        fun isUserTable(name: String): Boolean =
+            !name.startsWith("sqlite_") && name != "android_metadata" && name != "room_master_table"
     }
 }

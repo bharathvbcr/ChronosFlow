@@ -1,19 +1,16 @@
 package com.chronosflow.feature.daydial
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Transition
-import androidx.compose.animation.core.animateDp
-import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
@@ -26,11 +23,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -40,9 +35,13 @@ import com.chronosflow.core.ai.PrivacyMode
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.core.domain.planner.DialRing
+import com.chronosflow.core.domain.planner.PlannerOperationResult
 import com.chronosflow.core.ui.motion.ChronosMotionDefaults
 import com.chronosflow.core.ui.motion.ChronosTransitionDirection
+import com.chronosflow.core.ui.motion.chronosBackPeek
+import com.chronosflow.core.ui.motion.chronosCrossSectionTransitionSet
 import com.chronosflow.core.ui.components.ChronosBackdrop
+import com.chronosflow.core.ui.components.formatLastSyncedLabel
 import com.chronosflow.core.ui.motion.ChronosTransitionSet
 import com.chronosflow.core.ui.settings.ChronosBackdropTheme
 import com.chronosflow.core.ui.settings.ChronosFeatureFlags
@@ -62,18 +61,12 @@ import com.chronosflow.feature.daydial.ui.PlanTab
 import com.chronosflow.feature.daydial.ui.SidebarPageContent
 import com.chronosflow.feature.daydial.ui.TodayTab
 import java.time.LocalDate
-import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 
-private val DayDialMoveInBlurRadius = 8.dp
-private val DayDialMoveInTravel = 12.dp
 private const val DayDialRouteEnterFadeDelayMillis = 0
 private const val DayDialRouteEnterFadeDurationMillis = 1
 private const val DayDialRouteExitFadeDurationMillis = 80
 private const val DayDialRouteEnterInitialAlpha = 1f
-private const val DayDialMoveInBlurDurationMillis = 260
-private const val DayDialMoveInExitFadeDurationMillis = 120
-private const val DayDialMoveInTravelDurationMillis = 320
 
 internal fun shouldRenderPrimaryTabContent(
     activeSidebarPage: SidebarPage?,
@@ -121,15 +114,6 @@ internal fun dayDialPrimaryTabTransition(
         reducedMotion = reducedMotion
     )
 
-internal fun dayDialMoveInBlurRadius(reducedMotion: Boolean, entering: Boolean): Dp =
-    if (reducedMotion || !entering) 0.dp else DayDialMoveInBlurRadius
-
-internal fun dayDialMoveInTravel(reducedMotion: Boolean, entering: Boolean): Dp =
-    if (reducedMotion || !entering) 0.dp else DayDialMoveInTravel
-
-internal fun dayDialMoveInLayerAlpha(reducedMotion: Boolean, exiting: Boolean): Float =
-    if (reducedMotion || !exiting) 1f else 0f
-
 internal fun dayDialMoveInTravelMultiplier(direction: ChronosTransitionDirection): Int =
     when (direction) {
         ChronosTransitionDirection.Forward -> 1
@@ -154,13 +138,10 @@ private fun DayDialPrimaryTabLayer(
     renderedPrimaryTab: DayDialTab,
     transition: Transition<DayDialTab>,
     reduceMotionEnabled: Boolean,
+    backProgress: Float = 0f,
     content: @Composable (Boolean) -> Unit
 ) {
     val isActive = tab == renderedPrimaryTab
-    val transitionDirection = dayDialPrimaryTabTransitionDirection(
-        initialState = transition.currentState,
-        targetState = transition.targetState
-    )
     val routeTransition = dayDialPrimaryTabTransition(
         initialState = transition.currentState,
         targetState = transition.targetState,
@@ -175,9 +156,12 @@ private fun DayDialPrimaryTabLayer(
             .fillMaxSize()
             .zIndex(primaryTabLayerZIndex(isActive))
     ) {
-        DayDialMoveInBlurLayer(
-            direction = transitionDirection,
-            reducedMotion = reduceMotionEnabled
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    chronosBackPeek(backProgress = backProgress, reducedMotion = reduceMotionEnabled)
+                }
         ) {
             content(isActive)
         }
@@ -198,7 +182,10 @@ private fun DayDialSidebarPageLayer(
         initialState = transition.currentState,
         targetState = transition.targetState
     )
-    val routeTransition = dayDialRouteTransition(
+    // Sidebar pages share the SAME cross-section motion as the NavDisplay routes
+    // (chronosCrossSectionTransitionSet) so every floating-sidebar destination matches whether it
+    // opens a full route (Meds/Tasks/Habits/Goals) or renders in-place (Calendar, settings, …).
+    val routeTransition = chronosCrossSectionTransitionSet(
         direction = transitionDirection,
         reducedMotion = reduceMotionEnabled
     )
@@ -216,87 +203,15 @@ private fun DayDialSidebarPageLayer(
                 )
             )
     ) {
-        DayDialMoveInBlurLayer(
-            direction = transitionDirection,
-            reducedMotion = reduceMotionEnabled
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    chronosBackPeek(backProgress = sidebarBackProgress, reducedMotion = reduceMotionEnabled)
+                }
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        translationX = size.width * sidebarBackProgress
-                        val scale = 1f - (sidebarBackProgress.absoluteValue * 0.05f)
-                        scaleX = scale
-                        scaleY = scale
-                    }
-            ) {
-                content()
-            }
+            content()
         }
-    }
-}
-
-@Composable
-private fun AnimatedVisibilityScope.DayDialMoveInBlurLayer(
-    direction: ChronosTransitionDirection,
-    reducedMotion: Boolean,
-    content: @Composable () -> Unit
-) {
-    val density = LocalDensity.current
-    val blurRadius by transition.animateDp(
-        transitionSpec = {
-            tween(
-                durationMillis = if (reducedMotion) 0 else DayDialMoveInBlurDurationMillis,
-                easing = ChronosMotionDefaults.MaterialStandardEasing
-            )
-        },
-        label = "dayDialMoveInBlur"
-    ) { state ->
-        dayDialMoveInBlurRadius(
-            reducedMotion = reducedMotion,
-            entering = state == EnterExitState.PreEnter
-        )
-    }
-    val travel by transition.animateDp(
-        transitionSpec = {
-            tween(
-                durationMillis = if (reducedMotion) 0 else DayDialMoveInTravelDurationMillis,
-                easing = ChronosMotionDefaults.MaterialStandardEasing
-            )
-        },
-        label = "dayDialMoveInTravel"
-    ) { state ->
-        dayDialMoveInTravel(
-            reducedMotion = reducedMotion,
-            entering = state == EnterExitState.PreEnter
-        )
-    }
-    val layerAlpha by transition.animateFloat(
-        transitionSpec = {
-            tween(
-                durationMillis = if (reducedMotion) 0 else DayDialMoveInExitFadeDurationMillis,
-                easing = ChronosMotionDefaults.MaterialStandardEasing
-            )
-        },
-        label = "dayDialMoveInExitAlpha"
-    ) { state ->
-        dayDialMoveInLayerAlpha(
-            reducedMotion = reducedMotion,
-            exiting = state == EnterExitState.PostExit
-        )
-    }
-    val travelPx = with(density) { travel.toPx() } * dayDialMoveInTravelMultiplier(direction)
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .graphicsLayer {
-                translationX = travelPx
-                alpha = layerAlpha
-            }
-            .blur(blurRadius)
-    ) {
-        content()
     }
 }
 
@@ -339,6 +254,7 @@ internal fun DayDialMainContent(
     showRingGuide: Boolean,
     protectFocusBlocks: Boolean,
     addBreaksAutomatically: Boolean,
+    defaultFocusBreakPreset: Int = 0,
     preserveManualBlocks: Boolean,
     syncCloud: Boolean,
     syncStatus: String,
@@ -346,6 +262,7 @@ internal fun DayDialMainContent(
     breakReminders: Boolean,
     missedAlerts: Boolean,
     endDayReviewReminder: Boolean,
+    sleepJournalLogReminder: Boolean,
     sleepScheduleEnabled: Boolean,
     sleepScheduleStartMinute: Int,
     sleepScheduleEndMinute: Int,
@@ -369,6 +286,7 @@ internal fun DayDialMainContent(
     onBreakRemindersChanged: (Boolean) -> Unit,
     onMissedAlertsChanged: (Boolean) -> Unit,
     onEndDayReviewReminderChanged: (Boolean) -> Unit,
+    onSleepJournalLogReminderChanged: (Boolean) -> Unit,
     onSleepScheduleEnabledChanged: (Boolean) -> Unit,
     onSleepScheduleStartMinuteChanged: (Int) -> Unit,
     onSleepScheduleEndMinuteChanged: (Int) -> Unit,
@@ -420,7 +338,9 @@ internal fun DayDialMainContent(
     contentBottomPadding: Dp = 0.dp,
     onOpenPlanTab: () -> Unit,
     showMessage: (String) -> Unit,
+    onShowUndoSnackbar: (message: String, onUndo: () -> Unit) -> Unit = { message, _ -> showMessage(message) },
     sidebarBackProgress: Float = 0f,
+    reviewBackProgress: Float = 0f,
     currentTab: DayDialTab = DayDialTab.TODAY,
     activeSidebarPage: SidebarPage? = null,
     scaffoldPadding: PaddingValues = PaddingValues()
@@ -432,6 +352,7 @@ internal fun DayDialMainContent(
     }
     val isViewingToday = selectedDate == LocalDate.now()
     val quickItems by viewModel.dayQuickItems.collectAsStateWithLifecycle()
+    val lastCalendarSyncAtMillis by viewModel.lastCalendarSyncAtMillis.collectAsStateWithLifecycle()
     val focusAccentBlockId = focusSession.blockId ?: focusedBlock?.id ?: selectedBlock?.id ?: activeBlock?.id
     val focusCachedAccent = viewModel.focusMoodAccentFor(focusAccentBlockId)
     val sidebarPageTransition = updateTransition(
@@ -523,7 +444,7 @@ internal fun DayDialMainContent(
                         onOpenPlanned = { onActiveSheetChanged(SheetTarget.ReviewDetails(ReviewDetailSection.PLANNED)) },
                         onOpenActual = { onActiveSheetChanged(SheetTarget.ReviewDetails(ReviewDetailSection.ACTUAL)) },
                         onOpenMissedRecovery = { onActiveSheetChanged(SheetTarget.ReviewDetails(ReviewDetailSection.MISSED)) },
-                        showSleepPrompt = featureFlags.reviewEnabled &&
+                        showSleepPrompt = featureFlags.sleepEnabled &&
                             isViewingToday &&
                             sleepTrack == null &&
                             currentMinute < 12 * 60,
@@ -559,6 +480,13 @@ internal fun DayDialMainContent(
                         templates = templateState.allTemplates,
                         selectedDate = selectedDate,
                         onSelectDate = viewModel::selectDate,
+                        onSyncCalendar = onRequestCalendarSync,
+                        calendarReadGranted = calendarPermissionStatus.readGranted,
+                        calendarSyncInProgress = calendarConnectionState.isWorking,
+                        lastSyncedLabel = formatLastSyncedLabel(
+                            lastCalendarSyncAtMillis,
+                            System.currentTimeMillis()
+                        ),
                         onAiPlanRequested = { viewModel.onAiPlanRequested(listOf("balanced")) },
                         onApplyAiSuggestions = viewModel::applyAiSuggestions,
                         onAcceptAiSuggestion = viewModel::acceptAiSuggestion,
@@ -588,8 +516,23 @@ internal fun DayDialMainContent(
                             )
                         },
                         onBlockSelected = viewModel::onBlockSelected,
-                        onDeleteBlock = viewModel::deleteBlock,
-                        onDuplicateBlock = viewModel::duplicateBlock,
+                        onDeleteBlock = { blockId ->
+                            viewModel.deleteBlock(blockId)
+                            onShowUndoSnackbar("Block deleted") { viewModel.undo() }
+                        },
+                        onDuplicateBlock = { blockId ->
+                            // Report the real planner outcome: the copy can be rejected when the
+                            // day has no free slot for it, so don't claim success unconditionally.
+                            viewModel.duplicateBlock(blockId) { result ->
+                                showMessage(
+                                    if (result is PlannerOperationResult.Applied) {
+                                        "Block duplicated"
+                                    } else {
+                                        result.message.ifBlank { "Couldn't duplicate block" }
+                                    }
+                                )
+                            }
+                        },
                         onApplyTemplate = templateState.applyTemplate,
                         onFillGaps = {
                             viewModel.fillEmptyTime(addBreaksAutomatically)
@@ -617,11 +560,13 @@ internal fun DayDialMainContent(
                             elapsedSeconds = focusElapsedSeconds,
                             reduceMotionEnabled = reduceMotionEnabled,
                             highContrastEnabled = highContrastEnabled,
+                            defaultBreakPresetIndex = defaultFocusBreakPreset,
                             onSaveMoodEnergyCheckIn = viewModel::saveMoodEnergyCheckIn,
                             onStart = viewModel::startFocusSession,
                             onStartWithBreaks = { blockId, workMinutes, breakMinutes ->
                                 viewModel.startFocusSession(blockId, workMinutes, breakMinutes)
                             },
+                            onMarkBlockComplete = viewModel::markBlockComplete,
                             onAdvancePhase = viewModel::advanceFocusPhase,
                             onPause = viewModel::pauseFocusSession,
                             onResume = viewModel::resumeFocusSession,
@@ -632,6 +577,8 @@ internal fun DayDialMainContent(
                             onAdjustByMinutes = { minutes ->
                                 if (minutes >= 0) viewModel.extendFocusSession(minutes) else viewModel.shortenFocusSession(-minutes)
                             },
+                            onInjectBreak = viewModel::injectBreakNow,
+                            onEndBreak = viewModel::endBreakEarly,
                             onOpenSettings = { onActiveSheetChanged(SheetTarget.FocusSettings) },
                             onOpenPlanTab = onOpenPlanTab,
                             onPlanCapturedFocus = { capture ->
@@ -672,8 +619,13 @@ internal fun DayDialMainContent(
                 tab = DayDialTab.INSIGHTS,
                 renderedPrimaryTab = renderedPrimaryTab,
                 transition = primaryTabTransition,
-                reduceMotionEnabled = reduceMotionEnabled
+                reduceMotionEnabled = reduceMotionEnabled,
+                backProgress = reviewBackProgress
             ) {
+                // Collected inside the Insights layer (composed only while the tab is visible) so the
+                // five trend Room sources are subscribed only on this tab, not the whole day screen.
+                val insightsTrends by viewModel.insightsTrends.collectAsStateWithLifecycle()
+                val insightsTrendRange by viewModel.trendRangeDays.collectAsStateWithLifecycle()
                 InsightsTab(
                         review = review,
                         timeBlocks = sortedBlocks,
@@ -683,13 +635,15 @@ internal fun DayDialMainContent(
                         assistSnapshot = insightsTabState.assistSnapshot,
                         digest = insightsTabState.digest,
                         isRefreshing = insightsTabState.isRefreshing,
-                        trendRangeDays = insightsTabState.trendRangeDays,
-                        trends = insightsTabState.trends,
+                        trendRangeDays = insightsTrendRange,
+                        trends = insightsTrends,
                         journalEntry = journalEntry,
                         sleepTrack = sleepTrack,
                         onTrendRangeSelected = viewModel::setInsightsTrendRange,
                         onOpenJournal = { onActiveSheetChanged(SheetTarget.Journal(selectedDate)) },
                         onOpenSleepLog = { onActiveSheetChanged(SheetTarget.SleepLog(selectedDate)) },
+                        journalEnabled = featureFlags.journalEnabled,
+                        sleepEnabled = featureFlags.sleepEnabled,
                         onRefreshRecommendations = viewModel::refreshInsightsRecommendations,
                         onApplyRecommendation = { recommendation ->
                             viewModel.applyInsightRecommendation(
@@ -704,7 +658,8 @@ internal fun DayDialMainContent(
                         contentBottomPadding = contentBottomPadding + scaffoldPadding.calculateBottomPadding(),
                         period = insightsTabState.period,
                         periodSummary = insightsTabState.periodSummary,
-                        onPeriodSelected = viewModel::setInsightsPeriod
+                        onPeriodSelected = viewModel::setInsightsPeriod,
+                        onStartFocus = onOpenFocusScreen
                     )
             }
         }
@@ -807,6 +762,8 @@ internal fun DayDialMainContent(
                         onMissedAlertsChanged = onMissedAlertsChanged,
                         endDayReviewReminder = endDayReviewReminder,
                         onEndDayReviewReminderChanged = onEndDayReviewReminderChanged,
+                        sleepJournalLogReminder = sleepJournalLogReminder,
+                        onSleepJournalLogReminderChanged = onSleepJournalLogReminderChanged,
                         sleepScheduleEnabled = sleepScheduleEnabled,
                         onSleepScheduleEnabledChanged = onSleepScheduleEnabledChanged,
                         sleepScheduleStartMinute = sleepScheduleStartMinute,
@@ -955,33 +912,35 @@ internal fun dayDialSidebarPageTransitionDirection(
     }
 }
 
+// iOS-style spring for the primary-tab directional slide; the slide overshoot is what
+// gives the switch its gentle bounce (tab bodies deliberately do not scale — see
+// ChronosTransitionMotionTest "avoid scaling heavy tab bodies").
+private fun dayDialPrimaryTabSlideSpring(): FiniteAnimationSpec<IntOffset> =
+    spring(
+        dampingRatio = ChronosMotionDefaults.PrimaryTabSpringDampingRatio,
+        stiffness = ChronosMotionDefaults.PrimaryTabSpringStiffness,
+        visibilityThreshold = IntOffset.VisibilityThreshold
+    )
+
 private fun dayDialRouteTransition(
     direction: ChronosTransitionDirection,
     reducedMotion: Boolean,
-    durationMillis: Int = ChronosMotionDefaults.PrimaryTabDurationMillis,
-    slideFraction: Float = ChronosMotionDefaults.PrimaryTabSlideFraction,
-    enterScale: Float = ChronosMotionDefaults.PrimaryTabScale,
-    exitScale: Float = ChronosMotionDefaults.PrimaryTabScale
+    slideFraction: Float = ChronosMotionDefaults.PrimaryTabSlideFraction
 ): ChronosTransitionSet {
-    val routeDurationMillis = if (reducedMotion) {
-        ChronosMotionDefaults.ReducedDurationMillis
-    } else {
-        durationMillis
-    }
     val routeDirection = if (reducedMotion) ChronosTransitionDirection.Neutral else direction
     val routeSlideFraction = if (reducedMotion) 0f else slideFraction
-    val routeEnterScale = if (reducedMotion) 1f else enterScale
-    val routeExitScale = if (reducedMotion) 1f else exitScale
-    val transformOrigin = dayDialRouteTransformOrigin(routeDirection)
+    val fadeDurationMillis = if (reducedMotion) {
+        ChronosMotionDefaults.ReducedDurationMillis
+    } else {
+        ChronosMotionDefaults.PrimaryTabDurationMillis
+    }
     val enterDelayMillis = dayDialRouteEnterFadeDelayMillis()
-    val enterDurationMillis = (routeDurationMillis - enterDelayMillis).coerceAtLeast(1)
+    val enterDurationMillis = (fadeDurationMillis - enterDelayMillis).coerceAtLeast(1)
     val slideEnter = dayDialRouteSlideEnterTransition(
-        durationMillis = routeDurationMillis,
         direction = routeDirection,
         slideFraction = routeSlideFraction
     )
     val slideExit = dayDialRouteSlideExitTransition(
-        durationMillis = routeDurationMillis,
         direction = routeDirection,
         slideFraction = routeSlideFraction
     )
@@ -992,26 +951,12 @@ private fun dayDialRouteTransition(
             delayMillis = enterDelayMillis,
             easing = ChronosMotionDefaults.MaterialStandardEasing
         )
-    ) + scaleIn(
-        initialScale = routeEnterScale,
-        transformOrigin = transformOrigin,
-        animationSpec = tween(
-            durationMillis = routeDurationMillis,
-            easing = ChronosMotionDefaults.MaterialStandardEasing
-        )
     )
     val exit = slideExit + fadeOut(
         animationSpec = tween(
             durationMillis = dayDialRouteExitFadeDurationMillis(
-                (routeDurationMillis * ChronosMotionDefaults.ExitFadeDurationFraction).roundToInt()
+                (fadeDurationMillis * ChronosMotionDefaults.ExitFadeDurationFraction).roundToInt()
             ),
-            easing = ChronosMotionDefaults.ExitEasing
-        )
-    ) + scaleOut(
-        targetScale = routeExitScale,
-        transformOrigin = transformOrigin,
-        animationSpec = tween(
-            durationMillis = routeDurationMillis,
             easing = ChronosMotionDefaults.ExitEasing
         )
     )
@@ -1019,7 +964,6 @@ private fun dayDialRouteTransition(
 }
 
 private fun dayDialRouteSlideEnterTransition(
-    durationMillis: Int,
     direction: ChronosTransitionDirection,
     slideFraction: Float
 ): EnterTransition {
@@ -1028,16 +972,12 @@ private fun dayDialRouteSlideEnterTransition(
     }
     val multiplier = dayDialMoveInTravelMultiplier(direction)
     return slideInHorizontally(
-        animationSpec = tween(
-            durationMillis = durationMillis,
-            easing = ChronosMotionDefaults.MaterialStandardEasing
-        ),
+        animationSpec = dayDialPrimaryTabSlideSpring(),
         initialOffsetX = { width -> (width * slideFraction * multiplier).roundToInt() }
     )
 }
 
 private fun dayDialRouteSlideExitTransition(
-    durationMillis: Int,
     direction: ChronosTransitionDirection,
     slideFraction: Float
 ): ExitTransition {
@@ -1046,17 +986,7 @@ private fun dayDialRouteSlideExitTransition(
     }
     val multiplier = dayDialMoveInTravelMultiplier(direction)
     return slideOutHorizontally(
-        animationSpec = tween(
-            durationMillis = durationMillis,
-            easing = ChronosMotionDefaults.MaterialStandardEasing
-        ),
+        animationSpec = dayDialPrimaryTabSlideSpring(),
         targetOffsetX = { width -> (-width * slideFraction * multiplier).roundToInt() }
     )
 }
-
-private fun dayDialRouteTransformOrigin(direction: ChronosTransitionDirection): TransformOrigin =
-    when (direction) {
-        ChronosTransitionDirection.Forward -> TransformOrigin(1f, 0.5f)
-        ChronosTransitionDirection.Backward -> TransformOrigin(0f, 0.5f)
-        ChronosTransitionDirection.Neutral -> TransformOrigin(0.5f, 0.5f)
-    }

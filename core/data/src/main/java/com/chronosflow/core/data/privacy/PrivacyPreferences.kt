@@ -8,8 +8,11 @@ import javax.inject.Singleton
 class PrivacyPreferences @Inject constructor(
     private val preferences: ChronosPreferencesDataSource
 ) {
+    // Off by default: the watch mirror and focus notifications show real titles/details out of the
+    // box. Users opt into redaction via the Settings → Privacy & Sync toggle (which calls the setter
+    // below); once set, the stored choice is honoured.
     fun redactSensitiveNotifications(): Boolean =
-        preferences.getBoolean(KEY_REDACT_NOTIFICATIONS, defaultValue = true)
+        preferences.getBoolean(KEY_REDACT_NOTIFICATIONS, defaultValue = false)
 
     fun setRedactSensitiveNotifications(enabled: Boolean) {
         preferences.putBoolean(KEY_REDACT_NOTIFICATIONS, enabled)

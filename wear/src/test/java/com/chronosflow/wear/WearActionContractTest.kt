@@ -22,6 +22,14 @@ class WearActionContractTest {
     }
 
     @Test
+    fun `sync request round-trips with an empty arg`() {
+        // The watch sends a bare sync request (no arg) when it opens; the phone must still decode
+        // it so its listener can re-publish the day summary.
+        val payload = WearActionContract.encode(WearActionContract.TYPE_SYNC, "")
+        assertEquals(WearActionContract.TYPE_SYNC to "", WearActionContract.decode(payload))
+    }
+
+    @Test
     fun `focusStart encodes an explicit duration but stays plain without one`() {
         assertEquals("start", WearActionContract.focusStart(null))
         assertEquals("start", WearActionContract.focusStart(0))

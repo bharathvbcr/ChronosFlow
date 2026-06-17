@@ -27,6 +27,7 @@ import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.EnergyIntensity
 import com.chronosflow.core.domain.model.Habit
+import com.chronosflow.core.domain.model.HabitDailyCompletion
 import com.chronosflow.core.domain.model.MedicationDoseEventType
 import com.chronosflow.core.domain.model.MedicationPlan
 import com.chronosflow.core.domain.model.MedicationSafetyProfile
@@ -64,7 +65,10 @@ import com.chronosflow.feature.daydial.delegate.DayDialFocusDelegate
 import com.chronosflow.feature.daydial.delegate.DayDialMoodEnergyDelegate
 import com.chronosflow.feature.daydial.delegate.DayDialReminderDelegate
 import com.chronosflow.feature.daydial.delegate.DayDialReviewDelegate
+import com.chronosflow.feature.daydial.delegate.DayDialTrendsDelegate
+import com.chronosflow.feature.daydial.delegate.CompanionTrendSections
 import com.chronosflow.feature.daydial.model.TimeBlockUiModel
+import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -77,9 +81,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.*
 import org.junit.After
+import org.junit.AfterClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -126,6 +132,7 @@ class DayDialViewModelTest {
     private val habitReminderScheduler: HabitReminderScheduler = mockk(relaxed = true)
     private val reminderPreferencesReader: DayDialReminderPreferencesReader = mockk()
     private val dataExportRepository: ChronosDataExportRepository = mockk()
+    private val trendsDelegate: DayDialTrendsDelegate = mockk(relaxed = true)
     private lateinit var viewModel: DayDialViewModel
 
     private val testDispatcher = UnconfinedTestDispatcher()
@@ -188,7 +195,8 @@ class DayDialViewModelTest {
                 assistantPreferences,
                 GapFillPlanner(FreeTimeCalculator()),
                 taskRepository,
-                habitRepository
+                habitRepository,
+                mockk(relaxed = true)
             ),
             reminderDelegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository),
             reviewDelegate = DayDialReviewDelegate(
@@ -214,7 +222,7 @@ class DayDialViewModelTest {
             ),
             moodEnergyDelegate = DayDialMoodEnergyDelegate(moodEnergyRepository, mockk(relaxed = true)),
             journalDelegate = mockk(relaxed = true),
-            trendsDelegate = mockk(relaxed = true),
+            trendsDelegate = trendsDelegate,
             moodEnergyCheckInAssistPlanner = mockk<MoodEnergyCheckInAssistPlanner>(relaxed = true),
             focusNextBlockPlanner = FocusNextBlockPlanner(genAiAssistCoordinatorForFocus),
             focusGuidancePlanner = FocusGuidancePlanner(genAiAssistCoordinatorForFocus),
@@ -229,6 +237,8 @@ class DayDialViewModelTest {
             routineRepository = mockk(relaxed = true),
             applyRoutineToDateUseCase = mockk(relaxed = true),
             completeRoutineForDateUseCase = mockk(relaxed = true),
+            routineAssistPlanner = mockk(relaxed = true),
+            genAiAssistCoordinator = mockk(relaxed = true),
             currentBlockNotificationCoordinator = mockk(relaxed = true),
             appEventLog = AppEventLog()
         )
@@ -238,25 +248,82 @@ class DayDialViewModelTest {
 
     @After
     fun tearDown() {
+        // Cancel this test's view model, but DON'T resetMain() here. Each test's VM launches flow
+        // collections on viewModelScope (backed by Main); some upstreams resume on a real dispatcher
+        // and can complete just after the test ends. If Main were reset to the (absent) platform
+        // dispatcher between tests, that late resume would throw "Dispatchers.Main accessed after
+        // resetMain", surfacing as a flaky UncaughtExceptionsBeforeTest in a random later test.
+        // Leaving Main pointing at a valid test dispatcher until the class finishes makes the late
+        // resume harmless; the next test's @Before re-sets Main to its own dispatcher.
         viewModel.viewModelScope.cancel()
-        Dispatchers.resetMain()
+    }
+
+    companion object {
+        @JvmStatic
+        @AfterClass
+        fun tearDownClass() {
+            Dispatchers.resetMain()
+        }
     }
 
     @Test
-    fun `initial state is correct`() = runTest {
+    fun `initial state is correct`() = runTest(testDispatcher) {
         assertEquals(LocalDate.now(), viewModel.selectedDate.value)
         assertEquals(null, viewModel.selectedBlockId.value)
     }
 
     @Test
-    fun `refreshNextFocusSuggestion stays null without focus-suitable blocks`() = runTest {
+    fun `setInsightsTrendRange coerces selections into the supported bounds`() = runTest(testDispatcher) {
+        viewModel.setInsightsTrendRange(3)
+        assertEquals(7, viewModel.trendRangeDays.value)
+
+        viewModel.setInsightsTrendRange(100)
+        assertEquals(60, viewModel.trendRangeDays.value)
+
+        viewModel.setInsightsTrendRange(14)
+        assertEquals(14, viewModel.trendRangeDays.value)
+    }
+
+    @Test
+    fun `insightsTrends reflects the trends delegate output`() = runTest(testDispatcher) {
+        val sections = CompanionTrendSections(habitTrend = listOf(habitDay(1)))
+        every { trendsDelegate.observeTrends(any(), any()) } returns flowOf(sections)
+
+        viewModel.insightsTrends.test {
+            assertEquals(1, expectMostRecentItem().habitTrend.size)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `insightsTrends re-queries the delegate when the range changes`() = runTest(testDispatcher) {
+        every { trendsDelegate.observeTrends(14, any()) } returns flowOf(
+            CompanionTrendSections(habitTrend = listOf(habitDay(1)))
+        )
+        every { trendsDelegate.observeTrends(7, any()) } returns flowOf(
+            CompanionTrendSections(habitTrend = listOf(habitDay(1), habitDay(2)))
+        )
+
+        viewModel.insightsTrends.test {
+            assertEquals(1, expectMostRecentItem().habitTrend.size)
+            viewModel.setInsightsTrendRange(7)
+            assertEquals(2, expectMostRecentItem().habitTrend.size)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    private fun habitDay(completed: Int) =
+        HabitDailyCompletion(LocalDate.now(), completedCount = completed, missedCount = 0)
+
+    @Test
+    fun `refreshNextFocusSuggestion stays null without focus-suitable blocks`() = runTest(testDispatcher) {
         viewModel.refreshNextFocusSuggestion()
 
         assertEquals(null, viewModel.focusNextBlockSuggestion.value)
     }
 
     @Test
-    fun `refreshFocusGuidance clears coaching while no session is active`() = runTest {
+    fun `refreshFocusGuidance clears coaching while no session is active`() = runTest(testDispatcher) {
         viewModel.refreshFocusGuidance(remainingSeconds = 600L)
 
         assertEquals(null, viewModel.focusGuidance.value)
@@ -267,7 +334,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `createDataExport writes full data export and updates export state`() = runTest {
+    fun `createDataExport writes full data export and updates export state`() = runTest(testDispatcher) {
         val file = File.createTempFile("chronosflow-data-export", ".json")
         every { dataExportRepository.exportSnapshot() } returns ChronosDataExportFile(
             file = file,
@@ -292,20 +359,20 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `selectDate updates selectedDate state`() = runTest {
+    fun `selectDate updates selectedDate state`() = runTest(testDispatcher) {
         val newDate = LocalDate.now().plusDays(1)
         viewModel.selectDate(newDate)
         assertEquals(newDate, viewModel.selectedDate.value)
     }
 
     @Test
-    fun `onBlockSelected updates selectedBlockId state`() = runTest {
+    fun `onBlockSelected updates selectedBlockId state`() = runTest(testDispatcher) {
         viewModel.onBlockSelected("block-1")
         assertEquals("block-1", viewModel.selectedBlockId.value)
     }
 
     @Test
-    fun `onBlockSelected emits selected summary block in same scheduler turn`() = runTest {
+    fun `onBlockSelected emits selected summary block in same scheduler turn`() = runTest(testDispatcher) {
         val block = timeBlock(
             id = "block-1",
             date = LocalDate.now(),
@@ -329,7 +396,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `timeBlocks emits scheduled task block from repository stream`() = runTest {
+    fun `timeBlocks emits scheduled task block from repository stream`() = runTest(testDispatcher) {
         val scheduledTaskBlock = timeBlock(
             id = "task-block-1",
             date = LocalDate.now(),
@@ -354,14 +421,14 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `onCompactModeToggled toggles compactMode state`() = runTest {
+    fun `onCompactModeToggled toggles compactMode state`() = runTest(testDispatcher) {
         val initial = viewModel.compactMode.value
         viewModel.onCompactModeToggled()
         assertEquals(!initial, viewModel.compactMode.value)
     }
 
     @Test
-    fun `window paging steps half a window in each direction`() = runTest {
+    fun `window paging steps half a window in each direction`() = runTest(testDispatcher) {
         viewModel.onCompactModeToggled()
         val start = viewModel.compactWindowStart.value
 
@@ -381,7 +448,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `syncCalendar reports refreshed device calendar`() = runTest {
+    fun `syncCalendar reports refreshed device calendar`() = runTest(testDispatcher) {
         val date = LocalDate.of(2026, 5, 25)
         viewModel.selectDate(date)
         coEvery { calendarEventRepository.syncFromDeviceCalendar(any(), any()) } returns Unit
@@ -396,7 +463,47 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `syncCalendar reports failure when device calendar refresh fails`() = runTest {
+    fun `refreshCalendarForAppForeground quietly refreshes the day in view without banners`() = runTest(testDispatcher) {
+        val date = LocalDate.of(2026, 5, 25)
+        viewModel.selectDate(date)
+        runCurrent()
+        // Fail the refresh: the quiet foreground sync must swallow it, unlike the
+        // manual syncCalendar which surfaces a failure banner.
+        coEvery { calendarEventRepository.syncFromDeviceCalendar(any(), any()) } throws IllegalStateException("resolver unavailable")
+
+        viewModel.refreshCalendarForAppForeground()
+        runCurrent()
+
+        coVerify(atLeast = 1) { calendarEventRepository.syncFromDeviceCalendar(any(), any()) }
+        val state = viewModel.calendarConnectionState.value
+        assertFalse(state.isWorking)
+        assertNull(state.lastSuccessMessage)
+        assertEquals(CalendarConnectionState().statusMessage, state.statusMessage)
+    }
+
+    @Test
+    fun `refreshCalendarForAppForeground throttles rapid foreground returns`() = runTest(testDispatcher) {
+        var clockMillis = 1_000_000L
+        viewModel.foregroundSyncClock = { clockMillis }
+        runCurrent()
+        // Drop the init/date-gate syncs so we count only foreground-triggered ones;
+        // the mock stays relaxed, so syncFromDeviceCalendar keeps returning Unit.
+        clearMocks(calendarEventRepository)
+
+        viewModel.refreshCalendarForAppForeground() // first return: no prior sync -> runs
+        runCurrent()
+        clockMillis += 30_000L
+        viewModel.refreshCalendarForAppForeground() // 30s later: within 60s -> throttled
+        runCurrent()
+        clockMillis += 31_000L
+        viewModel.refreshCalendarForAppForeground() // 61s after the last sync -> runs
+        runCurrent()
+
+        coVerify(exactly = 2) { calendarEventRepository.syncFromDeviceCalendar(any(), any()) }
+    }
+
+    @Test
+    fun `syncCalendar reports failure when device calendar refresh fails`() = runTest(testDispatcher) {
         coEvery { calendarEventRepository.syncFromDeviceCalendar(any(), any()) } throws IllegalStateException("resolver unavailable")
 
         viewModel.syncCalendar()
@@ -408,7 +515,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `endDayReview persists computed daily review`() = runTest {
+    fun `endDayReview persists computed daily review`() = runTest(testDispatcher) {
         val date = LocalDate.now()
         val block = timeBlock(
             id = "block-1",
@@ -437,7 +544,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `exportBlockToCalendar links exported event id onto block`() = runTest {
+    fun `exportBlockToCalendar links exported event id onto block`() = runTest(testDispatcher) {
         val block = timeBlock(
             id = "block-1",
             date = LocalDate.now(),
@@ -468,7 +575,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `refreshCalendarExport updates linked device event`() = runTest {
+    fun `refreshCalendarExport updates linked device event`() = runTest(testDispatcher) {
         val block = timeBlock(
             id = "block-1",
             date = LocalDate.now(),
@@ -490,7 +597,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `refreshCalendarExport reports failure when linked event update fails`() = runTest {
+    fun `refreshCalendarExport reports failure when linked event update fails`() = runTest(testDispatcher) {
         val block = timeBlock(
             id = "block-1",
             date = LocalDate.now(),
@@ -509,7 +616,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `removeCalendarExport deletes linked event and clears block link`() = runTest {
+    fun `removeCalendarExport deletes linked event and clears block link`() = runTest(testDispatcher) {
         val block = timeBlock(
             id = "block-1",
             date = LocalDate.now(),
@@ -540,7 +647,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `markBlockComplete advances recurring task occurrence`() = runTest {
+    fun `markBlockComplete advances recurring task occurrence`() = runTest(testDispatcher) {
         val occurrenceDate = LocalDate.of(2026, 5, 26)
         val block = timeBlock(
             id = "block-1",
@@ -586,7 +693,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `completeDayQuickTask delegates to task completion use case`() = runTest {
+    fun `completeDayQuickTask delegates to task completion use case`() = runTest(testDispatcher) {
         viewModel.completeDayQuickTask("task-1")
         runCurrent()
 
@@ -594,7 +701,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `completeDayQuickHabit delegates to habit completion for selected date`() = runTest {
+    fun `completeDayQuickHabit delegates to habit completion for selected date`() = runTest(testDispatcher) {
         val date = LocalDate.of(2026, 5, 27)
         val habit = habit(id = "habit-1", title = "Stretch")
         coEvery { habitRepository.getHabitById("habit-1") } returns habit
@@ -607,7 +714,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `markDayQuickMedicationTaken records dose and decrements supply`() = runTest {
+    fun `markDayQuickMedicationTaken records dose and decrements supply`() = runTest(testDispatcher) {
         val date = LocalDate.of(2026, 5, 27)
         val plan = medicationPlan(id = "med-1", missedCount = 2, supplyRemaining = 4)
         coEvery { medicationRepository.getMedicationPlanById("med-1") } returns plan
@@ -642,7 +749,7 @@ class DayDialViewModelTest {
     }
 
     @Test
-    fun `markDayQuickMedicationMissed records dose and increments missed count`() = runTest {
+    fun `markDayQuickMedicationMissed records dose and increments missed count`() = runTest(testDispatcher) {
         val date = LocalDate.of(2026, 5, 27)
         val plan = medicationPlan(id = "med-1", missedCount = 1, supplyRemaining = 4)
         coEvery { medicationRepository.getMedicationPlanById("med-1") } returns plan

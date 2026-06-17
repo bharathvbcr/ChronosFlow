@@ -23,6 +23,12 @@ class ChronosSecureDatabaseProvider @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
     fun create(builder: RoomDatabase.Builder<ChronosDatabase>): ChronosDatabase {
+        // Write-Ahead Logging lets readers run concurrently with a writer. Without it the
+        // SQLCipher SupportOpenHelperFactory opens a single serialized connection, so a write
+        // (delete/duplicate/undo a block) blocks the reactive read that repaints the timeline —
+        // which is why those edits used to take "forever" to appear. The app is single-process
+        // (no android:process), so default single-instance invalidation stays correct under WAL.
+        builder.setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
         if (!ENCRYPTION_ENABLED) return builder.build()
         System.loadLibrary("sqlcipher")
         return builder

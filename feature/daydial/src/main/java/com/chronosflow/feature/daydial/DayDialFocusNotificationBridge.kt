@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.chronosflow.feature.daydial.delegate.encodePhases
 import com.chronosflow.feature.daydial.model.FocusPhase
 import com.chronosflow.feature.daydial.model.FocusPhaseKind
 import com.chronosflow.feature.focus.FocusService
@@ -69,7 +70,15 @@ internal fun DayDialFocusNotificationBridge(
                         sessionId = newId,
                         blockId = blockId,
                         terminal = !focusSession.isSplitSession,
-                        boundaryLabel = boundaryLabel
+                        boundaryLabel = boundaryLabel,
+                        // Carry the whole split plan so the live notification can draw the
+                        // segmented work/break bar; null for a flat (single-phase) session.
+                        phasePlan = if (focusSession.isSplitSession) {
+                            encodePhases(focusSession.phases)
+                        } else {
+                            null
+                        },
+                        phaseIndex = focusSession.currentPhaseIndex
                     )
                 } else if (previousStatus == FocusExecutionStatus.PAUSED) {
                     context.sendFocusServiceCommand(

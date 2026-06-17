@@ -6,11 +6,13 @@ import com.chronosflow.core.ai.genai.AssistTextGeneration
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
 import com.chronosflow.core.domain.model.DailyReviewSummary
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import java.time.LocalDate
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,7 +24,7 @@ class ChronosAIPlannerTest {
         val context = mockk<Context>()
         every { context.packageName } returns "com.chronosflow.test"
         val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
-        coEvery { coordinator.generateAssistText(any(), any()) } returns AssistTextGeneration(
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = null,
             source = AssistGenAiSource.LOCAL
         )
@@ -40,11 +42,39 @@ class ChronosAIPlannerTest {
     }
 
     @Test
+    fun generateIdealDayPlan_rescuesMalformedJsonWithOneCorrectiveRetry() = runTest {
+        val context = mockk<Context>()
+        every { context.packageName } returns "com.chronosflow.test"
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        val validJson = """
+            {"blocks":[{"title":"Deep work","category":"WORK","startMinuteOfDay":540,"durationMinutes":90,"flexibility":"RESIZABLE","isProtected":false}],"reason":"r","conflictsResolved":[],"explanation":"e"}
+        """.trimIndent()
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returnsMany listOf(
+            AssistTextGeneration(text = "sorry, here is your plan (no JSON)", source = AssistGenAiSource.GEMINI_NANO),
+            AssistTextGeneration(text = validJson, source = AssistGenAiSource.GEMINI_NANO)
+        )
+        val planner = ChronosAIPlanner(context = context, genAiAssistCoordinator = coordinator)
+
+        val result = planner.generateIdealDayPlan(
+            userPreferences = "deep work",
+            date = LocalDate.of(2026, 5, 24),
+            currentTimeZone = "America/Chicago",
+            privacyMode = PrivacyMode.ON_DEVICE_ONLY
+        )
+
+        // The plan came from the retried JSON, not the local heuristic fallback.
+        assertEquals(1, result.proposedBlocks.size)
+        assertEquals("Deep work", result.proposedBlocks.first().title)
+        assertEquals(AssistGenAiSource.GEMINI_NANO, result.explanationSource)
+        coVerify(exactly = 2) { coordinator.generateAssistText(any(), any(), any()) }
+    }
+
+    @Test
     fun generateReviewBackedDayPlan_fallsBackToHeuristicsWhenCloudAndNanoFail() = runTest {
         val context = mockk<Context>()
         every { context.packageName } returns "com.chronosflow.test"
         val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
-        coEvery { coordinator.generateAssistText(any(), any()) } returns AssistTextGeneration(
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = null,
             source = AssistGenAiSource.LOCAL
         )

@@ -1,0 +1,133 @@
+# XcodeGen spec — the canonical, reproducible definition of the ChronosFlow iOS project.
+# Regenerate the .xcodeproj on a Mac with:  brew install xcodegen && cd ios && xcodegen generate
+#
+# A pre-generated ChronosFlow.xcodeproj is also committed so you can open the app target
+# directly without XcodeGen; regenerate with XcodeGen to (re)create the widget extension target.
+
+name: ChronosFlow
+options:
+  bundleIdPrefix: com.chronosflow
+  deploymentTarget:
+    iOS: "27.0"
+    watchOS: "27.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+# Local SwiftPM package holding the platform-agnostic logic core (dial math, smart-fill,
+# focus phase planning, insights analytics, sleep readiness…). The app target links it so
+# views call the unit-tested core instead of re-deriving logic inline.
+packages:
+  ChronosCore:
+    path: ChronosCore
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    DEVELOPMENT_TEAM: ""            # set your team for device builds
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  ChronosFlow:
+    type: application
+    platform: iOS
+    sources:
+      - ChronosFlow
+      # Interactive widget / Live-Activity intents + the focus command bridge are shared with the
+      # widget extension; the app compiles them too so it can post/drain focus commands.
+      - path: ChronosFlowWidgets/WidgetIntents.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chronosflow.app
+        INFOPLIST_FILE: ChronosFlow/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ChronosFlow/ChronosFlow.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1,2"   # iPhone + iPad
+    dependencies:
+      - package: ChronosCore
+      - target: ChronosFlowWidgets
+      - target: ChronosWatch
+        embed: true   # bundle the watch app inside the iOS app
+
+  # watchOS companion — the iOS-native analogue of the Android `wear/` module. App Groups are
+  # device-local, so the watch does NOT open the phone's SwiftData store; it talks to the phone over
+  # WatchConnectivity using the Foundation-only DTOs. It therefore compiles only its own sources plus
+  # the shared `WatchSyncDTO.swift` — NOT the @Model entities / Persistence / ChronosCore.
+  ChronosWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - ChronosWatch
+      - path: ChronosFlow/Models/WatchSyncDTO.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chronosflow.app.watchkitapp
+        CODE_SIGN_ENTITLEMENTS: ChronosWatch/ChronosWatch.entitlements
+        INFOPLIST_KEY_WKApplication: YES
+        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.chronosflow.app
+        INFOPLIST_KEY_CFBundleDisplayName: ChronosFlow
+        TARGETED_DEVICE_FAMILY: "4"   # watchOS
+    dependencies:
+      - target: ChronosWatchWidgets
+        embed: true   # bundle the watch widget extension inside the watch app
+
+  # watchOS WidgetKit extension — face complications + Smart Stack widget. Reads the WatchSnapshot
+  # the watch app caches into the on-watch App Group. The iOS-native analogue of the Wear tiles.
+  ChronosWatchWidgets:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - ChronosWatchWidgets
+      # Shared snapshot DTOs (Foundation-only) so the widget decodes the cached WatchSnapshot.
+      - path: ChronosFlow/Models/WatchSyncDTO.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chronosflow.app.watchkitapp.widgets
+        INFOPLIST_FILE: ChronosWatchWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ChronosWatchWidgets/ChronosWatchWidgets.entitlements
+        TARGETED_DEVICE_FAMILY: "4"   # watchOS
+
+  ChronosFlowWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - ChronosFlowWidgets
+      # Shared code compiled into the extension so widgets + Live Activity can read the store.
+      - ChronosFlow/Models
+      - ChronosFlow/Persistence
+      - path: ChronosFlow/Planner/DialGeometry.swift
+      - path: ChronosFlow/DesignSystem/ChronosTokens.swift
+      - path: ChronosFlow/LiveActivity/FocusActivityAttributes.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chronosflow.app.widgets
+        INFOPLIST_FILE: ChronosFlowWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ChronosFlowWidgets/ChronosFlowWidgets.entitlements
+    dependencies:
+      # The shared Models compile `import ChronosCore` (TaskItem.recurrence bridges to it).
+      - package: ChronosCore
+
+# Explicit shared schemes so CI (`xcodebuild -scheme …`) and `build.sh` are deterministic regardless
+# of XcodeGen's version-dependent auto-scheme behaviour. The iOS/watch widget extensions build as
+# embedded dependencies of these two app schemes, so they don't need their own.
+schemes:
+  ChronosFlow:
+    build:
+      targets:
+        ChronosFlow: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  ChronosWatch:
+    build:
+      targets:
+        ChronosWatch: all
+    run:
+      config: Debug
+    archive:
+      config: Release

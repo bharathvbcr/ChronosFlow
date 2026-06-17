@@ -53,13 +53,6 @@ class ChronosDialRingSemanticsTest {
     }
 
     @Test
-    fun ringGuideOverlayRequiresVisibleGuideAndThreeRingMode() {
-        assertTrue(shouldDrawRingGuides(enableThreeRingMode = true, showRingGuide = true))
-        assertFalse(shouldDrawRingGuides(enableThreeRingMode = true, showRingGuide = false))
-        assertFalse(shouldDrawRingGuides(enableThreeRingMode = false, showRingGuide = true))
-    }
-
-    @Test
     fun dialRadiusScaleExpandsVisualAndHitGeometryTogether() {
         assertEquals(400f, scaledDialOuterDiameter(canvasSize = 600f, dialRadiusScale = 1f), 0.001f)
         assertEquals(464f, scaledDialOuterDiameter(canvasSize = 600f, dialRadiusScale = 1.16f), 0.001f)

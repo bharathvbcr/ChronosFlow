@@ -5,7 +5,7 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import androidx.activity.compose.BackHandler
+import androidx.activity.BackEventCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -23,6 +23,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -40,7 +42,11 @@ import com.chronosflow.core.ui.shell.ChronosShellChromeSuppression
 import com.chronosflow.core.ui.shell.ChronosShellViewedDateReporter
 import com.chronosflow.core.ai.PrivacyMode
 import com.chronosflow.core.domain.diagnostics.AppEventLogEntry
+import com.chronosflow.core.domain.planner.PlannerOperationResult
+import com.chronosflow.core.notifications.NotificationPermissions
 import com.chronosflow.core.ui.components.ChronosBackdrop
+import com.chronosflow.core.ui.components.ChronosPredictiveBackHandlerWithProgress
+import com.chronosflow.core.ui.settings.ChronosFeatureFlags
 import com.chronosflow.core.ui.shell.ChronosSnackbarHost
 import com.chronosflow.core.ui.shell.LocalChronosShellBottomInset
 import com.chronosflow.feature.daydial.model.DayDialTab
@@ -70,7 +76,8 @@ fun DayDialScreen(
     onOpenMedication: () -> Unit,
     onOpenReview: () -> Unit,
     onSelectPrimaryTab: (DayDialTab) -> Unit,
-    onOpenCommandPalette: (() -> Unit)? = null
+    onOpenCommandPalette: (() -> Unit)? = null,
+    isActiveSection: Boolean = true
 ) {
     if (launchTargetUsesLightweightSidebar(launchTarget)) {
         DayDialLightweightSidebarScreen(
@@ -103,7 +110,8 @@ fun DayDialScreen(
         onOpenMedication = onOpenMedication,
         onOpenReview = onOpenReview,
         onSelectPrimaryTab = onSelectPrimaryTab,
-        onOpenCommandPalette = onOpenCommandPalette
+        onOpenCommandPalette = onOpenCommandPalette,
+        isActiveSection = isActiveSection
     )
 }
 
@@ -123,7 +131,8 @@ private fun DayDialDataScreen(
     onOpenMedication: () -> Unit,
     onOpenReview: () -> Unit,
     onSelectPrimaryTab: (DayDialTab) -> Unit,
-    onOpenCommandPalette: (() -> Unit)? = null
+    onOpenCommandPalette: (() -> Unit)? = null,
+    isActiveSection: Boolean = true
 ) {
     val context = LocalContext.current
     val vmState = rememberDayDialViewModelState(viewModel)
@@ -140,6 +149,15 @@ private fun DayDialDataScreen(
     val requestNotificationPermission = rememberNotificationPermissionRequester(context, viewModel, settings, uiState)
     val activity = context.findActivity()
     val lifecycleOwner = LocalLifecycleOwner.current
+    // Hold the screen awake only while a focus session is actually running and the
+    // user opted in, so an idle DayDial never drains the battery.
+    val keepScreenOnDuringFocus = settings.keepScreenOnDuringFocus &&
+        isFocusSessionActiveForTab(vmState.focusSession)
+    val rootView = LocalView.current
+    DisposableEffect(keepScreenOnDuringFocus) {
+        rootView.keepScreenOn = keepScreenOnDuringFocus
+        onDispose { rootView.keepScreenOn = false }
+    }
     var calendarPermissionRequested by rememberSaveable { mutableStateOf(false) }
     var calendarPermissionRefreshKey by rememberSaveable { mutableIntStateOf(0) }
     var showCalendarPermissionRationale by rememberSaveable { mutableStateOf(false) }
@@ -154,9 +172,25 @@ private fun DayDialDataScreen(
         )
     }
     DisposableEffect(lifecycleOwner, activity) {
+        // Cold start already auto-syncs the day in view through the ViewModel's
+        // per-date gate, so skip the first ON_START and only refresh on later
+        // foreground returns — reopening the app then pulls calendar edits made
+        // while it was backgrounded. The refresh is quiet (no-ops without calendar
+        // permission, never raises a banner).
+        var skipInitialForegroundSync = true
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                calendarPermissionRefreshKey = nextCalendarPermissionRefreshKey(calendarPermissionRefreshKey)
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    if (skipInitialForegroundSync) {
+                        skipInitialForegroundSync = false
+                    } else {
+                        viewModel.refreshCalendarForAppForeground()
+                    }
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    calendarPermissionRefreshKey = nextCalendarPermissionRefreshKey(calendarPermissionRefreshKey)
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -260,8 +294,20 @@ private fun DayDialDataScreen(
     val launchTargetKey = "$launchTarget#$launchTargetGeneration"
     if (lastAppliedTarget.value != launchTargetKey) {
         lastAppliedTarget.value = launchTargetKey
-        applyLaunchTarget(launchTarget, uiState, viewModel)
+        applyLaunchTarget(launchTarget, uiState, viewModel, settings.featureFlags)
     }
+
+    // `launchTarget` tracks the *live* requested Day target (re-applied on every
+    // dayTargetGeneration bump above to drive in-place tab switching). The system-back
+    // fallback instead needs the tab the screen was originally *routed* into: backing out
+    // of a non-Today primary tab (Plan / Focus / Review) returns to Today, but a deep link
+    // / cold start straight into a tab makes that tab the root, so back should exit to its
+    // owner. Capturing the launch target once (and across process death) keeps an in-app
+    // visit distinct from a deep link — otherwise the live target, which equals the current
+    // tab whenever it's showing, would make every visit look like a deep link and close the
+    // app on back (the original Review regression).
+    val initialLaunchTarget = rememberSaveable { launchTarget ?: "" }
+    val launchTab = dayDialTabForLaunchTarget(initialLaunchTarget)
 
     val renderedCurrentTab = dayDialRenderedCurrentTab(
         requestedPrimaryTab = requestedPrimaryTab,
@@ -384,6 +430,17 @@ private fun DayDialDataScreen(
         viewModel.clearAiPlanPrefill()
     }
 
+    // When Day stops being the active section (a sub-section is pushed on top — including the
+    // predictive-back preview that composes Day while topLevelSection is still the sub-section),
+    // drop any in-place sheet/selection so backing out returns to a clean dial rather than
+    // reviving a stale sheet (whose dismiss BackHandler would otherwise swallow the back gesture).
+    LaunchedEffect(isActiveSection) {
+        if (!isActiveSection) {
+            dismissSheet()
+            uiState.activeSidebarPage = null
+        }
+    }
+
     LaunchedEffect(uiState.activeSheet, vmState.isGenerating, hasGeneratedAiPlanResult, aiPlanAutoDismissState) {
         val update = reduceAiPlanAutoDismiss(
             state = aiPlanAutoDismissState,
@@ -419,12 +476,25 @@ private fun DayDialDataScreen(
     }
     val backFallbackTab = dayDialBackFallbackTab(
         currentTab = renderedCurrentTab,
-        launchTarget = launchTarget,
+        launchTab = launchTab,
         activeSheet = uiState.activeSheet
     )
-    BackHandler(enabled = backFallbackTab != null) {
-        backFallbackTab?.let(selectPrimaryTab)
-    }
+    // Drive a swipe-following preview as a non-Today primary tab (Plan / Focus / Review) is
+    // dismissed back to Today, so the back gesture is predictive instead of snapping on
+    // release. Mirrors the sidebar-page predictive back handler in DayDialScreenChrome.
+    var reviewBackProgress by remember { mutableFloatStateOf(0f) }
+    ChronosPredictiveBackHandlerWithProgress(
+        // Inert while a sub-section is on top (incl. the back-preview that composes Day): the back
+        // belongs to NavDisplay's pop, not this in-place tab-fallback handler.
+        enabled = isActiveSection && backFallbackTab != null,
+        onBackStarted = { backEvent -> reviewBackProgress = signedReviewBackProgress(backEvent) },
+        onBackProgressed = { backEvent -> reviewBackProgress = signedReviewBackProgress(backEvent) },
+        onBackCancelled = { reviewBackProgress = 0f },
+        onBackInvoked = {
+            reviewBackProgress = 0f
+            backFallbackTab?.let(selectPrimaryTab)
+        }
+    )
 
     DayDialScreenChrome(
         viewModel = viewModel,
@@ -446,6 +516,7 @@ private fun DayDialDataScreen(
         snackbarHostState = snackbarHostState,
         renderedCurrentTab = renderedCurrentTab,
         renderedActiveSidebarPage = renderedActiveSidebarPage,
+        reviewBackProgress = reviewBackProgress,
         requestNotificationPermission = requestNotificationPermission,
         calendarPermissionStatus = calendarPermissionStatus,
         showCalendarPermissionRationale = showCalendarPermissionRationale,
@@ -474,9 +545,12 @@ private fun DayDialDataScreen(
 
     MaterialTheme(colorScheme = dayDialColorScheme) {
         DayDialSheetHost(
-            activeSheet = uiState.activeSheet,
+            // Gate the sheet inputs to null while Day is not the active section so its
+            // ModalBottomSheet (and the dismiss BackHandler that would otherwise swallow a
+            // sub-section back gesture) never composes during the predictive-back preview.
+            activeSheet = if (isActiveSection) uiState.activeSheet else null,
             sheetState = sheetState,
-            selectedBlock = vmState.selectedBlock,
+            selectedBlock = if (isActiveSection) vmState.selectedBlock else null,
             selectedDate = vmState.selectedDate,
             sortedBlocks = sortedBlocks,
             missedBlocks = missedBlocks,
@@ -495,11 +569,28 @@ private fun DayDialDataScreen(
             focusElapsedSeconds = focusElapsedSeconds,
             focusRemainingSeconds = focusRemainingSeconds,
             focusSessionActive = isFocusSessionActiveForTab(vmState.focusSession),
+            currentMinuteOfDay = vmState.currentMinute,
             syncStatus = settings.syncStatus,
+            protectFocusBlocks = settings.protectFocusBlocks,
+            onProtectFocusChanged = { settings.protectFocusBlocks = it },
+            addBreaksAutomatically = settings.addBreaksAutomatically,
+            onAddBreaksAutomaticallyChanged = { settings.addBreaksAutomatically = it },
+            keepScreenOnDuringFocus = settings.keepScreenOnDuringFocus,
+            onKeepScreenOnDuringFocusChanged = { settings.keepScreenOnDuringFocus = it },
+            dailyFocusGoalMinutes = settings.dailyFocusGoalMinutes,
+            onDailyFocusGoalMinutesChanged = { settings.dailyFocusGoalMinutes = it },
+            defaultFocusBreakPreset = settings.defaultFocusBreakPreset,
+            onDefaultFocusBreakPresetChanged = { settings.defaultFocusBreakPreset = it },
             blockStartReminders = settings.blockStartReminders,
+            onBlockStartRemindersChanged = { settings.blockStartReminders = it },
             breakReminders = settings.breakReminders,
+            onBreakRemindersChanged = { settings.breakReminders = it },
             missedAlerts = settings.missedAlerts,
+            onMissedAlertsChanged = { settings.missedAlerts = it },
             endDayReviewReminder = settings.endDayReviewReminder,
+            onEndDayReviewReminderChanged = { settings.endDayReviewReminder = it },
+            notificationsReady = NotificationPermissions.areFocusNotificationsReady(context),
+            onRequestNotificationPermission = requestNotificationPermission,
             reminderScheduleStatus = vmState.reminderScheduleStatus,
             medicationReliabilityStatus = vmState.medicationReliabilityStatus,
             dynamicColorEnabled = settings.dynamicColorEnabled,
@@ -520,6 +611,9 @@ private fun DayDialDataScreen(
             onDeleteSelectedBlock = {
                 viewModel.deleteSelectedBlock()
                 uiState.activeSheet = null
+                uiState.showSnackbar("Block deleted", actionLabel = "Undo") {
+                    viewModel.undo()
+                }
             },
             onStartFocus = viewModel::startFocusSession,
             onAdjustFocus = { minutes ->
@@ -539,11 +633,20 @@ private fun DayDialDataScreen(
             onAcceptAiSuggestion = viewModel::acceptAiSuggestion,
             onRejectAiSuggestion = viewModel::rejectAiSuggestion,
             onModifyAiSuggestion = viewModel::modifyAiSuggestion,
-            onSetPrivacyMode = viewModel::setPrivacyMode,
             onMarkComplete = viewModel::markBlockComplete,
             onMarkMissed = { blockId -> viewModel.markCurrentBlockMissed(blockId, true) },
             onUndoMissed = { blockId -> viewModel.markCurrentBlockMissed(blockId, false) },
-            onDuplicateBlock = viewModel::duplicateBlock,
+            onDuplicateBlock = { blockId ->
+                // Message from the real planner outcome — the copy is rejected when the day has
+                // no free slot, so the sheet must not claim success unconditionally.
+                viewModel.duplicateBlock(blockId) { result ->
+                    uiState.snackbarMessage = if (result is PlannerOperationResult.Applied) {
+                        "Block duplicated"
+                    } else {
+                        result.message.ifBlank { "Couldn't duplicate block" }
+                    }
+                }
+            },
             onUpdateBlockDetails = viewModel::updateBlockDetails,
             onExportBlockToCalendar = { requestCalendarAction(PendingCalendarAction.ExportBlock(it)) },
             onRefreshCalendarExport = { requestCalendarAction(PendingCalendarAction.RefreshBlock(it)) },
@@ -574,13 +677,20 @@ private fun DayDialDataScreen(
         )
     }
 
-    DayDialTemplateEditorSheet(templateState)
+    val routineAssistState by viewModel.routineAssistState.collectAsStateWithLifecycle()
+    DayDialTemplateEditorSheet(
+        templateState = templateState,
+        assistState = routineAssistState,
+        onRequestAssist = viewModel::requestRoutineAssist,
+        onClearAssist = viewModel::clearRoutineAssist
+    )
 }
 
 private fun applyLaunchTarget(
     target: String?,
     uiState: DayDialScreenUiState,
-    viewModel: DayDialViewModel
+    viewModel: DayDialViewModel,
+    featureFlags: ChronosFeatureFlags
 ) {
     sidebarPageForLaunchTarget(target)?.let { page ->
         uiState.activeSidebarPage = page
@@ -606,12 +716,16 @@ private fun applyLaunchTarget(
         "journal" -> {
             uiState.currentTab = DayDialTab.TODAY
             uiState.activeSidebarPage = null
-            uiState.activeSheet = SheetTarget.Journal(LocalDate.now())
+            if (featureFlags.journalEnabled) {
+                uiState.activeSheet = SheetTarget.Journal(LocalDate.now())
+            }
         }
         "sleep" -> {
             uiState.currentTab = DayDialTab.TODAY
             uiState.activeSidebarPage = null
-            uiState.activeSheet = SheetTarget.SleepLog(LocalDate.now())
+            if (featureFlags.sleepEnabled) {
+                uiState.activeSheet = SheetTarget.SleepLog(LocalDate.now())
+            }
         }
         // "review"/"review-sheet" are legacy aliases for pinned shortcuts and old
         // notifications; they now resolve to the unified Review page (the Insights tab),
@@ -787,6 +901,8 @@ private fun DayDialLightweightSidebarScreen(
                         onMissedAlertsChanged = { settings.missedAlerts = it },
                         endDayReviewReminder = settings.endDayReviewReminder,
                         onEndDayReviewReminderChanged = { settings.endDayReviewReminder = it },
+                        sleepJournalLogReminder = settings.sleepJournalLogReminder,
+                        onSleepJournalLogReminderChanged = { settings.sleepJournalLogReminder = it },
                         sleepScheduleEnabled = settings.sleepScheduleEnabled,
                         onSleepScheduleEnabledChanged = { settings.sleepScheduleEnabled = it },
                         sleepScheduleStartMinute = settings.sleepScheduleStartMinute,
@@ -907,13 +1023,44 @@ internal fun applyRequestedPrimaryTabIfChanged(
     return requestedPrimaryTab
 }
 
+/**
+ * Signed -1f..1f swipe progress for the Review-tab predictive back preview. A right-edge
+ * gesture translates content toward the left (negative) and a left-edge gesture toward the
+ * right (positive), so the dismissing tab follows the swipe edge.
+ */
+private fun signedReviewBackProgress(backEvent: BackEventCompat): Float =
+    if (backEvent.swipeEdge == BackEventCompat.EDGE_RIGHT) {
+        -backEvent.progress
+    } else {
+        backEvent.progress
+    }
+
+/**
+ * The Day tab a launch/routing target lands on, mirroring [applyLaunchTarget]'s tab assignment
+ * (sidebar and one-shot-sheet targets keep the underlying Today tab). Used to recover the tab the
+ * app was originally routed into so the back fallback can leave a deep-link/cold-start root to exit.
+ */
+internal fun dayDialTabForLaunchTarget(target: String?): DayDialTab =
+    when (target) {
+        "plan" -> DayDialTab.PLAN
+        "focus-planner" -> DayDialTab.FOCUS
+        LAUNCH_TARGET_INSIGHTS, "review-sheet", "review" -> DayDialTab.INSIGHTS
+        else -> DayDialTab.TODAY
+    }
+
+/**
+ * Which Day tab a system-back gesture should fall back to, or null to let back propagate (exit).
+ * Today is the home/root, so back from any other primary tab returns to Today — except when that
+ * tab is the one the app was launched/deep-linked into (then it's the root and back exits), or a
+ * sheet is open (the sheet owns back).
+ */
 internal fun dayDialBackFallbackTab(
     currentTab: DayDialTab,
-    launchTarget: String?,
+    launchTab: DayDialTab,
     activeSheet: SheetTarget?
 ): DayDialTab? =
-    if (currentTab == DayDialTab.INSIGHTS &&
-        launchTarget != LAUNCH_TARGET_INSIGHTS &&
+    if (currentTab != DayDialTab.TODAY &&
+        currentTab != launchTab &&
         activeSheet == null
     ) {
         DayDialTab.TODAY

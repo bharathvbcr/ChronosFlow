@@ -6,6 +6,8 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.chronosflow.core.data.model.GoalEntity
+import com.chronosflow.core.data.model.HabitEntity
+import com.chronosflow.core.data.model.TaskEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -30,4 +32,16 @@ interface GoalDao {
             "AND habitId IN (SELECT id FROM habits WHERE goalId = :goalId)"
     )
     fun observeHabitCompletionCount(goalId: String): Flow<Int>
+
+    @Query(
+        "SELECT * FROM tasks WHERE goalId = :goalId " +
+            "ORDER BY isCompleted ASC, priority DESC, targetDate IS NULL, targetDate ASC, title ASC"
+    )
+    fun observeTasksForGoal(goalId: String): Flow<List<TaskEntity>>
+
+    @Query(
+        "SELECT * FROM habits WHERE goalId = :goalId " +
+            "ORDER BY isActive DESC, streakCount DESC, title ASC"
+    )
+    fun observeHabitsForGoal(goalId: String): Flow<List<HabitEntity>>
 }

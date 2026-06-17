@@ -156,19 +156,19 @@ class ChronosRouteShellDestinationTest {
         val destinations = ChronosRoute.expandedShellDestinations().associateBy { it.id }
 
         assertEquals(
-            ChronosRoute.Tasks.route,
+            ChronosRoute.Tasks(),
             destinations.getValue(ChronosRoute.SHELL_TASKS).route
         )
         assertEquals(
-            ChronosRoute.Habits.route,
+            ChronosRoute.Habits(),
             destinations.getValue(ChronosRoute.SHELL_HABITS).route
         )
         assertEquals(
-            ChronosRoute.Medication.route,
+            ChronosRoute.Medication(),
             destinations.getValue(ChronosRoute.SHELL_MEDICATION).route
         )
         assertEquals(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS),
+            ChronosRoute.Day(ChronosRoute.Day.TARGET_INSIGHTS),
             destinations.getValue(ChronosRoute.SHELL_REVIEW).route
         )
     }
@@ -205,63 +205,30 @@ class ChronosRouteShellDestinationTest {
     }
 
     @Test
-    fun `initial shell target only seeds sidebar launch pages`() {
-        assertEquals(
-            ChronosRoute.Day.TARGET_TASKS,
-            initialLocalDayTarget(ChronosRoute.Day.TARGET_TASKS)
-        )
-        assertEquals(
-            ChronosRoute.Day.TARGET_TEMPLATES,
-            initialLocalDayTarget(ChronosRoute.Day.TARGET_TEMPLATES)
-        )
-        assertNull(initialLocalDayTarget(ChronosRoute.Day.TARGET_TODAY))
-        // Review resolves to the Insights tab, which is not a sidebar launch page.
-        assertNull(initialLocalDayTarget(ChronosRoute.Day.TARGET_INSIGHTS))
-    }
-
-    @Test
-    fun `external sidebar launch replaces current local day target`() {
-        assertEquals(
-            ChronosRoute.Day.TARGET_HABITS,
-            localDayTargetAfterExternalLaunch(
-                launchDayTarget = ChronosRoute.Day.TARGET_HABITS,
-                localDayTarget = ChronosRoute.Day.TARGET_TASKS
-            )
-        )
-        assertEquals(
-            ChronosRoute.Day.TARGET_TASKS,
-            localDayTargetAfterExternalLaunch(
-                launchDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                localDayTarget = ChronosRoute.Day.TARGET_TASKS
-            )
-        )
-    }
-
-    @Test
     fun `medication and graduated review notifications are enabled by default`() {
         assertEquals(
-            ChronosRoute.Medication.route,
+            ChronosRoute.Medication(),
             ChronosRoute.routeForNotificationLaunch(
                 NotificationLaunch(section = SECTION_MEDICATION),
                 ChronosFeatureFlags()
             )
         )
         assertEquals(
-            ChronosRoute.Day.createRoute(),
+            ChronosRoute.Day(),
             ChronosRoute.routeForNotificationLaunch(
                 NotificationLaunch(section = SECTION_MEDICATION),
                 ChronosFeatureFlags(medicationEnabled = false)
             )
         )
         assertEquals(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS),
+            ChronosRoute.Day(ChronosRoute.Day.TARGET_INSIGHTS),
             ChronosRoute.routeForNotificationLaunch(
                 NotificationLaunch(section = SECTION_REVIEW),
                 ChronosFeatureFlags()
             )
         )
         assertEquals(
-            ChronosRoute.Day.createRoute(),
+            ChronosRoute.Day(),
             ChronosRoute.routeForNotificationLaunch(
                 NotificationLaunch(section = SECTION_REVIEW),
                 ChronosFeatureFlags(reviewEnabled = false)
@@ -337,20 +304,6 @@ class ChronosRouteShellDestinationTest {
     }
 
     @Test
-    fun `day primary shell destinations can switch in place while already on day`() {
-        val planDestination = ChronosRoute.shellDestinations.single { it.id == ChronosRoute.SHELL_PLAN }
-        val todayDestination = ChronosRoute.shellDestinations.single { it.id == ChronosRoute.SHELL_TODAY }
-        val focusDestination = ChronosRoute.shellDestinations.single { it.id == ChronosRoute.SHELL_FOCUS }
-        val reviewDestination = ChronosRoute.shellDestinations.single { it.id == ChronosRoute.SHELL_REVIEW }
-
-        assertTrue(shouldHandleDayPrimaryDestinationInPlace(ChronosRoute.Day.section, planDestination))
-        assertTrue(shouldHandleDayPrimaryDestinationInPlace(ChronosRoute.Day.section, todayDestination))
-        assertTrue(shouldHandleDayPrimaryDestinationInPlace(ChronosRoute.Day.section, focusDestination))
-        assertFalse(shouldHandleDayPrimaryDestinationInPlace(ChronosRoute.Tasks.section, planDestination))
-        assertFalse(shouldHandleDayPrimaryDestinationInPlace(ChronosRoute.Day.section, reviewDestination))
-    }
-
-    @Test
     fun `quick add closes when shell destination changes`() {
         val baseTodayKey = quickAddDestinationChangeKey(
             destinationId = ChronosRoute.SHELL_TODAY,
@@ -407,164 +360,10 @@ class ChronosRouteShellDestinationTest {
     }
 
     @Test
-    fun `local day target overrides route target only while shell is on day`() {
-        assertEquals(
-            ChronosRoute.Day.TARGET_PLAN,
-            effectiveShellDayTarget(
-                currentSection = ChronosRoute.Day.section,
-                routeDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                localDayTarget = ChronosRoute.Day.TARGET_PLAN
-            )
-        )
-        assertEquals(
-            ChronosRoute.Day.TARGET_TODAY,
-            effectiveShellDayTarget(
-                currentSection = ChronosRoute.Day.section,
-                routeDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                localDayTarget = null
-            )
-        )
-        assertEquals(
-            null,
-            effectiveShellDayTarget(
-                currentSection = ChronosRoute.Tasks.section,
-                routeDayTarget = null,
-                localDayTarget = ChronosRoute.Day.TARGET_PLAN
-            )
-        )
-    }
-
-    @Test
-    fun `pending primary day target renders immediately while shell is on day`() {
-        assertEquals(
-            ChronosRoute.Day.TARGET_PLAN,
-            optimisticShellDayTarget(
-                currentSection = ChronosRoute.Day.section,
-                effectiveDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                pendingPrimaryDayTarget = ChronosRoute.Day.TARGET_PLAN
-            )
-        )
-        assertEquals(
-            ChronosRoute.Day.TARGET_TODAY,
-            optimisticShellDayTarget(
-                currentSection = ChronosRoute.Tasks.section,
-                effectiveDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                pendingPrimaryDayTarget = ChronosRoute.Day.TARGET_PLAN
-            )
-        )
-        assertEquals(
-            ChronosRoute.Day.TARGET_TODAY,
-            optimisticShellDayTarget(
-                currentSection = ChronosRoute.Day.section,
-                effectiveDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                pendingPrimaryDayTarget = ChronosRoute.Day.TARGET_INSIGHTS
-            )
-        )
-    }
-
-    @Test
-    fun `pending primary day target is committed until synchronized target catches up`() {
-        assertEquals(
-            ChronosRoute.Day.TARGET_PLAN,
-            localDayTargetAfterOptimisticPrimaryTarget(
-                currentSection = ChronosRoute.Day.section,
-                synchronizedLocalDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                pendingPrimaryDayTarget = ChronosRoute.Day.TARGET_PLAN
-            )
-        )
-        assertEquals(
-            ChronosRoute.Day.TARGET_PLAN,
-            localDayTargetAfterOptimisticPrimaryTarget(
-                currentSection = ChronosRoute.Day.section,
-                synchronizedLocalDayTarget = ChronosRoute.Day.TARGET_PLAN,
-                pendingPrimaryDayTarget = ChronosRoute.Day.TARGET_PLAN
-            )
-        )
-        assertEquals(
-            ChronosRoute.Day.TARGET_TODAY,
-            localDayTargetAfterOptimisticPrimaryTarget(
-                currentSection = ChronosRoute.Tasks.section,
-                synchronizedLocalDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                pendingPrimaryDayTarget = ChronosRoute.Day.TARGET_PLAN
-            )
-        )
-    }
-
-    @Test
-    fun `changed route day target replaces stale local day target while shell is on day`() {
-        assertEquals(
-            ChronosRoute.Day.TARGET_FOCUS_PLANNER,
-            localDayTargetAfterRouteTargetChange(
-                currentSection = ChronosRoute.Day.section,
-                previousSection = ChronosRoute.Day.section,
-                previousRouteDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                routeDayTarget = ChronosRoute.Day.TARGET_FOCUS_PLANNER,
-                localDayTarget = ChronosRoute.Day.TARGET_PLAN
-            )
-        )
-        assertEquals(
-            ChronosRoute.Day.TARGET_INSIGHTS,
-            localDayTargetAfterRouteTargetChange(
-                currentSection = ChronosRoute.Day.section,
-                previousSection = ChronosRoute.Day.section,
-                previousRouteDayTarget = ChronosRoute.Day.TARGET_PLAN,
-                routeDayTarget = ChronosRoute.Day.TARGET_INSIGHTS,
-                localDayTarget = ChronosRoute.Day.TARGET_FOCUS_PLANNER
-            )
-        )
-    }
-
-    @Test
-    fun `unchanged or missing route day target preserves in-place local day target`() {
-        assertEquals(
-            ChronosRoute.Day.TARGET_PLAN,
-            localDayTargetAfterRouteTargetChange(
-                currentSection = ChronosRoute.Day.section,
-                previousSection = ChronosRoute.Day.section,
-                previousRouteDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                routeDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                localDayTarget = ChronosRoute.Day.TARGET_PLAN
-            )
-        )
-        assertEquals(
-            ChronosRoute.Day.TARGET_PLAN,
-            localDayTargetAfterRouteTargetChange(
-                currentSection = ChronosRoute.Day.section,
-                previousSection = ChronosRoute.Day.section,
-                previousRouteDayTarget = ChronosRoute.Day.TARGET_TODAY,
-                routeDayTarget = null,
-                localDayTarget = ChronosRoute.Day.TARGET_PLAN
-            )
-        )
-    }
-
-    @Test
-    fun `base day route clears stale local target after returning from another section`() {
-        assertEquals(
-            null,
-            localDayTargetAfterRouteTargetChange(
-                currentSection = ChronosRoute.Day.section,
-                previousSection = ChronosRoute.Tasks.section,
-                previousRouteDayTarget = null,
-                routeDayTarget = null,
-                localDayTarget = ChronosRoute.Day.TARGET_PLAN
-            )
-        )
-        assertEquals(
-            null,
-            localDayTargetAfterRouteTargetChange(
-                currentSection = ChronosRoute.Day.section,
-                previousSection = null,
-                previousRouteDayTarget = null,
-                routeDayTarget = null,
-                localDayTarget = ChronosRoute.Day.TARGET_FOCUS_PLANNER
-            )
-        )
-    }
-
-    @Test
     fun `day shell targets map to DayDial tabs`() {
         assertEquals(DayDialTab.TODAY, dayDialTabForShellTarget(ChronosRoute.Day.TARGET_TODAY))
+        // The Today double-tap target resets the date but still renders the Today tab.
+        assertEquals(DayDialTab.TODAY, dayDialTabForShellTarget(ChronosRoute.Day.TARGET_TODAY_RESET))
         assertEquals(DayDialTab.PLAN, dayDialTabForShellTarget(ChronosRoute.Day.TARGET_PLAN))
         assertEquals(DayDialTab.FOCUS, dayDialTabForShellTarget(ChronosRoute.Day.TARGET_FOCUS_PLANNER))
         assertEquals(null, dayDialTabForShellTarget(ChronosRoute.Day.TARGET_INSIGHTS))
@@ -708,62 +507,15 @@ class ChronosRouteShellDestinationTest {
     }
 
     @Test
-    fun `page transitions use global shared axis motion by default`() {
-        val pop = chronosRouteTransitionSelection(
-            from = ChronosRoute.Tasks.route,
-            to = ChronosRoute.Day.route,
-            operation = ChronosNavigationOperation.Pop,
-            reducedMotion = false
-        )
-
-        assertEquals(ChronosRouteTransitionKind.MaterialSharedAxis, pop.kind)
-        assertEquals(ChronosTransitionDirection.Backward, pop.direction)
-        assertEquals(ChronosMotionDefaults.DefaultDurationMillis, pop.motionConfig.durationMillis)
-        assertEquals(
-            ChronosMotionDefaults.SharedAxisSlideFraction.toDouble(),
-            pop.motionConfig.slideFraction.toDouble(),
-            0.0001
-        )
-
-        val reduced = chronosRouteTransitionSelection(
-            from = ChronosRoute.Tasks.route,
-            to = ChronosRoute.Day.route,
-            operation = ChronosNavigationOperation.Pop,
-            reducedMotion = true
-        )
-
-        assertEquals(ChronosMotionDefaults.ReducedDurationMillis, reduced.motionConfig.durationMillis)
-        assertEquals(0.0, reduced.motionConfig.slideFraction.toDouble(), 0.0001)
-        assertEquals(1.0, reduced.motionConfig.enterScale.toDouble(), 0.0001)
-        assertEquals(1.0, reduced.motionConfig.exitScale.toDouble(), 0.0001)
-    }
-
-    @Test
-    fun `route transition resolver suppresses day internal motion and fades shell peers`() {
-        val dayInternal = chronosRouteTransitionSelection(
-            from = ChronosRoute.Day.route,
-            to = ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_PLAN),
-            operation = ChronosNavigationOperation.Push,
-            reducedMotion = false
-        )
-        assertEquals(ChronosRouteTransitionKind.None, dayInternal.kind)
-        assertEquals(ChronosTransitionDirection.Neutral, dayInternal.direction)
-
-        val shellPeer = chronosRouteTransitionSelection(
-            from = ChronosRoute.Tasks.route,
-            to = ChronosRoute.Medication.route,
-            operation = ChronosNavigationOperation.Push,
-            reducedMotion = false
-        )
-        assertEquals(ChronosRouteTransitionKind.ShellPeerFade, shellPeer.kind)
-        assertEquals(ChronosTransitionDirection.Neutral, shellPeer.direction)
-    }
-
-    @Test
     fun `day targets and focus routes resolve to the expected shell destination`() {
         assertEquals(
             ChronosRoute.SHELL_TODAY,
             ChronosRoute.shellDestinationFor(SECTION_DAY, ChronosRoute.Day.TARGET_TODAY).id
+        )
+        // The Today double-tap reset target keeps the Today bottom-bar item highlighted.
+        assertEquals(
+            ChronosRoute.SHELL_TODAY,
+            ChronosRoute.shellDestinationFor(SECTION_DAY, ChronosRoute.Day.TARGET_TODAY_RESET).id
         )
         assertEquals(
             ChronosRoute.SHELL_PLAN,
@@ -810,41 +562,41 @@ class ChronosRouteShellDestinationTest {
     @Test
     fun `quick add routes target add sheets`() {
         assertEquals(
-            "${SECTION_DAY}?target=${ChronosRoute.Day.TARGET_ADD_BLOCK}",
+            ChronosRoute.Day(target = ChronosRoute.Day.TARGET_ADD_BLOCK),
             ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_ADD_BLOCK)
         )
         assertEquals(
-            "${SECTION_TASKS}?taskId=&target=${ChronosRoute.TARGET_ADD}",
+            ChronosRoute.Tasks(target = ChronosRoute.TARGET_ADD),
             ChronosRoute.Tasks.createRoute(target = ChronosRoute.TARGET_ADD)
         )
         assertEquals(
-            "${SECTION_HABITS}?target=${ChronosRoute.TARGET_ADD}",
+            ChronosRoute.Habits(target = ChronosRoute.TARGET_ADD),
             ChronosRoute.Habits.createRoute(ChronosRoute.TARGET_ADD)
         )
         assertEquals(
-            "${SECTION_MEDICATION}?target=${ChronosRoute.TARGET_ADD}",
+            ChronosRoute.Medication(target = ChronosRoute.TARGET_ADD),
             ChronosRoute.Medication.createRoute(ChronosRoute.TARGET_ADD)
         )
     }
 
     @Test
-    fun `capture routes encode add text for dynamic create flows`() {
+    fun `capture routes carry add text for dynamic create flows`() {
         assertEquals(
-            "${SECTION_TASKS}?taskId=&target=${ChronosRoute.TARGET_ADD}&capture=call%20mom%20tomorrow",
+            ChronosRoute.Tasks(target = ChronosRoute.TARGET_ADD, capture = "call mom tomorrow"),
             ChronosRoute.Tasks.createRoute(
                 target = ChronosRoute.TARGET_ADD,
                 capture = "call mom tomorrow"
             )
         )
         assertEquals(
-            "${SECTION_HABITS}?target=${ChronosRoute.TARGET_ADD}&capture=gym%203x%20week%20evening",
+            ChronosRoute.Habits(target = ChronosRoute.TARGET_ADD, capture = "gym 3x week evening"),
             ChronosRoute.Habits.createRoute(
                 target = ChronosRoute.TARGET_ADD,
                 capture = "gym 3x week evening"
             )
         )
         assertEquals(
-            "${SECTION_MEDICATION}?target=${ChronosRoute.TARGET_ADD}&capture=vitamin%20d%201000%20iu%20morning",
+            ChronosRoute.Medication(target = ChronosRoute.TARGET_ADD, capture = "vitamin d 1000 iu morning"),
             ChronosRoute.Medication.createRoute(
                 target = ChronosRoute.TARGET_ADD,
                 capture = "vitamin d 1000 iu morning"
@@ -853,169 +605,36 @@ class ChronosRouteShellDestinationTest {
     }
 
     @Test
-    fun `one shot sheet routes can re-enter while primary tabs stay single top`() {
-        assertFalse(
-            shouldLaunchSingleTopForRoute(
-                ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_ADD_BLOCK)
-            )
-        )
-        assertFalse(
-            shouldLaunchSingleTopForRoute(
-                ChronosRoute.Tasks.createRoute(target = ChronosRoute.TARGET_ADD)
-            )
-        )
-        assertFalse(
-            shouldLaunchSingleTopForRoute(
-                ChronosRoute.Habits.createRoute(ChronosRoute.TARGET_ADD)
-            )
-        )
-        assertFalse(
-            shouldLaunchSingleTopForRoute(
-                ChronosRoute.Medication.createRoute(ChronosRoute.TARGET_ADD)
-            )
-        )
-        assertTrue(
-            shouldLaunchSingleTopForRoute(
-                ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TODAY)
-            )
-        )
-        assertTrue(
-            shouldLaunchSingleTopForRoute(
-                ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_PLAN)
-            )
-        )
-        assertTrue(
-            shouldLaunchSingleTopForRoute(
-                ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_FOCUS_PLANNER)
-            )
-        )
-        assertTrue(shouldLaunchSingleTopForRoute(ChronosRoute.Tasks.route))
-    }
-
-    @Test
-    fun `day primary tab routes do not restore a stale day tab state`() {
-        val dayPrimaryTabRoutes = listOf(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TODAY),
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_PLAN),
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_FOCUS_PLANNER)
-        )
-
-        dayPrimaryTabRoutes.forEach { route ->
-            val policy = navigationPolicyForRoute(route)
-
-            assertTrue("Expected launchSingleTop for $route", policy.launchSingleTop)
-            assertFalse("Expected no restoreState for $route", policy.restoreState)
-            assertFalse("Expected no saveState for $route", policy.saveState)
-            assertEquals(ChronosRoute.Day.route, policy.popUpToRoute)
-        }
-    }
-
-    @Test
-    fun `today reset route does not restore a stale day state`() {
-        // Double-tapping the Today tab navigates to "today-reset"; it must apply fresh
-        // (launchSingleTop, no restoreState/saveState) so selectDate(now) runs. If it
-        // restored a saved Day back stack, the stale target/ViewModel would clobber the
-        // reset and the dial would stay on the previously viewed date.
-        val policy = navigationPolicyForRoute(ChronosRoute.Day.createRoute("today-reset"))
-
-        assertTrue("Expected launchSingleTop for today-reset", policy.launchSingleTop)
-        assertFalse("Expected no restoreState for today-reset", policy.restoreState)
-        assertFalse("Expected no saveState for today-reset", policy.saveState)
-        assertEquals(ChronosRoute.Day.route, policy.popUpToRoute)
-    }
-
-    @Test
-    fun `stable shell routes save and restore back stack state`() {
-        val stableRoutes = listOf(
-            ChronosRoute.Day.createRoute(),
-            ChronosRoute.Tasks.route,
-            ChronosRoute.Habits.route,
-            ChronosRoute.Medication.route
-        )
-
-        stableRoutes.forEach { route ->
-            val policy = navigationPolicyForRoute(route)
-
-            assertTrue("Expected launchSingleTop for $route", policy.launchSingleTop)
-            assertTrue("Expected restoreState for $route", policy.restoreState)
-            assertTrue("Expected saveState for $route", policy.saveState)
-            assertEquals(ChronosRoute.Day.route, policy.popUpToRoute)
-        }
-    }
-
-    @Test
-    fun `insights route is back stackable without restoring stale day state`() {
-        val policy = navigationPolicyForRoute(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS)
-        )
-
-        assertFalse(policy.launchSingleTop)
-        assertFalse(policy.restoreState)
-        assertFalse(policy.saveState)
-        assertNull(policy.popUpToRoute)
-    }
-
-    @Test
-    fun `one shot sheet routes do not restore stale sheet state`() {
-        val oneShotRoutes = listOf(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_ADD_BLOCK),
-            ChronosRoute.Tasks.createRoute(target = ChronosRoute.TARGET_ADD),
-            ChronosRoute.Tasks.createRoute(
-                target = ChronosRoute.TARGET_ADD,
-                capture = "call mom tomorrow"
-            ),
-            ChronosRoute.Tasks.createRoute(taskId = "task-1", target = "context"),
-            ChronosRoute.Habits.createRoute(ChronosRoute.TARGET_ADD),
-            ChronosRoute.Habits.createRoute(ChronosRoute.TARGET_ADD, capture = "gym 3x week evening"),
-            ChronosRoute.Medication.createRoute(ChronosRoute.TARGET_ADD),
-            ChronosRoute.Medication.createRoute(
-                target = ChronosRoute.TARGET_ADD,
-                capture = "vitamin d 1000 iu morning"
-            )
-        )
-
-        oneShotRoutes.forEach { route ->
-            val policy = navigationPolicyForRoute(route)
-
-            assertFalse("Expected no launchSingleTop for $route", policy.launchSingleTop)
-            assertFalse("Expected no restoreState for $route", policy.restoreState)
-            assertFalse("Expected no saveState for $route", policy.saveState)
-            assertEquals(ChronosRoute.Day.route, policy.popUpToRoute)
-        }
-    }
-
-    @Test
-    fun `capture create routes encode typed command text for query navigation`() {
+    fun `capture create routes carry typed command text for type-safe navigation`() {
         val capture = "call mom & vitamin d"
-        val encodedCapture = "call%20mom%20%26%20vitamin%20d"
 
         assertEquals(
-            "$SECTION_TASKS?taskId=&target=add&capture=$encodedCapture",
+            ChronosRoute.Tasks(target = ChronosRoute.TARGET_ADD, capture = capture),
             ChronosRoute.Tasks.createRoute(target = ChronosRoute.TARGET_ADD, capture = capture)
         )
         assertEquals(
-            "$SECTION_HABITS?target=add&capture=$encodedCapture",
+            ChronosRoute.Habits(target = ChronosRoute.TARGET_ADD, capture = capture),
             ChronosRoute.Habits.createRoute(target = ChronosRoute.TARGET_ADD, capture = capture)
         )
         assertEquals(
-            "$SECTION_MEDICATION?target=add&capture=$encodedCapture",
+            ChronosRoute.Medication(target = ChronosRoute.TARGET_ADD, capture = capture),
             ChronosRoute.Medication.createRoute(target = ChronosRoute.TARGET_ADD, capture = capture)
         )
         assertEquals(
-            "$SECTION_DAY?target=${ChronosRoute.Day.TARGET_FOCUS_PLANNER}&capture=$encodedCapture",
+            ChronosRoute.Day(target = ChronosRoute.Day.TARGET_FOCUS_PLANNER, capture = capture),
             ChronosRoute.Day.createRoute(target = ChronosRoute.Day.TARGET_FOCUS_PLANNER, capture = capture)
         )
     }
 
     @Test
     fun `top level sections open their full feature screens directly`() {
-        assertEquals(ChronosRoute.Day.createRoute(), ChronosRoute.topLevelRouteFor(SECTION_DAY))
-        assertEquals(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_FOCUS_PLANNER), ChronosRoute.topLevelRouteFor(SECTION_FOCUS))
-        assertEquals(ChronosRoute.Tasks.route, ChronosRoute.topLevelRouteFor(SECTION_TASKS))
-        assertEquals(ChronosRoute.Habits.route, ChronosRoute.topLevelRouteFor(SECTION_HABITS))
-        assertEquals(ChronosRoute.Medication.route, ChronosRoute.topLevelRouteFor(SECTION_MEDICATION))
+        assertEquals(ChronosRoute.Day(), ChronosRoute.topLevelRouteFor(SECTION_DAY))
+        assertEquals(ChronosRoute.Day(ChronosRoute.Day.TARGET_FOCUS_PLANNER), ChronosRoute.topLevelRouteFor(SECTION_FOCUS))
+        assertEquals(ChronosRoute.Tasks(), ChronosRoute.topLevelRouteFor(SECTION_TASKS))
+        assertEquals(ChronosRoute.Habits(), ChronosRoute.topLevelRouteFor(SECTION_HABITS))
+        assertEquals(ChronosRoute.Medication(), ChronosRoute.topLevelRouteFor(SECTION_MEDICATION))
         assertEquals(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS),
+            ChronosRoute.Day(ChronosRoute.Day.TARGET_INSIGHTS),
             ChronosRoute.topLevelRouteFor(SECTION_REVIEW)
         )
     }

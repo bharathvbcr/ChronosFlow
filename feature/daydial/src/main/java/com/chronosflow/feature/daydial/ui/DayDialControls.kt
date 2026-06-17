@@ -1,6 +1,9 @@
 package com.chronosflow.feature.daydial.ui
 
+import com.chronosflow.core.ui.components.ChronosFilledTonalButton
+
 import androidx.compose.foundation.clickable
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,7 +17,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -23,18 +25,30 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.chronosflow.core.ai.PrivacyMode
+import com.chronosflow.core.domain.wear.WearLinkStatus
+import com.chronosflow.core.ui.components.ChronosFilterChip
 import com.chronosflow.core.ui.components.ChronosListCard
+import com.chronosflow.core.ui.components.ChronosSectionTitle
 import com.chronosflow.core.ui.components.ChronosSettingsRow
 import com.chronosflow.core.ui.components.formatDurationLabel
+import com.chronosflow.core.ui.components.formatLastSyncedLabel
 import com.chronosflow.feature.daydial.DailyReview
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun ActionGrid(actions: List<Pair<String, () -> Unit>>) {
@@ -42,7 +56,7 @@ internal fun ActionGrid(actions: List<Pair<String, () -> Unit>>) {
         actions.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 row.forEach { (label, action) ->
-                    FilledTonalButton(onClick = action, modifier = Modifier.weight(1f)) {
+                    ChronosFilledTonalButton(onClick = action, modifier = Modifier.weight(1f)) {
                         Text(label, textAlign = TextAlign.Center)
                     }
                 }
@@ -59,21 +73,94 @@ internal fun PrivacyModeSelector(
 ) {
     Text("Privacy Mode", style = MaterialTheme.typography.labelLarge)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        FilterChip(
+        ChronosFilterChip(
             selected = privacyMode == PrivacyMode.ON_DEVICE_ONLY,
             onClick = { onPrivacyModeSelected(PrivacyMode.ON_DEVICE_ONLY) },
             label = { Text("Gemini Nano") }
         )
-        FilterChip(
+        ChronosFilterChip(
             selected = privacyMode == PrivacyMode.CLOUD_ALLOWED,
             onClick = { onPrivacyModeSelected(PrivacyMode.CLOUD_ALLOWED) },
             label = { Text("Cloud Gemini") }
         )
-        FilterChip(
+        ChronosFilterChip(
             selected = privacyMode == PrivacyMode.DISABLED,
             onClick = { onPrivacyModeSelected(PrivacyMode.DISABLED) },
             label = { Text("Privacy Off") }
         )
+    }
+}
+
+/**
+ * Wear OS link status + on-demand sync, for the Privacy & Sync settings. Shows whether a watch is
+ * reachable and when the phone last pushed the day summary, and lets the user force a push — the
+ * direct fix for a watch stuck on "Not synced yet" while the phone app is open. Status loads when
+ * the card appears and refreshes after a manual sync.
+ */
+@Composable
+internal fun WearLinkStatusCard(
+    backdropMutedText: Color,
+    showMessage: (String) -> Unit
+) {
+    val provider = rememberWearLinkStatusProvider()
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf<WearLinkStatus?>(null) }
+    var syncing by remember { mutableStateOf(false) }
+    LaunchedEffect(provider) { status = runCatching { provider.currentStatus() }.getOrNull() }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ChronosSectionTitle(title = "Watch", subtitle = "Wear OS sync")
+        val current = status
+        val connectionLine = when {
+            current == null -> "Checking watch…"
+            current.watchAppInstalled ->
+                "Connected" + (current.connectedNodeName?.let { ": $it" }.orEmpty())
+            current.watchConnected -> "Watch connected — ChronosFlow app not installed on it"
+            current.watchPaired -> "Watch paired but not reachable"
+            else -> "No watch connected"
+        }
+        Text(connectionLine, style = MaterialTheme.typography.bodyMedium)
+        if (current?.watchConnected == true && !current.watchAppInstalled) {
+            Text(
+                "Install ChronosFlow on your watch from the Play Store on the watch to sync.",
+                style = MaterialTheme.typography.bodySmall,
+                color = backdropMutedText
+            )
+        }
+        Text(
+            formatLastSyncedLabel(
+                current?.lastPublishedAtMillis?.takeIf { it > 0L },
+                System.currentTimeMillis()
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = backdropMutedText
+        )
+        Text(
+            "Opening the watch app pulls a fresh copy automatically. Sync now if the watch still " +
+                "looks out of date.",
+            style = MaterialTheme.typography.bodySmall,
+            color = backdropMutedText
+        )
+        ChronosFilledTonalButton(
+            onClick = {
+                if (syncing) return@ChronosFilledTonalButton
+                syncing = true
+                scope.launch {
+                    status = runCatching { provider.syncNow() }.getOrNull() ?: status
+                    syncing = false
+                    showMessage(
+                        when {
+                            status?.watchAppInstalled == true -> "Synced to watch"
+                            status?.watchConnected == true -> "Watch app not installed"
+                            else -> "No watch connected"
+                        }
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (syncing) "Syncing…" else "Sync watch now")
+        }
     }
 }
 
@@ -140,7 +227,7 @@ internal fun DailyReviewHeader(
                 )
             }
             if (showReviewAction) {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = onOpenReview,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -163,10 +250,10 @@ private fun ReviewItem(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .clickable(
+            .chronosHapticClick(
+                onClick = onClick,
                 onClickLabel = reviewMetricActionLabel(label),
-                role = Role.Button,
-                onClick = onClick
+                role = Role.Button
             )
             .padding(vertical = 4.dp, horizontal = 12.dp)
     ) {

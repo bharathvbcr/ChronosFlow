@@ -3,13 +3,16 @@ package com.chronosflow.core.domain.usecase
 import com.chronosflow.core.domain.model.BlockFlexibility
 import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.EnergyIntensity
+import com.chronosflow.core.domain.model.SleepReadiness
 import com.chronosflow.core.domain.model.SleepSchedule
 import com.chronosflow.core.domain.model.TimeBlock
+import com.chronosflow.core.domain.model.deriveSleepReadiness
 import com.chronosflow.core.domain.planner.FreeTimeCalculator
 import com.chronosflow.core.domain.planner.PlannerOperationResult
 import com.chronosflow.core.domain.planner.PlannerService
 import com.chronosflow.core.domain.repository.MoodEnergyRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
+import com.chronosflow.core.domain.repository.SleepTrackRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TaskScheduleRepository
 import java.time.Instant
@@ -25,6 +28,7 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
     private val plannerService: PlannerService,
     private val freeTimeCalculator: FreeTimeCalculator,
     private val sleepScheduleRepository: SleepScheduleRepository,
+    private val sleepTrackRepository: SleepTrackRepository,
     private val moodEnergyRepository: MoodEnergyRepository
 ) {
     suspend operator fun invoke(
@@ -64,10 +68,20 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
         }
         val sleepSchedule = sleepScheduleRepository.getSleepSchedule()
         val energyLevel = energyForPriority(task.priority)
+        // Last night only bears on today's plan: scheduling a future date ignores it.
+        val readiness = if (scheduledDate == currentDate) {
+            deriveSleepReadiness(mostRecentNight(currentDate))
+        } else {
+            SleepReadiness.UNKNOWN
+        }
         // Demanding work is placed near the user's measured energy peak; lighter work keeps first-fit.
-        // An explicit preferred start always wins, so we only seek a peak when none was set.
+        // An explicit preferred start always wins, so we only seek a peak when none was set. After a
+        // depleted night the historical morning peak is unreliable, so we skip it and defer instead.
         val peakEnergyHour =
-            if (energyLevel == EnergyIntensity.HIGH && task.preferredStartMinuteOfDay == null) {
+            if (energyLevel == EnergyIntensity.HIGH &&
+                task.preferredStartMinuteOfDay == null &&
+                readiness != SleepReadiness.DEPLETED
+            ) {
                 peakEnergyHour(scheduledDate)
             } else {
                 null
@@ -81,7 +95,9 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
             sleepSchedule = sleepSchedule,
             currentDate = currentDate,
             currentTime = currentTime,
-            peakEnergyHour = peakEnergyHour
+            peakEnergyHour = peakEnergyHour,
+            energyLevel = energyLevel,
+            readiness = readiness
         )
             ?: return PlannerOperationResult.Rejected(
                 "No open $duration minute gap ${noGapDateLabel(scheduledDate, currentDate)}",
@@ -151,7 +167,9 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
         sleepSchedule: SleepSchedule,
         currentDate: LocalDate,
         currentTime: LocalTime,
-        peakEnergyHour: Int?
+        peakEnergyHour: Int?,
+        energyLevel: EnergyIntensity,
+        readiness: SleepReadiness
     ): Int? {
         val earliest = if (date == currentDate) {
             val minute = nowMinuteOfDay ?: currentTime.let { it.hour * 60 + it.minute }
@@ -168,6 +186,19 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
                     !sleepSchedule.intersects(start, duration)
             }
         if (fittingGaps.isEmpty()) return null
+
+        // After a poor night, slide demanding work past the grogginess buffer. Soft preference: if no
+        // gap reaches past the buffer we fall through to first-fit rather than fail to schedule.
+        if (readiness == SleepReadiness.DEPLETED &&
+            energyLevel == EnergyIntensity.HIGH &&
+            preferredStartMinuteOfDay == null
+        ) {
+            val deferredEarliest = maxOf(earliest, DEPLETED_DEMANDING_FLOOR_MINUTE)
+            fittingGaps.firstNotNullOfOrNull { (start, end) ->
+                val placed = maxOf(start, deferredEarliest)
+                if (placed + duration <= end && !sleepSchedule.intersects(placed, duration)) placed else null
+            }?.let { return it }
+        }
 
         if (peakEnergyHour != null) {
             val peakStart = peakEnergyHour * 60
@@ -187,6 +218,11 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
         return fittingGaps.first().first
     }
 
+    /** The most recently logged night up to [currentDate] — dated either the wake day or the bed day. */
+    private suspend fun mostRecentNight(currentDate: LocalDate) =
+        sleepTrackRepository.getForDateRange(currentDate.minusDays(1), currentDate)
+            .maxByOrNull { it.date }
+
     private suspend fun peakEnergyHour(date: LocalDate): Int? {
         val checkIns = moodEnergyRepository.getForDateRange(date.minusDays(ENERGY_HISTORY_DAYS), date)
         if (checkIns.size < MIN_ENERGY_SAMPLES) return null
@@ -204,5 +240,7 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
     private companion object {
         const val ENERGY_HISTORY_DAYS = 13L
         const val MIN_ENERGY_SAMPLES = 3
+        // Demanding work avoids the early-morning grogginess window after a depleted night.
+        const val DEPLETED_DEMANDING_FLOOR_MINUTE = 11 * 60
     }
 }

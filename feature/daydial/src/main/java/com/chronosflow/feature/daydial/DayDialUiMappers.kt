@@ -1,8 +1,8 @@
 package com.chronosflow.feature.daydial
 
-import androidx.compose.ui.graphics.Color
 import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.TimeBlock
+import com.chronosflow.core.ui.theme.ChronosColors
 
 fun TimeBlock.toDayDialUiModel(isSelected: Boolean = false): TimeBlockUiModel = TimeBlockUiModel(
     id = id,
@@ -10,11 +10,11 @@ fun TimeBlock.toDayDialUiModel(isSelected: Boolean = false): TimeBlockUiModel = 
     startMinuteOfDay = startMinuteOfDay,
     durationMinutes = durationMinutes,
     color = when (provenance) {
-        BlockProvenance.USER_CREATED -> Color(0xFF4CAF50)
-        BlockProvenance.AI_SUGGESTED -> Color(0xFF3F51B5)
-        BlockProvenance.TASK_CONVERTED -> Color(0xFFFF9800)
-        BlockProvenance.CALENDAR_IMPORTED -> Color(0xFF9E9E9E)
-        BlockProvenance.SYSTEM_GENERATED -> Color(0xFF9C27B0)
+        BlockProvenance.USER_CREATED -> ChronosColors.ProvenanceUserCreated
+        BlockProvenance.AI_SUGGESTED -> ChronosColors.ProvenanceAiSuggested
+        BlockProvenance.TASK_CONVERTED -> ChronosColors.ProvenanceTaskConverted
+        BlockProvenance.CALENDAR_IMPORTED -> ChronosColors.ProvenanceCalendarImported
+        BlockProvenance.SYSTEM_GENERATED -> ChronosColors.ProvenanceSystemGenerated
     },
     isSelected = isSelected,
     provenance = provenance.name,

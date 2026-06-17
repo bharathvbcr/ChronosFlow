@@ -10,6 +10,7 @@ import com.chronosflow.core.domain.repository.TimeBlockRepository
 import com.chronosflow.core.domain.usecase.LogActualTimeUseCase
 import com.chronosflow.feature.daydial.testManualMissedBlockRegistry
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -60,6 +61,55 @@ class DayDialReviewDelegateMissedTest {
 
         delegate.markBlockComplete(this, "block-1")
         advanceUntilIdle()
+        assertFalse(registry.missedIdsForDate(today).contains("block-1"))
+    }
+
+    @Test
+    fun `markBlockComplete skips logging when block already has actual time`() = runTest {
+        val today = LocalDate.parse("2026-05-25")
+        val registry = testManualMissedBlockRegistry()
+        registry.markMissed("block-1", today)
+
+        val repository = mockk<TimeBlockRepository>()
+        // Block already carries an actual window (e.g. a finished focus session or a prior tap).
+        val block = sampleBlock("block-1", today).copy(
+            actualStartMinuteOfDay = 600,
+            actualEndMinuteOfDay = 625
+        )
+        coEvery { repository.getTimeBlockById("block-1") } returns block
+        coEvery { repository.saveTimeBlock(any()) } returns Unit
+
+        val logActualTimeUseCase = mockk<LogActualTimeUseCase>(relaxed = true)
+        coEvery { logActualTimeUseCase(any()) } returns Unit
+
+        val delegate = DayDialReviewDelegate(
+            repository = repository,
+            reviewRepository = mockk(relaxed = true),
+            moodEnergyRepository = mockk(relaxed = true),
+            habitRepository = mockk(relaxed = true),
+            medicationRepository = mockk(relaxed = true),
+            taskRepository = mockk(relaxed = true),
+            taskScheduleRepository = mockk(relaxed = true),
+            completeDailyReviewUseCase = mockk(relaxed = true),
+            completeTaskOccurrenceUseCase = mockk(relaxed = true),
+            logActualTimeUseCase = logActualTimeUseCase,
+            syncRecurringTaskAlarmsUseCase = mockk(relaxed = true),
+            alarmScheduler = mockk(relaxed = true),
+            alarmRequestRepository = mockk(relaxed = true),
+            energyCorrelationEngine = mockk(relaxed = true),
+            insightsRecommendationsPlanner = mockk(relaxed = true),
+            deepWorkAssistPlanner = mockk(relaxed = true),
+            genAiAssistCoordinator = mockk(relaxed = true),
+            reviewAssistPlanner = mockk(relaxed = true),
+            manualMissedBlockRegistry = registry
+        )
+
+        delegate.markBlockComplete(this, "block-1")
+        advanceUntilIdle()
+
+        // No duplicate actual-time segment is appended for an already-completed block,
+        // but a stale missed flag is still cleared.
+        coVerify(exactly = 0) { logActualTimeUseCase(any()) }
         assertFalse(registry.missedIdsForDate(today).contains("block-1"))
     }
 

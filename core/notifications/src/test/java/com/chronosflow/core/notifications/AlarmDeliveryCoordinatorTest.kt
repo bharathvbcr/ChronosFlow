@@ -3,6 +3,7 @@ package com.chronosflow.core.notifications
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.ContextCompat
 import androidx.test.core.app.ApplicationProvider
 import com.chronosflow.core.domain.model.AlarmDeliveryState
 import com.chronosflow.core.domain.model.AlarmReliability
@@ -16,6 +17,7 @@ import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -40,6 +42,7 @@ class AlarmDeliveryCoordinatorTest {
     private val timeBlockRepository: TimeBlockRepository = mockk(relaxed = true)
     private val habitRepository: HabitRepository = mockk(relaxed = true)
     private val alarmScheduler: AlarmScheduler = mockk(relaxed = true)
+    private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator = mockk(relaxed = true)
     private lateinit var coordinator: AlarmDeliveryCoordinator
     private lateinit var notificationManager: NotificationManager
     private lateinit var shadowNotificationManager: ShadowNotificationManager
@@ -53,7 +56,8 @@ class AlarmDeliveryCoordinatorTest {
             taskRepository,
             timeBlockRepository,
             habitRepository,
-            alarmScheduler
+            alarmScheduler,
+            currentBlockNotificationCoordinator
         )
         notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         shadowNotificationManager = shadowOf(notificationManager)
@@ -92,6 +96,12 @@ class AlarmDeliveryCoordinatorTest {
         val notification = notifications[0]
         assertEquals("Test Title", shadowOf(notification).contentTitle)
         assertEquals("Test Message", shadowOf(notification).contentText)
+        // URGENT_TASK routes to the critical channel, so the (single, effective) accent must be
+        // the warm critical tint — guards against a reintroduced double-setColor override.
+        assertEquals(
+            ContextCompat.getColor(context, R.color.notification_accent_critical),
+            notification.color
+        )
 
         // Verify repository update
         coVerify { 
@@ -102,6 +112,67 @@ class AlarmDeliveryCoordinatorTest {
         
         // Verify alarm cancelled (removed from system scheduler)
         coVerify { alarmScheduler.cancelAlarm(requestId) }
+    }
+
+    @Test
+    fun `planner block start reroutes to the live now notification instead of a transient reminder`() = runTest {
+        val requestId = "daydial:${LocalDate.now()}:block-1:start"
+        val intent = Intent().apply {
+            putExtra(AlarmDeliveryCoordinator.EXTRA_ID, requestId)
+            putExtra(AlarmDeliveryCoordinator.EXTRA_TITLE, "Deep work")
+            putExtra(AlarmDeliveryCoordinator.EXTRA_MESSAGE, "Your planned block starts now.")
+        }
+        coEvery { alarmRequestRepository.getAlarmRequest(requestId) } returns AlarmRequest(
+            id = requestId,
+            type = AlarmRequestType.BLOCK_START,
+            scheduledFor = Instant.now(),
+            title = "Deep work",
+            message = "Your planned block starts now.",
+            medicationPlanId = null,
+            blockId = "block-1",
+            reliability = AlarmReliability.EXACT,
+            deliveryState = AlarmDeliveryState.PENDING,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now()
+        )
+        every { currentBlockNotificationCoordinator.isEnabled() } returns true
+
+        coordinator.deliverFromAlarmIntent(intent, AlarmReceiver::class.java)
+
+        // No separate "starts now" reminder is posted — the live "now" notification owns the alert.
+        assertEquals(0, shadowNotificationManager.allNotifications.size)
+        coVerify { currentBlockNotificationCoordinator.refresh(any(), any()) }
+        coVerify { alarmScheduler.cancelAlarm(requestId) }
+    }
+
+    @Test
+    fun `planner block start still posts a reminder when the now notification is disabled`() = runTest {
+        val requestId = "daydial:${LocalDate.now()}:block-2:start"
+        val intent = Intent().apply {
+            putExtra(AlarmDeliveryCoordinator.EXTRA_ID, requestId)
+            putExtra(AlarmDeliveryCoordinator.EXTRA_TITLE, "Deep work")
+            putExtra(AlarmDeliveryCoordinator.EXTRA_MESSAGE, "Your planned block starts now.")
+        }
+        coEvery { alarmRequestRepository.getAlarmRequest(requestId) } returns AlarmRequest(
+            id = requestId,
+            type = AlarmRequestType.BLOCK_START,
+            scheduledFor = Instant.now(),
+            title = "Deep work",
+            message = "Your planned block starts now.",
+            medicationPlanId = null,
+            blockId = "block-2",
+            reliability = AlarmReliability.EXACT,
+            deliveryState = AlarmDeliveryState.PENDING,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now()
+        )
+        every { currentBlockNotificationCoordinator.isEnabled() } returns false
+
+        coordinator.deliverFromAlarmIntent(intent, AlarmReceiver::class.java)
+
+        // Fallback: the user turned the live "now" notification off, so keep the heads-up reminder.
+        assertEquals(1, shadowNotificationManager.allNotifications.size)
+        coVerify(exactly = 0) { currentBlockNotificationCoordinator.refresh(any(), any()) }
     }
 
     @Test
@@ -180,5 +251,11 @@ class AlarmDeliveryCoordinatorTest {
         val notification = notifications[0]
         assertEquals("Low Medication Supply: Aspirin", shadowOf(notification).contentTitle)
         assertTrue(shadowOf(notification).contentText?.contains("3 tablet(s) left") == true)
+        // Low-supply always uses the critical channel → warm critical accent (single effective
+        // setColor); guards the second alarm builder against a reintroduced double-setColor.
+        assertEquals(
+            ContextCompat.getColor(context, R.color.notification_accent_critical),
+            notification.color
+        )
     }
 }

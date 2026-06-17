@@ -6,17 +6,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.chronosflow.core.ui.theme.ChronosSpacing
+import kotlin.math.roundToInt
 
 @Composable
 fun ChronosMoodEnergyCheckInCard(
@@ -38,7 +40,7 @@ fun ChronosMoodEnergyCheckInCard(
             MoodEnergyScoreRow(label = "Stress", value = stress, onValueChange = { stress = it })
             MoodEnergyScoreRow(label = "Energy", value = energy, onValueChange = { energy = it })
             MoodEnergyScoreRow(label = "Focus", value = focus, onValueChange = { focus = it })
-            Button(
+            ChronosButton(
                 onClick = { onSave(mood, stress, energy, focus) },
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -55,15 +57,24 @@ private fun MoodEnergyScoreRow(
     onValueChange: (Int) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            (1..5).forEach { score ->
-                FilterChip(
-                    selected = value == score,
-                    onClick = { onValueChange(score) },
-                    label = { Text(score.toString()) }
-                )
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, style = MaterialTheme.typography.labelMedium)
+            Text(
+                text = value.toString(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onValueChange(it.roundToInt()) },
+            valueRange = 1f..5f,
+            steps = 3,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }

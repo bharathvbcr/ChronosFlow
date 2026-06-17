@@ -10,7 +10,12 @@ import com.chronosflow.core.domain.model.AlarmRequestType
 object ReminderNotificationChannels {
     const val DEFAULT_CHANNEL_ID = "chronos_reminders"
     const val CRITICAL_CHANNEL_ID = "chronos_reminders_critical"
-    const val CURRENT_BLOCK_CHANNEL_ID = "chronos_current_block"
+    // v2 of the current-block channel. The original "chronos_current_block" was IMPORTANCE_LOW
+    // (silent) and Android won't let an existing channel's importance be raised, so the unified
+    // "now" live notification — which alerts once when a block begins, then persists silently —
+    // lives on a fresh DEFAULT-importance id. The old silent channel is deleted in ensureCreated.
+    const val CURRENT_BLOCK_CHANNEL_ID = "chronos_now_live"
+    private const val LEGACY_CURRENT_BLOCK_CHANNEL_ID = "chronos_current_block"
 
     fun ensureCreated(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -32,16 +37,21 @@ object ReminderNotificationChannels {
             description = "Medication doses and urgent task deadlines"
             group = NotificationChannelGroups.REMINDERS
         }
+        // The single live "now" notification: alerts once when a block begins (DEFAULT importance
+        // makes a sound), then re-posts silently via setOnlyAlertOnce for the rest of the block.
         val currentBlockChannel = NotificationChannel(
             CURRENT_BLOCK_CHANNEL_ID,
-            "Current block",
-            NotificationManager.IMPORTANCE_LOW
+            context.getString(R.string.current_block_channel_name),
+            NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
-            description = "Silent live progress for the time block happening now"
+            description = context.getString(R.string.current_block_channel_description)
+            group = NotificationChannelGroups.FOCUS
         }
         manager.createNotificationChannel(defaultChannel)
         manager.createNotificationChannel(criticalChannel)
         manager.createNotificationChannel(currentBlockChannel)
+        // Remove the retired silent current-block channel so it stops cluttering settings.
+        manager.deleteNotificationChannel(LEGACY_CURRENT_BLOCK_CHANNEL_ID)
     }
 
     fun channelIdFor(

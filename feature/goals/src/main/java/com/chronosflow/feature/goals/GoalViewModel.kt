@@ -3,12 +3,18 @@ package com.chronosflow.feature.goals
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.chronosflow.core.domain.model.Goal
+import com.chronosflow.core.domain.model.GoalLinkedWork
 import com.chronosflow.core.domain.model.GoalWithProgress
 import com.chronosflow.core.domain.repository.GoalRepository
+import com.chronosflow.core.domain.usecase.ObserveGoalLinkedWorkUseCase
 import com.chronosflow.core.domain.usecase.ObserveGoalsWithProgressUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -18,11 +24,30 @@ import javax.inject.Inject
 @HiltViewModel
 class GoalViewModel @Inject constructor(
     private val goalRepository: GoalRepository,
-    observeGoalsWithProgressUseCase: ObserveGoalsWithProgressUseCase
+    observeGoalsWithProgressUseCase: ObserveGoalsWithProgressUseCase,
+    private val observeGoalLinkedWorkUseCase: ObserveGoalLinkedWorkUseCase
 ) : ViewModel() {
 
     val goals: StateFlow<List<GoalWithProgress>> = observeGoalsWithProgressUseCase()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // The goal whose detail sheet is open; null collapses the linked-work stream to empty.
+    private val detailGoalId = MutableStateFlow<String?>(null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val detailLinkedWork: StateFlow<GoalLinkedWork> = detailGoalId
+        .flatMapLatest { id ->
+            if (id == null) flowOf(GoalLinkedWork()) else observeGoalLinkedWorkUseCase(id)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GoalLinkedWork())
+
+    fun openGoalDetail(goalId: String) {
+        detailGoalId.value = goalId
+    }
+
+    fun closeGoalDetail() {
+        detailGoalId.value = null
+    }
 
     fun addGoal(
         title: String,

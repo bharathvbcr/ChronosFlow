@@ -1,5 +1,7 @@
 package com.chronosflow.core.ui.security
 
+import com.chronosflow.core.ui.components.ChronosButton
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -87,7 +89,7 @@ fun AppLockOverlay(
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
             }
-            Button(
+            ChronosButton(
                 onClick = onUnlock,
                 enabled = canAuthenticate
             ) {

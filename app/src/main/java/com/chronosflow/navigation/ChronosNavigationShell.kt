@@ -1,5 +1,7 @@
 package com.chronosflow.navigation
 
+import com.chronosflow.core.ui.components.ChronosIconButton
+
 import android.os.SystemClock
 import androidx.activity.BackEventCompat
 import androidx.compose.animation.AnimatedVisibility
@@ -79,15 +81,17 @@ import com.chronosflow.core.ui.shell.LocalChronosShellBottomInset
 import com.chronosflow.core.ui.shell.LocalChronosShellOverlayController
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -95,7 +99,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.fragment.app.FragmentActivity
-import androidx.navigation.NavHostController
 import com.chronosflow.AppLockViewModel
 import com.chronosflow.ChronosShellState
 import com.chronosflow.core.ui.components.ChronosBackground
@@ -171,7 +174,6 @@ private fun chronosShellSurfaceTransition(
     )
 }
 
-private const val QUICK_COMMAND_ROUTE = "chronosflow://quick-command"
 
 private enum class ChronosShellLayout {
     COMPACT,
@@ -181,7 +183,8 @@ private enum class ChronosShellLayout {
 internal data class ChronosQuickAddAction(
     val label: String,
     val icon: ImageVector,
-    val route: String
+    // null == the "type a command" quick-capture input rather than a navigation target.
+    val route: ChronosRoute?
 )
 
 internal fun quickAddActionsFor(featureFlags: ChronosFeatureFlags): List<ChronosQuickAddAction> = buildList {
@@ -248,12 +251,12 @@ internal fun quickAddActionsFor(featureFlags: ChronosFeatureFlags): List<Chronos
         ChronosQuickAddAction(
             label = "Type a task, med, habit, or goal",
             icon = Icons.Default.Search,
-            route = QUICK_COMMAND_ROUTE
+            route = null
         )
     )
 }
 
-private fun ChronosQuickAddAction.isCommandInput(): Boolean = route == QUICK_COMMAND_ROUTE
+private fun ChronosQuickAddAction.isCommandInput(): Boolean = route == null
 
 internal fun compactShellOverlayBottomInset(
     navigationBarInset: Dp,
@@ -298,15 +301,9 @@ internal fun compactShellInteractiveBottomInset(
 internal fun shouldNavigateShellDestination(selectedId: String, destinationId: String): Boolean =
     selectedId != destinationId
 
-private val PrimaryDayTargets = setOf(
-    ChronosRoute.Day.TARGET_TODAY,
-    ChronosRoute.Day.TARGET_PLAN,
-    ChronosRoute.Day.TARGET_FOCUS_PLANNER
-)
-
 internal fun dayDialTabForShellTarget(dayTarget: String?): DayDialTab? =
     when (dayTarget) {
-        ChronosRoute.Day.TARGET_TODAY -> DayDialTab.TODAY
+        ChronosRoute.Day.TARGET_TODAY, ChronosRoute.Day.TARGET_TODAY_RESET -> DayDialTab.TODAY
         ChronosRoute.Day.TARGET_PLAN -> DayDialTab.PLAN
         ChronosRoute.Day.TARGET_FOCUS_PLANNER -> DayDialTab.FOCUS
         else -> null
@@ -320,75 +317,6 @@ internal fun dayTargetForDayDialTab(tab: DayDialTab): String? =
         DayDialTab.INSIGHTS -> ChronosRoute.Day.TARGET_INSIGHTS
     }
 
-internal fun initialLocalDayTarget(initialDayTarget: String?): String? =
-    initialDayTarget?.takeIf(::isDaySidebarLaunchTarget)
-
-internal fun localDayTargetAfterExternalLaunch(
-    launchDayTarget: String?,
-    localDayTarget: String?
-): String? =
-    initialLocalDayTarget(launchDayTarget) ?: localDayTarget
-
-internal fun effectiveShellDayTarget(
-    currentSection: String?,
-    routeDayTarget: String?,
-    localDayTarget: String?
-): String? =
-    if (currentSection == ChronosRoute.Day.section) {
-        localDayTarget ?: routeDayTarget
-    } else {
-        routeDayTarget
-    }
-
-internal fun optimisticShellDayTarget(
-    currentSection: String?,
-    effectiveDayTarget: String?,
-    pendingPrimaryDayTarget: String?
-): String? =
-    if (
-        currentSection == ChronosRoute.Day.section &&
-        pendingPrimaryDayTarget != null &&
-        pendingPrimaryDayTarget in PrimaryDayTargets
-    ) {
-        pendingPrimaryDayTarget
-    } else {
-        effectiveDayTarget
-    }
-
-internal fun localDayTargetAfterOptimisticPrimaryTarget(
-    currentSection: String?,
-    synchronizedLocalDayTarget: String?,
-    pendingPrimaryDayTarget: String?
-): String? =
-    if (
-        currentSection == ChronosRoute.Day.section &&
-        pendingPrimaryDayTarget != null &&
-        pendingPrimaryDayTarget in PrimaryDayTargets
-    ) {
-        pendingPrimaryDayTarget
-    } else {
-        synchronizedLocalDayTarget
-    }
-
-internal fun localDayTargetAfterRouteTargetChange(
-    currentSection: String?,
-    previousSection: String?,
-    previousRouteDayTarget: String?,
-    routeDayTarget: String?,
-    localDayTarget: String?
-): String? =
-    when {
-        currentSection != ChronosRoute.Day.section -> localDayTarget
-        routeDayTarget != null && previousRouteDayTarget != routeDayTarget -> routeDayTarget
-        previousSection != ChronosRoute.Day.section && routeDayTarget == null -> null
-        else -> localDayTarget
-    }
-
-internal fun shouldHandleDayPrimaryDestinationInPlace(
-    currentSection: String?,
-    destination: ChronosRoute.ShellDestination
-): Boolean =
-    currentSection == ChronosRoute.Day.section && destination.dayTarget in PrimaryDayTargets
 
 internal fun quickAddDestinationChangeKey(
     destinationId: String,
@@ -483,8 +411,7 @@ internal fun quickCaptureInputState(
 
 @Composable
 internal fun ChronosNavigationShell(
-    navController: NavHostController,
-    startRoute: String,
+    navState: ChronosNavigationState,
     currentSection: String?,
     currentDayTarget: String?,
     shellState: ChronosShellState,
@@ -494,9 +421,6 @@ internal fun ChronosNavigationShell(
     onOpenMedication: () -> Unit,
     activity: FragmentActivity,
     appLockViewModel: AppLockViewModel,
-    initialDayTarget: String? = null,
-    externalDayTarget: String? = null,
-    externalDayTargetGeneration: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val layout = rememberChronosShellLayout()
@@ -508,55 +432,13 @@ internal fun ChronosNavigationShell(
     val imeInset = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
     val statusBarInset = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
     val showNavigationChrome = currentSection != ChronosRoute.Focus.section
-    var localDayTarget by rememberSaveable {
-        mutableStateOf(initialLocalDayTarget(initialDayTarget))
-    }
-    // Bumped on every Today double-tap so the day screen re-applies "today-reset"
-    // even when the route (and thus the launch target string) is unchanged.
-    var todayResetGeneration by rememberSaveable { mutableIntStateOf(0) }
-    var pendingPrimaryDayTarget by rememberSaveable { mutableStateOf<String?>(null) }
-    var lastSection by rememberSaveable { mutableStateOf(currentSection) }
-    var lastRouteDayTarget by rememberSaveable { mutableStateOf(currentDayTarget) }
-    val synchronizedLocalDayTarget = localDayTargetAfterRouteTargetChange(
-        currentSection = currentSection,
-        previousSection = lastSection,
-        previousRouteDayTarget = lastRouteDayTarget,
-        routeDayTarget = currentDayTarget,
-        localDayTarget = localDayTarget
-    )
-    val committedLocalDayTarget = localDayTargetAfterOptimisticPrimaryTarget(
-        currentSection = currentSection,
-        synchronizedLocalDayTarget = synchronizedLocalDayTarget,
-        pendingPrimaryDayTarget = pendingPrimaryDayTarget
-    )
-    SideEffect {
-        lastSection = currentSection
-        lastRouteDayTarget = currentDayTarget
-        localDayTarget = committedLocalDayTarget
-        if (
-            pendingPrimaryDayTarget != null &&
-            (currentSection != ChronosRoute.Day.section || synchronizedLocalDayTarget == pendingPrimaryDayTarget)
-        ) {
-            pendingPrimaryDayTarget = null
-        }
-    }
-    LaunchedEffect(externalDayTarget, externalDayTargetGeneration) {
-        pendingPrimaryDayTarget = null
-        localDayTarget = localDayTargetAfterExternalLaunch(
-            launchDayTarget = externalDayTarget,
-            localDayTarget = localDayTarget
-        )
-    }
-    val effectiveDayTarget = effectiveShellDayTarget(
-        currentSection = currentSection,
-        routeDayTarget = currentDayTarget,
-        localDayTarget = synchronizedLocalDayTarget
-    )
-    val renderedDayTarget = optimisticShellDayTarget(
-        currentSection = currentSection,
-        effectiveDayTarget = effectiveDayTarget,
-        pendingPrimaryDayTarget = pendingPrimaryDayTarget
-    )
+    // Single source of truth for the Day tab: navState.requestedDayTarget, passed in as
+    // currentDayTarget. Nav3's selectDayTarget is synchronous, so the previous optimistic
+    // localDayTarget state machine (and its companion SideEffect/LaunchedEffect) is no longer
+    // needed — selecting a tab updates navState immediately and recomposes with the new value.
+    // navState.dayTargetGeneration is bumped on every tab selection (including a re-tap of the
+    // current tab), which drives DayDialScreen to re-apply the target for the Today double-tap reset.
+    val renderedDayTarget = currentDayTarget
     val requestedPrimaryTab = dayDialTabForShellTarget(renderedDayTarget)
     val currentDestination = ChronosRoute.shellDestinationFor(currentSection, renderedDayTarget, featureFlags)
     val quickAddActions = quickAddActionsFor(featureFlags)
@@ -614,19 +496,12 @@ internal fun ChronosNavigationShell(
     val haptic = LocalHapticFeedback.current
     val onDayPrimaryTabSelected: (DayDialTab) -> Unit = { tab ->
         closeQuickAdd()
-        val target = dayTargetForDayDialTab(tab)
-        pendingPrimaryDayTarget = target?.takeIf { it in PrimaryDayTargets }
-        localDayTarget = target
+        navState.selectDayTarget(dayTargetForDayDialTab(tab))
     }
     val onShellDestinationSelected: (ChronosRoute.ShellDestination) -> Unit = shellNavigation@ { destination ->
         closeQuickAdd()
         if (!shouldNavigateShellDestination(currentDestination.id, destination.id)) {
             return@shellNavigation
-        }
-        val handlesDayPrimaryInPlace = shouldHandleDayPrimaryDestinationInPlace(currentSection, destination)
-        if (handlesDayPrimaryInPlace) {
-            pendingPrimaryDayTarget = destination.dayTarget
-            localDayTarget = destination.dayTarget
         }
         if (shouldPerformShellHaptic(
                 ChronosShellHapticCue.NavigationTick,
@@ -635,28 +510,21 @@ internal fun ChronosNavigationShell(
         ) {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         }
-        if (handlesDayPrimaryInPlace) {
-            return@shellNavigation
+        // navigate() routes Day targets (Plan/Today/Focus/Review) in-place via selectDayTarget
+        // and switches sections for everything else.
+        navState.navigate(destination.route)
+    }
+    val onShellDestinationDoubleClick: (ChronosRoute.ShellDestination) -> Unit = { destination ->
+        if (destination.id == ChronosRoute.SHELL_TODAY) {
+            // Double-tapping Today snaps the dial back to the current date
+            // (TARGET_TODAY_RESET), even when arriving from another section or
+            // after browsing to another day.
+            navState.selectDayTarget(ChronosRoute.Day.TARGET_TODAY_RESET)
         }
-        pendingPrimaryDayTarget = null
-        when {
-            destination.dayTarget != null -> localDayTarget = destination.dayTarget
-            destination.route == ChronosRoute.Day.createRoute() ||
-                destination.route.startsWith("${ChronosRoute.Day.section}?") -> localDayTarget = null
-        }
-        navController.navigateShellRoute(
-            activity = activity,
-            appLockViewModel = appLockViewModel,
-            route = destination.route
-        )
     }
     val onQuickAddActionSelected: (ChronosQuickAddAction) -> Unit = { action ->
         closeQuickAdd()
-        navController.navigateShellRoute(
-            activity = activity,
-            appLockViewModel = appLockViewModel,
-            route = action.route
-        )
+        action.route?.let(navState::navigate)
     }
     val onQuickCaptureSubmitted: (String) -> Boolean = { capture ->
         val handled = onQuickCaptureCommand(capture)
@@ -694,17 +562,16 @@ internal fun ChronosNavigationShell(
             Box(modifier = Modifier.fillMaxSize()) {
                 when (layout) {
                     ChronosShellLayout.COMPACT -> {
-                        ChronosNavGraph(
-                            navController = navController,
-                            startRoute = startRoute,
+                        ChronosNavDisplay(
+                            navState = navState,
                             contentPadding = PaddingValues(),
                             onOpenCommandPalette = onOpenCommandPalette,
                             onOpenMedication = onOpenMedication,
                             featureFlags = featureFlags,
-                            reducedMotion = uiSettings.reduceMotionEnabled,
                             requestedPrimaryTab = requestedPrimaryTab,
                             shellDayTarget = renderedDayTarget,
-                            dayLaunchTargetGeneration = todayResetGeneration,
+                            dayLaunchTargetGeneration = navState.dayTargetGeneration,
+                            reducedMotion = uiSettings.reduceMotionEnabled,
                             onDayPrimaryTabSelected = onDayPrimaryTabSelected,
                             modifier = Modifier
                                 .fillMaxSize()
@@ -743,17 +610,7 @@ internal fun ChronosNavigationShell(
                                     quickAddExpanded = quickAddExpanded,
                                     onQuickAddClick = { setQuickAddExpanded(!quickAddExpanded) },
                                     onNavigate = onShellDestinationSelected,
-                                    onDoubleClick = { destination ->
-                                        if (destination.id == ChronosRoute.SHELL_TODAY) {
-                                            localDayTarget = ChronosRoute.Day.TARGET_TODAY
-                                            todayResetGeneration += 1
-                                            navController.navigateShellRoute(
-                                                activity = activity,
-                                                appLockViewModel = appLockViewModel,
-                                                route = ChronosRoute.Day.createRoute("today-reset")
-                                            )
-                                        }
-                                    },
+                                    onDoubleClick = onShellDestinationDoubleClick,
                                     modifier = Modifier
                                         .align(Alignment.BottomCenter)
                                         .padding(
@@ -777,17 +634,7 @@ internal fun ChronosNavigationShell(
                                         shellState = shellState,
                                         highContrastEnabled = highContrastEnabled,
                                         onNavigate = onShellDestinationSelected,
-                                        onDoubleClick = { destination ->
-                                            if (destination.id == ChronosRoute.SHELL_TODAY) {
-                                                localDayTarget = ChronosRoute.Day.TARGET_TODAY
-                                                todayResetGeneration += 1
-                                                navController.navigateShellRoute(
-                                                    activity = activity,
-                                                    appLockViewModel = appLockViewModel,
-                                                    route = ChronosRoute.Day.createRoute("today-reset")
-                                                )
-                                            }
-                                        },
+                                        onDoubleClick = onShellDestinationDoubleClick,
                                         modifier = Modifier
                                             .fillMaxHeight()
                                             .padding(
@@ -796,17 +643,16 @@ internal fun ChronosNavigationShell(
                                                 bottom = navigationBarInset + ChronosShellDefaults.RailPanelPadding
                                             )
                                     )
-                                    ChronosNavGraph(
-                                        navController = navController,
-                                        startRoute = startRoute,
+                                    ChronosNavDisplay(
+                                        navState = navState,
                                         contentPadding = PaddingValues(),
                                         onOpenCommandPalette = onOpenCommandPalette,
                                         onOpenMedication = onOpenMedication,
                                         featureFlags = featureFlags,
-                                        reducedMotion = uiSettings.reduceMotionEnabled,
                                         requestedPrimaryTab = requestedPrimaryTab,
                                         shellDayTarget = renderedDayTarget,
-                            dayLaunchTargetGeneration = todayResetGeneration,
+                                        dayLaunchTargetGeneration = navState.dayTargetGeneration,
+                                        reducedMotion = uiSettings.reduceMotionEnabled,
                                         onDayPrimaryTabSelected = onDayPrimaryTabSelected,
                                         modifier = Modifier
                                             .weight(1f)
@@ -833,17 +679,16 @@ internal fun ChronosNavigationShell(
                                 }
                             }
                         } else {
-                            ChronosNavGraph(
-                                navController = navController,
-                                startRoute = startRoute,
+                            ChronosNavDisplay(
+                                navState = navState,
                                 contentPadding = PaddingValues(),
                                 onOpenCommandPalette = onOpenCommandPalette,
                                 onOpenMedication = onOpenMedication,
                                 featureFlags = featureFlags,
-                                reducedMotion = uiSettings.reduceMotionEnabled,
                                 requestedPrimaryTab = requestedPrimaryTab,
                                 shellDayTarget = renderedDayTarget,
-                            dayLaunchTargetGeneration = todayResetGeneration,
+                                dayLaunchTargetGeneration = navState.dayTargetGeneration,
+                                reducedMotion = uiSettings.reduceMotionEnabled,
                                 onDayPrimaryTabSelected = onDayPrimaryTabSelected,
                                 modifier = Modifier.fillMaxSize()
                             )
@@ -900,7 +745,6 @@ private fun ChronosCompactFloatingBottomBar(
         tonalElevation = if (highContrastEnabled || frosted) 0.dp else 8.dp,
         shadowElevation = if (highContrastEnabled || frosted) 0.dp else 10.dp
     ) {
-        val density = LocalDensity.current
         var barCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
         val itemBounds = remember { mutableStateMapOf<Int, ChronosNavItemBounds>() }
         val selectedIndex = destinations.indexOfFirst { it.id == selectedId }
@@ -909,38 +753,36 @@ private fun ChronosCompactFloatingBottomBar(
         // cross-fading its own background independently.
         val indicatorX by animateFloatAsState(
             targetValue = selectedBounds?.x ?: 0f,
-            animationSpec = ChronosValueAnimationFactory.selection(reducedMotion),
+            animationSpec = ChronosValueAnimationFactory.navIndicator(reducedMotion),
             label = "navIndicatorX"
         )
         val indicatorWidth by animateFloatAsState(
             targetValue = selectedBounds?.width ?: 0f,
-            animationSpec = ChronosValueAnimationFactory.selection(reducedMotion),
+            animationSpec = ChronosValueAnimationFactory.navIndicator(reducedMotion),
             label = "navIndicatorWidth"
         )
+        val indicatorColor = MaterialTheme.colorScheme.primaryContainer
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 6.dp)
                 .onGloballyPositioned { barCoordinates = it }
+                // The selection pill is drawn (not laid out) so both its glide and width
+                // animate entirely in the draw phase — GPU-composited on the bar's render
+                // node with no per-frame recomposition or relayout.
+                .drawBehind {
+                    val bounds = selectedBounds ?: return@drawBehind
+                    val width = indicatorWidth
+                    if (width <= 0f) return@drawBehind
+                    drawRoundRect(
+                        color = indicatorColor,
+                        topLeft = Offset(indicatorX, bounds.y),
+                        size = Size(width, bounds.height),
+                        cornerRadius = CornerRadius(24.dp.toPx())
+                    )
+                }
         ) {
             val dayDialViewedDate = LocalChronosShellOverlayController.current?.dayDialViewedDate
-            if (selectedBounds != null && indicatorWidth > 0f) {
-                Box(
-                    modifier = Modifier
-                        .graphicsLayer {
-                            translationX = indicatorX
-                            translationY = selectedBounds.y
-                        }
-                        .size(
-                            width = with(density) { indicatorWidth.toDp() },
-                            height = with(density) { selectedBounds.height.toDp() }
-                        )
-                        .background(
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            shape = RoundedCornerShape(24.dp)
-                        )
-                )
-            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1204,7 +1046,7 @@ private fun ChronosQuickCaptureInput(
             )
         },
         trailingIcon = {
-            IconButton(
+            ChronosIconButton(
                 onClick = submit,
                 enabled = inputState.canSubmit
             ) {

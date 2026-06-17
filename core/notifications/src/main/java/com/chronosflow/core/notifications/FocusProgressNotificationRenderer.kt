@@ -6,7 +6,6 @@ import android.content.Context
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,7 +20,6 @@ class FocusProgressNotificationRenderer @Inject constructor(
         text: String,
         timeLeftSeconds: Int,
         totalSeconds: Int,
-        plannedEndAt: Instant? = null,
         isPaused: Boolean = false,
         redactSensitiveTitles: Boolean = false,
         promotedNotificationsAllowed: Boolean = true,
@@ -29,7 +27,10 @@ class FocusProgressNotificationRenderer @Inject constructor(
         pauseIntent: PendingIntent? = null,
         resumeIntent: PendingIntent? = null,
         stopIntent: PendingIntent? = null,
-        extendIntent: PendingIntent? = null
+        extendIntent: PendingIntent? = null,
+        phaseSegments: List<FocusPhaseSegment> = emptyList(),
+        currentPhaseIndex: Int = 0,
+        subText: String? = null
     ): Notification {
         val (max, progress) = focusNotificationProgress(totalSeconds, timeLeftSeconds)
         if (liveUpdateRenderer.canRender()) {
@@ -39,7 +40,6 @@ class FocusProgressNotificationRenderer @Inject constructor(
                 text = text,
                 timeLeftSeconds = timeLeftSeconds,
                 totalSeconds = totalSeconds,
-                plannedEndAt = plannedEndAt,
                 isPaused = isPaused,
                 redactSensitiveTitles = redactSensitiveTitles,
                 promotedNotificationsAllowed = promotedNotificationsAllowed,
@@ -47,8 +47,20 @@ class FocusProgressNotificationRenderer @Inject constructor(
                 pauseIntent = pauseIntent,
                 resumeIntent = resumeIntent,
                 stopIntent = stopIntent,
-                extendIntent = extendIntent
+                extendIntent = extendIntent,
+                phaseSegments = phaseSegments,
+                currentPhaseIndex = currentPhaseIndex,
+                subText = subText
             )
+        }
+        // Compat path (SDK < 36): a split session shows overall-session progress on the determinate
+        // bar (segments aren't supported pre-36); a flat session keeps its single-phase progress.
+        val barSegments = focusBarSegments(phaseSegments, currentPhaseIndex, totalSeconds)
+        val (barMax, barProgress) = if (barSegments.size > 1) {
+            barSegments.sumOf { it.lengthSeconds }.coerceAtLeast(1) to
+                focusSegmentedProgressPoint(barSegments, timeLeftSeconds)
+        } else {
+            max to progress
         }
 
         val displayTitle = PrivacyRedaction.focusNotificationTitle(title, redactSensitiveTitles)
@@ -60,16 +72,26 @@ class FocusProgressNotificationRenderer @Inject constructor(
 
         return NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_chronosflow_notification)
-            .setColor(ContextCompat.getColor(context, R.color.chronosflow_brand_accent))
             .setContentTitle(displayTitle)
             .setContentText(displayText)
-            .setSubText(context.getString(R.string.focus_notification_subtext))
+            .setSubText(subText ?: context.getString(R.string.focus_notification_subtext))
             .setContentIntent(contentIntent)
-            .setColor(ContextCompat.getColor(context, R.color.notification_accent))
+            // Tint icon/app-name (and the determinate bar) with the Material You accent, matching
+            // the live-update path: muted while paused, warm in the final stretch. Brand violet
+            // fallback below Android 12.
+            .setColor(
+                ContextCompat.getColor(
+                    context,
+                    focusProgressBarColorRes(
+                        focusBarState(isPaused, timeLeftSeconds),
+                        android.os.Build.VERSION.SDK_INT
+                    )
+                )
+            )
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
-            .setProgress(max, progress, false)
+            .setProgress(barMax, barProgress, false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .apply {

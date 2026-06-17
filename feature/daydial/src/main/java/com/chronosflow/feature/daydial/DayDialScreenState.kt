@@ -166,7 +166,20 @@ internal class DayDialScreenUiState(
     var activeSidebarPage by mutableStateOf<SidebarPage?>(null)
     var activeSheet by mutableStateOf<SheetTarget?>(null)
     var snackbarMessage by mutableStateOf<String?>(null)
+    var snackbarActionLabel by mutableStateOf<String?>(null)
+    var onSnackbarAction by mutableStateOf<(() -> Unit)?>(null)
     var focusTick by mutableStateOf(0)
+
+    /**
+     * Show a snackbar carrying an optional inline action (e.g. "Undo"). Setting the message
+     * last is what triggers the consuming LaunchedEffect, so the action fields are already in
+     * place when it reads them. The effect clears all three after the snackbar resolves.
+     */
+    fun showSnackbar(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
+        snackbarActionLabel = actionLabel
+        onSnackbarAction = onAction
+        snackbarMessage = message
+    }
 }
 
 @Composable
@@ -187,12 +200,16 @@ internal class DayDialSettingsState(
     private val showRingGuideState: androidx.compose.runtime.MutableState<Boolean>,
     private val protectFocusBlocksState: androidx.compose.runtime.MutableState<Boolean>,
     private val addBreaksAutomaticallyState: androidx.compose.runtime.MutableState<Boolean>,
+    private val defaultFocusBreakPresetState: androidx.compose.runtime.MutableState<Int>,
+    private val keepScreenOnDuringFocusState: androidx.compose.runtime.MutableState<Boolean>,
+    private val dailyFocusGoalMinutesState: androidx.compose.runtime.MutableState<Int>,
     private val preserveManualBlocksState: androidx.compose.runtime.MutableState<Boolean>,
     private val syncCloudState: androidx.compose.runtime.MutableState<Boolean>,
     private val blockStartRemindersState: androidx.compose.runtime.MutableState<Boolean>,
     private val breakRemindersState: androidx.compose.runtime.MutableState<Boolean>,
     private val missedAlertsState: androidx.compose.runtime.MutableState<Boolean>,
     private val endDayReviewReminderState: androidx.compose.runtime.MutableState<Boolean>,
+    private val sleepJournalLogReminderState: androidx.compose.runtime.MutableState<Boolean>,
     private val sleepScheduleEnabledState: androidx.compose.runtime.MutableState<Boolean>,
     private val sleepScheduleStartMinuteState: androidx.compose.runtime.MutableState<Int>,
     private val sleepScheduleEndMinuteState: androidx.compose.runtime.MutableState<Int>,
@@ -215,12 +232,16 @@ internal class DayDialSettingsState(
     var showRingGuide by showRingGuideState
     var protectFocusBlocks by protectFocusBlocksState
     var addBreaksAutomatically by addBreaksAutomaticallyState
+    var defaultFocusBreakPreset by defaultFocusBreakPresetState
+    var keepScreenOnDuringFocus by keepScreenOnDuringFocusState
+    var dailyFocusGoalMinutes by dailyFocusGoalMinutesState
     var preserveManualBlocks by preserveManualBlocksState
     var syncCloud by syncCloudState
     var blockStartReminders by blockStartRemindersState
     var breakReminders by breakRemindersState
     var missedAlerts by missedAlertsState
     var endDayReviewReminder by endDayReviewReminderState
+    var sleepJournalLogReminder by sleepJournalLogReminderState
     var sleepScheduleEnabled by sleepScheduleEnabledState
     var sleepScheduleStartMinute by sleepScheduleStartMinuteState
     var sleepScheduleEndMinute by sleepScheduleEndMinuteState
@@ -264,6 +285,9 @@ internal fun rememberDayDialSettingsState(): DayDialSettingsState {
         showRingGuideState = rememberPersistentBoolean("show_ring_guide", true),
         protectFocusBlocksState = rememberPersistentBoolean("protect_focus_blocks", true),
         addBreaksAutomaticallyState = rememberPersistentBoolean("add_breaks_automatically", true),
+        defaultFocusBreakPresetState = rememberPersistentInt("focus_default_break_preset", 0),
+        keepScreenOnDuringFocusState = rememberPersistentBoolean("focus_keep_screen_on", false),
+        dailyFocusGoalMinutesState = rememberPersistentInt("focus_daily_goal_minutes", 120),
         preserveManualBlocksState = rememberPersistentBoolean("preserve_manual_blocks", true),
         syncCloudState = rememberPersistentBoolean("sync_checkpoints", true),
         blockStartRemindersState = rememberPersistentBoolean(
@@ -281,6 +305,10 @@ internal fun rememberDayDialSettingsState(): DayDialSettingsState {
         endDayReviewReminderState = rememberPersistentBoolean(
             DayDialReminderSettingsKeys.END_DAY_REVIEW_REMINDER,
             DayDialReminderSettingsKeys.DEFAULT_END_DAY_REVIEW_REMINDER
+        ),
+        sleepJournalLogReminderState = rememberPersistentBoolean(
+            DayDialReminderSettingsKeys.SLEEP_JOURNAL_LOG_REMINDER,
+            DayDialReminderSettingsKeys.DEFAULT_SLEEP_JOURNAL_LOG_REMINDER
         ),
         sleepScheduleEnabledState = rememberPersistentBoolean(SleepSchedule.KEY_ENABLED, false),
         sleepScheduleStartMinuteState = rememberPersistentInt(

@@ -5,6 +5,7 @@ import com.chronosflow.core.data.model.JournalEntryEntity
 import com.chronosflow.core.data.model.SleepTrackEntity
 import com.chronosflow.core.domain.model.Goal
 import com.chronosflow.core.domain.model.JournalEntry
+import com.chronosflow.core.domain.model.SleepSource
 import com.chronosflow.core.domain.model.SleepTrack
 
 fun GoalEntity.toDomain(): Goal = Goal(
@@ -62,7 +63,8 @@ fun SleepTrackEntity.toDomain(): SleepTrack = SleepTrack(
     actualEndMinute = actualEndMinute,
     sleepQuality = sleepQuality,
     windDownNotes = windDownNotes,
-    interruptedCount = interruptedCount
+    interruptedCount = interruptedCount,
+    source = runCatching { SleepSource.valueOf(source) }.getOrDefault(SleepSource.MANUAL)
 )
 
 fun SleepTrack.toEntity(): SleepTrackEntity = SleepTrackEntity(
@@ -74,5 +76,6 @@ fun SleepTrack.toEntity(): SleepTrackEntity = SleepTrackEntity(
     actualEndMinute = actualEndMinute,
     sleepQuality = sleepQuality,
     windDownNotes = windDownNotes,
-    interruptedCount = interruptedCount
+    interruptedCount = interruptedCount,
+    source = source.name
 )

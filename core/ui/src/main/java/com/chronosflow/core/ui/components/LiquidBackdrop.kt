@@ -302,12 +302,14 @@ private fun SmokeBackdrop(
         repeatMode = RepeatMode.Restart,
         label = "smokePhase"
     )
-    val phase = phaseState.value
     val smokeColors = listOf(
         colorScheme.primary.copy(alpha = if (darkTheme) 0.16f else 0.08f),
         colorScheme.secondary.copy(alpha = if (darkTheme) 0.14f else 0.07f),
         colorScheme.tertiary.copy(alpha = if (darkTheme) 0.12f else 0.06f)
     )
+    // Precompute the per-color glow stops once; each puff just reuses its color's stops
+    // rather than rebuilding the stop array every animated draw frame.
+    val smokeStops = smokeColors.map { liquidBackdropGlowStops(it) }
 
     Box(
         modifier = modifier
@@ -316,6 +318,7 @@ private fun SmokeBackdrop(
                 onDrawBehind {
                     val shortestSide = min(size.width, size.height)
                     
+                    val phase = phaseState.value
                     SmokePuffSpecs.forEachIndexed { index, spec ->
                         val wave = sin((phase + spec.phase).toDouble()).toFloat()
                         
@@ -325,14 +328,14 @@ private fun SmokeBackdrop(
                         
                         val center = Offset(size.width * x, size.height * y)
                         val radius = shortestSide * spec.radiusFraction * (1f + 0.12f * wave)
-                        val puffColor = smokeColors[index % smokeColors.size]
+                        val puffStops = smokeStops[index % smokeStops.size]
                         
                         // Draw a soft, elongated, slightly rotated smoke puff/wisp
                         rotate(degrees = spec.rotation + 12f * wave, pivot = center) {
                             scale(scaleX = 1.6f, scaleY = 0.8f, pivot = center) {
                                 drawCircle(
                                     brush = Brush.radialGradient(
-                                        *liquidBackdropGlowStops(puffColor),
+                                        *puffStops,
                                         center = center,
                                         radius = radius
                                     ),
@@ -365,7 +368,6 @@ private fun WaterDropBackdrop(
         repeatMode = RepeatMode.Restart,
         label = "waterDropPhase"
     )
-    val phase = phaseState.value
 
     // Subtle dark shadow underneath for depth
     val shadowColor = Color.Black.copy(alpha = 0.12f)
@@ -375,6 +377,14 @@ private fun WaterDropBackdrop(
     val dropRimColor = (if (darkTheme) Color.White else Color.Black).copy(alpha = if (darkTheme) 0.15f else 0.20f)
     // Bright white highlight reflection
     val highlightColor = Color.White.copy(alpha = 0.65f)
+    // Refraction glow stops depend only on refractionColor, so build them once here
+    // instead of rebuilding the stop array for every droplet on every animated frame.
+    val refractionStops = liquidBackdropGlowStops(refractionColor)
+    // Wet-trail colors are likewise constant; only the trail's start/end Y change per frame.
+    val trailColors = listOf(
+        Color.Transparent,
+        refractionColor.copy(alpha = refractionColor.alpha * 0.4f)
+    )
 
     Box(
         modifier = modifier
@@ -383,6 +393,7 @@ private fun WaterDropBackdrop(
                 onDrawBehind {
                     val shortestSide = min(size.width, size.height)
 
+                    val phase = phaseState.value
                     WaterDropSpecs.forEach { spec ->
                         // Calculate positions
                         val yProgress = if (spec.isSliding && !reduceMotionEnabled) {
@@ -415,7 +426,7 @@ private fun WaterDropBackdrop(
                             
                             drawLine(
                                 brush = Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, refractionColor.copy(alpha = refractionColor.alpha * 0.4f)),
+                                    colors = trailColors,
                                     startY = trailStartY,
                                     endY = trailEndY
                                 ),
@@ -433,7 +444,7 @@ private fun WaterDropBackdrop(
                             dropRimColor = dropRimColor,
                             highlightColor = highlightColor,
                             shadowColor = shadowColor,
-                            refractionColor = refractionColor
+                            refractionStops = refractionStops
                         )
                     }
                 }
@@ -447,7 +458,7 @@ private fun DrawScope.drawGlassDroplet(
     dropRimColor: Color,
     highlightColor: Color,
     shadowColor: Color,
-    refractionColor: Color
+    refractionStops: Array<Pair<Float, Color>>
 ) {
     // 1. Drop shadow (cast at bottom-right)
     drawCircle(
@@ -459,7 +470,7 @@ private fun DrawScope.drawGlassDroplet(
     // 2. Refracted highlight inside (offset gradient toward bottom-right)
     drawCircle(
         brush = Brush.radialGradient(
-            *liquidBackdropGlowStops(refractionColor),
+            *refractionStops,
             center = Offset(center.x + radius * 0.25f, center.y + radius * 0.25f),
             radius = radius * 0.95f
         ),
@@ -501,7 +512,6 @@ private fun AuroraBackdrop(
         repeatMode = RepeatMode.Restart,
         label = "auroraPhase"
     )
-    val phase = phaseState.value
     
     // Glowing Aurora colors (Vibrant Green, Cyan, Purple)
     val baseAlpha = if (darkTheme) 0.22f else 0.12f
@@ -510,15 +520,20 @@ private fun AuroraBackdrop(
         ChronosColors.BackdropAuroraCyan.copy(alpha = baseAlpha * 0.9f), // Cyan
         ChronosColors.BackdropAuroraPurple.copy(alpha = baseAlpha * 0.8f)  // Violet/Purple
     )
+    // Curtain stops depend only on the band color. Build them once per band; the per-line
+    // streak alpha is then applied via drawLine(alpha = ...) instead of rebuilding a scaled
+    // stop array for every one of the ~hundreds of curtain lines drawn each frame.
+    val bandStops = bandColors.map { liquidBackdropCurtainStops(it) }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .drawWithCache {
                 onDrawBehind {
+                    val phase = phaseState.value
                     AuroraBandSpecs.forEachIndexed { bandIndex, spec ->
-                        val color = bandColors[bandIndex % bandColors.size]
-                        
+                        val stops = bandStops[bandIndex % bandStops.size]
+
                         // Draw vertical curtain streaks along the sine wave path
                         val stepX = 18f
                         var x = -50f
@@ -535,24 +550,27 @@ private fun AuroraBackdrop(
                             
                             // Modulate individual line opacity to create vertical streaks
                             val streakVal = 0.4f + 0.6f * sin((phase * 2.5f + progressX * 24.0 * Math.PI).toDouble()).toFloat()
-                            val streakColor = color.copy(alpha = color.alpha * streakVal)
-                            
+
                             val startY = centerY - curtainHeight / 2f
                             val endY = centerY + curtainHeight / 2f
-                            
-                            // Vertical fade gradient brush for the curtain line
+
+                            // Vertical fade gradient brush for the curtain line (geometry varies
+                            // per line, so the brush is per-line; the band's stops are reused).
                             val brush = Brush.verticalGradient(
-                                *liquidBackdropCurtainStops(streakColor),
+                                *stops,
                                 startY = startY,
                                 endY = endY
                             )
-                            
+
+                            // Streak opacity is applied here rather than baked into the stop
+                            // colors — visually identical, since the stops scale linearly with alpha.
                             drawLine(
                                 brush = brush,
                                 start = Offset(x, startY),
                                 end = Offset(x, endY),
                                 strokeWidth = 14f,
-                                cap = StrokeCap.Round
+                                cap = StrokeCap.Round,
+                                alpha = streakVal.coerceIn(0f, 1f)
                             )
                             
                             x += stepX
@@ -581,7 +599,6 @@ private fun SunsetGlowBackdrop(
         repeatMode = RepeatMode.Restart,
         label = "sunsetPhase"
     )
-    val phase = phaseState.value
 
     // Shifting sunset colors
     val amber = ChronosColors.BackdropSunsetAmber
@@ -592,6 +609,11 @@ private fun SunsetGlowBackdrop(
     val color1 = if (darkTheme) indigo.copy(alpha = 0.25f) else amber.copy(alpha = 0.15f)
     val color2 = if (darkTheme) rose.copy(alpha = 0.20f) else gold.copy(alpha = 0.12f)
     val color3 = if (darkTheme) amber.copy(alpha = 0.15f) else rose.copy(alpha = 0.10f)
+    // Glow stops depend only on color, so build them once here (composition now runs
+    // rarely) instead of reallocating the stop array every animated draw frame.
+    val stops1 = liquidBackdropGlowStops(color1)
+    val stops2 = liquidBackdropGlowStops(color2)
+    val stops3 = liquidBackdropGlowStops(color3)
 
     Box(
         modifier = modifier
@@ -600,6 +622,8 @@ private fun SunsetGlowBackdrop(
                 onDrawBehind {
                     val shortestSide = min(size.width, size.height)
                     
+                    val phase = phaseState.value
+
                     // Blob 1: Top Right Sunset light
                     val wave1 = sin(phase.toDouble()).toFloat()
                     val center1 = Offset(
@@ -609,7 +633,7 @@ private fun SunsetGlowBackdrop(
                     val r1 = shortestSide * (0.7f + 0.1f * wave1)
                     drawCircle(
                         brush = Brush.radialGradient(
-                            *liquidBackdropGlowStops(color1),
+                            *stops1,
                             center = center1,
                             radius = r1
                         ),
@@ -626,7 +650,7 @@ private fun SunsetGlowBackdrop(
                     val r2 = shortestSide * (0.8f + 0.12f * wave2)
                     drawCircle(
                         brush = Brush.radialGradient(
-                            *liquidBackdropGlowStops(color2),
+                            *stops2,
                             center = center2,
                             radius = r2
                         ),
@@ -643,7 +667,7 @@ private fun SunsetGlowBackdrop(
                     val r3 = shortestSide * (0.6f + 0.08f * wave3)
                     drawCircle(
                         brush = Brush.radialGradient(
-                            *liquidBackdropGlowStops(color3),
+                            *stops3,
                             center = center3,
                             radius = r3
                         ),
@@ -673,7 +697,6 @@ private fun NebulaBackdrop(
         repeatMode = RepeatMode.Restart,
         label = "nebulaPhase"
     )
-    val phase = phaseState.value
 
     // Cosmic Nebula colors
     val indigo = ChronosColors.BackdropNebulaIndigo
@@ -683,6 +706,11 @@ private fun NebulaBackdrop(
     val color1 = indigo.copy(alpha = if (darkTheme) 0.28f else 0.12f)
     val color2 = magenta.copy(alpha = if (darkTheme) 0.18f else 0.08f)
     val color3 = cyan.copy(alpha = if (darkTheme) 0.15f else 0.06f)
+    // Glow stops depend only on color, so build them once here instead of reallocating
+    // the stop array on every animated draw frame.
+    val stops1 = liquidBackdropGlowStops(color1)
+    val stops2 = liquidBackdropGlowStops(color2)
+    val stops3 = liquidBackdropGlowStops(color3)
 
     Box(
         modifier = modifier
@@ -690,6 +718,8 @@ private fun NebulaBackdrop(
             .drawWithCache {
                 onDrawBehind {
                     val shortestSide = min(size.width, size.height)
+
+                    val phase = phaseState.value
 
                     // Nebula Cloud 1: Indigo Base
                     val center1 = Offset(
@@ -699,7 +729,7 @@ private fun NebulaBackdrop(
                     val r1 = shortestSide * (0.8f + 0.1f * sin((phase * 0.3f).toDouble()).toFloat())
                     drawCircle(
                         brush = Brush.radialGradient(
-                            *liquidBackdropGlowStops(color1),
+                            *stops1,
                             center = center1,
                             radius = r1
                         ),
@@ -715,7 +745,7 @@ private fun NebulaBackdrop(
                     val r2 = shortestSide * (0.7f + 0.12f * cos((phase * 0.4f).toDouble()).toFloat())
                     drawCircle(
                         brush = Brush.radialGradient(
-                            *liquidBackdropGlowStops(color2),
+                            *stops2,
                             center = center2,
                             radius = r2
                         ),
@@ -731,7 +761,7 @@ private fun NebulaBackdrop(
                     val r3 = shortestSide * (0.6f + 0.08f * sin((phase * 0.5f).toDouble()).toFloat())
                     drawCircle(
                         brush = Brush.radialGradient(
-                            *liquidBackdropGlowStops(color3),
+                            *stops3,
                             center = center3,
                             radius = r3
                         ),

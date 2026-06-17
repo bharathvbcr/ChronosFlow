@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -95,7 +94,7 @@ fun ChronosLauncherAppPicker(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             filteredApps.forEach { option ->
-                FilterChip(
+                ChronosFilterChip(
                     selected = option.matchesLaunchValue(normalizedSelection),
                     onClick = { onAppSelected(option) },
                     leadingIcon = {

@@ -51,6 +51,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flowOf
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -126,11 +128,12 @@ class TaskViewModelTest {
 
     @After
     fun tearDown() {
+        viewModel.viewModelScope.cancel()
         Dispatchers.resetMain()
     }
 
     @Test
-    fun `tasks state reflects use case flow`() = runTest {
+    fun `tasks state reflects use case flow`() = runTest(testDispatcher) {
         val tasks = listOf(
             Task("1", "Task 1", null, false, 0, null, Instant.now(), Instant.now())
         )
@@ -161,7 +164,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `addTask calls use case`() = runTest {
+    fun `addTask calls use case`() = runTest(testDispatcher) {
         val created = Task("1", "New Task", "Desc", false, 0, null, Instant.now(), Instant.now())
         coEvery { addTaskUseCase(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns created
 
@@ -171,7 +174,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `addTask saves recurring schedule when recurrence is enabled`() = runTest {
+    fun `addTask saves recurring schedule when recurrence is enabled`() = runTest(testDispatcher) {
         val created = Task("1", "Recurring task", null, false, 0, null, Instant.now(), Instant.now())
         val recurringConfig = TaskRecurringConfig(
             enabled = true,
@@ -207,7 +210,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `addTask forwards checklist and schedule preferences`() = runTest {
+    fun `addTask forwards checklist and schedule preferences`() = runTest(testDispatcher) {
         val created = Task("1", "Launch prep", "Desc", false, 2, null, Instant.now(), Instant.now())
         val checklist = listOf(
             TaskChecklistItem(id = "item-1", label = "Outline", isCompleted = false)
@@ -243,7 +246,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `addTask forwards linked contact and actions`() = runTest {
+    fun `addTask forwards linked contact and actions`() = runTest(testDispatcher) {
         val linkedContact = TaskContactSnapshot(
             displayName = "Alex Johnson",
             lookupKey = "lookup-1",
@@ -305,7 +308,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `addTask forwards attachments`() = runTest {
+    fun `addTask forwards attachments`() = runTest(testDispatcher) {
         val attachments = listOf(
             TaskAttachment(
                 id = "attachment-1",
@@ -354,7 +357,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `toggleTask calls use case`() = runTest {
+    fun `toggleTask calls use case`() = runTest(testDispatcher) {
         coEvery { toggleTaskCompletionUseCase(any()) } returns Unit
         coEvery { taskRepository.getTaskById("1") } returnsMany listOf(
             Task("1", "Task 1", null, false, 0, null, Instant.now(), Instant.now()),
@@ -368,7 +371,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `updateTask persists edited task`() = runTest {
+    fun `updateTask persists edited task`() = runTest(testDispatcher) {
         val task = Task("1", "Task 1", "Old", false, 0, null, Instant.now(), Instant.now())
         coEvery { taskRepository.saveTask(any()) } returns Unit
 
@@ -387,7 +390,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `updateTask deletes recurring schedule when recurrence is disabled`() = runTest {
+    fun `updateTask deletes recurring schedule when recurrence is disabled`() = runTest(testDispatcher) {
         val task = Task("1", "Task 1", "Old", false, 0, null, Instant.now(), Instant.now())
         coEvery { taskRepository.saveTask(any()) } returns Unit
         coEvery { taskScheduleRepository.getTaskSchedule("1") } returns com.chronosflow.core.domain.model.TaskSchedule(
@@ -414,7 +417,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `deleteTask deletes repository task`() = runTest {
+    fun `deleteTask deletes repository task`() = runTest(testDispatcher) {
         val task = Task("1", "Task 1", null, false, 0, null, Instant.now(), Instant.now())
         coEvery { taskRepository.deleteTask(task) } returns Unit
 
@@ -425,7 +428,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `scheduleTaskToday calls scheduler and exposes status`() = runTest {
+    fun `scheduleTaskToday calls scheduler and exposes status`() = runTest(testDispatcher) {
         coEvery {
             scheduleTaskIntoDayUseCase("1", null, null, null, any(), any())
         } returns PlannerOperationResult.Applied(
@@ -441,7 +444,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `urgent alarm flow exposes fallback state by task id`() = runTest {
+    fun `urgent alarm flow exposes fallback state by task id`() = runTest(testDispatcher) {
         viewModel.urgentTaskAlarmStates.test {
             assertEquals(emptyMap<String, TaskAlarmUiState>(), awaitItem())
 
@@ -469,7 +472,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `urgent alarms are skipped during sleep hours`() = runTest {
+    fun `urgent alarms are skipped during sleep hours`() = runTest(testDispatcher) {
         val dueDate = Instant.parse("2026-05-26T12:00:00Z")
         val created = Task("1", "Sleepy task", null, false, 2, dueDate, Instant.now(), Instant.now())
         every { sleepScheduleRepository.getSleepSchedule() } returns SleepSchedule(
@@ -500,7 +503,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `toggleTask reschedules urgent alarm when task is reopened`() = runTest {
+    fun `toggleTask reschedules urgent alarm when task is reopened`() = runTest(testDispatcher) {
         val dueDate = Instant.now().plusSeconds(3600)
         coEvery { toggleTaskCompletionUseCase("1") } returns Unit
         coEvery { taskRepository.getTaskById("1") } returnsMany listOf(
@@ -517,7 +520,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `duplicateTask regenerates action contact method and attachment ids`() = runTest {
+    fun `duplicateTask regenerates action contact method and attachment ids`() = runTest(testDispatcher) {
         val original = Task(
             id = "1",
             title = "Task 1",
@@ -580,7 +583,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `requestTaskAssist exposes manual suggestions`() = runTest {
+    fun `requestTaskAssist exposes manual suggestions`() = runTest(testDispatcher) {
         val request = TaskAssistRequest(title = "Email launch team")
         val suggestions = listOf(
             TaskAssistSuggestion.Schedule(
@@ -600,7 +603,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `rewriteTaskDescription publishes a preview the form applies explicitly`() = runTest {
+    fun `rewriteTaskDescription publishes a preview the form applies explicitly`() = runTest(testDispatcher) {
         coEvery {
             taskAssistPlanner.rewriteText("Email the launch team about the rollout plan", RewriteStyle.SHORTEN)
         } returns "Email launch team re: rollout plan"
@@ -619,7 +622,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun `rewriteTaskDescription reports when the rewrite tool is unavailable`() = runTest {
+    fun `rewriteTaskDescription reports when the rewrite tool is unavailable`() = runTest(testDispatcher) {
         coEvery { taskAssistPlanner.rewriteText(any(), any()) } returns null
 
         viewModel.rewriteTaskDescription(

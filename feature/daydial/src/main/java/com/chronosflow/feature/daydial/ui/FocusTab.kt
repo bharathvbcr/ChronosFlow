@@ -1,8 +1,14 @@
 package com.chronosflow.feature.daydial.ui
 
+import com.chronosflow.core.ui.components.ChronosButton
+import com.chronosflow.core.ui.components.ChronosTextButton
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,11 +30,11 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.outlined.FreeBreakfast
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -45,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -62,6 +69,7 @@ import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.feature.daydial.latestFocusMoodAccent
 import com.chronosflow.core.ui.components.ChronosEmptyState
+import com.chronosflow.core.ui.components.ChronosFilterChip
 import com.chronosflow.core.ui.components.ChronosWarningBanner
 import com.chronosflow.core.ui.components.FocusGlassCard
 import com.chronosflow.core.ui.components.FocusMissedBadge
@@ -142,8 +150,10 @@ internal fun FocusTab(
     elapsedSeconds: Long,
     reduceMotionEnabled: Boolean = false,
     highContrastEnabled: Boolean = false,
+    defaultBreakPresetIndex: Int = 0,
     onStart: (String) -> Unit,
     onStartWithBreaks: (String, Int, Int) -> Unit = { id, _, _ -> onStart(id) },
+    onMarkBlockComplete: (String) -> Unit = {},
     onAdvancePhase: () -> Unit = {},
     onPause: () -> Unit,
     onResume: () -> Unit,
@@ -152,6 +162,8 @@ internal fun FocusTab(
     onExtend: () -> Unit,
     onShorten: () -> Unit,
     onAdjustByMinutes: (Int) -> Unit,
+    onInjectBreak: (Int) -> Unit = {},
+    onEndBreak: () -> Unit = {},
     onOpenSettings: () -> Unit,
     onOpenPlanTab: () -> Unit = {},
     onPlanCapturedFocus: (String) -> Unit = { onOpenPlanTab() },
@@ -261,14 +273,16 @@ internal fun FocusTab(
                     if (linkedBlockManuallyMissed) {
                         FocusMissedBadge()
                     }
-                    var splitOptionIndex by rememberSaveable(block.id) { mutableIntStateOf(0) }
+                    var splitOptionIndex by rememberSaveable(block.id) {
+                        mutableIntStateOf(defaultBreakPresetIndex.coerceIn(FocusSplitOptions.indices))
+                    }
                     FocusSplitSelector(
                         blockDurationMinutes = block.durationMinutes,
                         selectedIndex = splitOptionIndex,
                         onSelect = { splitOptionIndex = it },
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Button(
+                    ChronosButton(
                         onClick = {
                             val option = FocusSplitOptions[splitOptionIndex]
                             onStartWithBreaks(block.id, option.workMinutes, option.breakMinutes)
@@ -280,6 +294,23 @@ internal fun FocusTab(
                         Icon(Icons.Default.PlayArrow, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Start focus", fontWeight = FontWeight.SemiBold)
+                    }
+                    // Forgot to start the timer? Log it as done without running a session.
+                    // Once actual time exists the block is already complete, so the action
+                    // settles into a confirmed state to avoid re-logging duplicate segments.
+                    val alreadyCompleted = block.actualStartMinuteOfDay != null
+                    ChronosOutlinedButton(
+                        onClick = { onMarkBlockComplete(block.id) },
+                        enabled = !alreadyCompleted,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (alreadyCompleted) "Completed" else "Mark complete",
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }
@@ -293,7 +324,7 @@ internal fun FocusTab(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
                     ) {
-                        Button(
+                        ChronosButton(
                             onClick = onOpenPlanTab,
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(
@@ -303,7 +334,7 @@ internal fun FocusTab(
                         ) {
                             Text("Plan focus block", fontWeight = FontWeight.SemiBold)
                         }
-                        OutlinedButton(
+                        ChronosOutlinedButton(
                             onClick = onOpenSettings,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(20.dp)
@@ -328,7 +359,7 @@ internal fun FocusTab(
                         verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
                     ) {
                         if (captureDraft != null) {
-                            Button(
+                            ChronosButton(
                                 onClick = { onPlanCapturedFocus(captureDraft.message) },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(
@@ -339,7 +370,7 @@ internal fun FocusTab(
                                 Text("Plan captured focus", fontWeight = FontWeight.SemiBold)
                             }
                         } else if (nextFocusBlock != null) {
-                            Button(
+                            ChronosButton(
                                 onClick = { onStart(nextFocusBlock.id) },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(
@@ -352,7 +383,7 @@ internal fun FocusTab(
                                 Text("Start next: ${nextFocusBlock.title}", fontWeight = FontWeight.SemiBold)
                             }
                         } else {
-                            Button(
+                            ChronosButton(
                                 onClick = onOpenPlanTab,
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(
@@ -363,7 +394,7 @@ internal fun FocusTab(
                                 Text("Plan day", fontWeight = FontWeight.SemiBold)
                             }
                         }
-                        OutlinedButton(
+                        ChronosOutlinedButton(
                             onClick = onOpenSettings,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(20.dp)
@@ -380,7 +411,7 @@ internal fun FocusTab(
                     message = message,
                     modifier = Modifier.fillMaxWidth()
                 )
-                TextButton(
+                ChronosTextButton(
                     onClick = onDismissSessionResumedBanner,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -421,7 +452,8 @@ internal fun FocusTab(
             if (isSplit) {
                 FocusPhaseIndicator(
                     focusSession = focusSession,
-                    highContrastEnabled = highContrastEnabled
+                    highContrastEnabled = highContrastEnabled,
+                    reduceMotionEnabled = reduceMotionEnabled
                 )
             } else {
                 selectedBlock?.category?.let { category ->
@@ -442,6 +474,18 @@ internal fun FocusTab(
                 highContrastEnabled = highContrastEnabled,
                 accentColor = ringAccent
             )
+
+            // The frozen ring alone reads ambiguously, so name the paused state
+            // explicitly (the boundary hold has its own copy, so skip it there).
+            if (focusSession.status == FocusExecutionStatus.PAUSED && !awaitingAdvance) {
+                Text(
+                    text = "Paused · tap play to resume",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
 
             if (awaitingAdvance) {
                 FocusPhaseBoundaryControls(
@@ -507,7 +551,7 @@ internal fun FocusTab(
                 horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(
+                ChronosOutlinedButton(
                     onClick = { onAdjustByMinutes(5) },
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
@@ -516,7 +560,7 @@ internal fun FocusTab(
                             contentDescription = focusSessionAdjustmentActionLabel(5)
                         }
                 ) { Text("+5m", fontWeight = FontWeight.SemiBold) }
-                OutlinedButton(
+                ChronosOutlinedButton(
                     onClick = { onAdjustByMinutes(-5) },
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
@@ -527,6 +571,47 @@ internal fun FocusTab(
                 ) { Text("-5m", fontWeight = FontWeight.SemiBold) }
             }
             } // end awaitingAdvance else
+
+            // Mid-session break injection: shown when the session is active
+            // and the user is not already on a break.
+            if (!awaitingAdvance && !focusSession.isOnBreak) {
+                FocusMidSessionBreakRow(
+                    onInjectBreak = onInjectBreak
+                )
+            }
+
+            // On a break: let the user cut it short and jump back to focus instead
+            // of waiting it out or ending the whole session. The boundary handoff
+            // keeps the live notification in sync.
+            if (!awaitingAdvance && focusSession.isOnBreak) {
+                ChronosButton(
+                    onClick = onEndBreak,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary
+                    ),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Icon(Icons.Default.SkipNext, contentDescription = null)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Back to focus now", fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            // End session sits with the live controls (not buried below the info
+            // cards) so it's always reachable; the boundary hold renders its own.
+            if (!awaitingAdvance) {
+                ChronosOutlinedButton(
+                    onClick = onFinish,
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("End session", fontWeight = FontWeight.SemiBold)
+                }
+            }
 
             if (!highContrastEnabled) {
                 Text(
@@ -629,17 +714,6 @@ internal fun FocusTab(
         }
 
         if (showSessionUi) {
-            OutlinedButton(
-                onClick = onEndDay,
-                shape = RoundedCornerShape(20.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                modifier = Modifier.fillMaxWidth(0.85f)
-            ) {
-                Text("End session early", fontWeight = FontWeight.SemiBold)
-            }
-        }
-
-        if (showSessionUi) {
             MoodEnergyCheckInCard(
                 onSave = onSaveMoodEnergyCheckIn,
                 privacyMode = privacyMode,
@@ -719,7 +793,7 @@ private fun FocusNextBlockAssistCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary
             )
-            Button(
+            ChronosButton(
                 onClick = { onStart(suggestion.id) },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
@@ -827,7 +901,7 @@ private fun StatusChipItem(
                     MaterialTheme.colorScheme.surfaceContainerHigh
                 }
             )
-            .clickable(onClick = onClick)
+            .chronosHapticClick(onClick = onClick)
             .padding(horizontal = ChronosSpacing.Compact, vertical = 8.dp)
     ) {
         Icon(
@@ -843,6 +917,85 @@ private fun StatusChipItem(
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface
         )
+    }
+}
+
+/** Break preset options for mid-session injection. */
+private val FocusMidSessionBreakPresets: List<Int> = listOf(5, 10, 15)
+
+/**
+ * A row of break-duration chips shown during an active focus session (not
+ * while already on a break). Tapping a chip injects an immediate break of
+ * that duration into the session plan.
+ */
+@Composable
+private fun FocusMidSessionBreakRow(
+    onInjectBreak: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
+    ) {
+        Text(
+            text = "Take a break",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
+        ) {
+            FocusMidSessionBreakPresets.forEach { minutes ->
+                FocusBreakChip(
+                    minutes = minutes,
+                    onClick = { onInjectBreak(minutes) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FocusBreakChip(
+    minutes: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val containerColor = MaterialTheme.colorScheme.tertiaryContainer
+    val contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(containerColor)
+            .chronosHapticClick(onClick = onClick)
+            .padding(horizontal = ChronosSpacing.Compact, vertical = 10.dp)
+            .semantics {
+                contentDescription = "Take a ${minutes} minute break now"
+            }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.FreeBreakfast,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = "${minutes}m",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = contentColor
+            )
+        }
     }
 }
 
@@ -869,7 +1022,11 @@ internal fun focusTabReadyBlock(
     selectedBlock: TimeBlockUiModel?,
     sessionActive: Boolean
 ): TimeBlockUiModel? =
-    selectedBlock?.takeUnless { sessionActive || it.isAllDayCalendarImport() }
+    // A block that already has logged actual time is done — don't keep surfacing it as
+    // "ready to focus" (with a live Start button) after the user marked it complete.
+    selectedBlock?.takeUnless {
+        sessionActive || it.isAllDayCalendarImport() || it.actualEndMinuteOfDay != null
+    }
 
 internal fun focusTabAllDayCalendarNoteBlock(
     selectedBlock: TimeBlockUiModel?,
@@ -1212,7 +1369,7 @@ private fun FocusSplitSelector(
             horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
         ) {
             FocusSplitOptions.forEachIndexed { index, option ->
-                FilterChip(
+                ChronosFilterChip(
                     selected = index == selectedIndex,
                     onClick = { onSelect(index) },
                     label = { Text(option.label) }
@@ -1232,7 +1389,8 @@ private fun FocusSplitSelector(
 @Composable
 private fun FocusPhaseIndicator(
     focusSession: FocusExecutionState,
-    highContrastEnabled: Boolean
+    highContrastEnabled: Boolean,
+    reduceMotionEnabled: Boolean
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1262,11 +1420,27 @@ private fun FocusPhaseIndicator(
                     done -> base.copy(alpha = if (highContrastEnabled) 0.7f else 0.5f)
                     else -> base.copy(alpha = if (highContrastEnabled) 0.4f else 0.2f)
                 }
+                // Fixed 10.dp slot; the active dot springs up to full size (inactive = 0.8 ≈ 8.dp)
+                // so the row stays put while the current phase pulses, iOS page-control style.
+                val dotScale by animateFloatAsState(
+                    targetValue = if (active) 1f else 0.8f,
+                    animationSpec = ChronosValueAnimationFactory.navIndicator(reduceMotionEnabled),
+                    label = "focusPhaseDotScale"
+                )
+                val animatedDotColor by animateColorAsState(
+                    targetValue = dotColor,
+                    animationSpec = ChronosValueAnimationFactory.selection(reduceMotionEnabled),
+                    label = "focusPhaseDotColor"
+                )
                 Box(
                     modifier = Modifier
-                        .size(if (active) 10.dp else 8.dp)
+                        .size(10.dp)
+                        .graphicsLayer {
+                            scaleX = dotScale
+                            scaleY = dotScale
+                        }
                         .clip(CircleShape)
-                        .background(dotColor)
+                        .background(animatedDotColor)
                 )
             }
         }
@@ -1293,7 +1467,7 @@ private fun FocusPhaseBoundaryControls(
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center
         )
-        Button(
+        ChronosButton(
             onClick = onAdvancePhase,
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
@@ -1309,7 +1483,7 @@ private fun FocusPhaseBoundaryControls(
             Spacer(modifier = Modifier.width(6.dp))
             Text(advanceLabel, fontWeight = FontWeight.SemiBold)
         }
-        TextButton(
+        ChronosTextButton(
             onClick = onFinish,
             modifier = Modifier.fillMaxWidth()
         ) {

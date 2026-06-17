@@ -1,4 +1,7 @@
 package com.chronosflow.feature.medication
+
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+import com.chronosflow.core.ui.components.ChronosFilledTonalButton
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -775,7 +778,7 @@ internal fun MedicationFormSheet(
                 modifier = Modifier.fillMaxWidth()
             )
             if (onRequestAssist != null) {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = {
                         onRequestAssist(
                             MedicationAssistRequest(
@@ -1086,7 +1089,7 @@ internal fun MedicationFormSheet(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (onTaken != null) {
-                        FilledTonalButton(
+                        ChronosFilledTonalButton(
                             onClick = {
                                 onTaken(initialPlan)
                                 onDismiss()
@@ -1099,7 +1102,7 @@ internal fun MedicationFormSheet(
                         ) { Text("Taken") }
                     }
                     if (onMissed != null) {
-                        OutlinedButton(
+                        ChronosOutlinedButton(
                             onClick = {
                                 onMissed(initialPlan)
                                 onDismiss()
@@ -1118,7 +1121,7 @@ internal fun MedicationFormSheet(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         listOf(15, 30, 60).forEach { minutes ->
-                            FilledTonalButton(
+                            ChronosFilledTonalButton(
                                 onClick = {
                                     onSnooze(initialPlan, minutes)
                                     onDismiss()
@@ -1294,14 +1297,14 @@ internal fun MedicationFormSheet(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = {
                         reminderOverride = nudgeMinuteText(reminder, -30, parsedReminder ?: 8 * 60)
                         reminderPresetOverride = "Custom"
                     },
                     modifier = Modifier.weight(1f)
                 ) { Text("−30m") }
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = {
                         reminderOverride = nudgeMinuteText(reminder, 30, parsedReminder ?: 8 * 60)
                         reminderPresetOverride = "Custom"
@@ -1310,7 +1313,7 @@ internal fun MedicationFormSheet(
                 ) { Text("+30m") }
             }
             if (reminderCount > 1 && parsedReminder != null) {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = {
                         applyEvenMedicationSpacing(
                             primaryMinute = parsedReminder,

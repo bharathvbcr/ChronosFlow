@@ -1,6 +1,7 @@
 package com.chronosflow.feature.daydial.delegate
 
 import com.chronosflow.core.domain.model.JournalEntry
+import com.chronosflow.core.domain.model.SleepSource
 import com.chronosflow.core.domain.model.SleepTrack
 import com.chronosflow.core.domain.repository.JournalRepository
 import com.chronosflow.core.domain.repository.SleepTrackRepository
@@ -94,7 +95,9 @@ class DayDialJournalDelegate @Inject constructor(
                 actualStartMinute = actualStartMinute,
                 actualEndMinute = actualEndMinute,
                 interruptedCount = interruptions.coerceAtLeast(0),
-                windDownNotes = windDownNotes?.trim()?.takeIf { it.isNotBlank() }
+                windDownNotes = windDownNotes?.trim()?.takeIf { it.isNotBlank() },
+                // A hand-edit claims the night as user-owned, so the Health Connect sync won't overwrite it.
+                source = SleepSource.MANUAL
             )
         )
     }

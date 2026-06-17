@@ -14,7 +14,7 @@ object DayPlanResponseParser {
         timezone: String,
         fallbackExplanation: String
     ): StructuredDayPlanSuggestion? {
-        val jsonText = extractJsonObject(raw) ?: return null
+        val jsonText = extractJsonObject(raw)?.let(::stripTrailingCommas) ?: return null
         return runCatching {
             val root = JSONObject(jsonText)
             val blocksArray = root.optJSONArray("blocks") ?: JSONArray()
@@ -61,6 +61,49 @@ object DayPlanResponseParser {
                 if (value.isNotBlank()) add(value)
             }
         }
+    }
+
+    /**
+     * Removes JSON trailing commas (`,` immediately before a `}` or `]`), which small on-device
+     * models often emit despite instructions and which `org.json` rejects. String-aware so a comma
+     * inside a quoted value (e.g. `"do x, then y"`) is never touched. Rescues a malformed first
+     * attempt without spending a corrective retry.
+     */
+    private fun stripTrailingCommas(json: String): String {
+        val out = StringBuilder(json.length)
+        var inString = false
+        var escaped = false
+        var i = 0
+        while (i < json.length) {
+            val c = json[i]
+            if (inString) {
+                out.append(c)
+                when {
+                    escaped -> escaped = false
+                    c == '\\' -> escaped = true
+                    c == '"' -> inString = false
+                }
+                i++
+                continue
+            }
+            if (c == '"') {
+                inString = true
+                out.append(c)
+                i++
+                continue
+            }
+            if (c == ',') {
+                var j = i + 1
+                while (j < json.length && json[j].isWhitespace()) j++
+                if (j < json.length && (json[j] == '}' || json[j] == ']')) {
+                    i++ // drop the trailing comma
+                    continue
+                }
+            }
+            out.append(c)
+            i++
+        }
+        return out.toString()
     }
 
     private fun extractJsonObject(raw: String): String? {

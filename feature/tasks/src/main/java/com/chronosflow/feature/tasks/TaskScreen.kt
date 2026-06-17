@@ -1,11 +1,19 @@
 package com.chronosflow.feature.tasks
 
+import com.chronosflow.core.ui.components.ChronosIconButton
+
+import com.chronosflow.core.ui.components.ChronosButton
+import com.chronosflow.core.ui.components.ChronosTextButton
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+import com.chronosflow.core.ui.components.ChronosFilledTonalButton
+
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.foundation.layout.Arrangement
@@ -39,9 +47,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -86,6 +92,8 @@ import com.chronosflow.core.notifications.TaskContextCommandTarget
 import com.chronosflow.core.notifications.TaskContextInternalAction
 import com.chronosflow.core.notifications.launchTaskContextCommand
 import com.chronosflow.core.ui.components.ChronosEmptyState
+import com.chronosflow.core.ui.components.ChronosCheckbox
+import com.chronosflow.core.ui.components.ChronosFilterChip
 import com.chronosflow.core.ui.components.ChronosLinkOption
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosMetricTile
@@ -93,9 +101,11 @@ import com.chronosflow.core.ui.shell.ChronosModalBottomSheet
 import com.chronosflow.core.ui.components.ChronosCommandPaletteAction
 import com.chronosflow.core.ui.components.ChronosPageHeader
 import com.chronosflow.core.ui.components.ChronosScreenScaffold
+import com.chronosflow.core.ui.components.OneShotNavTrigger
 import com.chronosflow.core.ui.components.formatDisplayMinute
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
 import com.chronosflow.core.ui.settings.rememberChronosUiSettings
+import com.chronosflow.core.ui.settings.rememberPersistentUiStringSetting
 import com.chronosflow.core.ui.shell.ChronosSnackbarHost
 import com.chronosflow.core.ui.shell.LocalChronosShellBottomInset
 import com.chronosflow.core.ui.theme.ChronosSpacing
@@ -118,7 +128,8 @@ fun TaskScreen(
     initialContextTaskId: String? = null,
     openInitialContextSheet: Boolean = false,
     openAddSheet: Boolean = false,
-    initialAddCapture: String? = null
+    initialAddCapture: String? = null,
+    navTargetGeneration: Int = 0
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -136,14 +147,19 @@ fun TaskScreen(
     val assistState by viewModel.assistState.collectAsStateWithLifecycle()
     val rewriteState by viewModel.rewriteState.collectAsStateWithLifecycle()
     var sheetTarget by remember { mutableStateOf<TaskSheetTarget?>(null) }
+    var addInstanceId by remember { mutableStateOf(0) }
+    val taskTemplatesSetting = rememberPersistentUiStringSetting("task.templates", "")
+    val taskTemplates = remember(taskTemplatesSetting.value) {
+        decodeTaskTemplates(taskTemplatesSetting.value)
+    }
     var commandSheetTask by remember { mutableStateOf<Task?>(null) }
-    var initialContextConsumed by rememberSaveable(initialContextTaskId, openInitialContextSheet) {
+    // Context-sheet one-shot: include navTargetGeneration so re-navigating to the SAME task's
+    // context (an equal NavKey) re-fires. tasks stays out of the reset keys (only in the effect
+    // below) so the flag isn't reset every time the list reloads — that would reopen the sheet.
+    var initialContextConsumed by rememberSaveable(initialContextTaskId, openInitialContextSheet, navTargetGeneration) {
         mutableStateOf(false)
     }
     val normalizedInitialAddCapture = initialAddCapture?.trim()?.takeIf(String::isNotBlank)
-    var initialAddConsumed by rememberSaveable(openAddSheet, normalizedInitialAddCapture) {
-        mutableStateOf(false)
-    }
     var filter by rememberSaveable { mutableStateOf(TaskFilter.OPEN) }
     val snackbarHostState = remember { SnackbarHostState() }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -186,7 +202,7 @@ fun TaskScreen(
         viewModel.clearScheduleStatus()
     }
 
-    LaunchedEffect(tasks, initialContextTaskId, openInitialContextSheet, initialContextConsumed) {
+    LaunchedEffect(tasks, initialContextTaskId, openInitialContextSheet, navTargetGeneration, initialContextConsumed) {
         if (!openInitialContextSheet || initialContextConsumed || initialContextTaskId == null) return@LaunchedEffect
         tasks.firstOrNull { it.id == initialContextTaskId }?.let { task ->
             commandSheetTask = task
@@ -194,13 +210,11 @@ fun TaskScreen(
         }
     }
 
-    LaunchedEffect(openAddSheet, normalizedInitialAddCapture, initialAddConsumed) {
-        if (!openAddSheet || initialAddConsumed) return@LaunchedEffect
+    OneShotNavTrigger(openAddSheet, navTargetGeneration, normalizedInitialAddCapture) {
         sheetTarget = TaskSheetTarget.Add(prefillTitle = normalizedInitialAddCapture)
         normalizedInitialAddCapture?.let { capture ->
             viewModel.requestTaskAssist(TaskAssistRequest(title = capture))
         }
-        initialAddConsumed = true
     }
 
     fun openTaskContext(task: Task) {
@@ -276,11 +290,17 @@ fun TaskScreen(
                 }
             }
             item {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = { sheetTarget = TaskSheetTarget.Add() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Add task", fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            if (tasks.isNotEmpty()) {
+                item(key = "task_stats_card") {
+                    TaskStatsCard(tasks = tasks, modifier = Modifier.animateItem())
                 }
             }
 
@@ -350,7 +370,7 @@ fun TaskScreen(
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                         TaskFilter.entries.forEach { option ->
-                            FilterChip(
+                            ChronosFilterChip(
                                 selected = filter == option,
                                 onClick = { filter = option },
                                 label = { Text(option.label) }
@@ -358,7 +378,7 @@ fun TaskScreen(
                         }
                     }
                     if (onOpenDayDial != null) {
-                        OutlinedButton(onClick = onOpenDayDial) {
+                        ChronosOutlinedButton(onClick = onOpenDayDial) {
                             Icon(Icons.Default.Today, contentDescription = null)
                             Text("DayDial")
                         }
@@ -455,7 +475,43 @@ fun TaskScreen(
         onClearAssist = viewModel::clearTaskAssist,
         rewriteState = rewriteState,
         onRequestRewrite = viewModel::rewriteTaskDescription,
-        onClearRewrite = viewModel::clearTaskRewrite
+        onClearRewrite = viewModel::clearTaskRewrite,
+        existingTaskTitles = tasks.map { it.title },
+        taskTemplates = taskTemplates,
+        onSaveTemplate = { template ->
+            taskTemplatesSetting.value = encodeTaskTemplates(upsertTaskTemplate(taskTemplates, template))
+        },
+        onDeleteTemplate = { id ->
+            taskTemplatesSetting.value = encodeTaskTemplates(taskTemplates.filterNot { it.id == id })
+        },
+        onAddAnother = {
+                title, desc, priority, dueDate, alarmEnabled, preferredDurationMinutes,
+                preferredStartMinuteOfDay, targetDate, checklist, linkedContact, actions,
+                attachments, recurringConfig, goalId ->
+            viewModel.addTask(
+                title = title,
+                description = desc,
+                priority = priority,
+                dueDate = dueDate,
+                alarmEnabled = alarmEnabled,
+                preferredDurationMinutes = preferredDurationMinutes,
+                preferredStartMinuteOfDay = preferredStartMinuteOfDay,
+                targetDate = targetDate,
+                checklist = checklist,
+                linkedContact = linkedContact,
+                actions = actions,
+                attachments = attachments,
+                recurringConfig = recurringConfig,
+                goalId = goalId
+            )
+            addInstanceId += 1
+            sheetTarget = TaskSheetTarget.Add(instanceId = addInstanceId)
+        },
+        onOpenExistingTask = { title ->
+            tasks.firstOrNull { it.title.trim().equals(title.trim(), ignoreCase = true) }?.let { existing ->
+                sheetTarget = TaskSheetTarget.Edit(existing, taskSchedulesByTaskId[existing.id])
+            }
+        }
     )
 
     commandSheetTask?.let { task ->
@@ -478,7 +534,7 @@ private fun EmptyTasks(filter: TaskFilter, onAdd: () -> Unit, modifier: Modifier
             "Add the next concrete commitment, then protect time for it on the dial."
         },
         modifier = modifier.fillMaxWidth(),
-        action = { Button(onClick = onAdd) { Text("Add task") } }
+        action = { ChronosButton(onClick = onAdd) { Text("Add task") } }
     )
 }
 
@@ -511,11 +567,11 @@ private fun TaskAttentionCard(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onAction) {
+                ChronosTextButton(onClick = onAction) {
                     Text(actionLabel, fontWeight = FontWeight.SemiBold)
                 }
                 onDismiss?.let { dismiss ->
-                    TextButton(
+                    ChronosTextButton(
                         onClick = dismiss,
                         modifier = Modifier.semantics {
                             contentDescription = taskAttentionDismissActionLabel(title)
@@ -554,7 +610,7 @@ private fun TaskItem(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top
             ) {
-                Checkbox(
+                ChronosCheckbox(
                     checked = task.isCompleted,
                     onCheckedChange = { onToggle() },
                     modifier = Modifier
@@ -567,10 +623,10 @@ private fun TaskItem(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable(
+                        .chronosHapticClick(
+                            onClick = onOpenContext,
                             onClickLabel = taskContextActionLabel(task, commandSet),
-                            role = Role.Button,
-                            onClick = onOpenContext
+                            role = Role.Button
                         )
                         .padding(end = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -683,7 +739,7 @@ private fun TaskItem(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (!task.isCompleted) {
-                        FilledTonalButton(
+                        ChronosFilledTonalButton(
                             onClick = onSchedule,
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                             modifier = Modifier
@@ -707,7 +763,7 @@ private fun TaskItem(
                     }
                     
                     if (primaryExternalCommand != null && !task.isCompleted) {
-                        OutlinedButton(
+                        ChronosOutlinedButton(
                             onClick = onOpenContext,
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                             modifier = Modifier.height(32.dp)
@@ -725,7 +781,7 @@ private fun TaskItem(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
+                    ChronosIconButton(
                         onClick = onDuplicate,
                         modifier = Modifier.size(32.dp)
                     ) {
@@ -736,7 +792,7 @@ private fun TaskItem(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                     }
-                    IconButton(
+                    ChronosIconButton(
                         onClick = onEdit,
                         modifier = Modifier.size(32.dp)
                     ) {
@@ -747,7 +803,7 @@ private fun TaskItem(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                     }
-                    IconButton(
+                    ChronosIconButton(
                         onClick = onDelete,
                         modifier = Modifier.size(32.dp)
                     ) {
@@ -868,7 +924,7 @@ private fun TaskContextCommandSheet(
                     )
                 }
             }
-            TextButton(
+            ChronosTextButton(
                 onClick = onDismiss,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -912,10 +968,10 @@ private fun TaskCommandRow(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(
+            .chronosHapticClick(
+                onClick = { onCommand(command) },
                 onClickLabel = commandClickLabel(command),
-                role = Role.Button,
-                onClick = { onCommand(command) }
+                role = Role.Button
             ),
         shape = MaterialTheme.shapes.medium,
         color = containerColor,

@@ -26,7 +26,8 @@ interface AppForegroundGate {
 }
 
 interface CloudGeminiConfig {
-    val apiKey: String?
+    /** True when a default FirebaseApp is initialized — i.e. cloud AI (Firebase AI Logic) is available. */
+    val isCloudConfigured: Boolean
 }
 
 interface OnDeviceGeminiGateway {
@@ -36,13 +37,13 @@ interface OnDeviceGeminiGateway {
 
     suspend fun ensureReadyForInference(): NanoModelStatus
 
-    suspend fun generateText(prompt: String): Result<String>
+    suspend fun generateText(prompt: String, profile: GenerationProfile = GenerationProfile.BALANCED): Result<String>
 
     /**
      * Streams a cumulative response. Emits nothing (an empty flow) when the app is backgrounded or
      * Gemini Nano is not ready, so callers can fall back to [generateText] or local copy.
      */
-    fun generateTextStream(prompt: String): Flow<String>
+    fun generateTextStream(prompt: String, profile: GenerationProfile = GenerationProfile.BALANCED): Flow<String>
 }
 
 interface CloudGeminiGateway {

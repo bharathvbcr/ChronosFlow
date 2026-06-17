@@ -16,6 +16,9 @@ class JournalRepositoryImpl @Inject constructor(
     override fun observeForDate(date: LocalDate): Flow<List<JournalEntry>> =
         journalEntryDao.observeForDate(date).map { list -> list.map { it.toDomain() } }
 
+    override fun observeForDateRange(start: LocalDate, end: LocalDate): Flow<List<JournalEntry>> =
+        journalEntryDao.observeForDateRange(start, end).map { list -> list.map { it.toDomain() } }
+
     override suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<JournalEntry> =
         journalEntryDao.getForDateRange(start, end).map { it.toDomain() }
 

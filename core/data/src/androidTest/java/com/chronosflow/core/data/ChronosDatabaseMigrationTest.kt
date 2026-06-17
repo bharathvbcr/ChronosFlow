@@ -23,15 +23,50 @@ class ChronosDatabaseMigrationTest {
     )
 
     @Test
-    fun migrate7To18ValidatesFullCheckedInSchemaChain() {
+    fun migrate7To19ValidatesFullCheckedInSchemaChain() {
         helper.createDatabase(TEST_DB, 7).close()
 
         helper.runMigrationsAndValidate(
             TEST_DB,
-            18,
+            19,
             true,
             *AVAILABLE_SCHEMA_MIGRATIONS
         )
+    }
+
+    @Test
+    fun migrate18To19AddsSleepSourceColumnDefaultingToManual() {
+        helper.createDatabase(TEST_DB, 18).apply {
+            insert(
+                "sleep_tracks",
+                SQLiteDatabase.CONFLICT_NONE,
+                ContentValues().apply {
+                    put("id", "sleep-1")
+                    put("date", "2026-06-11")
+                    putNull("plannedStartMinute")
+                    putNull("plannedEndMinute")
+                    put("actualStartMinute", 1380)
+                    put("actualEndMinute", 420)
+                    put("sleepQuality", 4)
+                    put("windDownNotes", "Read before bed")
+                    put("interruptedCount", 1)
+                }
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            19,
+            true,
+            ChronosDatabase.MIGRATION_18_19
+        ).apply {
+            query("SELECT windDownNotes, source FROM sleep_tracks WHERE id = 'sleep-1'").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("Read before bed", cursor.getString(0))
+                org.junit.Assert.assertEquals("MANUAL", cursor.getString(1))
+            }
+        }
     }
 
     @Test
@@ -441,6 +476,52 @@ class ChronosDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate19To20CreatesAppUsageDaysTable() {
+        helper.createDatabase(TEST_DB, 19).close()
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            20,
+            true,
+            ChronosDatabase.MIGRATION_19_20
+        ).apply {
+            // New, additive table is present and queryable; existing data is untouched.
+            execSQL(
+                "INSERT INTO app_usage_days (date, productiveMinutes, distractingMinutes, neutralMinutes) " +
+                    "VALUES ('2026-06-15', 120, 45, 30)"
+            )
+            query(
+                "SELECT productiveMinutes, distractingMinutes, neutralMinutes FROM app_usage_days WHERE date = '2026-06-15'"
+            ).use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals(120, cursor.getInt(0))
+                org.junit.Assert.assertEquals(45, cursor.getInt(1))
+                org.junit.Assert.assertEquals(30, cursor.getInt(2))
+            }
+        }
+    }
+
+    @Test
+    fun migrate20To21CreatesAppUsageOverridesTable() {
+        helper.createDatabase(TEST_DB, 20).close()
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            21,
+            true,
+            ChronosDatabase.MIGRATION_20_21
+        ).apply {
+            execSQL(
+                "INSERT INTO app_usage_overrides (packageName, category) VALUES ('com.example.social', 'PRODUCTIVE')"
+            )
+            query("SELECT category FROM app_usage_overrides WHERE packageName = 'com.example.social'").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("PRODUCTIVE", cursor.getString(0))
+            }
+        }
+    }
+
+    @Test
     fun migrate17To18RecreatesCalendarEventsWithCompositeKey() {
         helper.createDatabase(TEST_DB, 17).apply {
             insert(
@@ -501,7 +582,10 @@ class ChronosDatabaseMigrationTest {
             ChronosDatabase.MIGRATION_14_15,
             ChronosDatabase.MIGRATION_15_16,
             ChronosDatabase.MIGRATION_16_17,
-            ChronosDatabase.MIGRATION_17_18
+            ChronosDatabase.MIGRATION_17_18,
+            ChronosDatabase.MIGRATION_18_19,
+            ChronosDatabase.MIGRATION_19_20,
+            ChronosDatabase.MIGRATION_20_21
         )
     }
 }

@@ -44,15 +44,27 @@ object ChronosColors {
     val NightSurfaceContainer = Color(0xFF222633)
     val HighContrastDarkSurface = Color(0xFF111111)
     val HighContrastDarkSurfaceHigh = Color(0xFF1A1A1A)
+    val HighContrastDarkSurfaceHighest = Color(0xFF222222)
+    // Day-view (DayDial) tonal surface ramp + readable variants, dark.
+    val NightSurfaceContainerLowest = Color(0xFF0F1118)
+    val NightSurfaceContainerLow = Color(0xFF1A1D28)
+    val NightSurfaceContainerHighest = Color(0xFF35394A)
+    val NightOnSurfaceVariantBright = Color(0xFFE4DDF0)
     val LightSurface = Color(0xFFFFFBFE)
     val LightSurfaceVariant = Color(0xFFEDE7F3)
     val LightOnSurfaceVariant = Color(0xFF4B4658)
     val LightOutline = Color(0xFF797187)
     val HighContrastLightSurface = Color(0xFFF0F0F0)
     val HighContrastLightSurfaceHigh = Color(0xFFE8E8E8)
+    // Day-view (DayDial) tonal surface ramp + readable variants, light.
+    val LightSurfaceContainerLow = Color(0xFFFAF7FD)
+    val LightSurfaceContainer = Color(0xFFF3EEF9)
+    val LightSurfaceContainerHighest = Color(0xFFE7E0F0)
+    val LightOnSurfaceVariantStrong = Color(0xFF373142)
 
     // Semantic alert roles
     val DarkError = Color(0xFFFFB4AB)
+    val LightError = Color(0xFFB3261E)
     val DarkOnError = Color(0xFF690005)
 
     // Glass tokens
@@ -60,6 +72,50 @@ object ChronosColors {
     val GlassDark = Color(0x731A1D29)
     val GlassBorder = Color(0xA6FFFFFF)
     val GlassBorderDark = Color(0x42FFFFFF)
+
+    // Block provenance accents — color-code where a planned block came from.
+    val ProvenanceUserCreated = Color(0xFF4CAF50)
+    val ProvenanceAiSuggested = Color(0xFF3F51B5)
+    val ProvenanceTaskConverted = Color(0xFFFF9800)
+    val ProvenanceCalendarImported = Color(0xFF9E9E9E)
+    val ProvenanceSystemGenerated = Color(0xFF9C27B0)
+
+    // Quick-item accents — Today/Plan day-item rows, keyed by source kind.
+    val QuickItemTask = Color(0xFF2F6BEA)
+    val QuickItemHabit = Color(0xFF5DAA54)
+    val QuickItemMedication = Color(0xFFD17A2A)
+
+    // AI assist accents — color-code suggestion intent on review/plan surfaces.
+    val AssistProtectedFocus = Color(0xFF3F7E44)
+    val AssistBreakRecovery = Color(0xFF8A5D00)
+    val AssistOptional = Color(0xFF3859B8)
+    val AssistSuggestion = Color(0xFF64B5F6)
+
+    // Dial ring legend accents + night band.
+    val DialRingTeal = Color(0xFF4DB6AC)
+    val DialRingIndigo = Color(0xFF8E99F3)
+    val DialRingGreen = Color(0xFF4CAF50)
+    val DialRingAmber = Color(0xFFFF9800)
+    val DialNightBand = Color(0xFF302A5E)
+
+    // Medication adherence chart — mid-score threshold tint.
+    val AdherenceMid = Color(0xFF6B5300)
+
+    // Backdrop gradient palette — per ChronosBackdropTheme (start, end).
+    val BackdropLiquidStart = Color(0xFF8B5CF6)
+    val BackdropLiquidEnd = Color(0xFF38BDF8)
+    val BackdropSmokeStart = Color(0xFF94A3B8)
+    val BackdropSmokeEnd = Color(0xFF475569)
+    val BackdropWaterStart = Color(0xFF38BDF8)
+    val BackdropWaterEnd = Color(0xFFBAE6FD)
+    val BackdropAuroraStart = Color(0xFF22C55E)
+    val BackdropAuroraEnd = Color(0xFF38BDF8)
+    val BackdropSunsetStart = Color(0xFFF59E0B)
+    val BackdropSunsetEnd = Color(0xFFEF4444)
+    val BackdropNebulaStart = Color(0xFF6366F1)
+    val BackdropNebulaEnd = Color(0xFFEC4899)
+    val BackdropMinimalStart = Color(0xFFE2E8F0)
+    val BackdropMinimalEnd = Color(0xFFCBD5E1)
 
     // Category colors — used for block accent bars and chips
     val CategoryWork = SoftViolet

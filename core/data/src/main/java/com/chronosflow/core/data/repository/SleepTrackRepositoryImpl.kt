@@ -16,6 +16,9 @@ class SleepTrackRepositoryImpl @Inject constructor(
     override fun observeForDate(date: LocalDate): Flow<SleepTrack?> =
         sleepTrackDao.observeForDate(date).map { it?.toDomain() }
 
+    override fun observeForDateRange(start: LocalDate, end: LocalDate): Flow<List<SleepTrack>> =
+        sleepTrackDao.observeForDateRange(start, end).map { list -> list.map { it.toDomain() } }
+
     override suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<SleepTrack> =
         sleepTrackDao.getForDateRange(start, end).map { it.toDomain() }
 

@@ -22,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -119,6 +121,7 @@ fun FocusScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(CircularProgressIndicatorDefaults.FullScreenPadding)
+                .semantics { contentDescription = "Focus session progress" }
         )
 
         Column(
@@ -138,6 +141,21 @@ fun FocusScreen(
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
+                )
+            }
+            // Wall-clock finish, so a glance answers "done by when". Hidden while paused, when the
+            // end time is no longer fixed (it slides out as the session is resumed later).
+            if (!state.paused) {
+                val endLabel = remember(state.plannedEndAtMillis) {
+                    val end = java.time.Instant.ofEpochMilli(state.plannedEndAtMillis)
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .toLocalTime()
+                    "%02d:%02d".format(end.hour, end.minute)
+                }
+                Text(
+                    text = "ends $endLabel",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             // Primary control: a single large Pause/Resume button. Stop is demoted to a quiet

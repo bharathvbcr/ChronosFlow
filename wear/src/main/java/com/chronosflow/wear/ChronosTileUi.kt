@@ -1,14 +1,17 @@
 package com.chronosflow.wear
 
 import android.content.Context
+import androidx.wear.protolayout.ActionBuilders
 import androidx.wear.protolayout.ColorBuilders
 import com.chronosflow.core.domain.wear.WearThemeContract
 import androidx.wear.protolayout.DimensionBuilders
 import androidx.wear.protolayout.LayoutElementBuilders
+import androidx.wear.protolayout.ModifiersBuilders
 import androidx.wear.protolayout.TimelineBuilders
 import androidx.wear.protolayout.material.Text
 import androidx.wear.protolayout.material.Typography
 import androidx.wear.tiles.TileBuilders
+import com.chronosflow.wear.presentation.WearStartPage
 
 /**
  * Shared building blocks for the ChronosFlow tiles so the Today and Habits tiles stay visually
@@ -24,6 +27,9 @@ internal object ChronosTileUi {
     val LABEL_COLOR = 0xFFF3F4F6.toInt()
     val MUTED_COLOR = 0xFF9CA3AF.toInt()
 
+    /** Coral warning tint (mirrors the phone error/tertiary) for the stale-data caption. */
+    val WARN_COLOR = 0xFFFFB4A8.toInt()
+
     /** Accent for titles and the focus ring: the phone's mirrored palette, or the brand teal. */
     fun accent(context: Context): Int =
         WearThemeStore.read(context)?.get(WearThemeContract.IDX_PRIMARY) ?: ChronosWearPalette.PRIMARY
@@ -37,20 +43,59 @@ internal object ChronosTileUi {
     fun body(context: Context, text: String): LayoutElementBuilders.LayoutElement =
         text(context, text, Typography.TYPOGRAPHY_BODY2, LABEL_COLOR)
 
-    fun caption(context: Context, text: String): LayoutElementBuilders.LayoutElement =
-        text(context, text, Typography.TYPOGRAPHY_CAPTION1, MUTED_COLOR)
+    fun caption(
+        context: Context,
+        text: String,
+        color: Int = MUTED_COLOR
+    ): LayoutElementBuilders.LayoutElement =
+        text(context, text, Typography.TYPOGRAPHY_CAPTION1, color)
 
     fun spacer(heightDp: Float): LayoutElementBuilders.LayoutElement =
         LayoutElementBuilders.Spacer.Builder()
             .setHeight(DimensionBuilders.dp(heightDp))
             .build()
 
-    fun column(vararg elements: LayoutElementBuilders.LayoutElement): LayoutElementBuilders.LayoutElement {
+    fun column(
+        modifiers: ModifiersBuilders.Modifiers? = null,
+        vararg elements: LayoutElementBuilders.LayoutElement
+    ): LayoutElementBuilders.LayoutElement {
         val column = LayoutElementBuilders.Column.Builder()
             .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
         elements.forEach { column.addContent(it) }
-        return LayoutElementBuilders.Box.Builder().addContent(column.build()).build()
+        val box = LayoutElementBuilders.Box.Builder().addContent(column.build())
+        modifiers?.let { box.setModifiers(it) }
+        return box.build()
     }
+
+    /**
+     * Modifiers that make a tile element tap-to-open the watch app at [startPage] (a
+     * [WearStartPage] value). Without this a tile is a glanceable dead end; tapping should always
+     * land the wearer on the matching page so they can act.
+     */
+    fun launchModifiers(context: Context, startPage: String): ModifiersBuilders.Modifiers =
+        ModifiersBuilders.Modifiers.Builder()
+            .setClickable(
+                ModifiersBuilders.Clickable.Builder()
+                    .setId(startPage)
+                    .setOnClick(
+                        ActionBuilders.LaunchAction.Builder()
+                            .setAndroidActivity(
+                                ActionBuilders.AndroidActivity.Builder()
+                                    .setPackageName(context.packageName)
+                                    .setClassName(MainActivity::class.java.name)
+                                    .addKeyToExtraMapping(
+                                        WearStartPage.EXTRA,
+                                        ActionBuilders.AndroidStringExtra.Builder()
+                                            .setValue(startPage)
+                                            .build()
+                                    )
+                                    .build()
+                            )
+                            .build()
+                    )
+                    .build()
+            )
+            .build()
 
     fun tile(root: LayoutElementBuilders.LayoutElement): TileBuilders.Tile =
         TileBuilders.Tile.Builder()

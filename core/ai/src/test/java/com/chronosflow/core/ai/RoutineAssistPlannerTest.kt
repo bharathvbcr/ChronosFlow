@@ -480,4 +480,90 @@ class RoutineAssistPlannerTest {
         assertEquals("Once daily", onceDailyDetails.frequency)
         assertEquals("Twice daily", twiceDailyDetails.frequency)
     }
+
+    @Test
+    fun `routine refineTitle returns proofread name when materially different`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.proofread("morning rutine") } returns AssistTextGeneration(
+            text = "Morning routine",
+            source = AssistGenAiSource.GEMINI_NANO
+        )
+        val planner = RoutineAssistPlanner(coordinator)
+
+        val suggestion = planner.refineTitle("morning rutine")
+
+        assertEquals("Morning routine", suggestion?.title)
+        assertEquals(RoutineAssistSource.GEMINI_NANO, suggestion?.source)
+    }
+
+    @Test
+    fun `routine prompt includes concrete capture examples`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        val prompt = slot<String>()
+        coEvery { coordinator.generateAssistText(capture(prompt)) } returns AssistTextGeneration(
+            text = null,
+            source = AssistGenAiSource.LOCAL
+        )
+        val planner = RoutineAssistPlanner(coordinator)
+
+        planner.suggest(RoutineAssistRequest(title = "morning routine", stepCount = 0))
+
+        assertTrue(prompt.captured.contains("Input: morning routine"))
+        assertTrue(prompt.captured.contains("Return the title and several step suggestions together"))
+        assertTrue(prompt.captured.contains("For dictated fragments, keep each step name separate"))
+        assertTrue(prompt.captured.contains("step|Hydrate|Hydrate,420,5"))
+    }
+
+    @Test
+    fun `routine assist parses Gemini Nano title and steps`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+            text = """
+                title|Evening wind down|Evening wind down|Keep the wind-down intent.
+                step|Tidy up|Tidy up,1260,10|A quick reset closes the day.
+                step|Reflect|Reflect,1270,10|A short reflection helps the day land.
+            """.trimIndent(),
+            source = AssistGenAiSource.GEMINI_NANO
+        )
+        val planner = RoutineAssistPlanner(coordinator)
+
+        val suggestions = planner.suggest(RoutineAssistRequest(title = "evening", stepCount = 0))
+
+        val title = suggestions.filterIsInstance<RoutineAssistSuggestion.Title>().single()
+        val steps = suggestions.filterIsInstance<RoutineAssistSuggestion.Steps>().single()
+        assertEquals("Evening wind down", title.title)
+        assertEquals(2, steps.steps.size)
+        assertEquals(1260, steps.steps.first().startMinute)
+        assertEquals(RoutineAssistSource.GEMINI_NANO, steps.source)
+    }
+
+    @Test
+    fun `routine assist falls back locally with starter steps`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+            text = null,
+            source = AssistGenAiSource.LOCAL
+        )
+        val planner = RoutineAssistPlanner(coordinator)
+
+        val suggestions = planner.suggest(RoutineAssistRequest(title = "morning routine", stepCount = 0))
+
+        val steps = suggestions.filterIsInstance<RoutineAssistSuggestion.Steps>().single()
+        assertTrue(steps.steps.any { it.title == "Hydrate" })
+        assertEquals(RoutineAssistSource.LOCAL, steps.source)
+    }
+
+    @Test
+    fun `routine assist local fallback does not add starter steps when steps already exist`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>()
+        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+            text = null,
+            source = AssistGenAiSource.LOCAL
+        )
+        val planner = RoutineAssistPlanner(coordinator)
+
+        val suggestions = planner.suggest(RoutineAssistRequest(title = "morning routine", stepCount = 3))
+
+        assertTrue(suggestions.none { it is RoutineAssistSuggestion.Steps })
+    }
 }

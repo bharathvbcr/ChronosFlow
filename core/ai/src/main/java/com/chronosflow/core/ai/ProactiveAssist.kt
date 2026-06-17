@@ -2,6 +2,7 @@ package com.chronosflow.core.ai
 
 import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
+import com.chronosflow.core.ai.genai.GenerationProfile
 import com.chronosflow.core.data.datastore.ChronosPreferencesDataSource
 import com.chronosflow.core.domain.model.ProactiveDigestKeys
 import javax.inject.Inject
@@ -18,7 +19,13 @@ data class ProactiveAssistInput(
     val completedBlocks: Int,
     val openTaskCount: Int,
     val dueMedicationCount: Int,
-    val nextBlockTitle: String? = null
+    val nextBlockTitle: String? = null,
+    /** Today's focused (productive-app) screen-time minutes; 0 when screen time isn't tracked. */
+    val focusedMinutes: Int = 0,
+    /** The user's daily focus-minutes goal; 0 when unset or screen time isn't tracked. */
+    val focusGoalMinutes: Int = 0,
+    /** True when today's distracting-app time is notably above the user's usual level. */
+    val distractionAboveUsual: Boolean = false
 )
 
 /** A pre-generated, cached piece of assistant copy plus when and what it was generated for. */
@@ -80,7 +87,12 @@ class ProactiveAssistGenerator @Inject constructor(
 ) {
     suspend fun refresh(input: ProactiveAssistInput, nowEpochMs: Long): ProactiveAssistContent {
         val local = localDigest(input)
-        val generation = genAiAssistCoordinator.generateAssistText(buildPrompt(input))
+        // The digest is a factual status line ("3 blocks done, 2 tasks open") — low temperature keeps
+        // the model from inventing numbers, which a chattier profile is more prone to.
+        val generation = genAiAssistCoordinator.generateAssistText(
+            buildPrompt(input),
+            profile = GenerationProfile.FACTUAL
+        )
         val cleaned = generation.text?.trim()?.lineSequence()?.firstOrNull()?.trim().orEmpty()
         val content = if (cleaned.isNotBlank()) {
             ProactiveAssistContent(cleaned.take(MAX_DIGEST_LENGTH), generation.source, nowEpochMs, input.dateIso)
@@ -112,13 +124,27 @@ class ProactiveAssistGenerator @Inject constructor(
         appendLine("Open tasks: ${input.openTaskCount}")
         appendLine("Medications due: ${input.dueMedicationCount}")
         appendLine("Next block: ${input.nextBlockTitle ?: "none"}")
+        // Screen-time signals are only included when tracked, so the model never references focus
+        // data for users who haven't enabled it. When present, the model may acknowledge focus
+        // progress or, if distracted, gently suggest a focus block.
+        if (input.focusGoalMinutes > 0 || input.focusedMinutes > 0 || input.distractionAboveUsual) {
+            appendLine("Focused app minutes today: ${input.focusedMinutes}")
+            if (input.focusGoalMinutes > 0) appendLine("Daily focus goal minutes: ${input.focusGoalMinutes}")
+            if (input.distractionAboveUsual) {
+                appendLine("Note: more time on distracting apps than usual today — a focus block may help.")
+            }
+        }
     }
 
     private fun localDigest(input: ProactiveAssistInput): String = when {
         input.dueMedicationCount > 0 ->
             "${input.dueMedicationCount} medication(s) still due today — a quick check keeps the streak."
+        input.distractionAboveUsual ->
+            "More time on distracting apps than usual today — a focus block could rebalance the day."
         input.openTaskCount > 0 ->
             "${input.completedBlocks} block(s) done; ${input.openTaskCount} task(s) still open for today."
+        input.focusGoalMinutes > 0 && input.focusedMinutes >= input.focusGoalMinutes ->
+            "You hit your focus goal today — nicely done."
         input.completedBlocks > 0 ->
             "Nice work — ${input.completedBlocks} block(s) completed today."
         input.nextBlockTitle != null ->

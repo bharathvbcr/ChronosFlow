@@ -1,9 +1,16 @@
 package com.chronosflow.feature.daydial.ui
 
+import com.chronosflow.core.ui.components.ChronosIconButton
+
+import com.chronosflow.core.ui.components.ChronosButton
+import com.chronosflow.core.ui.components.ChronosTextButton
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+
 import android.content.Context
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -35,12 +42,10 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -69,6 +74,8 @@ import com.chronosflow.core.notifications.TaskContextCommandKind
 import com.chronosflow.core.notifications.launchAppTarget
 import com.chronosflow.core.notifications.launchTaskContextCommand
 import com.chronosflow.core.domain.planner.DialRing
+import com.chronosflow.core.ui.components.ChronosAssistChip
+import com.chronosflow.core.ui.components.ChronosFilterChip
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosSectionTitle
 import com.chronosflow.core.ui.components.formatDurationLabel
@@ -76,12 +83,14 @@ import com.chronosflow.core.ui.motion.ChronosMotionDefaults
 import com.chronosflow.core.ui.motion.ChronosTransitionDirection
 import com.chronosflow.core.ui.motion.ChronosTransitionFactory
 import com.chronosflow.core.ui.settings.rememberChronosUiSettings
+import com.chronosflow.core.ui.theme.ChronosColors
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.core.ui.theme.categoryColor
 import com.chronosflow.feature.daydial.ChronosDial
 import com.chronosflow.feature.daydial.DailyReview
 import com.chronosflow.feature.daydial.PlannerHapticCue
 import com.chronosflow.feature.daydial.TimeBlockUiModel
+import com.chronosflow.feature.daydial.formatClockLabel
 import com.chronosflow.feature.daydial.TimeRangeUi
 import com.chronosflow.feature.daydial.model.DailyActionKind
 import com.chronosflow.feature.daydial.model.DailyActionUiModel
@@ -120,7 +129,7 @@ private fun TodaySleepPromptCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Button(onClick = onLogSleep) { Text("Log sleep") }
+            ChronosButton(onClick = onLogSleep) { Text("Log sleep") }
         }
     }
 }
@@ -392,26 +401,23 @@ internal fun TodayTab(
                         dialRadiusScale = compactTodayDialRadiusScale
                     )
                     TodayDialLegend(showRingGuide = showRingGuide)
-                    DailyReviewHeader(
-                        review = review,
-                        onPlannedClick = onOpenPlanned,
-                        onActualClick = onOpenActual,
-                        onMissedClick = onOpenMissedRecovery,
-                        onOpenReview = onOpenReview,
-                        showReviewAction = reviewFeatureEnabled
-                    )
-                    dailyAction?.let { action ->
-                        val handlers = todayActionHandlers(
-                            action, activeBlock, nextBlock, currentMinute,
-                            onOpenPlanTab, onEmptyAreaSelected, onStartFocus, onCompleteBlock,
-                            onBlockSelected, onShowMissed, onAiStripAction
-                        )
-                        DailyActionStrip(
-                            action = action,
-                            onPrimary = handlers.first,
-                            onSecondary = handlers.second
-                        )
-                    }
+                    // The active-block CTA lives inside the "Now & next" card below (identical
+                    // Start focus / Complete buttons), so the strip would only duplicate it —
+                    // show the strip for the states that have no live block to host the action.
+                    dailyAction
+                        ?.takeIf { it.kind != DailyActionKind.ACTIVE_BLOCK }
+                        ?.let { action ->
+                            val handlers = todayActionHandlers(
+                                action, activeBlock, nextBlock, currentMinute,
+                                onOpenPlanTab, onEmptyAreaSelected, onStartFocus, onCompleteBlock,
+                                onBlockSelected, onShowMissed, onAiStripAction
+                            )
+                            DailyActionStrip(
+                                action = action,
+                                onPrimary = handlers.first,
+                                onSecondary = handlers.second
+                            )
+                        }
                     DayQuickItemsSection(
                         quickItems = quickItems,
                         habitsEnabled = habitsFeatureEnabled,
@@ -436,7 +442,7 @@ internal fun TodayTab(
                         quickItems = quickItems,
                         manualMissedBlockIds = manualMissedBlockIds,
                         highContrastEnabled = highContrastEnabled,
-                        showInlineActions = dailyAction == null,
+                        showInlineActions = dailyAction == null || dailyAction.kind == DailyActionKind.ACTIVE_BLOCK,
                         onEmptyAreaSelected = onEmptyAreaSelected,
                         onStartFocus = onStartFocus,
                         onCompleteBlock = onCompleteBlock,
@@ -444,6 +450,18 @@ internal fun TodayTab(
                         onBlockSelected = onBlockSelected,
                         onContextActionFailed = onQuickContextActionFailed,
                         onAiStripAction = onAiStripAction
+                    )
+                    // Retrospective day summary sits below the live/actionable content: the
+                    // dial hub already carries at-a-glance progress ("3 of 7 done · 2h free"),
+                    // so the full Planned/Actual/Missed breakdown reads better as an end-of-scroll
+                    // recap than as the first card under the dial.
+                    DailyReviewHeader(
+                        review = review,
+                        onPlannedClick = onOpenPlanned,
+                        onActualClick = onOpenActual,
+                        onMissedClick = onOpenMissedRecovery,
+                        onOpenReview = onOpenReview,
+                        showReviewAction = reviewFeatureEnabled
                     )
                     if (showQuickActions) {
                         TodayQuickActions(onAiStripAction = onAiStripAction)
@@ -628,7 +646,7 @@ private fun DialZoomControls(
         horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        FilterChip(
+        ChronosFilterChip(
             selected = compactMode,
             onClick = onToggleCompactMode,
             label = { Text(if (compactMode) "12h" else "24h") },
@@ -637,7 +655,7 @@ private fun DialZoomControls(
             }
         )
         if (compactMode) {
-            IconButton(
+            ChronosIconButton(
                 onClick = onWindowBack,
                 modifier = Modifier.semantics { contentDescription = "Show earlier hours" }
             ) {
@@ -648,14 +666,14 @@ private fun DialZoomControls(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            IconButton(
+            ChronosIconButton(
                 onClick = onWindowForward,
                 modifier = Modifier.semantics { contentDescription = "Show later hours" }
             ) {
                 Icon(Icons.Filled.ChevronRight, contentDescription = null)
             }
             if (isViewingToday && !dialZoomMinuteInWindow(currentMinute, compactWindowStart)) {
-                TextButton(onClick = onCenterWindowOnNow) { Text("Now") }
+                ChronosTextButton(onClick = onCenterWindowOnNow) { Text("Now") }
             }
         }
     }
@@ -665,7 +683,7 @@ internal fun dialZoomToggleActionLabel(compactMode: Boolean): String =
     if (compactMode) "Switch to 24 hour dial" else "Zoom dial to 12 hours"
 
 internal fun dialZoomWindowLabel(windowStart: Int): String =
-    "${formatMinute(windowStart)} – ${formatMinute((windowStart + 720) % DAY_IN_MINUTES)}"
+    "${formatClockLabel(windowStart)} – ${formatClockLabel((windowStart + 720) % DAY_IN_MINUTES)}"
 
 internal fun dialZoomMinuteInWindow(minute: Int, windowStart: Int): Boolean =
     ((minute - windowStart + DAY_IN_MINUTES) % DAY_IN_MINUTES) < 720
@@ -697,18 +715,22 @@ private fun TodayDetailsSections(
     onShowMissed: () -> Unit,
     onAiStripAction: (String) -> Unit
 ) {
-    dailyAction?.let { action ->
-        val handlers = todayActionHandlers(
-            action, activeBlock, nextBlock, currentMinute,
-            onOpenPlanTab, onEmptyAreaSelected, onStartFocus, onCompleteBlock,
-            onBlockSelected, onShowMissed, onAiStripAction
-        )
-        DailyActionStrip(
-            action = action,
-            onPrimary = handlers.first,
-            onSecondary = handlers.second
-        )
-    }
+    // Active-block CTA is hosted by the "Now & next" card below; the strip only renders for
+    // the states with no live block to carry the action (see the compact path for the rationale).
+    dailyAction
+        ?.takeIf { it.kind != DailyActionKind.ACTIVE_BLOCK }
+        ?.let { action ->
+            val handlers = todayActionHandlers(
+                action, activeBlock, nextBlock, currentMinute,
+                onOpenPlanTab, onEmptyAreaSelected, onStartFocus, onCompleteBlock,
+                onBlockSelected, onShowMissed, onAiStripAction
+            )
+            DailyActionStrip(
+                action = action,
+                onPrimary = handlers.first,
+                onSecondary = handlers.second
+            )
+        }
     TodayNowAndNextSection(
         activeBlock = activeBlock,
         nextBlock = nextBlock,
@@ -719,7 +741,7 @@ private fun TodayDetailsSections(
         quickItems = quickItems,
         manualMissedBlockIds = manualMissedBlockIds,
         highContrastEnabled = highContrastEnabled,
-        showInlineActions = dailyAction == null,
+        showInlineActions = dailyAction == null || dailyAction.kind == DailyActionKind.ACTIVE_BLOCK,
         onEmptyAreaSelected = onEmptyAreaSelected,
         onStartFocus = onStartFocus,
         onCompleteBlock = onCompleteBlock,
@@ -775,7 +797,7 @@ private fun buildTodayTimelineItems(
         val rangeLabel = if (block.isAllDayCalendarImport()) {
             "All day"
         } else {
-            "${formatMinute(block.startMinuteOfDay)} – ${formatMinute(block.startMinuteOfDay + block.durationMinutes)}"
+            "${formatClockLabel(block.startMinuteOfDay)} – ${formatClockLabel(block.startMinuteOfDay + block.durationMinutes)}"
         }
         TodayTimelineItem(
             id = "block:${block.id}",
@@ -831,7 +853,7 @@ private fun DayQuickItemUiModel.toTimelineItem(
     onSecondaryAction: (() -> Unit)? = null
 ): TodayTimelineItem {
     val scheduledMinute = scheduledMinuteOfDay ?: UNSCHEDULED_TIMELINE_MINUTE
-    val timeLabel = scheduledMinuteOfDay?.let { formatMinute(it) } ?: "Unscheduled"
+    val timeLabel = scheduledMinuteOfDay?.let { formatClockLabel(it) } ?: "Unscheduled"
     return TodayTimelineItem(
         id = "quick:$id",
         title = title.ifBlank { "Unnamed item" },
@@ -868,9 +890,9 @@ private fun timelineSourceLabel(block: TimeBlockUiModel): String = when {
 }
 
 private fun timelineQuickItemColor(kind: DayQuickItemKind): Color = when (kind) {
-    DayQuickItemKind.TASK -> Color(0xFF2F6BEA)
-    DayQuickItemKind.HABIT -> Color(0xFF5DAA54)
-    DayQuickItemKind.MEDICATION -> Color(0xFFD17A2A)
+    DayQuickItemKind.TASK -> ChronosColors.QuickItemTask
+    DayQuickItemKind.HABIT -> ChronosColors.QuickItemHabit
+    DayQuickItemKind.MEDICATION -> ChronosColors.QuickItemMedication
 }
 
 internal fun todayContextActionForBlock(
@@ -946,7 +968,7 @@ private fun TodayDetailedTimelineItemRow(
                 .fillMaxWidth()
                 .then(
                     if (item.onRowClick != null) {
-                        Modifier.clickable(
+                        Modifier.chronosHapticClick(
                             onClick = item.onRowClick,
                             onClickLabel = item.title
                         )
@@ -991,7 +1013,7 @@ private fun TodayDetailedTimelineItemRow(
                     verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
                 ) {
                     if (item.primaryActionLabel != null) {
-                        Button(
+                        ChronosButton(
                             onClick = item.onPrimaryAction ?: {},
                             enabled = !item.isDone && item.onPrimaryAction != null,
                             shape = RoundedCornerShape(18.dp)
@@ -1000,7 +1022,7 @@ private fun TodayDetailedTimelineItemRow(
                         }
                     }
                     if (!item.isDone && item.secondaryActionLabel != null && item.onSecondaryAction != null) {
-                        OutlinedButton(
+                        ChronosOutlinedButton(
                             onClick = item.onSecondaryAction,
                             shape = RoundedCornerShape(18.dp)
                         ) {
@@ -1024,7 +1046,7 @@ private fun TodayTimelineContextActionPill(
     action: DayQuickContextActionUiModel,
     onClick: () -> Unit
 ) {
-    AssistChip(
+    ChronosAssistChip(
         onClick = onClick,
         label = { Text(action.label) },
         leadingIcon = {
@@ -1210,7 +1232,7 @@ private fun TodayNowBlockContent(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "${formatMinute(block.startMinuteOfDay)} – ${formatMinute(block.startMinuteOfDay + block.durationMinutes)}",
+                text = "${formatClockLabel(block.startMinuteOfDay)} – ${formatClockLabel(block.startMinuteOfDay + block.durationMinutes)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1221,7 +1243,7 @@ private fun TodayNowBlockContent(
                     color = MaterialTheme.colorScheme.error,
                     fontWeight = FontWeight.SemiBold
                 )
-                TextButton(
+                ChronosTextButton(
                     onClick = { onUndoMissed(block.id) },
                     modifier = Modifier.semantics {
                         contentDescription = todayUndoMissedActionLabel(block)
@@ -1285,7 +1307,7 @@ private fun TodayNowBlockContent(
 
     if (showInlineActions) {
         Row(horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
-            Button(
+            ChronosButton(
                 onClick = { onStartFocus(block.id) },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -1302,8 +1324,12 @@ private fun TodayNowBlockContent(
                 Spacer(Modifier.width(6.dp))
                 Text("Start focus", fontWeight = FontWeight.SemiBold)
             }
-            OutlinedButton(
+            // Once actual time is logged the block is already complete; settle the action into
+            // a confirmed state so it reads consistently with the Focus tab and can't re-log.
+            val alreadyCompleted = block.actualStartMinuteOfDay != null
+            ChronosOutlinedButton(
                 onClick = { onCompleteBlock(block.id) },
+                enabled = !alreadyCompleted,
                 modifier = Modifier
                     .weight(1f)
                     .semantics {
@@ -1314,7 +1340,10 @@ private fun TodayNowBlockContent(
             ) {
                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Complete", fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = if (alreadyCompleted) "Completed" else "Complete",
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }
@@ -1336,23 +1365,20 @@ private fun TodayOpenTimeContent(
         openWindowEndMinute = openWindowEndMinute
     ) ?: 0
     val fillGapTargetMinute = nextStartMinute ?: openWindowEndMinute ?: (DAY_END_MINUTE - 1)
-    Text(
-        text = "Open time",
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurface
-    )
+    // The card's "Now" section title and the action strip already label this as open time,
+    // so lead straight with the free-window summary instead of repeating "Open time" a third time.
     Text(
         text = todayOpenTimeSummaryLabel(
             nextStartMinute = nextStartMinute,
             currentMinute = currentMinute,
             openWindowEndMinute = openWindowEndMinute
         ),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface
     )
     if (showInlineActions) {
-        OutlinedButton(
+        ChronosOutlinedButton(
             onClick = { onAiStripAction("Fill gaps") },
             modifier = Modifier
                 .fillMaxWidth()
@@ -1384,10 +1410,10 @@ private fun TodayNextBlockRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(
+                .chronosHapticClick(
+                    onClick = { onBlockSelected(nextBlock.id) },
                     onClickLabel = todayNextBlockActionLabel(nextBlock),
-                    role = Role.Button,
-                    onClick = { onBlockSelected(nextBlock.id) }
+                    role = Role.Button
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1406,7 +1432,7 @@ private fun TodayNextBlockRow(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "${formatMinute(nextBlock.startMinuteOfDay)} – ${formatMinute(nextBlock.startMinuteOfDay + nextBlock.durationMinutes)}",
+                    text = "${formatClockLabel(nextBlock.startMinuteOfDay)} – ${formatClockLabel(nextBlock.startMinuteOfDay + nextBlock.durationMinutes)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1443,7 +1469,7 @@ private fun TodayQuickActions(onAiStripAction: (String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
     ) {
         suggestions.forEach { (display, actionLabel) ->
-            AssistChip(
+            ChronosAssistChip(
                 onClick = { onAiStripAction(actionLabel) },
                 label = { Text(display) },
                 colors = AssistChipDefaults.assistChipColors(
@@ -1468,10 +1494,10 @@ internal fun todayNextBlockActionLabel(block: TimeBlockUiModel): String =
     "Open next block ${block.title}"
 
 internal fun todayOpenTimeAddBlockActionLabel(currentMinute: Int): String =
-    "Add block at ${formatMinute(currentMinute)}"
+    "Add block at ${formatClockLabel(currentMinute)}"
 
 internal fun todayOpenTimeFillGapActionLabel(nextStartMinute: Int, minutesUntilNext: Int): String =
-    "Fill $minutesUntilNext minute gap until ${formatMinute(nextStartMinute)}"
+    "Fill $minutesUntilNext minute gap until ${formatClockLabel(nextStartMinute)}"
 
 internal fun todayOpenTimeSummaryLabel(
     nextStartMinute: Int?,
@@ -1484,7 +1510,7 @@ internal fun todayOpenTimeSummaryLabel(
         openWindowEndMinute = openWindowEndMinute
     )
     if (nextStartMinute != null) {
-        return "Free until ${formatMinute(nextStartMinute)} · ${formatDurationLabel(minutesUntilNext ?: 0)}"
+        return "Free until ${formatClockLabel(nextStartMinute)} · ${formatDurationLabel(minutesUntilNext ?: 0)}"
     }
     return if (minutesUntilNext != null && minutesUntilNext > 0) {
         "Free for the rest of the day · ${formatDurationLabel(minutesUntilNext)}"
@@ -1500,18 +1526,6 @@ private fun todayOpenTimeMinutesUntil(
 ): Int? {
     val targetMinute = nextStartMinute ?: openWindowEndMinute ?: return null
     return (targetMinute - currentMinute + DAY_IN_MINUTES) % DAY_IN_MINUTES
-}
-
-private fun formatMinute(minute: Int): String {
-    val normalized = ((minute % DAY_IN_MINUTES) + DAY_IN_MINUTES) % DAY_IN_MINUTES
-    val hour = normalized / 60
-    val m = normalized % 60
-    val suffix = if (hour >= 12) "PM" else "AM"
-    val displayHour = when (val h = hour % 12) {
-        0 -> 12
-        else -> h
-    }
-    return "%d:%02d %s".format(displayHour, m, suffix)
 }
 
 /**

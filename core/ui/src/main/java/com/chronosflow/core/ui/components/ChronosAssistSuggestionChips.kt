@@ -10,17 +10,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -43,7 +39,6 @@ fun <T> ChronosAssistSuggestionChips(
     loadingLabel: String = "Drafting suggestions…",
     onApplyAll: (() -> Unit)? = null
 ) {
-    val haptics = LocalHapticFeedback.current
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -74,16 +69,13 @@ fun <T> ChronosAssistSuggestionChips(
                     val suggestionLabel = label(suggestion)
                     val suggestionReason = reason(suggestion)
                     val suggestionSource = sourceLabel(suggestion)
-                    FilterChip(
+                    ChronosFilterChip(
                         modifier = Modifier.semantics(mergeDescendants = true) {
                             contentDescription =
                                 "Apply suggestion: $suggestionLabel. $suggestionSource. $suggestionReason"
                         },
                         selected = false,
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                            onApply(suggestion)
-                        },
+                        onClick = { onApply(suggestion) },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Filled.AutoAwesome,
@@ -105,11 +97,8 @@ fun <T> ChronosAssistSuggestionChips(
                     )
                 }
                 if (onApplyAll != null && suggestions.size >= 2) {
-                    AssistChip(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                            onApplyAll()
-                        },
+                    ChronosAssistChip(
+                        onClick = { onApplyAll() },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Filled.DoneAll,

@@ -248,10 +248,46 @@ class DayDialBlockDelegate @Inject constructor(
     ) {
         scope.launch {
             val source = repository.getTimeBlockById(blockId) ?: return@launch
+            // A copy at the source's exact start always overlaps the source, so placement
+            // validation would reject it and nothing would appear. Drop the copy into open time,
+            // shrinking it to fit the nearest partial gap when nothing fits the full block, so a
+            // duplicate only fails on a day with literally no free time.
+            val dayBlocks = repository.getTimeBlocksByDate(source.date).first()
+            val placement = nextDuplicatePlacement(dayBlocks, source)
+            if (placement == null) {
+                onResult(
+                    PlannerOperationResult.Rejected("No free time to duplicate this block", blockId),
+                    false
+                )
+                return@launch
+            }
+            // The copy is a fresh, standalone user block: drop every instance-identity link
+            // (task/habit/medication/recurrence/routine/calendar + actuals) so it isn't a phantom
+            // second instance of the same scheduled thing, and normalize provenance/source.
+            // It must also be creatable — createBlock rejects locked blocks and validatePlacement
+            // rejects FIXED ones — so unlock it and downgrade FIXED to MOVABLE.
             val duplicate = source.copy(
                 id = UUID.randomUUID().toString(),
                 title = "${source.title} (Copy)",
+                startMinuteOfDay = placement.startMinute,
+                durationMinutes = placement.durationMinutes,
+                provenance = BlockProvenance.USER_CREATED,
+                source = "USER",
+                flexibility = if (source.flexibility == BlockFlexibility.FIXED) {
+                    BlockFlexibility.MOVABLE
+                } else {
+                    source.flexibility
+                },
+                isLocked = false,
+                taskId = null,
+                taskOccurrenceDate = null,
                 calendarEventId = null,
+                medicationPlanId = null,
+                habitId = null,
+                recurrenceRuleId = null,
+                routineId = null,
+                actualStartMinuteOfDay = null,
+                actualEndMinuteOfDay = null,
                 updatedAt = Instant.now(),
                 createdAt = Instant.now()
             )
@@ -459,6 +495,40 @@ class DayDialBlockDelegate @Inject constructor(
         )
     }
 
+    /** Start minute and (possibly shrunk) duration for a duplicate, or null if there is no room. */
+    private data class DuplicatePlacement(val startMinute: Int, val durationMinutes: Int)
+
+    /**
+     * Decides where a duplicate of [source] lands so it sits in open time instead of on top of the
+     * original. In order of preference: the first free gap at/after the original's end that fits the
+     * full block, then the earliest gap anywhere that fits the full block, then the largest gap with
+     * the copy shrunk to fit it. Returns null only when no usable free time remains.
+     */
+    private fun nextDuplicatePlacement(dayBlocks: List<TimeBlock>, source: TimeBlock): DuplicatePlacement? {
+        val duration = source.durationMinutes
+        val preferredStart = source.startMinuteOfDay + duration
+        val freeSegments = freeTimeCalculator.calculate(dayBlocks)
+        if (freeSegments.isEmpty()) return null
+
+        freeSegments
+            .filter { it.endMinute - maxOf(it.startMinute, preferredStart) >= duration }
+            .minByOrNull { it.startMinute }
+            ?.let { return DuplicatePlacement(maxOf(it.startMinute, preferredStart), duration) }
+
+        freeSegments
+            .filter { it.endMinute - it.startMinute >= duration }
+            .minByOrNull { it.startMinute }
+            ?.let { return DuplicatePlacement(it.startMinute, duration) }
+
+        val largest = freeSegments.maxByOrNull { it.endMinute - it.startMinute } ?: return null
+        val gapSize = largest.endMinute - largest.startMinute
+        return if (gapSize >= MIN_DUPLICATE_GAP_MINUTES) {
+            DuplicatePlacement(largest.startMinute, gapSize.coerceAtMost(duration))
+        } else {
+            null
+        }
+    }
+
     private fun currentSleepSchedule(): SleepSchedule = sleepScheduleRepository.getSleepSchedule()
 
     private fun sleepWindowResult(
@@ -476,6 +546,10 @@ class DayDialBlockDelegate @Inject constructor(
 
     private companion object {
         const val SLEEP_SCHEDULE_MESSAGE = "This time overlaps your sleep schedule"
+
+        // Below this, a leftover gap is too small to be a useful duplicate, so we report no room
+        // instead of dropping in a sliver of a block.
+        const val MIN_DUPLICATE_GAP_MINUTES = 15
     }
 
     private suspend fun syncLinkedCalendarExport(blockId: String) {

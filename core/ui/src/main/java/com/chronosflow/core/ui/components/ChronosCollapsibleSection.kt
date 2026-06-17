@@ -2,7 +2,6 @@ package com.chronosflow.core.ui.components
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -19,11 +18,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 import com.chronosflow.core.ui.theme.ChronosSpacing
 
@@ -43,7 +41,6 @@ fun ChronosCollapsibleSection(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val reduceMotionEnabled = rememberChronosUiSettings().reduceMotionEnabled
-    val haptics = LocalHapticFeedback.current
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = ChronosValueAnimationFactory.selection(reduceMotionEnabled),
@@ -59,10 +56,10 @@ fun ChronosCollapsibleSection(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onExpandedChange(!expanded)
-                    }
+                    .chronosHapticClick(
+                        onClick = { onExpandedChange(!expanded) },
+                        onClickLabel = if (expanded) "Collapse $title" else "Expand $title"
+                    )
                     .padding(ChronosSpacing.Standard),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)

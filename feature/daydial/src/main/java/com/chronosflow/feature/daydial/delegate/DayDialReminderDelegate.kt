@@ -60,12 +60,18 @@ class DayDialReminderDelegate @Inject constructor(
         endDayReviewReminder: Boolean,
         sleepScheduleEnabled: Boolean,
         sleepScheduleStartMinute: Int,
-        sleepScheduleEndMinute: Int
+        sleepScheduleEndMinute: Int,
+        journalRemindersEnabled: Boolean = true,
+        sleepJournalLogReminder: Boolean = false,
+        sleepJournalRemindersEnabled: Boolean = true
     ) {
         scope.launch {
             val blocks = repository.getTimeBlocksByDate(date).first()
             val habits = habitRepository.observeHabits().first()
-            val reminderBlocks = blocks.filter { it.occupiesScheduleTime() }
+            // Completed blocks (actual time logged) shouldn't keep firing start/break/missed
+            // reminders. Excluding them here lets the stale-id sweep below cancel any alarms
+            // that were scheduled before the block was marked complete.
+            val reminderBlocks = blocks.filter { it.occupiesScheduleTime() && it.actualEndMinuteOfDay == null }
             val nextReminderIds = mutableSetOf<String>()
             var scheduled = 0
             var skipped = 0
@@ -73,7 +79,8 @@ class DayDialReminderDelegate @Inject constructor(
             val reminderTypesEnabled = blockStartReminders ||
                 breakReminders ||
                 missedAlerts ||
-                endDayReviewReminder
+                endDayReviewReminder ||
+                sleepJournalLogReminder
             val sleepSchedule = SleepSchedule(
                 enabled = sleepScheduleEnabled,
                 startMinute = sleepScheduleStartMinute,
@@ -190,13 +197,29 @@ class DayDialReminderDelegate @Inject constructor(
                 }
             }
 
-            if (endDayReviewReminder) {
+            // The daily review reminder deep-links to the journal sheet, so suppress it
+            // when the Journal feature is turned off (the tap would otherwise dead-end).
+            if (endDayReviewReminder && journalRemindersEnabled) {
                 schedule(
                     id = reminderId(date, "day", "review"),
                     minuteOfDay = 21 * 60,
                     title = "Daily review",
                     message = "Review your day and capture tonight's journal.",
                     type = AlarmRequestType.DAILY_REVIEW
+                )
+            }
+
+            // Evening nudge to log the night and journal. Fires a little earlier than the review
+            // so it lands before a typical sleep window (later times get skipped by `schedule`),
+            // and taps deep-link to the sleep log sheet (see NotificationLaunchIntent ":logsleep").
+            // Suppressed when both capture surfaces are off, so the tap can't dead-end.
+            if (sleepJournalLogReminder && sleepJournalRemindersEnabled) {
+                schedule(
+                    id = reminderId(date, "day", "logsleep"),
+                    minuteOfDay = SLEEP_JOURNAL_LOG_REMINDER_MINUTE,
+                    title = "Log sleep & journal",
+                    message = "Log last night's sleep and capture today's journal.",
+                    type = AlarmRequestType.LOG_REMINDER
                 )
             }
 
@@ -306,6 +329,12 @@ class DayDialReminderDelegate @Inject constructor(
                 failureReason = failureReason
             )
         )
+    }
+
+    private companion object {
+        // 8 PM — before a typical sleep window so the nudge isn't skipped, and late enough that
+        // the day's sleep and journal are worth logging.
+        const val SLEEP_JOURNAL_LOG_REMINDER_MINUTE = 20 * 60
     }
 }
 

@@ -31,8 +31,13 @@ fun SensitiveRouteGate(
     val viewModel: AppLockViewModel = hiltViewModel(viewModelStoreOwner = viewModelStoreOwner)
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val sensitiveSession by viewModel.sensitiveSession.collectAsStateWithLifecycle()
-    val requiresAuth = remember(area, sensitiveSession, uiState.isAppLocked) {
-        viewModel.requiresSensitiveAuth(area)
+    // Fail open when the device has no enrolled credential (no PIN/pattern/password/biometric):
+    // the gate can't be satisfied — BiometricPrompt would have nothing to check — so enforcing it
+    // would permanently lock the user out of their own data (e.g. medications, which require auth
+    // by default). This mirrors the master App-lock toggle, which likewise refuses to engage
+    // without a device screen lock. Once the user sets a screen lock, protection resumes.
+    val requiresAuth = remember(area, sensitiveSession, uiState.isAppLocked, uiState.canAuthenticate) {
+        uiState.canAuthenticate && viewModel.requiresSensitiveAuth(area)
     }
 
     LaunchedEffect(activity) {

@@ -1,5 +1,6 @@
 package com.chronosflow.widget
 
+
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
@@ -28,6 +29,7 @@ import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
+import com.chronosflow.core.domain.model.BlockCategories
 import com.chronosflow.core.domain.model.ChronosDayOverview
 import com.chronosflow.core.domain.model.WidgetFocusState
 import com.chronosflow.core.notifications.SECTION_FOCUS
@@ -66,7 +68,8 @@ class ChronosGlanceWidget : GlanceAppWidget() {
             modifier = GlanceModifier
                 .fillMaxSize()
                 .padding(16.dp)
-                .background(GlanceTheme.colors.background),
+                .background(GlanceTheme.colors.background)
+                .clickable(openSectionAction(LocalContext.current, SECTION_FOCUS)),
             verticalAlignment = Alignment.Vertical.CenterVertically,
             horizontalAlignment = Alignment.Horizontal.CenterHorizontally
         ) {
@@ -76,8 +79,7 @@ class ChronosGlanceWidget : GlanceAppWidget() {
                     color = GlanceTheme.colors.primary,
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp
-                ),
-                modifier = GlanceModifier.clickable(openSectionAction(LocalContext.current, SECTION_FOCUS))
+                )
             )
             Spacer(modifier = GlanceModifier.height(6.dp))
             when (overview.focus.state) {
@@ -163,23 +165,34 @@ class ChronosGlanceWidget : GlanceAppWidget() {
         )
     }
 
-    private fun idleContextLine(overview: ChronosDayOverview): String {
-        overview.currentBlock?.let {
-            return "Now: ${it.title} · until ${formatMinuteOfDay(it.endMinuteOfDay)}"
-        }
-        overview.nextBlock?.let {
-            return "Next: ${it.title} · ${formatMinuteOfDay(it.startMinuteOfDay)}"
-        }
-        return "No session running"
-    }
-
     private fun formatTimeLeft(seconds: Int): String {
         val safe = seconds.coerceAtLeast(0)
         return "%d:%02d".format(safe / 60, safe % 60)
     }
+}
 
-    private fun formatMinuteOfDay(minuteOfDay: Int): String {
-        val safe = minuteOfDay.coerceIn(0, 1439)
-        return "%02d:%02d".format(safe / 60, safe % 60)
+/**
+ * The idle (no focus running) context line for the Focus widget: the current block's full time
+ * window, or — when nothing's active — the next event and the next break split out the same way
+ * the live "now" notification does, so the widget and the notification never disagree about what's
+ * next. Top-level + internal so it is unit-tested without the Glance runtime.
+ */
+internal fun idleContextLine(overview: ChronosDayOverview): String {
+    overview.currentBlock?.let {
+        return "Now: ${it.title} · ${formatWidgetMinute(it.startMinuteOfDay)}–${formatWidgetMinute(it.endMinuteOfDay)}"
     }
+    val upcoming = overview.blocks.filterNot { it.isCurrent }
+    val nextEvent = upcoming.firstOrNull { !BlockCategories.isBreak(it.category) }
+    val nextBreak = upcoming.firstOrNull { BlockCategories.isBreak(it.category) }
+    val parts = listOfNotNull(
+        nextEvent?.let { "Next: ${it.title} · ${formatWidgetMinute(it.startMinuteOfDay)}" },
+        nextBreak?.let { "Break · ${formatWidgetMinute(it.startMinuteOfDay)}" }
+    )
+    return parts.joinToString(" · ").ifEmpty { "No session running" }
+}
+
+/** 24-hour "HH:mm", wrapping minutes past midnight (end-of-block can exceed 1439). */
+private fun formatWidgetMinute(minuteOfDay: Int): String {
+    val safe = ((minuteOfDay % 1440) + 1440) % 1440
+    return "%02d:%02d".format(safe / 60, safe % 60)
 }

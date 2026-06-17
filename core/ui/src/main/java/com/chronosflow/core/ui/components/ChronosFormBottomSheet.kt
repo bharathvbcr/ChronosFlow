@@ -111,7 +111,7 @@ fun ChronosFormBottomSheet(
                 }
                 Spacer(modifier = Modifier.height(16.dp))
                 if (onDuplicate != null) {
-                    TextButton(
+                    ChronosTextButton(
                         onClick = onDuplicate,
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -119,7 +119,7 @@ fun ChronosFormBottomSheet(
                     }
                 }
                 if (onArchive != null) {
-                    TextButton(
+                    ChronosTextButton(
                         onClick = onArchive,
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.textButtonColors(
@@ -138,13 +138,13 @@ fun ChronosFormBottomSheet(
                         .imePadding(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    OutlinedButton(
+                    ChronosOutlinedButton(
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(dismissLabel, fontWeight = FontWeight.SemiBold)
                     }
-                    Button(
+                    ChronosButton(
                         onClick = onConfirm,
                         enabled = enabled,
                         modifier = Modifier.weight(1f)

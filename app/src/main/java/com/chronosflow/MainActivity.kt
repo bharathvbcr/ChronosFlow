@@ -7,6 +7,7 @@ import android.os.Bundle
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.fragment.app.FragmentActivity
@@ -38,8 +39,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.platform.LocalContext
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
+import com.chronosflow.navigation.rememberChronosNavigationState
 import com.chronosflow.core.ai.genai.GenAiAssistCopy
 import com.chronosflow.core.ui.components.CommandPaletteDialog
 import com.chronosflow.core.ui.components.CommandPaletteItem
@@ -66,12 +66,12 @@ import com.chronosflow.core.notifications.EXTRA_INITIAL_SECTION
 import com.chronosflow.core.notifications.NotificationLaunch
 import com.chronosflow.core.notifications.consumeNotificationLaunchExtras
 import com.chronosflow.core.notifications.parseNotificationLaunch
+import com.chronosflow.core.notifications.parseSharedTextLaunch
 import com.chronosflow.navigation.ChronosNavigationShell
 import com.chronosflow.navigation.ChronosRoute
 import com.chronosflow.navigation.quickCreateCommandProvider
 import com.chronosflow.navigation.guardedMedicationOpener
 import com.chronosflow.navigation.navigateFromNotificationLaunch
-import com.chronosflow.navigation.navigateSingleTop
 import com.chronosflow.navigation.navigateToMedication
 import com.chronosflow.security.AppLockLifecycleObserver
 import dagger.hilt.android.AndroidEntryPoint
@@ -94,6 +94,8 @@ class MainActivity : FragmentActivity() {
     private val launchGeneration = mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Branded cold-start splash (androidx SplashScreen API); hands off to Theme.ChronosFlow.
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         launchIntentState.value = intent
         appLockLifecycleObserver.register()
@@ -187,44 +189,45 @@ private fun ChronosFlowApp(
     val notificationPlan = remember(launchGeneration, launchIntent) {
         buildNotificationNavigationPlan(launchIntent)
     }
-    val navController = rememberNavController()
+    val navState = rememberChronosNavigationState(
+        startDayTarget = initialDayTargetForNotificationLaunch(notificationPlan.notificationLaunch)
+    )
     val appLockViewModel: AppLockViewModel = hiltViewModel()
     val shellState = rememberDeferredShellState()
     val appLockState by appLockViewModel.uiState.collectAsStateWithLifecycle()
-    val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val activity = LocalContext.current as FragmentActivity
-    val openMedication = remember(navController, activity, appLockViewModel) {
-        guardedMedicationOpener(activity, appLockViewModel, navController)
+    val openMedication = remember(navState, activity, appLockViewModel) {
+        guardedMedicationOpener(activity, appLockViewModel, navState)
     }
-    val openMedicationIfEnabled = remember(navController, openMedication, featureFlags) {
+    val openMedicationIfEnabled = remember(navState, openMedication, featureFlags) {
         {
             if (featureFlags.medicationEnabled) {
                 openMedication()
             } else {
-                navController.navigateSingleTop(ChronosRoute.Day.createRoute())
+                navState.navigate(ChronosRoute.Day.createRoute())
             }
         }
     }
-    val openTasksSidebar = remember(navController) {
+    val openTasksSidebar = remember(navState) {
         {
-            navController.navigateSingleTop(ChronosRoute.topLevelRouteFor(ChronosRoute.Tasks.section))
+            navState.navigate(ChronosRoute.topLevelRouteFor(ChronosRoute.Tasks.section))
         }
     }
-    val openHabitsSidebarIfEnabled = remember(navController, featureFlags) {
+    val openHabitsSidebarIfEnabled = remember(navState, featureFlags) {
         {
             if (featureFlags.habitsEnabled) {
-                navController.navigateSingleTop(ChronosRoute.topLevelRouteFor(ChronosRoute.Habits.section))
+                navState.navigate(ChronosRoute.topLevelRouteFor(ChronosRoute.Habits.section))
             } else {
-                navController.navigateSingleTop(ChronosRoute.Day.createRoute())
+                navState.navigate(ChronosRoute.Day.createRoute())
             }
         }
     }
-    val openMedicationSidebarIfEnabled = remember(navController, featureFlags) {
+    val openMedicationSidebarIfEnabled = remember(navState, featureFlags) {
         {
             if (featureFlags.medicationEnabled) {
-                navController.navigateSingleTop(ChronosRoute.topLevelRouteFor(ChronosRoute.Medication.section))
+                navState.navigate(ChronosRoute.topLevelRouteFor(ChronosRoute.Medication.section))
             } else {
-                navController.navigateSingleTop(ChronosRoute.Day.createRoute())
+                navState.navigate(ChronosRoute.Day.createRoute())
             }
         }
     }
@@ -232,7 +235,7 @@ private fun ChronosFlowApp(
         appLockVisibilityTransition(reduceMotionEnabled)
     }
     val assistantActions = remember(
-        navController,
+        navState,
         activity,
         appLockViewModel,
         openTasksSidebar,
@@ -241,22 +244,22 @@ private fun ChronosFlowApp(
         featureFlags
     ) {
         AssistantCommandActions(
-            onOpenDay = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TODAY)) },
+            onOpenDay = { navState.navigate(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TODAY)) },
             onOpenTasks = openTasksSidebar,
             onOpenReview = {
-                navController.navigateSingleTop(
+                navState.navigate(
                     ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS)
                 )
             },
             onOpenFocus = {
-                navController.navigateSingleTop(
+                navState.navigate(
                     ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_FOCUS_PLANNER)
                 )
             },
             onOpenHabits = openHabitsSidebarIfEnabled,
             onOpenMedication = openMedicationSidebarIfEnabled,
             onCaptureTask = { capture ->
-                navController.navigateSingleTop(
+                navState.navigate(
                     ChronosRoute.Tasks.createRoute(
                         target = ChronosRoute.TARGET_ADD,
                         capture = capture
@@ -265,30 +268,30 @@ private fun ChronosFlowApp(
             },
             onCaptureHabit = { capture ->
                 if (featureFlags.habitsEnabled) {
-                    navController.navigateSingleTop(
+                    navState.navigate(
                         ChronosRoute.Habits.createRoute(
                             target = ChronosRoute.TARGET_ADD,
                             capture = capture
                         )
                     )
                 } else {
-                    navController.navigateSingleTop(ChronosRoute.Day.createRoute())
+                    navState.navigate(ChronosRoute.Day.createRoute())
                 }
             },
             onCaptureMedication = { capture ->
                 if (featureFlags.medicationEnabled) {
-                    navController.navigateToMedication(
+                    navState.navigateToMedication(
                         activity = activity,
                         appLockViewModel = appLockViewModel,
                         target = ChronosRoute.TARGET_ADD,
                         capture = capture
                     )
                 } else {
-                    navController.navigateSingleTop(ChronosRoute.Day.createRoute())
+                    navState.navigate(ChronosRoute.Day.createRoute())
                 }
             },
             onCaptureFocus = { capture ->
-                navController.navigateSingleTop(
+                navState.navigate(
                     ChronosRoute.Day.createRoute(
                         target = ChronosRoute.Day.TARGET_FOCUS_PLANNER,
                         capture = capture
@@ -300,7 +303,7 @@ private fun ChronosFlowApp(
         )
     }
     val commandPaletteCommands = remember(
-        navController,
+        navState,
         activity,
         appLockViewModel,
         openTasksSidebar,
@@ -312,69 +315,69 @@ private fun ChronosFlowApp(
             buildList {
                 add(quickCreateCommandProvider(
                     onNewBlock = {
-                        navController.navigateSingleTop(
+                        navState.navigate(
                             ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_ADD_BLOCK)
                         )
                     },
                     onNewTask = {
-                        navController.navigateSingleTop(
+                        navState.navigate(
                             ChronosRoute.Tasks.createRoute(target = ChronosRoute.TARGET_ADD)
                         )
                     },
                     onNewFocus = {
-                        navController.navigateSingleTop(
+                        navState.navigate(
                             ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_FOCUS_PLANNER)
                         )
                     },
                     onNewHabit = {
-                        navController.navigateSingleTop(
+                        navState.navigate(
                             ChronosRoute.Habits.createRoute(ChronosRoute.TARGET_ADD)
                         )
                     },
                     onNewGoal = {
-                        navController.navigateSingleTop(
+                        navState.navigate(
                             ChronosRoute.Goals.createRoute(ChronosRoute.TARGET_ADD)
                         )
                     },
                     onNewMedication = {
-                        navController.navigateToMedication(
+                        navState.navigateToMedication(
                             activity,
                             appLockViewModel,
                             ChronosRoute.TARGET_ADD
                         )
                     },
                     onNewJournal = {
-                        navController.navigateSingleTop(
+                        navState.navigate(
                             ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_JOURNAL)
                         )
                     },
                     onLogSleep = {
-                        navController.navigateSingleTop(
+                        navState.navigate(
                             ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_SLEEP)
                         )
                     },
                     onOpenRoutines = {
-                        navController.navigateSingleTop(
+                        navState.navigate(
                             ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TEMPLATES)
                         )
                     },
                     featureFlags = featureFlags
                 ))
                 add(dayDialCommandProvider(
-                    onOpenDayDial = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TODAY)) },
-                    onOpenPlan = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_PLAN)) },
-                    onOpenFocusPlanner = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_FOCUS_PLANNER)) },
-                    onOpenReview = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS)) },
-                    onOpenPlanningTools = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_DAY_TOOLS)) },
-                    onOpenTemplates = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TEMPLATES)) },
-                    onOpenAiSettings = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_AI_SETTINGS)) },
-                    onOpenPrivacySync = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_PRIVACY_SYNC)) },
-                    onOpenNotificationSettings = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_NOTIFICATIONS)) },
-                    onOpenAppearanceSettings = { navController.navigateSingleTop(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_APPEARANCE)) },
+                    onOpenDayDial = { navState.navigate(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TODAY)) },
+                    onOpenPlan = { navState.navigate(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_PLAN)) },
+                    onOpenFocusPlanner = { navState.navigate(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_FOCUS_PLANNER)) },
+                    onOpenReview = { navState.navigate(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS)) },
+                    onOpenPlanningTools = { navState.navigate(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_DAY_TOOLS)) },
+                    onOpenTemplates = { navState.navigate(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TEMPLATES)) },
+                    onOpenAiSettings = { navState.navigate(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_AI_SETTINGS)) },
+                    onOpenPrivacySync = { navState.navigate(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_PRIVACY_SYNC)) },
+                    onOpenNotificationSettings = { navState.navigate(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_NOTIFICATIONS)) },
+                    onOpenAppearanceSettings = { navState.navigate(ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_APPEARANCE)) },
                     featureFlags = featureFlags
                 ))
                 add(focusCommandProvider {
-                    navController.navigateSingleTop(
+                    navState.navigate(
                         ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_FOCUS_PLANNER)
                     )
                 })
@@ -384,7 +387,7 @@ private fun ChronosFlowApp(
                 }
                 if (featureFlags.goalsEnabled) {
                     add(goalCommandProvider {
-                        navController.navigateSingleTop(ChronosRoute.Goals.route)
+                        navState.navigate(ChronosRoute.Goals())
                     })
                 }
                 if (featureFlags.medicationEnabled) {
@@ -416,9 +419,9 @@ private fun ChronosFlowApp(
     LaunchedEffect(launchGeneration) {
         val launch = notificationPlan.notificationLaunch ?: return@LaunchedEffect
         if (launch.section == ChronosRoute.Medication.section && featureFlags.medicationEnabled) {
-            navController.navigateToMedication(activity, appLockViewModel)
+            navState.navigateToMedication(activity, appLockViewModel)
         } else {
-            navController.navigateFromNotificationLaunch(launch, featureFlags)
+            navState.navigateFromNotificationLaunch(launch, featureFlags)
         }
         onNotificationLaunchHandled()
     }
@@ -444,12 +447,9 @@ private fun ChronosFlowApp(
             }
     ) {
         ChronosNavigationShell(
-            navController = navController,
-            startRoute = notificationPlan.startRoute,
-            currentSection = ChronosRoute.fromSection(
-                currentBackStackEntry?.destination?.route?.substringBefore("?")
-            ).section,
-            currentDayTarget = currentBackStackEntry?.arguments?.getString("target"),
+            navState = navState,
+            currentSection = navState.topLevelSection,
+            currentDayTarget = navState.requestedDayTarget,
             shellState = shellState,
             onOpenCommandPalette = openCommandPalette,
             onQuickCapturePreview = { capture ->
@@ -460,10 +460,7 @@ private fun ChronosFlowApp(
             },
             onOpenMedication = openMedicationIfEnabled,
             activity = activity,
-            appLockViewModel = appLockViewModel,
-            initialDayTarget = initialDayTargetForNotificationLaunch(notificationPlan.notificationLaunch),
-            externalDayTarget = initialDayTargetForNotificationLaunch(notificationPlan.notificationLaunch),
-            externalDayTargetGeneration = launchGeneration
+            appLockViewModel = appLockViewModel
         )
     }
     AnimatedVisibility(
@@ -597,26 +594,19 @@ private fun appLockVisibilityTransition(reduceMotionEnabled: Boolean): ChronosTr
     )
 
 internal data class NotificationNavigationPlan(
-    val startRoute: String,
     val notificationLaunch: NotificationLaunch?
 )
 
 internal fun buildNotificationNavigationPlan(intent: Intent?): NotificationNavigationPlan {
-    val launch = parseNotificationLaunch(intent)
-    // Start Day-target notifications on their routed Day destination so the first
-    // composition can render the requested surface without a second navigation pass.
+    // A notification/deep-link launch wins; otherwise treat an inbound Share / Process-text
+    // intent from another app as a task capture.
+    val launch = parseNotificationLaunch(intent) ?: parseSharedTextLaunch(intent)
+    // The shell starts on Day; Day-target notifications surface their tab in-place via
+    // [initialDayTargetForNotificationLaunch], so no separate start route is needed.
     return NotificationNavigationPlan(
-        startRoute = startRouteForNotificationLaunch(launch),
         notificationLaunch = launch
     )
 }
-
-internal fun startRouteForNotificationLaunch(launch: NotificationLaunch?): String =
-    if (launch?.section == ChronosRoute.Day.section && launch.dayTarget != null) {
-        ChronosRoute.Day.createRoute(launch.dayTarget)
-    } else {
-        ChronosRoute.Day.createRoute()
-    }
 
 internal fun initialDayTargetForNotificationLaunch(launch: NotificationLaunch?): String? =
     if (launch?.section == ChronosRoute.Day.section) launch.dayTarget else null

@@ -22,15 +22,24 @@ class CommandAssistPlanner @Inject constructor(
     ): List<String> {
         val normalized = query.trim().lowercase()
         if (normalized.length < 3) return emptyList()
+        val queryTokens = normalized.split(" ").filter { it.length > 2 }
         return candidates
             .map { candidate ->
                 val haystack = (candidate.title + " " + candidate.keywords.joinToString(" ")).lowercase()
-                val score = when {
+                val phraseScore = when {
                     candidate.title.lowercase() == normalized -> 100
                     candidate.title.lowercase().contains(normalized) -> 80
                     candidate.id.lowercase().contains(normalized) -> 70
                     haystack.contains(normalized) -> 60
-                    normalized.split(" ").count { token -> token.length > 2 && haystack.contains(token) } >= 2 -> 40
+                    else -> 0
+                }
+                // Graded token overlap: every matching query token counts, so a single strong keyword
+                // match still ranks (the old code needed >=2 tokens and gave a flat 40) and more
+                // overlap ranks higher. Base score when there's no phrase hit; a tiebreaker otherwise.
+                val tokenHits = queryTokens.count { token -> haystack.contains(token) }
+                val score = when {
+                    phraseScore > 0 -> phraseScore + tokenHits
+                    tokenHits > 0 -> 20 + tokenHits * 15
                     else -> 0
                 }
                 candidate.id to score

@@ -15,6 +15,10 @@ local.properties
 *.apk
 *.aab
 *.hprof
+# Release signing — never commit the keystore or its passwords (keystore.properties.example is the template)
+*.jks
+*.keystore
+keystore.properties
 *.log
 *_log.txt
 captures/
@@ -32,5 +36,5 @@ artifacts/
 /build_error*.txt
 /build_full_log.txt
 /compile_*.txt
-/clean_out.txt
+/*_out.txt
 /gitnexus-wholebase-*

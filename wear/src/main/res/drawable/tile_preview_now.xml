@@ -1,0 +1,33 @@
+<!-- Tile-picker preview for the "Now" tile (ChronosTodayTileProvider): a glance of the current
+     block, time remaining, and open-task count on the round watch surface. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="400dp"
+    android:height="400dp"
+    android:viewportWidth="400"
+    android:viewportHeight="400">
+
+    <!-- Dark tile surface (system clips to the watch shape). -->
+    <path
+        android:fillColor="#16191D"
+        android:pathData="M0,0 L400,0 L400,400 L0,400 Z" />
+
+    <!-- "Now" title (brand teal). -->
+    <path
+        android:fillColor="#18B8A6"
+        android:pathData="M165,83 L235,83 A12,12 0 0 1 235,107 L165,107 A12,12 0 0 1 165,83 Z" />
+
+    <!-- Current block line. -->
+    <path
+        android:fillColor="#E5E7EB"
+        android:pathData="M110,154 L290,154 A11,11 0 0 1 290,176 L110,176 A11,11 0 0 1 110,154 Z" />
+
+    <!-- "until 11:30" caption. -->
+    <path
+        android:fillColor="#9CA3AF"
+        android:pathData="M140,197 L260,197 A8,8 0 0 1 260,213 L140,213 A8,8 0 0 1 140,197 Z" />
+
+    <!-- Open-task count. -->
+    <path
+        android:fillColor="#9CA3AF"
+        android:pathData="M125,276 L275,276 A9,9 0 0 1 275,294 L125,294 A9,9 0 0 1 125,276 Z" />
+</vector>

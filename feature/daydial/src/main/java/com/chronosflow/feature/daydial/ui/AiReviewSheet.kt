@@ -1,5 +1,9 @@
 package com.chronosflow.feature.daydial.ui
 
+import com.chronosflow.core.ui.components.ChronosButton
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+import com.chronosflow.core.ui.theme.ChronosColors
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -59,7 +63,7 @@ fun AiReviewSheet(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
+                ChronosOutlinedButton(
                     onClick = onDismissAll,
                     modifier = Modifier
                         .heightIn(min = AiReviewActionHeight)
@@ -67,7 +71,7 @@ fun AiReviewSheet(
                             contentDescription = aiReviewDismissAllActionLabel(suggestions.size)
                         }
                 ) { Text("Dismiss All", maxLines = 1) }
-                Button(
+                ChronosButton(
                     onClick = onApplyAll,
                     modifier = Modifier
                         .heightIn(min = AiReviewActionHeight)
@@ -129,7 +133,7 @@ fun AiReviewSheet(
                             onDurationChange = { durationMinutes = it },
                             range = BlockEditorMinDurationMinutes..BlockEditorMaxDurationMinutes
                         )
-                        Button(
+                        ChronosButton(
                             onClick = {
                                 onModify(
                                     suggestion.id,
@@ -151,7 +155,7 @@ fun AiReviewSheet(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedButton(
+                        ChronosOutlinedButton(
                             onClick = { onReject(suggestion.id) },
                             modifier = Modifier
                                 .weight(1f)
@@ -160,7 +164,7 @@ fun AiReviewSheet(
                                     contentDescription = aiReviewRejectActionLabel(suggestion)
                                 }
                         ) { Text("Reject", maxLines = 1, fontWeight = FontWeight.SemiBold) }
-                        Button(
+                        ChronosButton(
                             onClick = { onAccept(suggestion.id) },
                             modifier = Modifier
                                 .weight(1f)
@@ -225,9 +229,9 @@ private fun rememberAiSuggestionDiff(suggestion: TimeBlockUiModel): AiSuggestion
         suggestion.title.contains("recover", ignoreCase = true)
     val isShortBuffer = suggestion.durationMinutes <= 20
     val accent = when {
-        isProtectedFocus -> Color(0xFF3F7E44)
-        isBreakOrRecovery || isShortBuffer -> Color(0xFF8A5D00)
-        suggestion.flexibility == "OPTIONAL" -> Color(0xFF3859B8)
+        isProtectedFocus -> ChronosColors.AssistProtectedFocus
+        isBreakOrRecovery || isShortBuffer -> ChronosColors.AssistBreakRecovery
+        suggestion.flexibility == "OPTIONAL" -> ChronosColors.AssistOptional
         else -> MaterialTheme.colorScheme.primary
     }
     val label = when {

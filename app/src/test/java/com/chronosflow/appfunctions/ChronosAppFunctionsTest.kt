@@ -1,6 +1,7 @@
 package com.chronosflow.appfunctions
 
 import androidx.appfunctions.AppFunctionContext
+import com.chronosflow.core.data.focus.ManualMissedBlockRegistry
 import com.chronosflow.core.domain.model.ActualTimeSegment
 import com.chronosflow.core.domain.model.BlockFlexibility
 import com.chronosflow.core.domain.model.BlockProvenance
@@ -28,12 +29,15 @@ import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
 import com.chronosflow.core.domain.usecase.ApplyRoutineToDateUseCase
 import com.chronosflow.core.domain.usecase.RecordSleepUseCase
+import com.chronosflow.core.ui.settings.ChronosFeatureFlags
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import java.time.Instant
 import java.time.LocalDate
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -58,10 +62,14 @@ class ChronosAppFunctionsTest {
     private val applyRoutineToDateUseCase: ApplyRoutineToDateUseCase = mockk(relaxed = true)
     private val plannerService: PlannerService = mockk()
     private val focusSessionRepository: FocusSessionRepository = mockk(relaxed = true)
+    private val manualMissedBlockRegistry: ManualMissedBlockRegistry = mockk(relaxed = true)
+    private val timeBlockCompletionHandler: TimeBlockCompletionHandler = mockk(relaxed = true)
 
     private val appFunctionContext: AppFunctionContext = mockk(relaxed = true)
 
-    private val appFunctions = ChronosAppFunctions(
+    private fun buildAppFunctions(
+        featureFlags: ChronosFeatureFlags = ChronosFeatureFlags.AllEnabled
+    ) = ChronosAppFunctions(
         taskRepository = taskRepository,
         habitRepository = habitRepository,
         medicationRepository = medicationRepository,
@@ -75,9 +83,14 @@ class ChronosAppFunctionsTest {
         sleepTrackRepository = sleepTrackRepository,
         recordSleepUseCase = recordSleepUseCase,
         applyRoutineToDateUseCase = applyRoutineToDateUseCase,
+        timeBlockCompletionHandler = timeBlockCompletionHandler,
         plannerService = plannerService,
-        focusSessionRepository = focusSessionRepository
+        focusSessionRepository = focusSessionRepository,
+        manualMissedBlockRegistry = manualMissedBlockRegistry,
+        featureFlagsSource = ChronosFeatureFlagsSource { featureFlags }
     )
+
+    private val appFunctions = buildAppFunctions()
 
     @Test
     fun createTaskCallsSaveTask() = runTest {
@@ -336,6 +349,115 @@ class ChronosAppFunctionsTest {
     }
 
     @Test
+    fun completeTimeBlockDelegatesToHandler() = runTest {
+        val block = timeBlock("block-1", "Deep Work", "work", start = 600, duration = 50)
+        coEvery { timeBlockRepository.getTimeBlockById("block-1") } returns block
+
+        val result = appFunctions.completeTimeBlock(
+            appFunctionContext = appFunctionContext,
+            blockId = "block-1"
+        )
+
+        assertTrue(result)
+        // The full completion (log + recurring advance + clear missed) is owned by the shared
+        // handler, covered by TimeBlockCompletionHandlerTest. The AppFunction resolves + delegates.
+        coVerify(exactly = 1) { timeBlockCompletionHandler.complete(match { it.id == "block-1" }) }
+    }
+
+    @Test
+    fun completeTimeBlockReturnsFalseForUnknownBlock() = runTest {
+        coEvery { timeBlockRepository.getTimeBlockById(any()) } returns null
+
+        val result = appFunctions.completeTimeBlock(
+            appFunctionContext = appFunctionContext,
+            blockId = "missing"
+        )
+
+        assertFalse(result)
+        coVerify(exactly = 0) { timeBlockCompletionHandler.complete(any()) }
+    }
+
+    @Test
+    fun markTimeBlockMissedFlagsBlock() = runTest {
+        val block = timeBlock("block-1", "Deep Work", "work", start = 600, duration = 50)
+        coEvery { timeBlockRepository.getTimeBlockById("block-1") } returns block
+
+        val result = appFunctions.markTimeBlockMissed(
+            appFunctionContext = appFunctionContext,
+            blockId = "block-1"
+        )
+
+        assertTrue(result)
+        verify(exactly = 1) { manualMissedBlockRegistry.markMissed("block-1", any()) }
+    }
+
+    @Test
+    fun markTimeBlockMissedReturnsFalseForUnknownBlock() = runTest {
+        coEvery { timeBlockRepository.getTimeBlockById(any()) } returns null
+
+        val result = appFunctions.markTimeBlockMissed(
+            appFunctionContext = appFunctionContext,
+            blockId = "missing"
+        )
+
+        assertFalse(result)
+        verify(exactly = 0) { manualMissedBlockRegistry.markMissed(any(), any()) }
+    }
+
+    @Test
+    fun completeTimeBlockResolvesByTitleWhenNoId() = runTest {
+        val block = timeBlock("block-1", "Deep Work", "work", start = 600, duration = 50)
+        every { timeBlockRepository.getTimeBlocksByDate(any()) } returns flowOf(listOf(block))
+
+        val result = appFunctions.completeTimeBlock(
+            appFunctionContext = appFunctionContext,
+            blockTitle = "deep work"
+        )
+
+        assertTrue(result)
+        coVerify(exactly = 1) { timeBlockCompletionHandler.complete(match { it.id == "block-1" }) }
+    }
+
+    @Test
+    fun completeTimeBlockPrefersIncompleteBlockOnTitleMatch() = runTest {
+        val done = timeBlock("done", "Study", "study", start = 540, duration = 60)
+            .copy(actualStartMinuteOfDay = 540, actualEndMinuteOfDay = 600)
+        val pending = timeBlock("pending", "Study", "study", start = 800, duration = 60)
+        every { timeBlockRepository.getTimeBlocksByDate(any()) } returns flowOf(listOf(done, pending))
+
+        val result = appFunctions.completeTimeBlock(
+            appFunctionContext = appFunctionContext,
+            blockTitle = "Study"
+        )
+
+        assertTrue(result)
+        // The not-yet-done block is targeted, not the already-completed duplicate.
+        coVerify(exactly = 1) { timeBlockCompletionHandler.complete(match { it.id == "pending" }) }
+    }
+
+    @Test
+    fun completeTimeBlockReturnsFalseWithoutIdentifier() = runTest {
+        val result = appFunctions.completeTimeBlock(appFunctionContext = appFunctionContext)
+
+        assertFalse(result)
+        coVerify(exactly = 0) { timeBlockCompletionHandler.complete(any()) }
+    }
+
+    @Test
+    fun markTimeBlockMissedResolvesByTitle() = runTest {
+        val block = timeBlock("block-1", "Workout", "fitness", start = 700, duration = 30)
+        every { timeBlockRepository.getTimeBlocksByDate(any()) } returns flowOf(listOf(block))
+
+        val result = appFunctions.markTimeBlockMissed(
+            appFunctionContext = appFunctionContext,
+            blockTitle = "workout"
+        )
+
+        assertTrue(result)
+        verify(exactly = 1) { manualMissedBlockRegistry.markMissed("block-1", any()) }
+    }
+
+    @Test
     fun syncCalendarEventsCallsSyncFromDeviceCalendar() = runTest {
         coEvery { calendarEventRepository.syncFromDeviceCalendar(any(), any()) } returns Unit
 
@@ -361,7 +483,7 @@ class ChronosAppFunctionsTest {
         assertTrue(result)
         // today is reflowed from the current minute, not from midnight
         coVerify(exactly = 1) {
-            plannerService.rebalanceDay(LocalDate.now(), match { it != null && it != 0 })
+            plannerService.rebalanceDay(LocalDate.now(), match { it != 0 })
         }
     }
 
@@ -376,13 +498,18 @@ class ChronosAppFunctionsTest {
 
         assertFalse(result)
     }
+
+    @Test
     fun getTodayScheduleReturnsBlocksSortedByStart() = runTest {
         every { timeBlockRepository.getTimeBlocksByDate(any()) } returns flowOf(
             listOf(
-                timeBlock(id = "b2", title = "Lunch", category = "meals", start = 720, duration = 60),
+                timeBlock(id = "b2", title = "Lunch", category = "meals", start = 720, duration = 60)
+                    .copy(actualStartMinuteOfDay = 720, actualEndMinuteOfDay = 780),
                 timeBlock(id = "b1", title = "Deep Work", category = "work", start = 540, duration = 90)
             )
         )
+        every { manualMissedBlockRegistry.ids } returns MutableStateFlow(emptySet())
+        every { manualMissedBlockRegistry.missedIdsForDate(any(), any()) } returns setOf("b1")
 
         val result = appFunctions.getTodaySchedule(appFunctionContext)
 
@@ -390,6 +517,11 @@ class ChronosAppFunctionsTest {
         assertEquals("Deep Work", result.first().title)
         assertEquals(540, result.first().startMinuteOfDay)
         assertEquals(90, result.first().durationMinutes)
+        // completed + missed let an agent route each block correctly.
+        assertFalse(result.first { it.id == "b1" }.completed)
+        assertTrue(result.first { it.id == "b2" }.completed)
+        assertTrue(result.first { it.id == "b1" }.missed)
+        assertFalse(result.first { it.id == "b2" }.missed)
     }
 
     @Test
@@ -441,6 +573,70 @@ class ChronosAppFunctionsTest {
         assertEquals(listOf("m1"), result.map { it.id })
         assertEquals("1 tablet", result.first().dosage)
         assertEquals(480, result.first().reminderMinuteOfDay)
+    }
+
+    @Test
+    fun createGoalIsBlockedWhenGoalsFeatureDisabled() = runTest {
+        val result = buildAppFunctions(ChronosFeatureFlags(goalsEnabled = false)).createGoal(
+            appFunctionContext = appFunctionContext,
+            title = "Run a marathon"
+        )
+
+        assertFalse(result)
+        coVerify(exactly = 0) { goalRepository.saveGoal(any()) }
+    }
+
+    @Test
+    fun addJournalEntryIsBlockedWhenJournalFeatureDisabled() = runTest {
+        val result = buildAppFunctions(ChronosFeatureFlags(journalEnabled = false)).addJournalEntry(
+            appFunctionContext = appFunctionContext,
+            text = "A quiet evening."
+        )
+
+        assertFalse(result)
+        coVerify(exactly = 0) { journalRepository.save(any()) }
+    }
+
+    @Test
+    fun logSleepIsBlockedWhenSleepFeatureDisabled() = runTest {
+        val result = buildAppFunctions(ChronosFeatureFlags(sleepEnabled = false)).logSleep(
+            appFunctionContext = appFunctionContext,
+            quality = 4
+        )
+
+        assertFalse(result)
+        coVerify(exactly = 0) { recordSleepUseCase(any()) }
+    }
+
+    @Test
+    fun logHabitCompletedIsBlockedWhenHabitsFeatureDisabled() = runTest {
+        val result = buildAppFunctions(ChronosFeatureFlags(habitsEnabled = false)).logHabitCompleted(
+            appFunctionContext = appFunctionContext,
+            habitId = "h1"
+        )
+
+        assertFalse(result)
+        coVerify(exactly = 0) { habitRepository.addHabitEvent(any()) }
+    }
+
+    @Test
+    fun logMedicationTakenIsBlockedWhenMedicationFeatureDisabled() = runTest {
+        val result = buildAppFunctions(ChronosFeatureFlags(medicationEnabled = false)).logMedicationTaken(
+            appFunctionContext = appFunctionContext,
+            medicationPlanId = "m1"
+        )
+
+        assertFalse(result)
+        coVerify(exactly = 0) { medicationRepository.addMedicationDoseEvent(any()) }
+    }
+
+    @Test
+    fun listHabitsIsEmptyWhenHabitsFeatureDisabled() = runTest {
+        val result = buildAppFunctions(ChronosFeatureFlags(habitsEnabled = false))
+            .listHabits(appFunctionContext)
+
+        assertTrue(result.isEmpty())
+        coVerify(exactly = 0) { habitRepository.observeHabits() }
     }
 
     private fun timeBlock(

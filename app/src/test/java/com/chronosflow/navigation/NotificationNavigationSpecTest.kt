@@ -1,48 +1,37 @@
 package com.chronosflow.navigation
 
 import com.chronosflow.core.notifications.NotificationLaunch
-import com.chronosflow.core.notifications.SECTION_DAY
 import com.chronosflow.core.notifications.SECTION_FOCUS
 import com.chronosflow.core.notifications.SECTION_MEDICATION
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NotificationNavigationSpecTest {
     @Test
-    fun `day launches replace existing day destination`() {
-        val spec = buildNotificationNavigationSpec(
-            NotificationLaunch(section = SECTION_DAY, dayTarget = ChronosRoute.Day.TARGET_TODAY)
-        )
-
-        assertEquals("${SECTION_DAY}?target=today", spec.route)
-        assertEquals(ChronosRoute.Day.route, spec.popUpToRoute)
-        assertTrue(spec.inclusive)
-    }
-
-    @Test
-    fun `focus launches rebuild destination above day`() {
-        val spec = buildNotificationNavigationSpec(
-            NotificationLaunch(section = SECTION_FOCUS, focusBlockId = "block-42")
-        )
-
+    fun `day launches resolve to the routed day tab`() {
         assertEquals(
-            "${SECTION_DAY}?target=${ChronosRoute.Day.TARGET_FOCUS_PLANNER}",
-            spec.route
+            ChronosRoute.Day(ChronosRoute.Day.TARGET_TODAY),
+            routeForNotificationLaunch(
+                NotificationLaunch(section = com.chronosflow.core.notifications.SECTION_DAY, dayTarget = ChronosRoute.Day.TARGET_TODAY)
+            )
         )
-        assertEquals(ChronosRoute.Day.route, spec.popUpToRoute)
-        assertFalse(spec.inclusive)
     }
 
     @Test
-    fun `secondary sections preserve day as the back stack anchor`() {
-        val spec = buildNotificationNavigationSpec(
-            NotificationLaunch(section = SECTION_MEDICATION)
+    fun `focus launches resolve to the focus planner day tab`() {
+        assertEquals(
+            ChronosRoute.Day(ChronosRoute.Day.TARGET_FOCUS_PLANNER),
+            routeForNotificationLaunch(
+                NotificationLaunch(section = SECTION_FOCUS, focusBlockId = "block-42")
+            )
         )
+    }
 
-        assertEquals(ChronosRoute.Medication.route, spec.route)
-        assertEquals(ChronosRoute.Day.route, spec.popUpToRoute)
-        assertFalse(spec.inclusive)
+    @Test
+    fun `secondary sections resolve to their own top-level route`() {
+        assertEquals(
+            ChronosRoute.Medication(),
+            routeForNotificationLaunch(NotificationLaunch(section = SECTION_MEDICATION))
+        )
     }
 }

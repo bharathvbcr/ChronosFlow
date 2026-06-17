@@ -5,8 +5,6 @@
     <string name="focus_notification_default_title">Focus session</string>
     <string name="focus_notification_paused_text">Paused · %1$s remaining</string>
     <string name="focus_notification_running_text">%1$s remaining</string>
-    <string name="focus_notification_redacted_text">Session in progress</string>
-    <string name="focus_notification_metric_label">Remaining</string>
     <string name="focus_notification_subtext">Focus</string>
     <string name="focus_notification_action_pause">Pause</string>
     <string name="focus_notification_action_resume">Resume</string>
@@ -15,11 +13,26 @@
     <string name="focus_notification_completed_text">Focus session completed</string>
     <string name="focus_notification_completed_big_text">Nicely done — your focus session is complete. Take a short break or start your next block.</string>
     <string name="focus_notification_pill_paused">Paused</string>
+    <!-- Split (Pomodoro) session phase indicator, e.g. "Focus 2 of 4" / "Break 2 of 4". -->
+    <string name="focus_notification_phase_focus">Focus %1$d of %2$d</string>
+    <string name="focus_notification_phase_break">Break %1$d of %2$d</string>
+    <!-- The unified "now" live notification (current time block). -->
+    <string name="current_block_channel_name">Now</string>
+    <string name="current_block_channel_description">Live status for the time block happening now</string>
+    <string name="current_block_subtext">Now</string>
+    <!-- Header suffix showing how many scheduled blocks remain after the current one, e.g. "Now · 3 to go". -->
+    <plurals name="current_block_remaining_count">
+        <item quantity="one">%1$d to go</item>
+        <item quantity="other">%1$d to go</item>
+    </plurals>
+    <string name="current_block_upnext_subtext">Up next</string>
+    <string name="current_block_default_title">Current block</string>
+    <string name="current_block_action_start_focus">Start focus</string>
+    <!-- Label for the Android 17 MetricStyle live count-down metric on the focus notification. -->
+    <string name="focus_metric_remaining_label">Remaining</string>
     <string name="focus_completion_channel_name">Focus completion</string>
     <string name="focus_completion_channel_description">Alerts when a focus session finishes</string>
     <string name="notification_permission_enabled">Notifications enabled</string>
     <string name="notification_permission_promoted_fallback">Notifications enabled; Live Updates may stay in standard notification surfaces</string>
     <string name="notification_permission_denied">Notifications permission denied</string>
-    <string name="focus_recover_session">Restoring live focus notification…</string>
-    <string name="focus_extend_session">Extend +15m</string>
 </resources>

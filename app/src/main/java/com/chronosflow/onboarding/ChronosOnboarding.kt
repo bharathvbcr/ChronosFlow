@@ -1,5 +1,9 @@
 package com.chronosflow.onboarding
 
+import com.chronosflow.core.ui.components.ChronosButton
+import com.chronosflow.core.ui.components.ChronosTextButton
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,19 +23,25 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.chronosflow.core.ui.components.ChronosSwitch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,15 +54,20 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.chronosflow.core.data.health.HealthConnectSleepDataSource
+import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
+import com.chronosflow.core.ui.settings.rememberChronosUiSettings
+import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.core.notifications.NotificationPermissions
 import com.chronosflow.core.ui.settings.ChronosUiSettingsKeys
 import com.chronosflow.core.ui.settings.rememberPersistentUiBooleanSetting
 import kotlinx.coroutines.launch
 
 /**
- * First-run introduction shown before the main shell. Explains the radial-dial metaphor, offers to
- * enable reminders, and lets the user opt into the Habits and Medication trackers before they land
- * on the planner. Completion is persisted so this is shown exactly once.
+ * First-run introduction shown before the main shell. It explains the radial-dial metaphor, lets the
+ * user pick exactly which trackers they want, and then asks only for the runtime permissions that
+ * those choices actually need — each with a plain-language reason. Completion is persisted so this is
+ * shown exactly once.
  */
 @Composable
 fun ChronosOnboarding(
@@ -63,30 +78,12 @@ fun ChronosOnboarding(
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { ONBOARDING_PAGE_COUNT })
 
-    val habitsEnabled = rememberPersistentUiBooleanSetting(
-        ChronosUiSettingsKeys.KEY_FEATURE_HABITS_ENABLED,
-        true
-    )
-    val medicationEnabled = rememberPersistentUiBooleanSetting(
-        ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED,
-        true
-    )
-
-    var notificationsGranted by remember {
-        mutableStateOf(NotificationPermissions.hasStandardPermission(context))
-    }
-    val notificationLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        notificationsGranted = NotificationPermissions.hasStandardPermission(context)
-    }
-    val requestNotifications = {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || notificationsGranted) {
-            notificationsGranted = true
-        } else {
-            notificationLauncher.launch(NotificationPermissions.requiredPermissions())
-        }
-    }
+    // Feature toggles — the user's choices here decide which permissions we ask for on the next page.
+    val features = rememberOnboardingFeatureChoices()
+    val sleepEnabled = features.first { it.key == ChronosUiSettingsKeys.KEY_FEATURE_SLEEP_ENABLED }.state
+    val medicationEnabled = features.first { it.key == ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED }.state
+    val habitsEnabled = features.first { it.key == ChronosUiSettingsKeys.KEY_FEATURE_HABITS_ENABLED }.state
+    val reviewEnabled = features.first { it.key == ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED }.state
 
     val isLastPage = pagerState.currentPage == ONBOARDING_PAGE_COUNT - 1
     val advance = {
@@ -109,7 +106,7 @@ fun ChronosOnboarding(
         ) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 if (!isLastPage) {
-                    TextButton(onClick = onComplete) { Text("Skip") }
+                    ChronosTextButton(onClick = onComplete) { Text("Skip") }
                 } else {
                     Spacer(Modifier.height(48.dp))
                 }
@@ -129,43 +126,14 @@ fun ChronosOnboarding(
                             "work, breaks, and routines, then watch the dial track what actually " +
                             "happens against your plan."
                     )
-                    1 -> OnboardingPage(
-                        icon = Icons.Outlined.Notifications,
-                        title = "Gentle nudges, never noise",
-                        body = "Reminders keep block start times, breaks, medication, and your " +
-                            "end-of-day review on schedule. You can fine-tune every reminder later " +
-                            "in Settings.",
-                        action = {
-                            Button(
-                                onClick = requestNotifications,
-                                enabled = !notificationsGranted
-                            ) {
-                                Text(if (notificationsGranted) "Reminders enabled" else "Enable reminders")
-                            }
-                        }
-                    )
-                    else -> OnboardingPage(
-                        icon = Icons.Filled.CheckCircle,
-                        title = "Choose what to track",
-                        body = "Beyond your schedule, ChronosFlow can track daily habits and " +
-                            "medication. Turn on what fits — you can change this anytime.",
-                        action = {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OnboardingToggle(
-                                    label = "Track habits",
-                                    checked = habitsEnabled.value,
-                                    onCheckedChange = { habitsEnabled.value = it }
-                                )
-                                OnboardingToggle(
-                                    label = "Track medication",
-                                    checked = medicationEnabled.value,
-                                    onCheckedChange = { medicationEnabled.value = it }
-                                )
-                            }
-                        }
+                    1 -> OnboardingFeaturePage(features = features)
+                    else -> OnboardingPermissionsPage(
+                        notificationReasons = notificationReasons(
+                            medicationEnabled = medicationEnabled.value,
+                            habitsEnabled = habitsEnabled.value,
+                            reviewEnabled = reviewEnabled.value
+                        ),
+                        sleepImportRequested = sleepEnabled.value
                     )
                 }
             }
@@ -176,7 +144,7 @@ fun ChronosOnboarding(
                 modifier = Modifier.padding(vertical = 16.dp)
             )
 
-            Button(
+            ChronosButton(
                 onClick = { advance() },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -186,6 +154,229 @@ fun ChronosOnboarding(
             }
         }
     }
+}
+
+/** A single tracker the user can opt into during onboarding, bound to its persisted feature flag. */
+private class OnboardingFeatureChoice(
+    val key: String,
+    val label: String,
+    val description: String,
+    val state: MutableState<Boolean>
+)
+
+@Composable
+private fun rememberOnboardingFeatureChoices(): List<OnboardingFeatureChoice> {
+    return listOf(
+        OnboardingFeatureChoice(
+            key = ChronosUiSettingsKeys.KEY_FEATURE_HABITS_ENABLED,
+            label = "Habits",
+            description = "Build streaks for daily routines like water, reading, or exercise.",
+            state = rememberPersistentUiBooleanSetting(
+                ChronosUiSettingsKeys.KEY_FEATURE_HABITS_ENABLED,
+                true
+            )
+        ),
+        OnboardingFeatureChoice(
+            key = ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED,
+            label = "Medication",
+            description = "Get dose reminders and keep an adherence history.",
+            state = rememberPersistentUiBooleanSetting(
+                ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED,
+                true
+            )
+        ),
+        OnboardingFeatureChoice(
+            key = ChronosUiSettingsKeys.KEY_FEATURE_GOALS_ENABLED,
+            label = "Goals",
+            description = "Break long-term goals into milestones you can track.",
+            state = rememberPersistentUiBooleanSetting(
+                ChronosUiSettingsKeys.KEY_FEATURE_GOALS_ENABLED,
+                true
+            )
+        ),
+        OnboardingFeatureChoice(
+            key = ChronosUiSettingsKeys.KEY_FEATURE_JOURNAL_ENABLED,
+            label = "Journal",
+            description = "Capture quick notes and reflect on how your day went.",
+            state = rememberPersistentUiBooleanSetting(
+                ChronosUiSettingsKeys.KEY_FEATURE_JOURNAL_ENABLED,
+                true
+            )
+        ),
+        OnboardingFeatureChoice(
+            key = ChronosUiSettingsKeys.KEY_FEATURE_SLEEP_ENABLED,
+            label = "Sleep",
+            description = "Log sleep and see trends — optionally imported from Health Connect.",
+            state = rememberPersistentUiBooleanSetting(
+                ChronosUiSettingsKeys.KEY_FEATURE_SLEEP_ENABLED,
+                true
+            )
+        ),
+        OnboardingFeatureChoice(
+            key = ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED,
+            label = "Daily review & insights",
+            description = "End-of-day summaries and weekly trends from your schedule.",
+            state = rememberPersistentUiBooleanSetting(
+                ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED,
+                true
+            )
+        ),
+        OnboardingFeatureChoice(
+            key = ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED,
+            label = "AI planning assistant",
+            description = "On-device suggestions that help you plan and adjust your day.",
+            state = rememberPersistentUiBooleanSetting(
+                ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED,
+                true
+            )
+        )
+    )
+}
+
+@Composable
+private fun OnboardingFeaturePage(features: List<OnboardingFeatureChoice>) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(Modifier.height(8.dp))
+        OnboardingHeader(
+            icon = Icons.Outlined.Tune,
+            title = "Choose what to track",
+            body = "Beyond your schedule, turn on only the trackers you want. Each adds its own " +
+                "section to the app — you can change any of these later in Settings."
+        )
+        Spacer(Modifier.height(24.dp))
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            features.forEach { feature ->
+                OnboardingFeatureToggle(
+                    label = feature.label,
+                    description = feature.description,
+                    checked = feature.state.value,
+                    onCheckedChange = { feature.state.value = it }
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun OnboardingPermissionsPage(
+    notificationReasons: List<String>,
+    sleepImportRequested: Boolean
+) {
+    val context = LocalContext.current
+
+    var notificationsGranted by remember {
+        mutableStateOf(NotificationPermissions.hasStandardPermission(context))
+    }
+    val notificationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        notificationsGranted = NotificationPermissions.hasStandardPermission(context)
+    }
+    val requestNotifications = {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || notificationsGranted) {
+            notificationsGranted = true
+        } else {
+            notificationLauncher.launch(NotificationPermissions.requiredPermissions())
+        }
+    }
+
+    // Sleep import is the one permission that is strictly opt-in: only surface it when the user kept
+    // the Sleep tracker on AND a Health Connect provider is actually installed on this device.
+    val sleepDataSource = remember(context) { HealthConnectSleepDataSource(context.applicationContext) }
+    val sleepProviderAvailable = remember(sleepDataSource) { sleepDataSource.isAvailable() }
+    var sleepGranted by remember { mutableStateOf(false) }
+    val sleepLauncher = rememberLauncherForActivityResult(
+        sleepDataSource.permissionRequestContract()
+    ) { granted ->
+        sleepGranted = granted.containsAll(sleepDataSource.requiredPermissions)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(Modifier.height(8.dp))
+        OnboardingHeader(
+            icon = Icons.Outlined.Notifications,
+            title = "Permissions you'll need",
+            body = "We only ask for what your choices require, and you can grant these later in " +
+                "Settings instead. Nothing here is required to start using the planner."
+        )
+        Spacer(Modifier.height(24.dp))
+
+        PermissionCard(
+            icon = Icons.Outlined.Notifications,
+            title = "Reminders & alerts",
+            why = "ChronosFlow notifies you about " + humanJoin(notificationReasons) +
+                ". Without this, those reminders stay silent.",
+            granted = notificationsGranted,
+            grantedLabel = "Reminders enabled",
+            actionLabel = "Enable reminders",
+            onGrant = requestNotifications
+        )
+
+        if (sleepImportRequested && sleepProviderAvailable) {
+            Spacer(Modifier.height(12.dp))
+            PermissionCard(
+                icon = Icons.Outlined.Bedtime,
+                title = "Import sleep from Health Connect",
+                why = "Reads your sleep sessions so the Sleep tracker can chart trends without " +
+                    "manual logging. You can still log sleep by hand if you skip this.",
+                granted = sleepGranted,
+                grantedLabel = "Sleep import connected",
+                actionLabel = "Connect Health Connect",
+                onGrant = { sleepLauncher.launch(sleepDataSource.requestPermissions) }
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun OnboardingHeader(
+    icon: ImageVector,
+    title: String,
+    body: String
+) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.size(80.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(38.dp)
+            )
+        }
+    }
+    Spacer(Modifier.height(20.dp))
+    Text(
+        text = title,
+        style = MaterialTheme.typography.headlineSmall,
+        textAlign = TextAlign.Center,
+        color = MaterialTheme.colorScheme.onBackground
+    )
+    Spacer(Modifier.height(12.dp))
+    Text(
+        text = body,
+        style = MaterialTheme.typography.bodyMedium,
+        textAlign = TextAlign.Center,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }
 
 @Composable
@@ -236,8 +427,9 @@ private fun OnboardingPage(
 }
 
 @Composable
-private fun OnboardingToggle(
+private fun OnboardingFeatureToggle(
     label: String,
+    description: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
@@ -252,13 +444,79 @@ private fun OnboardingToggle(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            ChronosSwitch(checked = checked, onCheckedChange = onCheckedChange)
+        }
+    }
+}
+
+@Composable
+private fun PermissionCard(
+    icon: ImageVector,
+    title: String,
+    why: String,
+    granted: Boolean,
+    grantedLabel: String,
+    actionLabel: String,
+    onGrant: () -> Unit
+) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(ChronosSpacing.Medium)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Spacer(Modifier.height(8.dp))
             Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f)
+                text = why,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
+            Spacer(Modifier.height(16.dp))
+            if (granted) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = grantedLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            } else {
+                ChronosOutlinedButton(onClick = onGrant) { Text(actionLabel) }
+            }
         }
     }
 }
@@ -269,6 +527,7 @@ private fun PageIndicator(
     currentPage: Int,
     modifier: Modifier = Modifier
 ) {
+    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
@@ -276,7 +535,11 @@ private fun PageIndicator(
     ) {
         repeat(pageCount) { index ->
             val selected = index == currentPage
-            val width by animateDpAsState(if (selected) 24.dp else 8.dp, label = "indicatorWidth")
+            val width by animateDpAsState(
+                targetValue = if (selected) 24.dp else 8.dp,
+                animationSpec = ChronosValueAnimationFactory.selection(reduceMotion),
+                label = "indicatorWidth"
+            )
             Box(
                 modifier = Modifier
                     .padding(horizontal = 4.dp)
@@ -293,6 +556,27 @@ private fun PageIndicator(
             )
         }
     }
+}
+
+/** Build the dynamic list of reasons we use notifications, limited to the features the user kept on. */
+private fun notificationReasons(
+    medicationEnabled: Boolean,
+    habitsEnabled: Boolean,
+    reviewEnabled: Boolean
+): List<String> = buildList {
+    // Block start times and breaks come from the core planner, so they always apply.
+    add("block start times and breaks")
+    if (medicationEnabled) add("medication doses")
+    if (habitsEnabled) add("habit nudges")
+    if (reviewEnabled) add("your end-of-day review")
+}
+
+/** Joins phrases into natural English: "a", "a and b", or "a, b, and c". */
+private fun humanJoin(items: List<String>): String = when (items.size) {
+    0 -> ""
+    1 -> items[0]
+    2 -> "${items[0]} and ${items[1]}"
+    else -> items.dropLast(1).joinToString(", ") + ", and " + items.last()
 }
 
 private const val ONBOARDING_PAGE_COUNT = 3

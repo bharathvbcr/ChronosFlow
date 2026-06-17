@@ -126,6 +126,11 @@ fun ChronosGlassTopBarShell(
                 .height(ChronosGlassTopBarDefaults.BarHeight)
                 .then(
                     if (glassBar) {
+                        // Intentionally the faux (translucency) glass, NOT chronosFrostedGlass: this top
+                        // bar is per-screen chrome reused by every ChronosScreenScaffold, and those
+                        // feature screens don't guarantee a `hazeSource` in their content. Real backdrop
+                        // blur would sample an empty source and render wrong. Shell-level chrome that DOES
+                        // sit over the shell's hazeSource (the floating nav bar / menu) uses frosted glass.
                         Modifier.liquidGlass(
                             cornerRadius = ChronosGlassTopBarDefaults.GlassCornerRadius,
                             blur = ChronosGlassTokens.AmbientBlur

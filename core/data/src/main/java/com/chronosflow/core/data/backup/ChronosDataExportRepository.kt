@@ -17,6 +17,15 @@ import org.json.JSONObject
 
 const val DATA_EXPORT_DIRECTORY = "data_exports"
 
+/** Shared contract between the full-data export writer and reader. */
+internal object ChronosDataExportFormat {
+    const val FORMAT_VERSION = 2
+    const val EXPORT_KIND_FULL_DATA = "chronosflow-full-data"
+    const val KEY_FORMAT_VERSION = "formatVersion"
+    const val KEY_EXPORT_KIND = "exportKind"
+    const val KEY_TABLES = "tables"
+}
+
 data class ChronosDataExportFile(
     val file: File,
     val tableCount: Int,
@@ -32,6 +41,29 @@ class ChronosDataExportRepository @Inject constructor(
 ) {
     fun exportSnapshot(): ChronosDataExportFile {
         val exportedAt = Instant.now()
+        val root = exportJson(includeLocalState = true, exportedAt = exportedAt)
+        val summary = root.getJSONObject(KEY_SUMMARY)
+
+        val exportDir = File(context.filesDir, DATA_EXPORT_DIRECTORY)
+        exportDir.mkdirs()
+        val exportFile = File(exportDir, "chronosflow-data-export-${exportedAt.fileStamp()}.json")
+        exportFile.writeText(root.toString(2))
+
+        return ChronosDataExportFile(
+            file = exportFile,
+            tableCount = summary.getInt(KEY_TABLE_COUNT),
+            rowCount = summary.getInt(KEY_ROW_COUNT),
+            byteCount = exportFile.length(),
+            localStateFileCount = summary.getInt(KEY_LOCAL_STATE_FILE_COUNT)
+        )
+    }
+
+    /**
+     * Builds the full-data export document. With [includeLocalState] false only the
+     * database tables travel — used for the device-transfer snapshot, where Android's
+     * backup rules already carry the preference and DataStore files separately.
+     */
+    fun exportJson(includeLocalState: Boolean, exportedAt: Instant = Instant.now()): JSONObject {
         val readableDatabase = database.openHelper.readableDatabase
         val tables = readableDatabase.exportableTableNames()
         val tableSchemasJson = JSONObject()
@@ -45,18 +77,22 @@ class ChronosDataExportRepository @Inject constructor(
             rowCount += rows.length()
         }
 
-        val sharedPreferenceFiles = context.sharedPreferenceDirectory().exportLocalStateFiles(
-            kind = "shared-preferences-xml"
-        )
-        val dataStoreFiles = File(context.filesDir, DATASTORE_DIRECTORY).exportLocalStateFiles(
-            kind = "datastore-file"
-        )
+        val sharedPreferenceFiles = if (includeLocalState) {
+            context.sharedPreferenceDirectory().exportLocalStateFiles(kind = "shared-preferences-xml")
+        } else {
+            emptyList()
+        }
+        val dataStoreFiles = if (includeLocalState) {
+            File(context.filesDir, DATASTORE_DIRECTORY).exportLocalStateFiles(kind = "datastore-file")
+        } else {
+            emptyList()
+        }
         val localStateFileCount = sharedPreferenceFiles.size + dataStoreFiles.size
         val localStateByteCount = sharedPreferenceFiles.totalByteCount() + dataStoreFiles.totalByteCount()
 
         val root = JSONObject()
             .put(KEY_FORMAT_VERSION, FORMAT_VERSION)
-            .put(KEY_EXPORT_KIND, "chronosflow-full-data")
+            .put(KEY_EXPORT_KIND, ChronosDataExportFormat.EXPORT_KIND_FULL_DATA)
             .put(KEY_EXPORTED_AT, exportedAt.toString())
             .put(KEY_DATABASE_VERSION, readableDatabase.version)
             .put(
@@ -71,25 +107,15 @@ class ChronosDataExportRepository @Inject constructor(
             )
             .put(KEY_TABLE_SCHEMAS, tableSchemasJson)
             .put(KEY_TABLES, tablesJson)
-            .put(
+        if (includeLocalState) {
+            root.put(
                 KEY_LOCAL_STATE,
                 JSONObject()
                     .put(KEY_SHARED_PREFERENCES, sharedPreferenceFiles.toJsonArray())
                     .put(KEY_DATASTORES, dataStoreFiles.toJsonArray())
             )
-
-        val exportDir = File(context.filesDir, DATA_EXPORT_DIRECTORY)
-        exportDir.mkdirs()
-        val exportFile = File(exportDir, "chronosflow-data-export-${exportedAt.fileStamp()}.json")
-        exportFile.writeText(root.toString(2))
-
-        return ChronosDataExportFile(
-            file = exportFile,
-            tableCount = tables.size,
-            rowCount = rowCount,
-            byteCount = exportFile.length(),
-            localStateFileCount = localStateFileCount
-        )
+        }
+        return root
     }
 
     private fun SupportSQLiteDatabase.exportableTableNames(): List<String> =
@@ -212,11 +238,11 @@ class ChronosDataExportRepository @Inject constructor(
     )
 
     private companion object {
-        const val FORMAT_VERSION = 2
+        const val FORMAT_VERSION = ChronosDataExportFormat.FORMAT_VERSION
         const val SHARED_PREFERENCES_DIRECTORY = "shared_prefs"
         const val DATASTORE_DIRECTORY = "datastore"
-        const val KEY_FORMAT_VERSION = "formatVersion"
-        const val KEY_EXPORT_KIND = "exportKind"
+        const val KEY_FORMAT_VERSION = ChronosDataExportFormat.KEY_FORMAT_VERSION
+        const val KEY_EXPORT_KIND = ChronosDataExportFormat.KEY_EXPORT_KIND
         const val KEY_EXPORTED_AT = "exportedAt"
         const val KEY_DATABASE_VERSION = "databaseVersion"
         const val KEY_SUMMARY = "summary"
@@ -227,7 +253,7 @@ class ChronosDataExportRepository @Inject constructor(
         const val KEY_LOCAL_STATE_FILE_COUNT = "localStateFileCount"
         const val KEY_LOCAL_STATE_BYTE_COUNT = "localStateByteCount"
         const val KEY_TABLE_SCHEMAS = "tableSchemas"
-        const val KEY_TABLES = "tables"
+        const val KEY_TABLES = ChronosDataExportFormat.KEY_TABLES
         const val KEY_LOCAL_STATE = "localState"
         const val KEY_SHARED_PREFERENCES = "sharedPreferences"
         const val KEY_DATASTORES = "dataStores"

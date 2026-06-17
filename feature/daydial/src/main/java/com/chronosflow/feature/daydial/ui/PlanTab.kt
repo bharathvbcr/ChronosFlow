@@ -1,5 +1,12 @@
 package com.chronosflow.feature.daydial.ui
 
+import com.chronosflow.core.ui.components.ChronosIconButton
+
+import com.chronosflow.core.ui.components.ChronosButton
+import com.chronosflow.core.ui.components.ChronosTextButton
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+import com.chronosflow.core.ui.components.ChronosFilledTonalButton
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -9,6 +16,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,25 +41,29 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxDefaults
+import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -66,6 +78,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.chronosflow.core.ui.components.ChronosFilterChip
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosSectionTitle
 import com.chronosflow.core.ui.components.formatDurationLabel
@@ -73,16 +86,19 @@ import com.chronosflow.core.ui.motion.ChronosTransitionDirection
 import com.chronosflow.core.ui.motion.ChronosTransitionFactory
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
 import com.chronosflow.core.ui.settings.rememberChronosUiSettings
+import com.chronosflow.core.ui.theme.ChronosColors
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.core.ui.theme.categoryColor
 import com.chronosflow.feature.daydial.TimeBlockUiModel
 import com.chronosflow.feature.daydial.TimeRangeUi
+import com.chronosflow.feature.daydial.formatClockLabel
 import com.chronosflow.feature.daydial.isAllDayCalendarImport
 import com.chronosflow.feature.daydial.model.DayQuickItemKind
 import com.chronosflow.feature.daydial.model.DayQuickItemUiModel
 import com.chronosflow.feature.daydial.model.DayQuickItemsUiState
 import com.chronosflow.feature.daydial.model.DayDialTab
 import com.chronosflow.feature.daydial.model.TemplateBlueprint
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -106,6 +122,10 @@ internal fun PlanTab(
     templates: List<TemplateBlueprint>,
     selectedDate: LocalDate,
     onSelectDate: (LocalDate) -> Unit,
+    onSyncCalendar: () -> Unit = {},
+    calendarReadGranted: Boolean = false,
+    calendarSyncInProgress: Boolean = false,
+    lastSyncedLabel: String? = null,
     onAiPlanRequested: () -> Unit,
     onApplyAiSuggestions: () -> Unit,
     onAcceptAiSuggestion: (String) -> Unit,
@@ -164,6 +184,10 @@ internal fun PlanTab(
             PlanDateScroller(
                 selectedDate = selectedDate,
                 onSelectDate = onSelectDate,
+                onSyncCalendar = onSyncCalendar,
+                calendarReadGranted = calendarReadGranted,
+                calendarSyncInProgress = calendarSyncInProgress,
+                lastSyncedLabel = lastSyncedLabel,
                 fullCalendarVisible = fullCalendarVisible,
                 onFullCalendarVisibleChange = { fullCalendarVisible = it },
                 timeBlocks = sortedBlocks,
@@ -181,7 +205,6 @@ internal fun PlanTab(
                 templates = templates,
                 onOpenAiSheet = onOpenAiSheet,
                 onRebalanceDay = onRebalanceDay,
-                onFillGaps = onFillGaps,
                 onCreateBlock = onCreateBlock,
                 onApplyTemplate = onApplyTemplate
             )
@@ -219,39 +242,39 @@ internal fun PlanTab(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                "Generate a balanced day or add blocks manually.",
+                                "Use Generate or Add manually above to plan your day.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Button(
-                                onClick = onOpenAiSheet,
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                shape = RoundedCornerShape(20.dp)
-                            ) { Text("Generate with AI", fontWeight = FontWeight.SemiBold) }
-                            OutlinedButton(
-                                onClick = onCreateBlock,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(20.dp)
-                            ) { Text("Add manually", fontWeight = FontWeight.SemiBold) }
                         }
                     }
                 }
             }
             items(sortedBlocks, key = { it.id }) { block ->
-                val dismissState = rememberSwipeToDismissBoxState()
-
-                LaunchedEffect(dismissState.currentValue) {
-                    if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
-                        onDeleteBlock(block.id)
-                    } else if (dismissState.currentValue == SwipeToDismissBoxValue.StartToEnd) {
-                        onDuplicateBlock(block.id)
-                        dismissState.snapTo(SwipeToDismissBoxValue.Settled)
-                    }
+                // Built with a plain (non-saveable) remember so a deleted-then-undone row — which is
+                // re-added under the same id — always starts fresh at Settled, instead of restoring
+                // a stale dismissed state that would re-hide (effectively re-delete) the row.
+                val swipeThreshold = SwipeToDismissBoxDefaults.positionalThreshold
+                val dismissState = remember(block.id) {
+                    SwipeToDismissBoxState(SwipeToDismissBoxValue.Settled, swipeThreshold)
                 }
+                val swipeScope = rememberCoroutineScope()
 
                 SwipeToDismissBox(
                     state = dismissState,
+                    // onDismiss fires once per swipe; reset() snaps the row back so it never stays
+                    // in a terminal dismissed state. The actual removal of a deleted block comes
+                    // from the reactive list update. This matters for undo: undo re-inserts the
+                    // block under the same id, and a lingering dismissed state would otherwise
+                    // re-hide (effectively re-delete) the restored row.
+                    onDismiss = { direction ->
+                        when (direction) {
+                            SwipeToDismissBoxValue.EndToStart -> onDeleteBlock(block.id)
+                            SwipeToDismissBoxValue.StartToEnd -> onDuplicateBlock(block.id)
+                            SwipeToDismissBoxValue.Settled -> Unit
+                        }
+                        swipeScope.launch { dismissState.reset() }
+                    },
                     backgroundContent = {
                         val color = when (dismissState.dismissDirection) {
                             SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.secondary
@@ -270,11 +293,15 @@ internal fun PlanTab(
                                 .padding(horizontal = 20.dp),
                             contentAlignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart else Alignment.CenterEnd
                         ) {
-                            Icon(
-                                imageVector = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) Icons.Default.ContentCopy else Icons.Default.Delete,
-                                contentDescription = null,
-                                tint = iconTint
-                            )
+                            // Only show the action icon while a swipe is in progress; at rest the
+                            // background is transparent and any icon would peek out from behind the card.
+                            if (dismissState.dismissDirection != SwipeToDismissBoxValue.Settled) {
+                                Icon(
+                                    imageVector = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) Icons.Default.ContentCopy else Icons.Default.Delete,
+                                    contentDescription = null,
+                                    tint = iconTint
+                                )
+                            }
                         }
                     },
                     modifier = Modifier
@@ -302,7 +329,6 @@ internal fun PlanTab(
             item(key = "plan_ai_suggestions") {
                 PlanAiSuggestionsCard(
                     suggestions = suggestedBlocks.take(3),
-                    onOpenAiSheet = onOpenAiSheet,
                     onApplyAiSuggestions = onApplyAiSuggestions,
                     onAcceptAiSuggestion = onAcceptAiSuggestion,
                     onRejectAiSuggestion = onRejectAiSuggestion,
@@ -317,6 +343,10 @@ internal fun PlanTab(
 private fun PlanDateScroller(
     selectedDate: LocalDate,
     onSelectDate: (LocalDate) -> Unit,
+    onSyncCalendar: () -> Unit,
+    calendarReadGranted: Boolean,
+    calendarSyncInProgress: Boolean,
+    lastSyncedLabel: String?,
     fullCalendarVisible: Boolean,
     onFullCalendarVisibleChange: (Boolean) -> Unit,
     timeBlocks: List<TimeBlockUiModel>,
@@ -356,14 +386,47 @@ private fun PlanDateScroller(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-                TextButton(
-                    onClick = { onFullCalendarVisibleChange(!fullCalendarVisible) },
-                    modifier = Modifier.semantics {
-                        contentDescription = planCalendarToggleActionLabel(fullCalendarVisible)
+                    if (calendarReadGranted && lastSyncedLabel != null) {
+                        Text(
+                            text = lastSyncedLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                ) {
-                    Text(if (fullCalendarVisible) "Hide calendar" else "Full calendar")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ChronosIconButton(
+                        onClick = onSyncCalendar,
+                        enabled = !calendarSyncInProgress,
+                        modifier = Modifier.semantics {
+                            contentDescription = planCalendarSyncActionLabel(
+                                calendarReadGranted = calendarReadGranted,
+                                syncInProgress = calendarSyncInProgress
+                            )
+                        }
+                    ) {
+                        if (calendarSyncInProgress) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    ChronosTextButton(
+                        onClick = { onFullCalendarVisibleChange(!fullCalendarVisible) },
+                        modifier = Modifier.semantics {
+                            contentDescription = planCalendarToggleActionLabel(fullCalendarVisible)
+                        }
+                    ) {
+                        Text(if (fullCalendarVisible) "Hide calendar" else "Full calendar")
+                    }
                 }
             }
 
@@ -404,7 +467,7 @@ private fun PlanDateScroller(
                     ) {
                         items(dates, key = { it.toEpochDay() }) { date ->
                             val isSelected = date == selectedDate
-                            FilterChip(
+                            ChronosFilterChip(
                                 selected = isSelected,
                                 onClick = { onSelectDate(date) },
                                 modifier = Modifier
@@ -453,7 +516,7 @@ private fun PlanMonthCalendar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            TextButton(
+            ChronosTextButton(
                 onClick = { onSelectDate(selectedDate.minusMonths(1)) },
                 modifier = Modifier.semantics {
                     contentDescription = planCalendarMonthNavigationLabel(selectedDate, -1)
@@ -467,7 +530,7 @@ private fun PlanMonthCalendar(
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            TextButton(
+            ChronosTextButton(
                 onClick = { onSelectDate(selectedDate.plusMonths(1)) },
                 modifier = Modifier.semantics {
                     contentDescription = planCalendarMonthNavigationLabel(selectedDate, 1)
@@ -522,7 +585,7 @@ private fun PlanMonthCalendar(
                         week.forEach { date ->
                             val isSelected = date == selectedDate
                             val inSelectedMonth = date.month == month.month && date.year == month.year
-                            FilterChip(
+                            ChronosFilterChip(
                                 selected = isSelected,
                                 onClick = { onSelectDate(date) },
                                 modifier = Modifier
@@ -627,7 +690,7 @@ private fun PlanCalendarAgendaItemRow(item: PlanCalendarAgendaItem) {
             .fillMaxWidth()
             .then(
                 if (item.onRowClick != null) {
-                    Modifier.clickable(onClickLabel = item.title, role = Role.Button, onClick = item.onRowClick)
+                    Modifier.chronosHapticClick(onClick = item.onRowClick, onClickLabel = item.title, role = Role.Button)
                 } else {
                     Modifier
                 }
@@ -666,12 +729,12 @@ private fun PlanCalendarAgendaItemRow(item: PlanCalendarAgendaItem) {
                 verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
             ) {
                 if (item.primaryActionLabel != null && item.onPrimaryAction != null && !item.isDone) {
-                    TextButton(onClick = item.onPrimaryAction) {
+                    ChronosTextButton(onClick = item.onPrimaryAction) {
                         Text(item.primaryActionLabel)
                     }
                 }
                 if (item.secondaryActionLabel != null && item.onSecondaryAction != null && !item.isDone) {
-                    TextButton(
+                    ChronosTextButton(
                         onClick = item.onSecondaryAction,
                         colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                     ) {
@@ -689,7 +752,6 @@ private fun PlanPlanningSurface(
     templates: List<TemplateBlueprint>,
     onOpenAiSheet: () -> Unit,
     onRebalanceDay: () -> Unit,
-    onFillGaps: () -> Unit,
     onCreateBlock: () -> Unit,
     onApplyTemplate: (TemplateBlueprint) -> Unit
 ) {
@@ -699,7 +761,7 @@ private fun PlanPlanningSurface(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
             ) {
-                Button(
+                ChronosButton(
                     onClick = onOpenAiSheet,
                     modifier = Modifier
                         .weight(1f)
@@ -716,7 +778,7 @@ private fun PlanPlanningSurface(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Generate", fontWeight = FontWeight.SemiBold)
                 }
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = onRebalanceDay,
                     modifier = Modifier
                         .weight(1f)
@@ -728,32 +790,16 @@ private fun PlanPlanningSurface(
                     Text("Rebalance", fontWeight = FontWeight.SemiBold)
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
+            ChronosOutlinedButton(
+                onClick = onCreateBlock,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        contentDescription = planCreateBlockActionLabel()
+                    },
+                shape = RoundedCornerShape(20.dp)
             ) {
-                OutlinedButton(
-                    onClick = onFillGaps,
-                    modifier = Modifier
-                        .weight(1f)
-                        .semantics {
-                            contentDescription = planFillGapsActionLabel()
-                        },
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Text("Fill gaps", fontWeight = FontWeight.SemiBold)
-                }
-                OutlinedButton(
-                    onClick = onCreateBlock,
-                    modifier = Modifier
-                        .weight(1f)
-                        .semantics {
-                            contentDescription = planCreateBlockActionLabel()
-                        },
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Text("Add manually", fontWeight = FontWeight.SemiBold)
-                }
+                Text("Add manually", fontWeight = FontWeight.SemiBold)
             }
             if (templates.isNotEmpty()) {
                 Text(
@@ -768,7 +814,7 @@ private fun PlanPlanningSurface(
                     verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
                 ) {
                     templates.forEach { template ->
-                        FilterChip(
+                        ChronosFilterChip(
                             selected = false,
                             onClick = { onApplyTemplate(template) },
                             modifier = Modifier.semantics {
@@ -821,7 +867,7 @@ private fun PlanScheduleAttentionCard(
                 )
             }
             if (onRepairConflicts != null) {
-                TextButton(
+                ChronosTextButton(
                     onClick = onRepairConflicts,
                     modifier = Modifier.semantics {
                         contentDescription = "Repair conflicting blocks with AI"
@@ -830,7 +876,7 @@ private fun PlanScheduleAttentionCard(
                     Text("Repair with AI")
                 }
             }
-            TextButton(
+            ChronosTextButton(
                 onClick = onFillGaps,
                 modifier = Modifier.semantics {
                     contentDescription = actionLabel
@@ -855,7 +901,6 @@ private fun formatDialMinute(minute: Int): String {
 @Composable
 private fun PlanAiSuggestionsCard(
     suggestions: List<TimeBlockUiModel>,
-    onOpenAiSheet: () -> Unit,
     onApplyAiSuggestions: () -> Unit,
     onAcceptAiSuggestion: (String) -> Unit,
     onRejectAiSuggestion: (String) -> Unit,
@@ -899,14 +944,14 @@ private fun PlanAiSuggestionsCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    TextButton(
+                    ChronosTextButton(
                         onClick = { onRejectAiSuggestion(suggestion.id) },
                         modifier = Modifier.semantics {
                             contentDescription = planSuggestionRejectActionLabel(suggestion)
                         },
                         colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                     ) { Text("Reject") }
-                    Button(
+                    ChronosButton(
                         onClick = { onAcceptAiSuggestion(suggestion.id) },
                         modifier = Modifier.semantics {
                             contentDescription = planSuggestionAcceptActionLabel(suggestion)
@@ -916,30 +961,16 @@ private fun PlanAiSuggestionsCard(
                     ) { Text("Accept") }
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
-            ) {
-                OutlinedButton(
-                    onClick = onOpenAiSheet,
-                    modifier = Modifier
-                        .weight(1f)
-                        .semantics {
-                            contentDescription = planSuggestionReviewAllActionLabel(suggestions.size)
-                        },
-                    shape = RoundedCornerShape(20.dp)
-                ) { Text("Review") }
-                Button(
-                    onClick = onApplyAiSuggestions,
-                    modifier = Modifier
-                        .weight(1f)
-                        .semantics {
-                            contentDescription = planSuggestionApplyAllActionLabel(suggestions.size)
-                        },
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) { Text("Apply all", fontWeight = FontWeight.SemiBold) }
-            }
+            ChronosButton(
+                onClick = onApplyAiSuggestions,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        contentDescription = planSuggestionApplyAllActionLabel(suggestions.size)
+                    },
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) { Text("Apply all", fontWeight = FontWeight.SemiBold) }
         }
     }
 }
@@ -951,19 +982,19 @@ private fun TimelineBlockItem(block: TimeBlockUiModel, onClick: () -> Unit, show
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClickLabel = planTimelineBlockActionLabel(block), role = Role.Button) { onClick() }
+            .chronosHapticClick(onClick = { onClick() }, onClickLabel = planTimelineBlockActionLabel(block), role = Role.Button)
     ) {
         if (showTimeColumn) {
             Column(horizontalAlignment = Alignment.End, modifier = Modifier.width(68.dp)) {
                 Text(
-                    text = formatMinute(block.startMinuteOfDay),
+                    text = formatClockLabel(block.startMinuteOfDay),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = formatMinute(block.startMinuteOfDay + block.durationMinutes),
+                    text = formatClockLabel(block.startMinuteOfDay + block.durationMinutes),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -1023,7 +1054,7 @@ private fun TimelineBlockItem(block: TimeBlockUiModel, onClick: () -> Unit, show
                             color = block.color
                         )
                         Text(
-                            text = "${formatMinute(block.startMinuteOfDay)} – ${formatMinute(block.startMinuteOfDay + block.durationMinutes)}",
+                            text = "${formatClockLabel(block.startMinuteOfDay)} – ${formatClockLabel(block.startMinuteOfDay + block.durationMinutes)}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1057,9 +1088,6 @@ internal fun planGenerateActionLabel(): String =
 
 internal fun planRebalanceActionLabel(): String =
     "Rebalance today's plan"
-
-internal fun planFillGapsActionLabel(): String =
-    "Fill open gaps in today's plan"
 
 internal fun planCreateBlockActionLabel(): String =
     "Add a block manually"
@@ -1104,6 +1132,15 @@ internal fun planCalendarMonthGridDates(selectedDate: LocalDate): List<LocalDate
 
 internal fun planCalendarToggleActionLabel(fullCalendarVisible: Boolean): String =
     if (fullCalendarVisible) "Hide full planning calendar" else "Show full planning calendar"
+
+internal fun planCalendarSyncActionLabel(
+    calendarReadGranted: Boolean,
+    syncInProgress: Boolean = false
+): String = when {
+    syncInProgress -> "Syncing device calendar events"
+    calendarReadGranted -> "Sync device calendar events into this plan"
+    else -> "Connect your device calendar to sync events into this plan"
+}
 
 internal fun planCalendarMonthNavigationLabel(selectedDate: LocalDate, monthOffset: Int): String {
     val targetMonth = selectedDate.plusMonths(monthOffset.toLong())
@@ -1156,25 +1193,22 @@ internal fun planSuggestionRejectActionLabel(suggestion: TimeBlockUiModel): Stri
     "Reject ${suggestion.title} suggestion ${planSuggestionTimeDetail(suggestion)}"
 
 internal fun planSuggestionTimeText(suggestion: TimeBlockUiModel): String =
-    "${formatMinute(suggestion.startMinuteOfDay)} - ${
-        formatMinute(suggestion.startMinuteOfDay + suggestion.durationMinutes)
+    "${formatClockLabel(suggestion.startMinuteOfDay)} - ${
+        formatClockLabel(suggestion.startMinuteOfDay + suggestion.durationMinutes)
     } · ${formatDurationLabel(suggestion.durationMinutes)}"
 
 private fun planSuggestionTimeDetail(suggestion: TimeBlockUiModel): String =
-    "from ${formatMinute(suggestion.startMinuteOfDay)} for ${formatDurationMinutes(suggestion.durationMinutes)}"
+    "from ${formatClockLabel(suggestion.startMinuteOfDay)} for ${formatDurationMinutes(suggestion.durationMinutes)}"
 
 private fun formatDurationMinutes(durationMinutes: Int): String =
     "$durationMinutes minute${if (durationMinutes == 1) "" else "s"}"
-
-internal fun planSuggestionReviewAllActionLabel(suggestionCount: Int): String =
-    "Review $suggestionCount AI suggestion${if (suggestionCount == 1) "" else "s"}"
 
 internal fun planSuggestionApplyAllActionLabel(suggestionCount: Int): String =
     "Apply $suggestionCount AI suggestion${if (suggestionCount == 1) "" else "s"} to today's plan"
 
 internal fun planTimelineBlockActionLabel(block: TimeBlockUiModel): String =
-    "Open ${block.title} from ${formatMinute(block.startMinuteOfDay)} to ${
-        formatMinute(block.startMinuteOfDay + block.durationMinutes)
+    "Open ${block.title} from ${formatClockLabel(block.startMinuteOfDay)} to ${
+        formatClockLabel(block.startMinuteOfDay + block.durationMinutes)
     }"
 
 internal fun planDuplicateBlockActionLabel(block: TimeBlockUiModel): String =
@@ -1237,7 +1271,7 @@ private fun buildPlanCalendarAgendaItems(
             timeLabel = if (allDayCalendarImport) {
                 "All day"
             } else {
-                "${formatMinute(block.startMinuteOfDay)} - ${formatMinute(block.startMinuteOfDay + block.durationMinutes)}"
+                "${formatClockLabel(block.startMinuteOfDay)} - ${formatClockLabel(block.startMinuteOfDay + block.durationMinutes)}"
             },
             detail = if (allDayCalendarImport) "Calendar import" else inferCategory(block),
             statusText = if (allDayCalendarImport) "Non-blocking note" else "Planned",
@@ -1298,15 +1332,15 @@ private fun DayQuickItemUiModel.toPlanCalendarAgendaItem(
         id = "quick:$id",
         title = title.ifBlank { "Unnamed item" },
         sourceLabel = sourceLabel,
-        timeLabel = scheduledMinuteOfDay?.let { formatMinute(it) } ?: "Unscheduled",
+        timeLabel = scheduledMinuteOfDay?.let { formatClockLabel(it) } ?: "Unscheduled",
         detail = detail.ifBlank { sourceLabel },
         statusText = if (isDone) "Completed" else status,
         isDone = isDone,
         sortMinute = scheduledMinute,
         accentColor = when (kind) {
-            DayQuickItemKind.TASK -> Color(0xFF2F6BEA)
-            DayQuickItemKind.HABIT -> Color(0xFF5DAA54)
-            DayQuickItemKind.MEDICATION -> Color(0xFFD17A2A)
+            DayQuickItemKind.TASK -> ChronosColors.QuickItemTask
+            DayQuickItemKind.HABIT -> ChronosColors.QuickItemHabit
+            DayQuickItemKind.MEDICATION -> ChronosColors.QuickItemMedication
         },
         primaryActionLabel = primaryActionLabel,
         onPrimaryAction = onPrimaryAction,
@@ -1326,18 +1360,6 @@ private fun planCalendarSourceRank(source: String): Int = when (source) {
 }
 
 private fun DayQuickItemUiModel.baseMedicationPlanId(): String = id.substringBefore(":")
-
-private fun formatMinute(minute: Int): String {
-    val normalized = ((minute % DAY_IN_MINUTES) + DAY_IN_MINUTES) % DAY_IN_MINUTES
-    val hour = normalized / 60
-    val m = normalized % 60
-    val suffix = if (hour >= 12) "PM" else "AM"
-    val displayHour = when (val h = hour % 12) {
-        0 -> 12
-        else -> h
-    }
-    return "%d:%02d %s".format(displayHour, m, suffix)
-}
 
 private fun inferCategory(block: TimeBlockUiModel): String = when {
     block.medicationPlanId != null -> "Medication"

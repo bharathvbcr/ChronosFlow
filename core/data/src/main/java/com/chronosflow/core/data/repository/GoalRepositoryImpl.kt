@@ -5,6 +5,9 @@ import com.chronosflow.core.data.mapper.toDomain
 import com.chronosflow.core.data.mapper.toEntity
 import com.chronosflow.core.domain.model.Goal
 import com.chronosflow.core.domain.model.GoalDerivedProgress
+import com.chronosflow.core.domain.model.GoalLinkedHabit
+import com.chronosflow.core.domain.model.GoalLinkedTask
+import com.chronosflow.core.domain.model.GoalLinkedWork
 import com.chronosflow.core.domain.repository.GoalRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -29,5 +32,32 @@ class GoalRepositoryImpl @Inject constructor(
             goalDao.observeHabitCompletionCount(goalId)
         ) { tasks, habits ->
             GoalDerivedProgress(completedTaskCount = tasks, habitCompletionCount = habits)
+        }
+
+    override fun observeLinkedWork(goalId: String): Flow<GoalLinkedWork> =
+        combine(
+            goalDao.observeTasksForGoal(goalId),
+            goalDao.observeHabitsForGoal(goalId)
+        ) { tasks, habits ->
+            GoalLinkedWork(
+                tasks = tasks.map { task ->
+                    GoalLinkedTask(
+                        id = task.id,
+                        title = task.title,
+                        isCompleted = task.isCompleted,
+                        priority = task.priority,
+                        targetDate = task.targetDate
+                    )
+                },
+                habits = habits.map { habit ->
+                    GoalLinkedHabit(
+                        id = habit.id,
+                        title = habit.title,
+                        cadence = habit.cadence,
+                        streakCount = habit.streakCount,
+                        isActive = habit.isActive
+                    )
+                }
+            )
         }
 }

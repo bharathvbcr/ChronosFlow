@@ -96,7 +96,7 @@ fun quickCreateCommandProvider(
                 )
             )
         }
-        if (featureFlags.reviewEnabled) {
+        if (featureFlags.journalEnabled) {
             add(
                 CommandPaletteItem(
                     id = "quick.create-journal",
@@ -109,6 +109,8 @@ fun quickCreateCommandProvider(
                     onRun = onNewJournal
                 )
             )
+        }
+        if (featureFlags.sleepEnabled) {
             add(
                 CommandPaletteItem(
                     id = "quick.create-sleep",

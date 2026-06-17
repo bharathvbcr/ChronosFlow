@@ -11,7 +11,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +26,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import com.chronosflow.core.ui.components.ChronosCommandPaletteAction
+import com.chronosflow.core.ui.components.ChronosDropdownMenuItem
 import com.chronosflow.core.ui.components.ChronosGlassTopBarDefaults
 import com.chronosflow.core.ui.components.ChronosGlassTopBarShell
 import com.chronosflow.core.ui.components.ChronosTopBarPill
@@ -139,7 +139,7 @@ internal fun DayDialTopBar(
                         onDismissRequest = { showHistoryMenu = false }
                     ) {
                         if (canUndo) {
-                            DropdownMenuItem(
+                            ChronosDropdownMenuItem(
                                 text = { Text("Undo") },
                                 onClick = {
                                     showHistoryMenu = false
@@ -151,7 +151,7 @@ internal fun DayDialTopBar(
                             )
                         }
                         if (canRedo) {
-                            DropdownMenuItem(
+                            ChronosDropdownMenuItem(
                                 text = { Text("Redo") },
                                 onClick = {
                                     showHistoryMenu = false

@@ -7,6 +7,7 @@ import com.chronosflow.core.domain.model.TaskRecurrenceRule
 import com.chronosflow.core.domain.model.TaskSchedule
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.core.domain.model.SleepSchedule
+import com.chronosflow.core.domain.model.SleepTrack
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TimeBlock
 import com.chronosflow.core.domain.planner.FreeTimeCalculator
@@ -14,6 +15,7 @@ import com.chronosflow.core.domain.planner.PlannerOperationResult
 import com.chronosflow.core.domain.planner.PlannerService
 import com.chronosflow.core.domain.repository.MoodEnergyRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
+import com.chronosflow.core.domain.repository.SleepTrackRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TaskScheduleRepository
 import io.mockk.coEvery
@@ -35,6 +37,7 @@ class ScheduleTaskIntoDayUseCaseTest {
     private val taskScheduleRepository: TaskScheduleRepository = mockk()
     private val plannerService: PlannerService = mockk()
     private val sleepScheduleRepository: SleepScheduleRepository = mockk()
+    private val sleepTrackRepository: SleepTrackRepository = mockk()
     private val moodEnergyRepository: MoodEnergyRepository = mockk()
     private lateinit var useCase: ScheduleTaskIntoDayUseCase
 
@@ -51,11 +54,13 @@ class ScheduleTaskIntoDayUseCaseTest {
             plannerService = plannerService,
             freeTimeCalculator = FreeTimeCalculator(),
             sleepScheduleRepository = sleepScheduleRepository,
+            sleepTrackRepository = sleepTrackRepository,
             moodEnergyRepository = moodEnergyRepository
         )
         coEvery { sleepScheduleRepository.getSleepSchedule() } returns SleepSchedule.default()
         coEvery { taskScheduleRepository.getTaskSchedule(any()) } returns null
         coEvery { moodEnergyRepository.getForDateRange(any(), any()) } returns emptyList()
+        coEvery { sleepTrackRepository.getForDateRange(any(), any()) } returns emptyList()
     }
 
     @Test
@@ -98,6 +103,35 @@ class ScheduleTaskIntoDayUseCaseTest {
         // Free all day, peak energy at 15:00 -> high-priority task lands on the peak instead of 08:00.
         assertEquals(15 * 60, captured.captured.startMinuteOfDay)
         assertEquals(EnergyIntensity.HIGH, captured.captured.energyLevel)
+    }
+
+    @Test
+    fun `demanding task is deferred past the grogginess buffer after a poor night`() = runTest {
+        val captured = slot<TimeBlock>()
+        coEvery { taskRepository.getTaskById("task-1") } returns task(id = "task-1", priority = 2)
+        coEvery { plannerService.getBlocksForDate(currentDate) } returns emptyList()
+        coEvery { sleepTrackRepository.getForDateRange(any(), any()) } returns
+            listOf(sleepNight(currentDate, quality = 1))
+        coEvery { plannerService.createBlock(capture(captured)) } returns PlannerOperationResult.Applied(
+            message = "Placement valid",
+            blockId = "new-block",
+            snappedToMinute = 11 * 60
+        )
+
+        val result = scheduleTask(
+            "task-1",
+            date = currentDate,
+            nowMinuteOfDay = 6 * 60,
+            currentDate = currentDate,
+            currentTime = LocalTime.of(6, 0)
+        )
+
+        assertTrue(result is PlannerOperationResult.Applied)
+        // Free from 06:00, but a poor night pushes the demanding task past the 11:00 grogginess buffer.
+        assertEquals(11 * 60, captured.captured.startMinuteOfDay)
+        assertEquals(EnergyIntensity.HIGH, captured.captured.energyLevel)
+        // A poor night also skips the energy-peak lookup entirely.
+        coVerify(exactly = 0) { moodEnergyRepository.getForDateRange(any(), any()) }
     }
 
     @Test
@@ -367,6 +401,18 @@ class ScheduleTaskIntoDayUseCaseTest {
         createdAt = now,
         updatedAt = now,
         taskOccurrenceDate = taskOccurrenceDate
+    )
+
+    private fun sleepNight(date: LocalDate, quality: Int): SleepTrack = SleepTrack(
+        id = "sleep-$date",
+        date = date,
+        plannedStartMinute = null,
+        plannedEndMinute = null,
+        actualStartMinute = null,
+        actualEndMinute = null,
+        sleepQuality = quality,
+        windDownNotes = null,
+        interruptedCount = 0
     )
 
     private fun peakCheckIns(peakHour: Int): List<MoodEnergyCheckIn> {

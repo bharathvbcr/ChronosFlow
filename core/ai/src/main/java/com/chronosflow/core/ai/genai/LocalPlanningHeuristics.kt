@@ -10,8 +10,10 @@ import com.chronosflow.core.domain.model.ReviewInsightSeverity
 import com.chronosflow.core.domain.model.ReviewInsightType
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TimeBlock
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
@@ -29,10 +31,7 @@ internal object LocalPlanningHeuristics {
         val wantsRecovery = listOf("recovery", "break", "low energy", "tired").any { it in normalizedPreferences }
         val wantsStudy = listOf("study", "read", "exam", "learn").any { it in normalizedPreferences }
         val wantsExercise = listOf("workout", "exercise", "walk", "run").any { it in normalizedPreferences }
-        val topTasks = pendingTasks
-            .filterNot(Task::isCompleted)
-            .sortedByDescending(Task::priority)
-            .take(2)
+        val topTasks = selectTopTasks(pendingTasks, date, currentTimeZone, limit = 2)
 
         val start = LocalTime.of(if (wantsRecovery) 9 else 8, 0)
         val blocks = buildList {
@@ -198,6 +197,30 @@ internal object LocalPlanningHeuristics {
             createdAt = java.time.Instant.now(),
             updatedAt = java.time.Instant.now()
         )
+    }
+
+    /**
+     * Picks the tasks the local (Nano-unavailable) planner should schedule into the deep-work and
+     * admin slots. Tasks due by the end of [date] are urgent and come first, then highest priority,
+     * then earliest deadline — so an offline user's overdue work isn't displaced by a merely
+     * high-priority task that isn't due yet.
+     */
+    private fun selectTopTasks(
+        pendingTasks: List<Task>,
+        date: LocalDate,
+        timezone: String,
+        limit: Int
+    ): List<Task> {
+        val zone = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.systemDefault())
+        val endOfDay = date.atTime(LocalTime.MAX).atZone(zone).toInstant()
+        return pendingTasks
+            .filterNot(Task::isCompleted)
+            .sortedWith(
+                compareByDescending<Task> { task -> task.dueDate?.let { !it.isAfter(endOfDay) } ?: false }
+                    .thenByDescending(Task::priority)
+                    .thenBy { it.dueDate ?: Instant.MAX }
+            )
+            .take(limit)
     }
 
     private fun suggestion(

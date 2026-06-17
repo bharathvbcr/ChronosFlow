@@ -39,8 +39,11 @@ class AndroidBackupPolicyTest {
             assertNoIncludes(section, "database")
             assertExcludes(section, "sharedpref", "chronos_secure_database.xml")
             assertExcludes(section, "sharedpref", "chronos_db_migration.xml")
-            assertNoIncludes(section, "file", "task_attachments/")
         }
+        // Attachment binaries fit only where no backup quota applies: device transfer
+        // carries them, cloud backup (25 MB quota) must not.
+        assertNoIncludes(cloudBackup, "file", "task_attachments/")
+        assertIncludes(deviceTransfer, "file", "task_attachments/")
     }
 
     @Test

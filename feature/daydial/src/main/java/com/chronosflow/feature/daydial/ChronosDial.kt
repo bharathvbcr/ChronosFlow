@@ -39,6 +39,7 @@ import com.chronosflow.core.domain.planner.DialHit
 import com.chronosflow.core.domain.planner.DialPoint
 import com.chronosflow.core.domain.planner.DialRing
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
+import com.chronosflow.core.ui.theme.ChronosColors
 import com.chronosflow.core.ui.theme.ChronosGlassTokens
 import com.chronosflow.feature.daydial.DialUtils.durationToSweep
 import com.chronosflow.feature.daydial.DialUtils.durationToSweepInWindow
@@ -66,7 +67,7 @@ private const val MIN_DIAL_RADIUS_SCALE = 0.1f
 // Night band tint. A mid-tone indigo (not a black scrim) so the band stays visible on every
 // surface — the near-black dark panel, a light surface, and pure-black/white high-contrast
 // modes alike — while reading unmistakably as "night".
-private val DialNightBandColor = Color(0xFF302A5E)
+private val DialNightBandColor = ChronosColors.DialNightBand
 
 internal fun scaledDialOuterDiameter(canvasSize: Float, dialRadiusScale: Float): Float =
     canvasSize / DIAL_OUTER_DIAMETER_DIVISOR * dialRadiusScale.coerceAtLeast(MIN_DIAL_RADIUS_SCALE)
@@ -76,10 +77,6 @@ internal fun scaledDialHitRadius(canvasSize: Float, dialRadiusScale: Float): Flo
 
 internal fun scaledOuterRingTapRadius(canvasSize: Float, dialRadiusScale: Float): Float =
     scaledDialHitRadius(canvasSize, dialRadiusScale) + canvasSize * OUTER_RING_TAP_HALO_CANVAS_FRACTION
-
-internal fun shouldDrawRingGuides(enableThreeRingMode: Boolean, showRingGuide: Boolean): Boolean {
-    return enableThreeRingMode && showRingGuide
-}
 
 internal fun shouldDrawOffWindowNowMarker(
     showNowHand: Boolean,
@@ -276,21 +273,18 @@ fun ChronosDial(
                 // intentional dark region, so the ring base stays uniform and non-directional.
                 val dialTrackColor = colorScheme.surface.copy(alpha = ringAlpha)
                 val dialStroke = Stroke(width = cachedRingStroke)
-                val dialOutlineStroke = Stroke(width = 0.5.dp.toPx())
-                val guideRingStroke = Stroke(width = cachedRingStroke * 0.1f)
                 onDrawBehind {
                     val solidDial = !glassSurfacesEnabled
+                    // One clean track. The previous design layered a separate outline circle
+                    // just outside this stroke and three faint "ring guide" circles inside it,
+                    // which stacked up as several concentric dark rings on the face. The lane
+                    // meaning now lives only in the legend below the dial, and lanes show on the
+                    // face solely where blocks exist — so empty lanes no longer read as rings.
                     drawCircle(
                         color = dialTrackColor,
                         radius = cachedOuterRadius / 2f,
                         center = cachedCenter,
                         style = dialStroke
-                    )
-                    drawCircle(
-                        color = colorScheme.outline.copy(alpha = 0.15f),
-                        radius = cachedOuterRadius / 2f + cachedRingStroke / 2f + 1.dp.toPx(),
-                        center = cachedCenter,
-                        style = dialOutlineStroke
                     )
                     renderModel.hourTicks.forEach { tick ->
                         val rad = Math.toRadians(tick.angle.toDouble())
@@ -314,16 +308,6 @@ fun ChronosDial(
                             end = markerEnd,
                             strokeWidth = if (tick.isMajor) 1.8.dp.toPx() else 1.dp.toPx()
                         )
-                    }
-                    if (shouldDrawRingGuides(enableThreeRingMode, showRingGuide)) {
-                        listOf(DialRing.OUTER, DialRing.MIDDLE, DialRing.INNER).forEach { ring ->
-                            drawCircle(
-                                color = ringGuideColor(ring, colorScheme).copy(alpha = 0.16f),
-                                radius = ringRadius(cachedOuterRadius / 2f, ring),
-                                center = cachedCenter,
-                                style = guideRingStroke
-                            )
-                        }
                     }
                 }
             }
@@ -420,6 +404,8 @@ fun ChronosDial(
                                 val block = blocks.firstOrNull { it.id == hit.blockId } ?: return@detectDragGestures
                                 dragMode = DialDragMode.Move(block.id, hit.minute)
                                 draggingBlockId = block.id
+                                // Pick-up cue: confirm the block was grabbed when the drag begins.
+                                haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                                 dragStartMinute = hit.minute
                                 blockStartMinuteAtDragStart = block.startMinuteOfDay
                                 blockDurationAtDragStart = block.durationMinutes
@@ -432,6 +418,7 @@ fun ChronosDial(
                                 val block = blocks.firstOrNull { it.id == hit.blockId } ?: return@detectDragGestures
                                 dragMode = DialDragMode.ResizeStart(block.id)
                                 draggingBlockId = block.id
+                                haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                                 dragStartMinute = hit.minute
                                 blockStartMinuteAtDragStart = block.startMinuteOfDay
                                 blockDurationAtDragStart = block.durationMinutes
@@ -444,6 +431,7 @@ fun ChronosDial(
                                 val block = blocks.firstOrNull { it.id == hit.blockId } ?: return@detectDragGestures
                                 dragMode = DialDragMode.ResizeEnd(block.id)
                                 draggingBlockId = block.id
+                                haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                                 dragStartMinute = hit.minute
                                 blockStartMinuteAtDragStart = block.startMinuteOfDay
                                 blockDurationAtDragStart = block.durationMinutes
@@ -544,11 +532,12 @@ fun ChronosDial(
             y = center.y - outerRadius / 2f
         )
 
-        // Night band: an indigo tint over the track for the sleep window. Drawn first so it
-        // reads as part of the dial face, beneath blocks and the now-hand. Butt caps keep the
-        // window edges crisp at the exact start/end times. Glass mode runs lighter so the band
-        // sits behind translucent blocks; the opaque (incl. high-contrast) path runs stronger.
-        val nightBandColor = DialNightBandColor.copy(alpha = if (glassSurfacesEnabled) 0.45f else 0.7f)
+        // Night band: a gentle indigo tint over the track for the sleep window. Drawn first so
+        // it reads as part of the dial face, beneath blocks and the now-hand. Butt caps keep the
+        // window edges crisp at the exact start/end times. Kept deliberately light so it whispers
+        // "night" rather than stamping a second dark ring across the face; glass mode runs lighter
+        // still since it sits behind translucent blocks.
+        val nightBandColor = DialNightBandColor.copy(alpha = if (glassSurfacesEnabled) 0.22f else 0.34f)
         renderModel.nightArcs.forEach { night ->
             if (night.startAngle.isNaN() || night.sweepAngle <= 0.1f) return@forEach
             drawArc(
@@ -1113,19 +1102,6 @@ internal val TimeBlockUiModel.isInnerRingActionBlock: Boolean
         medicationPlanId != null ||
         category.equals("ROUTINE", ignoreCase = true) ||
         category.equals("MEDICATION", ignoreCase = true)
-
-private fun ringGuideColor(
-    ring: DialRing,
-    colorScheme: androidx.compose.material3.ColorScheme
-): Color {
-    return when (ring) {
-        DialRing.OUTER -> colorScheme.tertiary
-        DialRing.MIDDLE -> colorScheme.primary
-        DialRing.INNER -> colorScheme.secondary
-        DialRing.CENTER,
-        DialRing.OUTSIDE -> colorScheme.outline
-    }
-}
 
 private fun ringRadius(maxRadius: Float, ring: DialRing): Float {
     return when (ring) {

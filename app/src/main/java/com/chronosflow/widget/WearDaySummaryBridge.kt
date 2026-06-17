@@ -1,6 +1,7 @@
 package com.chronosflow.widget
 
 import android.content.Context
+import com.chronosflow.core.domain.model.BlockCategories
 import com.chronosflow.core.domain.model.ChronosDayOverview
 import com.chronosflow.core.domain.wear.WearDaySummaryContract
 import com.google.android.gms.wearable.PutDataMapRequest
@@ -38,10 +39,24 @@ internal fun ChronosDayOverview.toWearDaySummaryEntries(
     currentBlock?.let {
         entries[WearDaySummaryContract.KEY_NOW_TITLE] = if (redactTitles) REDACTED_BLOCK_TITLE else it.title
         entries[WearDaySummaryContract.KEY_NOW_END_MINUTE] = it.endMinuteOfDay
+        // A bare id leaks no title, so it flows even when redacted — lets the watch complete it.
+        entries[WearDaySummaryContract.KEY_NOW_BLOCK_ID] = it.id
+        // Category (not sensitive) flows even redacted, so the watch can gate "Start focus".
+        entries[WearDaySummaryContract.KEY_NOW_CATEGORY] = it.category
     }
-    nextBlock?.let {
+    // Split the next break out from the next event so the watch mirrors the phone notification's
+    // "next event + next break" glance instead of just naming whichever block comes next.
+    val upcoming = blocks.filterNot { it.isCurrent }
+    val nextEvent = upcoming.firstOrNull { !BlockCategories.isBreak(it.category) }
+    val nextBreak = upcoming.firstOrNull { BlockCategories.isBreak(it.category) }
+    nextEvent?.let {
         entries[WearDaySummaryContract.KEY_NEXT_TITLE] = if (redactTitles) REDACTED_BLOCK_TITLE else it.title
         entries[WearDaySummaryContract.KEY_NEXT_START_MINUTE] = it.startMinuteOfDay
+    }
+    nextBreak?.let {
+        entries[WearDaySummaryContract.KEY_NEXT_BREAK_START_MINUTE] = it.startMinuteOfDay
+        // The break's start (a time) is safe; its title is dropped under redaction.
+        if (!redactTitles) entries[WearDaySummaryContract.KEY_NEXT_BREAK_TITLE] = it.title
     }
     // Times only — safe to publish even when titles are redacted; feeds the watch day dial.
     entries[WearDaySummaryContract.KEY_BLOCK_ENTRIES] = blocks
@@ -88,7 +103,8 @@ internal fun ChronosDayOverview.toWearDaySummaryEntries(
  */
 @Singleton
 class WearDaySummaryBridge @Inject constructor(
-    @param:ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context,
+    private val linkStatusStore: WearLinkStatusStore
 ) {
     private val dataClient by lazy { Wearable.getDataClient(context) }
 
@@ -110,7 +126,9 @@ class WearDaySummaryBridge @Inject constructor(
             // Urgent like the focus mirror: non-urgent items batch for minutes and the watch
             // looks like it simply isn't syncing.
             }.asPutDataRequest().setUrgent()
+            // Stamp on handoff success so Privacy & Sync can show an accurate "Last synced …".
             dataClient.putDataItem(request)
+                .addOnSuccessListener { linkStatusStore.recordPublished() }
         }
     }
 }

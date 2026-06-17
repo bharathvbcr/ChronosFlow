@@ -1,5 +1,8 @@
 package com.chronosflow.feature.daydial
 
+import com.chronosflow.core.ui.components.ChronosTextButton
+import com.chronosflow.core.ui.components.ChronosFilledTonalButton
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,12 +12,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -24,8 +29,14 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.chronosflow.core.ai.RoutineAssistRequest
+import com.chronosflow.core.ai.RoutineAssistStep
+import com.chronosflow.core.ai.RoutineAssistSuggestion
+import com.chronosflow.core.ai.genai.GenAiAssistCopy
+import com.chronosflow.core.ui.components.ChronosAssistSuggestionChips
 import com.chronosflow.core.ui.components.ChronosFormBottomSheet
 import com.chronosflow.core.ui.components.ChronosListCard
+import com.chronosflow.core.ui.components.GenAiAssistBanner
 import com.chronosflow.feature.daydial.model.TemplateBlockBlueprint
 import com.chronosflow.feature.daydial.model.TemplateBlueprint
 import java.util.Locale
@@ -43,6 +54,7 @@ internal class DayDialTemplateState(
     val updateDraftBlockStart: (String, String) -> Unit,
     val updateDraftBlockDuration: (String, String) -> Unit,
     val updateDraftBlockCategory: (String, String) -> Unit,
+    val applyAssistSteps: (List<RoutineAssistStep>) -> Unit,
     val addDraftBlock: () -> Unit,
     val removeDraftBlock: (String) -> Unit,
     val moveDraftBlockUp: (String) -> Unit,
@@ -102,7 +114,7 @@ internal fun normalizeTemplateDraftBlocks(drafts: List<TemplateBlockDraft>): Lis
     if (drafts.isEmpty()) return emptyList()
     return drafts.map { draft ->
         val title = draft.title.trim()
-        val startMinute = parseEditorMinute(draft.startText) ?: return null
+        val startMinute = parseMinuteOfDay(draft.startText) ?: return null
         val durationMinutes = draft.durationText.toIntOrNull()?.coerceIn(5, 240) ?: return null
         if (title.isBlank()) return null
         TemplateBlockBlueprint(
@@ -210,6 +222,17 @@ internal fun rememberDayDialTemplateState(
         updateDraftBlockCategory = { draftId, value ->
             updateDraftBlock(draftId) { current -> current.copy(category = value) }
         },
+        applyAssistSteps = { steps ->
+            draftBlocks = steps.map { step ->
+                TemplateBlockDraft(
+                    id = UUID.randomUUID().toString(),
+                    title = step.title,
+                    startText = formatMinuteOfDay(step.startMinute),
+                    durationText = step.durationMinutes.coerceIn(5, 240).toString(),
+                    category = step.category.uppercase(Locale.getDefault())
+                )
+            }
+        },
         addDraftBlock = {
             val nextStartMinute = nextDraftBlockStartMinute(draftBlocks)
             draftBlocks = draftBlocks + defaultTemplateDraftBlock(nextStartMinute)
@@ -263,7 +286,7 @@ internal fun rememberDayDialTemplateState(
                 TemplateBlockDraft(
                     id = UUID.randomUUID().toString(),
                     title = block.title,
-                    startText = formatEditorMinute(block.startMinuteOfDay),
+                    startText = formatMinuteOfDay(block.startMinuteOfDay),
                     durationText = block.durationMinutes.toString(),
                     category = inferDayDialCategory(block).uppercase(Locale.getDefault())
                 )
@@ -321,7 +344,12 @@ internal fun rememberDayDialTemplateState(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun DayDialTemplateEditorSheet(templateState: DayDialTemplateState) {
+internal fun DayDialTemplateEditorSheet(
+    templateState: DayDialTemplateState,
+    assistState: RoutineAssistUiState = RoutineAssistUiState(),
+    onRequestAssist: ((RoutineAssistRequest) -> Unit)? = null,
+    onClearAssist: (() -> Unit)? = null
+) {
     if (!templateState.isTemplateEditorOpen) return
     val templateName = templateState.templateToEdit?.name?.trim()?.takeIf { it.isNotBlank() }
     val blockCount = templateState.draftBlocks.size
@@ -373,6 +401,69 @@ internal fun DayDialTemplateEditorSheet(templateState: DayDialTemplateState) {
             modifier = Modifier.fillMaxWidth()
         )
 
+        if (onRequestAssist != null) {
+            val appliedAssistIds = remember(assistState.suggestions) { mutableStateListOf<String>() }
+            val visibleAssistSuggestions = assistState.suggestions.filter { it.id !in appliedAssistIds }
+
+            fun applyRoutineAssistSuggestion(suggestion: RoutineAssistSuggestion) {
+                when (suggestion) {
+                    is RoutineAssistSuggestion.Title -> templateState.setEditTemplateName(suggestion.title)
+                    is RoutineAssistSuggestion.Steps -> templateState.applyAssistSteps(suggestion.steps)
+                }
+                appliedAssistIds.add(suggestion.id)
+                if (assistState.suggestions.all { it.id in appliedAssistIds }) {
+                    onClearAssist?.invoke()
+                }
+            }
+
+            ChronosFilledTonalButton(
+                onClick = {
+                    onRequestAssist(
+                        RoutineAssistRequest(
+                            title = templateState.editTemplateName,
+                            stepCount = templateState.draftBlocks.size
+                        )
+                    )
+                },
+                enabled = !assistState.isLoading,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    when {
+                        assistState.isLoading -> "Drafting suggestions…"
+                        visibleAssistSuggestions.isNotEmpty() -> "Refresh suggestions"
+                        else -> "Suggest routine with AI"
+                    }
+                )
+            }
+            assistState.assistSnapshot?.let { snapshot ->
+                GenAiAssistBanner(
+                    title = snapshot.bannerTitle,
+                    message = snapshot.bannerMessage +
+                        " Type or dictate the routine and AI drafts an editable name and step outline. Nothing changes until you tap a suggestion.",
+                    ready = snapshot.isReady
+                )
+            }
+            assistState.message?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (visibleAssistSuggestions.isNotEmpty() || assistState.isLoading) {
+                ChronosAssistSuggestionChips(
+                    suggestions = visibleAssistSuggestions,
+                    isLoading = assistState.isLoading,
+                    onApply = ::applyRoutineAssistSuggestion,
+                    label = { it.label },
+                    reason = { it.reason },
+                    sourceLabel = { GenAiAssistCopy.routineAssistSourceLabel(it.source) },
+                    loadingLabel = "Drafting AI suggestions…"
+                )
+            }
+        }
+
         if (templateState.draftBlocks.isEmpty()) {
             Text(
                 text = "No blocks yet. Add a block to build this template.",
@@ -403,7 +494,7 @@ internal fun DayDialTemplateEditorSheet(templateState: DayDialTemplateState) {
                         onCategorySelected = { templateState.updateDraftBlockCategory(draft.id, it) }
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(
+                    ChronosTextButton(
                         onClick = { templateState.moveDraftBlockUp(draft.id) },
                         modifier = Modifier.semantics {
                             contentDescription = templateDraftBlockMoveUpActionLabel(draft, index)
@@ -411,7 +502,7 @@ internal fun DayDialTemplateEditorSheet(templateState: DayDialTemplateState) {
                     ) {
                         Text(templateDraftBlockMoveUpActionLabel(draft, index))
                     }
-                    TextButton(
+                    ChronosTextButton(
                         onClick = { templateState.moveDraftBlockDown(draft.id) },
                         modifier = Modifier.semantics {
                             contentDescription = templateDraftBlockMoveDownActionLabel(draft, index)
@@ -419,7 +510,7 @@ internal fun DayDialTemplateEditorSheet(templateState: DayDialTemplateState) {
                     ) {
                         Text(templateDraftBlockMoveDownActionLabel(draft, index))
                     }
-                    TextButton(
+                    ChronosTextButton(
                         onClick = { templateState.removeDraftBlock(draft.id) },
                         modifier = Modifier.semantics {
                             contentDescription = templateDraftBlockDeleteActionLabel(draft, index)
@@ -435,7 +526,7 @@ internal fun DayDialTemplateEditorSheet(templateState: DayDialTemplateState) {
         }
         }
 
-        TextButton(onClick = templateState.addDraftBlock) {
+        ChronosTextButton(onClick = templateState.addDraftBlock) {
             Text(templateDraftAddBlockActionLabel(blockCount))
         }
     }
@@ -513,14 +604,14 @@ private fun draftFromTemplateBlock(block: TemplateBlockBlueprint): TemplateBlock
     TemplateBlockDraft(
         id = UUID.randomUUID().toString(),
         title = block.title,
-        startText = formatEditorMinute(block.startMinute),
+        startText = formatMinuteOfDay(block.startMinute),
         durationText = block.durationMinutes.toString(),
         category = block.category
     )
 
 private fun nextDraftBlockStartMinute(drafts: List<TemplateBlockDraft>): Int {
     val lastDraft = drafts.lastOrNull() ?: return 9 * 60
-    val startMinute = parseEditorMinute(lastDraft.startText) ?: return 9 * 60
+    val startMinute = parseMinuteOfDay(lastDraft.startText) ?: return 9 * 60
     val durationMinutes = lastDraft.durationText.toIntOrNull()?.coerceIn(5, 240) ?: 25
     return (startMinute + durationMinutes) % 1440
 }
@@ -529,7 +620,7 @@ private fun defaultTemplateDraftBlock(startMinute: Int): TemplateBlockDraft =
     TemplateBlockDraft(
         id = UUID.randomUUID().toString(),
         title = "New Block",
-        startText = formatEditorMinute(startMinute),
+        startText = formatMinuteOfDay(startMinute),
         durationText = "25",
         category = "WORK"
     )

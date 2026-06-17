@@ -6,11 +6,14 @@ import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.ReviewInsight
 import com.chronosflow.core.domain.model.ReviewInsightSeverity
 import com.chronosflow.core.domain.model.ReviewInsightType
+import com.chronosflow.core.domain.model.Task
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 
 class LocalPlanningHeuristicsTest {
     @Test
@@ -54,6 +57,35 @@ class LocalPlanningHeuristicsTest {
         assertEquals("STUDY", result.proposedBlocks[1].category)
         assertEquals("Workout window", result.proposedBlocks[3].title)
         assertEquals("WORKOUT", result.proposedBlocks[3].category)
+    }
+
+    @Test
+    fun `generateIdealDayPlan schedules a due-today task ahead of a higher-priority task due later`() {
+        val date = LocalDate.of(2026, 5, 30)
+        val zone = ZoneId.of("UTC")
+        fun task(title: String, priority: Int, due: Instant?) = Task(
+            id = title,
+            title = title,
+            description = null,
+            isCompleted = false,
+            priority = priority,
+            dueDate = due,
+            createdAt = Instant.EPOCH,
+            updatedAt = Instant.EPOCH
+        )
+        val dueToday = task("Submit report", priority = 1, due = date.atTime(12, 0).atZone(zone).toInstant())
+        val highPriorityLater = task("Plan offsite", priority = 9, due = date.plusDays(20).atStartOfDay(zone).toInstant())
+
+        val result = LocalPlanningHeuristics.generateIdealDayPlan(
+            packageName = "com.chronosflow",
+            userPreferences = "",
+            date = date,
+            currentTimeZone = "UTC",
+            pendingTasks = listOf(highPriorityLater, dueToday)
+        )
+
+        // The deep-work slot (block index 1) takes the urgent due-today task over the higher-priority one.
+        assertEquals("Submit report", result.proposedBlocks[1].title)
     }
 
     @Test

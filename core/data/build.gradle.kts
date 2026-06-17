@@ -54,6 +54,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.health.connect)
     implementation(libs.kotlinx.coroutines.core)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.firestore)

@@ -33,10 +33,18 @@ data class WearMed(
 data class WearDaySummary(
     val nowTitle: String? = null,
     val nowEndMinute: Int = 0,
+    /** Id of the block happening now, so the watch can mark it complete; absent when none. */
+    val nowBlockId: String? = null,
+    /** Raw category of the current block (e.g. "WORK", "BREAK"); gates the "Start focus" action. */
+    val nowCategory: String = "",
     /** Today's current + upcoming blocks for the day dial; times only. */
     val blocks: List<WearBlock> = emptyList(),
+    /** Next upcoming *event* (non-break) — title + start; absent when no further event today. */
     val nextTitle: String? = null,
     val nextStartMinute: Int = 0,
+    /** Next upcoming *break* — start always (0 = none), title only when not redacted. */
+    val nextBreakStartMinute: Int = 0,
+    val nextBreakTitle: String? = null,
     val openTaskCount: Int = 0,
     val tasks: List<WearTask> = emptyList(),
     val habitsDone: Int = 0,
@@ -45,10 +53,24 @@ data class WearDaySummary(
     val medsDueCount: Int = 0,
     val meds: List<WearMed> = emptyList(),
     /** One-line AI day digest mirrored from the phone; absent when redacted or not yet generated. */
-    val digest: String? = null
+    val digest: String? = null,
+    /**
+     * Wall-clock epoch millis when the phone last pushed this summary (0 = never synced on this
+     * device). Lets the watch flag a schedule that may be out of date when the phone has been out
+     * of reach — the "now"/"until"/dial claims are time-relative and silently rot otherwise.
+     */
+    val receivedAtMillis: Long = 0L
 )
 
 private val SEP = WearDaySummaryContract.FIELD_SEP
+
+/** The block spanning now (start ≤ now < end), or null in a gap — the watch's "current block". */
+fun currentBlock(blocks: List<WearBlock>, nowMinute: Int): WearBlock? =
+    blocks.firstOrNull { nowMinute >= it.startMinute && nowMinute < it.endMinute }
+
+/** How many blocks start strictly after now — the "N to go" tally for the glance. */
+fun upcomingBlockCount(blocks: List<WearBlock>, nowMinute: Int): Int =
+    blocks.count { it.startMinute > nowMinute }
 
 fun parseBlocks(entries: List<String>): List<WearBlock> =
     entries.mapNotNull { entry ->
@@ -75,6 +97,13 @@ fun parseHabits(entries: List<String>): List<WearHabit> =
             title = parts[3]
         )
     }
+
+/**
+ * Orders doses for an at-a-glance list: untaken first (earliest reminder first, so anything
+ * already overdue floats to the top), taken doses last.
+ */
+fun sortMedsForGlance(meds: List<WearMed>): List<WearMed> =
+    meds.sortedWith(compareBy({ it.taken }, { it.reminderMinute }))
 
 fun parseMeds(entries: List<String>): List<WearMed> =
     entries.mapNotNull { entry ->

@@ -28,6 +28,7 @@ import com.chronosflow.core.domain.model.buildLegacyMedicationSchedule
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
 import com.chronosflow.core.domain.repository.MedicationRepository
 import com.chronosflow.core.domain.repository.PlannerPreferencesRepository
+import com.chronosflow.core.domain.usecase.ObserveMedicationAdherenceTrendUseCase
 import com.chronosflow.core.domain.usecase.ScheduleMedicationReminderUseCase
 import com.chronosflow.core.notifications.AlarmCapabilityRefresher
 import com.chronosflow.core.notifications.AlarmDeliveryCoordinator
@@ -76,6 +77,7 @@ class MedicationViewModel @Inject constructor(
     private val medicationRepository: MedicationRepository,
     private val plannerPreferencesRepository: PlannerPreferencesRepository,
     private val scheduleMedicationReminderUseCase: ScheduleMedicationReminderUseCase,
+    observeMedicationAdherenceTrendUseCase: ObserveMedicationAdherenceTrendUseCase,
     private val sleepScheduleRepository: SleepScheduleRepository,
     private val alarmScheduler: AlarmScheduler,
     private val medicationAssistPlanner: MedicationAssistPlanner,
@@ -106,6 +108,10 @@ class MedicationViewModel @Inject constructor(
     }
 
     val plans = medicationRepository.observeMedicationPlans()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Per-day taken/missed dose counts over the trailing 14 days, oldest first. */
+    val adherenceTrend = observeMedicationAdherenceTrendUseCase(windowDays = 14)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _status = MutableStateFlow<String?>(null)

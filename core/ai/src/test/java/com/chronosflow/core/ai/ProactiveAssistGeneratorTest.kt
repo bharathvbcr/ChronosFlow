@@ -22,8 +22,8 @@ class ProactiveAssistGeneratorTest {
 
     @Test
     fun `refresh caches the AI digest when Nano is available`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = "Strong day — 3 blocks done, 2 tasks left to close out.",
             source = AssistGenAiSource.GEMINI_NANO
         )
@@ -39,8 +39,8 @@ class ProactiveAssistGeneratorTest {
 
     @Test
     fun `refresh falls back to a local digest when AI returns nothing`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = null,
             source = AssistGenAiSource.LOCAL
         )
@@ -54,9 +54,44 @@ class ProactiveAssistGeneratorTest {
     }
 
     @Test
+    fun `local digest nudges toward focus when distraction runs above usual`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
+            text = null,
+            source = AssistGenAiSource.LOCAL
+        )
+        val generator = ProactiveAssistGenerator(coordinator, InMemoryProactiveAssistStore())
+
+        // Distraction-above-usual outranks the open-tasks line so the nudge is what surfaces.
+        val content = generator.refresh(
+            input.copy(distractionAboveUsual = true),
+            nowEpochMs = 1_000L
+        )
+
+        assertEquals(true, content.text.contains("focus block", ignoreCase = true))
+    }
+
+    @Test
+    fun `local digest celebrates hitting the focus goal when nothing else is pending`() = runTest {
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
+            text = null,
+            source = AssistGenAiSource.LOCAL
+        )
+        val generator = ProactiveAssistGenerator(coordinator, InMemoryProactiveAssistStore())
+
+        val content = generator.refresh(
+            input.copy(openTaskCount = 0, focusGoalMinutes = 120, focusedMinutes = 150),
+            nowEpochMs = 1_000L
+        )
+
+        assertEquals(true, content.text.contains("focus goal", ignoreCase = true))
+    }
+
+    @Test
     fun `cachedCopy rejects stale or wrong-day content`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = "Cached line.",
             source = AssistGenAiSource.GEMINI_NANO
         )

@@ -5,6 +5,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -54,12 +56,19 @@ class TaskFormSheetUiTest {
             }
         }
 
-        composeTestRule.onNodeWithText("Send launch follow-up").assertDoesNotExist()
+        // The suggested title is offered as a tappable chip, but must NOT be written into the
+        // editable Title field until the suggestion is clicked. Scope the check to the editable
+        // field (hasSetTextAction) so the offered chip doesn't count as "applied".
+        composeTestRule
+            .onNode(hasSetTextAction() and hasText("Send launch follow-up"))
+            .assertDoesNotExist()
 
         composeTestRule.onNodeWithText("Use clearer title").performClick()
         composeTestRule.waitForIdle()
 
-        composeTestRule.onNodeWithText("Send launch follow-up").assertExists()
+        composeTestRule
+            .onNode(hasSetTextAction() and hasText("Send launch follow-up"))
+            .assertExists()
         composeTestRule.onNodeWithText("Add task").performClick()
         composeTestRule.waitForIdle()
 
@@ -246,12 +255,15 @@ class TaskFormSheetUiTest {
             }
         }
 
-        composeTestRule.onNodeWithText("Priority details open").assertDoesNotExist()
+        // The priority suggestion is offered but the value applies only when clicked: capturedPriority
+        // stays unset until the chip is tapped and the task is saved. (The "Priority / reminder"
+        // section auto-expands whenever a priority suggestion exists, so section visibility can't
+        // distinguish the click — the applied value is the contract.)
+        composeTestRule.onNodeWithText("Mark urgent").assertExists()
 
         composeTestRule.onNodeWithText("Mark urgent").performClick()
         composeTestRule.waitForIdle()
 
-        composeTestRule.onNodeWithText("Priority details open").assertExists()
         composeTestRule.onNodeWithText("Add task").performClick()
         composeTestRule.waitForIdle()
 

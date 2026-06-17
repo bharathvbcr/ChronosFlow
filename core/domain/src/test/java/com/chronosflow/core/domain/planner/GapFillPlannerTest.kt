@@ -1,5 +1,6 @@
 package com.chronosflow.core.domain.planner
 
+import com.chronosflow.core.domain.model.SleepReadiness
 import com.chronosflow.core.domain.model.SleepSchedule
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.planner.PlannerTestFixtures.timeBlock
@@ -176,6 +177,39 @@ class GapFillPlannerTest {
             addBreaksAutomatically = false
         )
         assertTrue(withoutBreaks.proposedBlocks.isEmpty())
+    }
+
+    @Test
+    fun `a depleted night inserts a recovery break after a shorter focus stretch`() {
+        // A single 60-minute focus block: below the normal 90-minute stretch, above the depleted 60.
+        val blocks = listOf(
+            timeBlock(id = "deep-1", startMinute = 8 * 60, durationMinutes = 60),
+            timeBlock(id = "wall", startMinute = 13 * 60, durationMinutes = 11 * 60)
+        )
+
+        val normal = planner.propose(
+            blocks = blocks,
+            tasks = emptyList(),
+            habitCandidates = emptyList(),
+            sleepSchedule = noSleep,
+            nowMinuteOfDay = null,
+            addBreaksAutomatically = true
+        )
+        assertTrue(normal.proposedBlocks.none { it.category == "RECOVERY" })
+
+        val depleted = planner.propose(
+            blocks = blocks,
+            tasks = emptyList(),
+            habitCandidates = emptyList(),
+            sleepSchedule = noSleep,
+            nowMinuteOfDay = null,
+            addBreaksAutomatically = true,
+            readiness = SleepReadiness.DEPLETED
+        )
+        val recovery = depleted.proposedBlocks.filter { it.category == "RECOVERY" }
+        assertEquals(1, recovery.size)
+        assertEquals(9 * 60, recovery.single().startMinute)
+        assertEquals(25, recovery.single().durationMinutes)
     }
 
     @Test

@@ -15,7 +15,9 @@ fun Context.sendFocusServiceCommand(
     wasSkip: Boolean = false,
     adjustSeconds: Int? = null,
     terminal: Boolean = true,
-    boundaryLabel: String? = null
+    boundaryLabel: String? = null,
+    phasePlan: String? = null,
+    phaseIndex: Int = 0
 ) {
     val intent = Intent(this, FocusService::class.java).apply {
         this.action = action
@@ -28,6 +30,8 @@ fun Context.sendFocusServiceCommand(
         putExtra(FocusService.EXTRA_WAS_SKIP, wasSkip)
         putExtra(FocusService.EXTRA_TERMINAL, terminal)
         boundaryLabel?.let { putExtra(FocusService.EXTRA_BOUNDARY_LABEL, it) }
+        phasePlan?.let { putExtra(FocusService.EXTRA_PHASE_PLAN, it) }
+        putExtra(FocusService.EXTRA_PHASE_INDEX, phaseIndex)
         adjustSeconds?.let { putExtra(FocusService.EXTRA_ADJUST_SECONDS, it) }
     }
     if (action == FocusService.ACTION_STOP) {

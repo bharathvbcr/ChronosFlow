@@ -2,6 +2,7 @@ package com.chronosflow.feature.medication
 
 import com.chronosflow.core.domain.model.AlarmRequest
 import com.chronosflow.core.domain.model.MedicationSchedule
+import com.chronosflow.core.domain.model.MedicationDailyAdherence
 import com.chronosflow.core.domain.model.MedicationDoseEvent
 import com.chronosflow.core.domain.model.MedicationDoseEventType
 import com.chronosflow.core.domain.model.PlannerRecurrence
@@ -12,6 +13,7 @@ import com.chronosflow.core.domain.model.SleepSchedule
 import com.chronosflow.core.domain.repository.MedicationRepository
 import com.chronosflow.core.domain.repository.PlannerPreferencesRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
+import com.chronosflow.core.domain.usecase.ObserveMedicationAdherenceTrendUseCase
 import com.chronosflow.core.domain.usecase.ScheduleMedicationReminderUseCase
 import com.chronosflow.core.ai.MedicationAssistRequest
 import com.chronosflow.core.ai.MedicationAssistSuggestion
@@ -38,6 +40,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flowOf
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -58,6 +62,7 @@ class MedicationViewModelTest {
     private val medicationRepository: MedicationRepository = mockk()
     private val plannerPreferencesRepository: PlannerPreferencesRepository = mockk(relaxed = true)
     private val scheduleMedicationReminderUseCase: ScheduleMedicationReminderUseCase = mockk()
+    private val observeMedicationAdherenceTrendUseCase: ObserveMedicationAdherenceTrendUseCase = mockk()
     private val sleepScheduleRepository: SleepScheduleRepository = mockk()
     private val alarmScheduler: AlarmScheduler = mockk()
     private val medicationAssistPlanner: MedicationAssistPlanner = mockk()
@@ -68,12 +73,15 @@ class MedicationViewModelTest {
     private lateinit var viewModel: MedicationViewModel
     private val requestSlot = slot<AlarmRequest>()
     private val originalTimeZone = TimeZone.getDefault()
+    private val testDispatcher = UnconfinedTestDispatcher()
 
     @Before
     fun setup() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
+        Dispatchers.setMain(testDispatcher)
         TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
         every { medicationRepository.observeMedicationPlans() } returns flowOf(emptyList())
+        every { observeMedicationAdherenceTrendUseCase(any(), any()) } returns
+            flowOf(emptyList<MedicationDailyAdherence>())
         every { sleepScheduleRepository.getSleepSchedule() } returns SleepSchedule(
             enabled = true,
             startMinute = 21 * 60,
@@ -100,6 +108,7 @@ class MedicationViewModelTest {
             medicationRepository = medicationRepository,
             plannerPreferencesRepository = plannerPreferencesRepository,
             scheduleMedicationReminderUseCase = scheduleMedicationReminderUseCase,
+            observeMedicationAdherenceTrendUseCase = observeMedicationAdherenceTrendUseCase,
             sleepScheduleRepository = sleepScheduleRepository,
             alarmScheduler = alarmScheduler,
             medicationAssistPlanner = medicationAssistPlanner,
@@ -112,12 +121,13 @@ class MedicationViewModelTest {
 
     @After
     fun tearDown() {
+        viewModel.viewModelScope.cancel()
         TimeZone.setDefault(originalTimeZone)
         Dispatchers.resetMain()
     }
 
     @Test
-    fun `night medication reminders defer to wake time`() = runTest {
+    fun `night medication reminders defer to wake time`() = runTest(testDispatcher) {
         viewModel.addMedication(
             name = "Magnesium",
             dosage = "1",
@@ -131,7 +141,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `as needed medications do not schedule alarms`() = runTest {
+    fun `as needed medications do not schedule alarms`() = runTest(testDispatcher) {
         viewModel.addMedication(
             name = "Inhaler",
             dosage = "2",
@@ -151,7 +161,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `selected weekday medications schedule the next matching date`() = runTest {
+    fun `selected weekday medications schedule the next matching date`() = runTest(testDispatcher) {
         val zone = ZoneId.of("UTC")
         val targetDate = LocalDate.now(zone).plusDays(2)
         val targetDay = targetDate.dayOfWeek
@@ -179,7 +189,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `updateMedication trims and preserves fallback values`() = runTest {
+    fun `updateMedication trims and preserves fallback values`() = runTest(testDispatcher) {
         val plan = medicationPlan(
             id = "plan-2",
             dosage = "2",
@@ -216,7 +226,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `duplicateMedication creates active copy and preserves linkage`() = runTest {
+    fun `duplicateMedication creates active copy and preserves linkage`() = runTest(testDispatcher) {
         val source = medicationPlan(
             id = "plan-3",
             name = "Vitamin D",
@@ -244,7 +254,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `snoozeReminder schedules deferred reminder and records snooze event`() = runTest {
+    fun `snoozeReminder schedules deferred reminder and records snooze event`() = runTest(testDispatcher) {
         val plan = medicationPlan(
             id = "plan-4",
             reminderMinuteOfDay = 8 * 60
@@ -261,7 +271,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `markDoseTaken decreases remaining supply and triggers refill warning when low`() = runTest {
+    fun `markDoseTaken decreases remaining supply and triggers refill warning when low`() = runTest(testDispatcher) {
         val plan = medicationPlan(
             id = "plan-5",
             dosage = "1",
@@ -285,7 +295,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `markDoseMissed increments missed count and updates status`() = runTest {
+    fun `markDoseMissed increments missed count and updates status`() = runTest(testDispatcher) {
         val plan = medicationPlan(id = "plan-6", missedCount = 3)
 
         viewModel.markDoseMissed(plan)
@@ -297,7 +307,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `skipDoseToday records skipped event and status`() = runTest {
+    fun `skipDoseToday records skipped event and status`() = runTest(testDispatcher) {
         val plan = medicationPlan(id = "plan-7")
 
         val eventSlot = slot<MedicationDoseEvent>()
@@ -310,7 +320,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `pausePlan clamps minimum days and sets pausedUntil date`() = runTest {
+    fun `pausePlan clamps minimum days and sets pausedUntil date`() = runTest(testDispatcher) {
         val plan = medicationPlan(id = "plan-8")
         val pausedSlot = slot<MedicationPlan>()
         coEvery { medicationRepository.saveMedicationPlan(capture(pausedSlot)) } returns Unit
@@ -324,7 +334,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `resumePlan clears paused until`() = runTest {
+    fun `resumePlan clears paused until`() = runTest(testDispatcher) {
         val plan = medicationPlan(
             id = "plan-9",
             schedule = medicationSchedule(
@@ -345,7 +355,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `archive marks plan inactive`() = runTest {
+    fun `archive marks plan inactive`() = runTest(testDispatcher) {
         val plan = medicationPlan(id = "plan-archive", isActive = true)
         val archivedSlot = slot<MedicationPlan>()
         coEvery { medicationRepository.saveMedicationPlan(capture(archivedSlot)) } returns Unit
@@ -357,7 +367,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `clearStatus and exact alarm permission action helpers reset state`() = runTest {
+    fun `clearStatus and exact alarm permission action helpers reset state`() = runTest(testDispatcher) {
         viewModel.clearStatus()
         assertNull(viewModel.status.value)
 
@@ -366,12 +376,13 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `rememberHistoryTemplateSelection moves selected id to front and persists`() = runTest {
+    fun `rememberHistoryTemplateSelection moves selected id to front and persists`() = runTest(testDispatcher) {
         every { plannerPreferencesRepository.getRecentMedicationTemplateIds() } returns listOf("older", "older2", "older3", "older4", "older5", "older6")
         viewModel = MedicationViewModel(
             medicationRepository = medicationRepository,
             plannerPreferencesRepository = plannerPreferencesRepository,
             scheduleMedicationReminderUseCase = scheduleMedicationReminderUseCase,
+            observeMedicationAdherenceTrendUseCase = observeMedicationAdherenceTrendUseCase,
             sleepScheduleRepository = sleepScheduleRepository,
             alarmScheduler = alarmScheduler,
             medicationAssistPlanner = medicationAssistPlanner,
@@ -386,7 +397,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `adherence suggestions populate and apply moves the reminder`() = runTest {
+    fun `adherence suggestions populate and apply moves the reminder`() = runTest(testDispatcher) {
         val plan = MedicationPlan(
             id = "plan-adherence",
             name = "Vitamin D",
@@ -416,6 +427,7 @@ class MedicationViewModelTest {
             medicationRepository = medicationRepository,
             plannerPreferencesRepository = plannerPreferencesRepository,
             scheduleMedicationReminderUseCase = scheduleMedicationReminderUseCase,
+            observeMedicationAdherenceTrendUseCase = observeMedicationAdherenceTrendUseCase,
             sleepScheduleRepository = sleepScheduleRepository,
             alarmScheduler = alarmScheduler,
             medicationAssistPlanner = medicationAssistPlanner,
@@ -439,7 +451,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `requestMedicationAssist populates suggestions and clears state`() = runTest {
+    fun `requestMedicationAssist populates suggestions and clears state`() = runTest(testDispatcher) {
         val suggestion = MedicationAssistSuggestion.Reminder(
             id = "auto-1",
             label = "Morning",
@@ -471,7 +483,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `requestMedicationAssist captures planner failure message`() = runTest {
+    fun `requestMedicationAssist captures planner failure message`() = runTest(testDispatcher) {
         coEvery { medicationAssistPlanner.suggest(any()) } throws IllegalStateException("planner down")
 
         viewModel.requestMedicationAssist(
@@ -496,7 +508,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `rewriteMedicationNotes publishes a preview the form applies explicitly`() = runTest {
+    fun `rewriteMedicationNotes publishes a preview the form applies explicitly`() = runTest(testDispatcher) {
         coEvery {
             medicationAssistPlanner.rewriteNotes("take with a full glass of water in the morning", RewriteStyle.SHORTEN)
         } returns "Take with water in the morning"
@@ -516,7 +528,7 @@ class MedicationViewModelTest {
     }
 
     @Test
-    fun `rewriteMedicationNotes reports when the rewrite tool is unavailable`() = runTest {
+    fun `rewriteMedicationNotes reports when the rewrite tool is unavailable`() = runTest(testDispatcher) {
         coEvery { medicationAssistPlanner.rewriteNotes(any(), any()) } returns null
 
         viewModel.rewriteMedicationNotes(

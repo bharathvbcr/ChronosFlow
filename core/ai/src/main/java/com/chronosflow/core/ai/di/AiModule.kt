@@ -1,7 +1,9 @@
 package com.chronosflow.core.ai.di
 
+import com.chronosflow.core.ai.genai.CloudGeminiConfig
 import com.chronosflow.core.ai.genai.CloudGeminiGateway
 import com.chronosflow.core.ai.genai.CloudGeminiGatewayImpl
+import com.chronosflow.core.ai.genai.FirebaseCloudGeminiConfig
 import com.chronosflow.core.ai.genai.MlKitNanoPromptClient
 import com.chronosflow.core.ai.genai.MlKitGeminiNanoGateway
 import com.chronosflow.core.ai.genai.MlKitNanoModelClientFactory
@@ -38,6 +40,10 @@ abstract class AiModule {
     @Binds
     @Singleton
     abstract fun bindCloudGateway(impl: CloudGeminiGatewayImpl): CloudGeminiGateway
+
+    @Binds
+    @Singleton
+    abstract fun bindCloudGeminiConfig(impl: FirebaseCloudGeminiConfig): CloudGeminiConfig
 
     @Binds
     @Singleton

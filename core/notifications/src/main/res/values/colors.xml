@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="focus_progress_accent">#7257B8</color>
+    <!-- Muted track for the live focus bar while the timer is paused (pre-Android-12 fallback). -->
+    <color name="focus_progress_paused">#9E9E9E</color>
+    <!-- Break segments of a split (Pomodoro) session's live bar — a complementary teal so the
+         work/break rhythm reads at a glance against the violet focus segments. -->
+    <color name="focus_break_segment">#4E9A9A</color>
     <!-- Notification brand tint applied to small icon, app name and action labels. -->
     <color name="notification_accent">#7257B8</color>
     <!-- Warmer tint for critical reminders (medication doses, urgent deadlines). -->
     <color name="notification_accent_critical">#E0573E</color>
-    <!-- ChronosFlow brand accent; tints the dial small icon across all notifications. -->
-    <color name="chronosflow_brand_accent">#6C63FF</color>
 </resources>

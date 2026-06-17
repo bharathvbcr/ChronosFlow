@@ -119,7 +119,9 @@ private val FeatureGraduations: List<FeatureGraduation> = listOf(
         featureKeys = setOf(
             ChronosUiSettingsKeys.KEY_FEATURE_REVIEW_ENABLED,
             ChronosUiSettingsKeys.KEY_FEATURE_AI_ADVISOR_ENABLED,
-            ChronosUiSettingsKeys.KEY_FEATURE_GOALS_ENABLED
+            ChronosUiSettingsKeys.KEY_FEATURE_GOALS_ENABLED,
+            ChronosUiSettingsKeys.KEY_FEATURE_JOURNAL_ENABLED,
+            ChronosUiSettingsKeys.KEY_FEATURE_SLEEP_ENABLED
         )
     )
 )
@@ -274,7 +276,30 @@ private fun Preferences.toChronosUiSettingsSnapshot(context: Context): ChronosUi
     )
 }
 
+/**
+ * Process-level cache of the UI-settings [Preferences], seeded once at startup (see
+ * ChronosApplication) and kept fresh by the DataStore flow. Compose reads consult it synchronously
+ * so they never block the main thread on a DataStore round-trip. Reads fall back to a one-shot
+ * blocking load only during the brief cold-start window before the first emission arrives — so
+ * behaviour is never worse than before and, once warm, the main thread never blocks.
+ */
+object ChronosUiSettingsCache {
+    @Volatile
+    private var cachedPreferences: Preferences? = null
+
+    /** True once the first DataStore emission has seeded the cache. */
+    val isSeeded: Boolean get() = cachedPreferences != null
+
+    internal fun current(): Preferences? = cachedPreferences
+
+    /** Collects the settings store until cancelled, seeding then refreshing the cache. Call once. */
+    suspend fun keepFresh(context: Context) {
+        context.chronosUiPreferencesFlow().collect { cachedPreferences = it }
+    }
+}
+
 fun Context.readChronosUiSettingsSnapshot(): ChronosUiSettingsSnapshot {
+    ChronosUiSettingsCache.current()?.let { return it.toChronosUiSettingsSnapshot(this) }
     return runBlocking(Dispatchers.IO) {
         readChronosUiSettingsSnapshotFromDataStore()
     }
@@ -316,6 +341,9 @@ fun Context.chronosUiSettingsFlow(): Flow<ChronosUiSettingsSnapshot> {
 }
 
 fun Context.readChronosUiBooleanSetting(key: String, defaultValue: Boolean): Boolean {
+    ChronosUiSettingsCache.current()?.let {
+        return it.readBooleanSetting(legacyChronosUiPreferences(), key, defaultValue)
+    }
     return runBlocking(Dispatchers.IO) {
         val legacyPreferences = legacyChronosUiPreferences()
         chronosUiPreferencesFlow().first().readBooleanSetting(legacyPreferences, key, defaultValue)
@@ -323,6 +351,11 @@ fun Context.readChronosUiBooleanSetting(key: String, defaultValue: Boolean): Boo
 }
 
 fun Context.readChronosUiStringSetting(key: String, defaultValue: String): String {
+    ChronosUiSettingsCache.current()?.let {
+        return it[stringPreferencesKey(key)]
+            ?: legacyChronosUiPreferences().getString(key, defaultValue)
+            ?: defaultValue
+    }
     return runBlocking(Dispatchers.IO) {
         chronosUiPreferencesFlow().first()[stringPreferencesKey(key)]
             ?: legacyChronosUiPreferences().getString(key, defaultValue)
@@ -331,6 +364,10 @@ fun Context.readChronosUiStringSetting(key: String, defaultValue: String): Strin
 }
 
 fun Context.readChronosUiIntSetting(key: String, defaultValue: Int): Int {
+    ChronosUiSettingsCache.current()?.let {
+        return it[intPreferencesKey(key)]
+            ?: legacyChronosUiPreferences().getInt(key, defaultValue)
+    }
     return runBlocking(Dispatchers.IO) {
         chronosUiPreferencesFlow().first()[intPreferencesKey(key)]
             ?: legacyChronosUiPreferences().getInt(key, defaultValue)

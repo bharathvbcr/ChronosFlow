@@ -1,0 +1,244 @@
+import SwiftUI
+import SwiftData
+import ChronosCore
+
+/// The Focus tab: turn a planned work block into a running BLOCK-BOUNDED focus session with a glass
+/// timer ring, a fixed work/break phase split (preset chips), phase dots, and a Live Activity on the
+/// Lock Screen / Dynamic Island. At each phase boundary the session HOLDS and shows a "tap to
+/// continue" button instead of auto-rolling (the iOS port of Android `awaitingPhaseAdvance`).
+struct FocusView: View {
+    @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var timer = FocusTimerModel()
+    var prefilledBlockID: String? = nil
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                ChronosBackdrop()
+                VStack(spacing: ChronosSpacing.hero) {
+                    Text(phaseTitle).font(.chronosTitle).foregroundStyle(.secondary)
+                    timerRing
+                    if timer.isSplitSession && timer.phase != .idle { phaseDots }
+                    controls
+                    if timer.completedWorkSessions > 0 {
+                        Label("\(timer.completedWorkSessions) focus phases done", systemImage: "checkmark.seal.fill")
+                            .font(.chronosLabel).foregroundStyle(ChronosColors.brandSecondary)
+                    }
+                }
+                .padding(ChronosSpacing.medium)
+            }
+            .navigationTitle("Focus")
+            .toolbarTitleDisplayMode(.inlineLarge)
+            // Apply any focus controls that arrived from the Live Activity / Today widget while we
+            // were backgrounded or on another tab (FocusCommandBridge — see WidgetIntents.swift).
+            .onAppear {
+                FocusCommandObserver.startIfNeeded()
+                drainFocusCommands()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { drainFocusCommands() }
+            }
+            // A control tapped while we're already foregrounded on this tab applies immediately.
+            .onReceive(NotificationCenter.default.publisher(for: FocusCommandObserver.didReceive)) { _ in
+                drainFocusCommands()
+            }
+        }
+    }
+
+    /// Drains queued cross-process focus commands and applies them to the live timer.
+    private func drainFocusCommands() {
+        FocusCommandBridge.drain { command in
+            switch command {
+            case .start(let blockID):
+                let id = blockID
+                let block = try? context.fetch(
+                    FetchDescriptor<TimeBlock>(predicate: #Predicate { $0.id == id })).first
+                timer.start(blockTitle: block?.title ?? "Focus session",
+                            blockID: blockID,
+                            blockMinutes: block?.durationMinutes ?? 25)
+            case .togglePause: timer.togglePause()
+            case .stop: timer.stop(context: context)
+            case .extend(let mins): timer.extend(minutes: mins)
+            case .advance: timer.advancePhase()
+            }
+        }
+    }
+
+    private var phaseTitle: String {
+        if timer.awaitingPhaseAdvance { return timer.nextPhase == nil ? "Block complete" : "Phase complete" }
+        switch timer.phase {
+        case .idle: return "Ready to focus"
+        case .work: return "Focus"
+        case .shortBreak, .longBreak: return "Break"
+        case .completed: return "Session complete"
+        }
+    }
+
+    // MARK: Timer ring
+
+    private var timerRing: some View {
+        ZStack {
+            Circle().stroke(.secondary.opacity(0.2), lineWidth: 16)
+            Circle()
+                .trim(from: 0, to: timer.phase == .idle ? 0 : timer.progress)
+                .stroke(ringColor.gradient, style: StrokeStyle(lineWidth: 16, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(ChronosMotion.smooth, value: timer.progress)
+            VStack(spacing: 4) {
+                if timer.awaitingPhaseAdvance {
+                    Image(systemName: timer.nextPhase?.kind == .break ? "cup.and.saucer.fill" : "checkmark.circle.fill")
+                        .font(.system(size: 44, weight: .semibold))
+                        .foregroundStyle(ringColor)
+                        .symbolEffect(.bounce, value: timer.awaitingPhaseAdvance)
+                } else {
+                    HStack(spacing: 8) {
+                        if timer.phase != .idle {
+                            Image(systemName: timer.isPaused ? "pause.fill" : "circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(ringColor)
+                                .symbolEffect(.pulse, isActive: !timer.isPaused)
+                        }
+                        Text(timeString)
+                            .font(.system(size: 56, weight: .bold, design: .rounded)).monospacedDigit()
+                    }
+                    if timer.isPaused { Text("Paused").font(.chronosCaption).foregroundStyle(.secondary) }
+                }
+            }
+        }
+        .frame(width: 260, height: 260)
+        .padding(ChronosSpacing.medium)
+    }
+
+    private var ringColor: Color {
+        let breakish = timer.phase == .shortBreak || timer.phase == .longBreak || timer.nextPhase?.kind == .break
+        return breakish ? ChronosColors.brandSecondary : ChronosColors.brandPrimary
+    }
+
+    private var timeString: String {
+        let total = timer.phase == .idle ? TimeInterval(timer.workMinutes * 60) : timer.remaining
+        return String(format: "%02d:%02d", Int(total) / 60, Int(total) % 60)
+    }
+
+    // MARK: Phase dots
+
+    private var phaseDots: some View {
+        HStack(spacing: 8) {
+            ForEach(0..<timer.totalPhases, id: \.self) { index in
+                Circle()
+                    .fill(dotColor(for: index))
+                    .frame(width: index == timer.phaseNumber - 1 ? 12 : 8,
+                           height: index == timer.phaseNumber - 1 ? 12 : 8)
+                    .animation(ChronosMotion.bouncy, value: timer.phaseNumber)
+            }
+        }
+        .accessibilityLabel("Phase \(timer.phaseNumber) of \(timer.totalPhases)")
+    }
+
+    private func dotColor(for index: Int) -> Color {
+        if index < timer.phaseNumber - 1 { return ChronosColors.brandSecondary.opacity(0.7) } // done
+        if index == timer.phaseNumber - 1 { return ChronosColors.brandPrimary }               // current
+        return .secondary.opacity(0.25)                                                        // upcoming
+    }
+
+    // MARK: Controls
+
+    @ViewBuilder private var controls: some View {
+        if timer.phase == .idle || timer.phase == .completed {
+            VStack(spacing: ChronosSpacing.medium) {
+                presetChips
+                Button {
+                    timer.start(blockTitle: blockTitle, blockID: prefilledBlockID,
+                                blockMinutes: blockMinutes, preset: timer.preset)
+                } label: {
+                    Label("Start focus", systemImage: "play.fill").frame(maxWidth: 220)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.large)
+            }
+        } else if timer.awaitingPhaseAdvance {
+            boundaryControls
+        } else {
+            runningControls
+        }
+    }
+
+    private var presetChips: some View {
+        VStack(spacing: 6) {
+            Text("Split").font(.chronosCaption).foregroundStyle(.secondary)
+            HStack(spacing: ChronosSpacing.small) {
+                ForEach(FocusSplitPreset.allCases, id: \.self) { preset in
+                    Button { timer.preset = preset } label: {
+                        Text(preset.label)
+                            .font(.chronosLabel)
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(timer.preset == preset ? ChronosColors.brandPrimary : .secondary)
+                    .buttonBorderShape(.capsule)
+                }
+            }
+        }
+    }
+
+    private var boundaryControls: some View {
+        VStack(spacing: ChronosSpacing.medium) {
+            if let prompt = timer.boundaryPrompt {
+                Text(prompt).font(.chronosBody).multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+            }
+            if timer.nextPhase != nil {
+                Button { timer.advancePhase() } label: {
+                    Label(continueLabel, systemImage: timer.nextPhase?.kind == .break ? "cup.and.saucer.fill" : "play.fill")
+                        .frame(maxWidth: 220)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.large)
+            } else {
+                Button { timer.stop(context: context) } label: {
+                    Label("Finish block", systemImage: "checkmark.circle.fill").frame(maxWidth: 220)
+                }
+                .buttonStyle(.borderedProminent).tint(ChronosColors.brandSecondary).controlSize(.large)
+            }
+            Button { timer.stop(context: context) } label: {
+                Text("End session").font(.chronosLabel)
+            }
+            .buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+    }
+
+    private var continueLabel: String {
+        timer.nextPhase?.kind == .break ? "Start break" : "Start next focus"
+    }
+
+    private var runningControls: some View {
+        HStack(spacing: ChronosSpacing.large) {
+            Button { timer.togglePause() } label: {
+                Image(systemName: timer.isPaused ? "play.fill" : "pause.fill").font(.title)
+            }
+            .buttonStyle(.bordered).buttonBorderShape(.circle).controlSize(.large)
+
+            Button { timer.stop(context: context) } label: {
+                Image(systemName: "stop.fill").font(.title)
+            }
+            .buttonStyle(.borderedProminent).tint(ChronosColors.brandAccent)
+            .buttonBorderShape(.circle).controlSize(.large)
+
+            Button { timer.skipPhase() } label: {
+                Image(systemName: "forward.fill").font(.title)
+            }
+            .buttonStyle(.bordered).buttonBorderShape(.circle).controlSize(.large)
+        }
+    }
+
+    // MARK: Block lookup
+
+    private var block: TimeBlock? {
+        guard let id = prefilledBlockID else { return nil }
+        return try? context.fetch(FetchDescriptor<TimeBlock>(
+            predicate: #Predicate { $0.id == id })).first
+    }
+
+    private var blockTitle: String { block?.title ?? "Focus session" }
+    private var blockMinutes: Int { block?.durationMinutes ?? 25 }
+}
+
+#Preview { FocusView().modelContainer(ChronosStore.previewContainer()) }

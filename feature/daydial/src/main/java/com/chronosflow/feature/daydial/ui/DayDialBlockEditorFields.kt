@@ -2,7 +2,7 @@ package com.chronosflow.feature.daydial
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,7 +49,7 @@ internal fun DayDialBlockEditorFields(
     onCategorySelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val parsedStartMinute = parseEditorMinute(startText)
+    val parsedStartMinute = parseMinuteOfDay(startText)
     val startMinute = parsedStartMinute ?: 9 * 60
     val durationMinutes = durationText.toIntOrNull()
         ?.coerceIn(BlockEditorMinDurationMinutes, BlockEditorMaxDurationMinutes)
@@ -66,7 +66,7 @@ internal fun DayDialBlockEditorFields(
 
         BlockTimeRangeSummary(
             start = startText,
-            endTimeStr = formatEditorMinute(endMinute),
+            endTimeStr = formatMinuteOfDay(endMinute),
             durMin = durationMinutes
         )
 
@@ -76,14 +76,14 @@ internal fun DayDialBlockEditorFields(
         ) {
             ChronosTimePickerField(
                 label = "Start time",
-                value = parsedStartMinute?.let(::formatEditorMinute) ?: startText.ifBlank { "Pick a time" },
+                value = parsedStartMinute?.let(::formatMinuteOfDay) ?: startText.ifBlank { "Pick a time" },
                 selectedMinute = startMinute,
-                onTimeSelected = { onStartTextChange(formatEditorMinute(it)) },
+                onTimeSelected = { onStartTextChange(formatMinuteOfDay(it)) },
                 modifier = Modifier.weight(1f)
             )
             ChronosTimePickerField(
                 label = "End time",
-                value = formatEditorMinute(endMinute),
+                value = formatMinuteOfDay(endMinute),
                 selectedMinute = endMinute,
                 onTimeSelected = { selectedEnd ->
                     onDurationTextChange(blockEditorDurationFromEnd(startMinute, selectedEnd).toString())
@@ -109,22 +109,6 @@ internal fun DayDialBlockEditorFields(
             onCategorySelected = onCategorySelected
         )
     }
-}
-
-internal fun formatEditorMinute(minute: Int): String {
-    val normalized = ((minute % 1440) + 1440) % 1440
-    val h = (normalized / 60) % 24
-    val m = normalized % 60
-    return String.format(Locale.getDefault(), "%02d:%02d", h, m)
-}
-
-internal fun parseEditorMinute(value: String): Int? {
-    val parts = value.trim().split(":")
-    if (parts.size != 2) return null
-    val hour = parts[0].toIntOrNull() ?: return null
-    val minute = parts[1].toIntOrNull() ?: return null
-    if (hour !in 0..23 || minute !in 0..59) return null
-    return hour * 60 + minute
 }
 
 internal fun snapBlockEditorDuration(value: Float): Int =
@@ -207,7 +191,7 @@ private fun CategoryChipSelector(
                         color = borderCol,
                         shape = MaterialTheme.shapes.small
                     )
-                    .clickable { onCategorySelected(cat) }
+                    .chronosHapticClick(onClick = { onCategorySelected(cat) })
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -37,8 +37,32 @@ class ChronosHabitsTileProviderTest {
     }
 
     @Test
-    fun `empty store renders the no-habits state`() {
+    fun `a never-synced store prompts to open the phone`() {
+        assertTrue(requestTile().toString().contains(ChronosHabitsTileProvider.SYNC_LABEL))
+    }
+
+    @Test
+    fun `a synced but empty day renders the no-habits state`() {
+        DaySummaryStore.write(
+            RuntimeEnvironment.getApplication(),
+            WearDaySummary(receivedAtMillis = System.currentTimeMillis())
+        )
         assertTrue(requestTile().toString().contains(ChronosHabitsTileProvider.EMPTY_LABEL))
+    }
+
+    @Test
+    fun `tile is tappable and opens the app`() {
+        assertTrue(requestTile().toString().contains("MainActivity"))
+    }
+
+    @Test
+    fun `a stale mirror surfaces a sync-age warning on the tile`() {
+        DaySummaryStore.write(
+            RuntimeEnvironment.getApplication(),
+            WearDaySummary(habitsTotal = 2, receivedAtMillis = 1_000L)
+        )
+
+        assertTrue(requestTile().toString().contains("Synced"))
     }
 
     @Test

@@ -110,6 +110,17 @@ class FocusTabStateTest {
     }
 
     @Test
+    fun `completed blocks are not surfaced as ready to focus`() {
+        val completed = focusBlock().copy(
+            actualStartMinuteOfDay = 10 * 60,
+            actualEndMinuteOfDay = 10 * 60 + 45
+        )
+        assertNull(focusTabReadyBlock(completed, sessionActive = false))
+        // An incomplete block is still offered as a focus-start candidate.
+        assertEquals(focusBlock(), focusTabReadyBlock(focusBlock(), sessionActive = false))
+    }
+
+    @Test
     fun `focus capture draft is shown only when no ready session is taking priority`() {
         assertEquals(
             FocusTabDraftUiState(

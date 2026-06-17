@@ -14,6 +14,7 @@ import com.chronosflow.core.domain.model.deriveHabitAnalytics
 import com.chronosflow.core.domain.repository.HabitRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import java.time.Instant
 import javax.inject.Inject
 
@@ -94,11 +95,11 @@ class HabitRepositoryImpl @Inject constructor(
         habitEventDao.insertEvent(event.toEntity())
     }
 
-    override suspend fun getHabitEventsBetween(
+    override fun observeHabitEventsBetween(
         start: java.time.LocalDate,
         end: java.time.LocalDate
-    ): List<HabitEvent> =
-        habitEventDao.getEventsBetween(start, end).map { it.toDomain() }
+    ): Flow<List<HabitEvent>> =
+        habitEventDao.observeEventsBetween(start, end).map { events -> events.map { it.toDomain() } }
 
     override suspend fun deleteHabit(habit: Habit) = habitDao.deleteHabit(habit.toEntity())
 }

@@ -37,14 +37,25 @@ class GenAiAssistCoordinator @Inject constructor(
         return onDeviceGateway.runtimeStatus.value
     }
 
+    /**
+     * Proactively readies the on-device model (status + any pending download) so the first
+     * user-triggered generation of a session isn't cold. No-op when AI is disabled. Safe to call on
+     * every foreground: the gateway's status cache and download-failure cooldown keep repeats cheap.
+     */
+    suspend fun prewarm(privacyMode: PrivacyMode = privacyMode()) {
+        if (privacyMode == PrivacyMode.DISABLED) return
+        runCatching { onDeviceGateway.ensureReadyForInference() }
+    }
+
     suspend fun generateAssistText(
         prompt: String,
-        privacyMode: PrivacyMode = privacyMode()
+        privacyMode: PrivacyMode = privacyMode(),
+        profile: GenerationProfile = GenerationProfile.BALANCED
     ): AssistTextGeneration {
         return when (privacyMode) {
             PrivacyMode.DISABLED -> AssistTextGeneration(text = null, source = AssistGenAiSource.LOCAL)
-            PrivacyMode.ON_DEVICE_ONLY -> generateWithNano(prompt)
-            PrivacyMode.CLOUD_ALLOWED -> generateWithCloudThenNano(prompt)
+            PrivacyMode.ON_DEVICE_ONLY -> generateWithNano(prompt, profile)
+            PrivacyMode.CLOUD_ALLOWED -> generateWithCloudThenNano(prompt, profile)
         }
     }
 
@@ -55,28 +66,29 @@ class GenAiAssistCoordinator @Inject constructor(
      */
     fun generateAssistTextStream(
         prompt: String,
-        privacyMode: PrivacyMode = privacyMode()
+        privacyMode: PrivacyMode = privacyMode(),
+        profile: GenerationProfile = GenerationProfile.BALANCED
     ): Flow<String> = if (privacyMode == PrivacyMode.DISABLED) {
         emptyFlow()
     } else {
-        onDeviceGateway.generateTextStream(prompt)
+        onDeviceGateway.generateTextStream(prompt, profile)
     }
 
-    private suspend fun generateWithNano(prompt: String): AssistTextGeneration {
+    private suspend fun generateWithNano(prompt: String, profile: GenerationProfile): AssistTextGeneration {
         val status = onDeviceGateway.refreshStatus()
         if (status == NanoModelStatus.AVAILABLE || status == NanoModelStatus.DOWNLOADABLE) {
-            onDeviceGateway.generateText(prompt).getOrNull()?.let { text ->
+            onDeviceGateway.generateText(prompt, profile).getOrNull()?.let { text ->
                 return AssistTextGeneration(text = text, source = AssistGenAiSource.GEMINI_NANO)
             }
         }
         return AssistTextGeneration(text = null, source = AssistGenAiSource.LOCAL)
     }
 
-    private suspend fun generateWithCloudThenNano(prompt: String): AssistTextGeneration {
+    private suspend fun generateWithCloudThenNano(prompt: String, profile: GenerationProfile): AssistTextGeneration {
         cloudGateway.generateText(prompt).getOrNull()?.let { text ->
             return AssistTextGeneration(text = text, source = AssistGenAiSource.CLOUD_GEMINI)
         }
-        return generateWithNano(prompt)
+        return generateWithNano(prompt, profile)
     }
 
     /**

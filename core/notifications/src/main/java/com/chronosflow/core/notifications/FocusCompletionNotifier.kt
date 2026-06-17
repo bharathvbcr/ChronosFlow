@@ -9,8 +9,13 @@ import androidx.core.content.ContextCompat
 
 object FocusCompletionNotifier {
     private const val CHANNEL_ID = "chronos_focus_completion"
-    private const val NOTIFICATION_ID = 4202
+    // Completion folds into the live focus notification's slot (id 4201): the bar you were watching
+    // fills to 100% and reads "complete" in place, rather than a separate notification popping up.
+    // FocusService detaches (not removes) the foreground notification on completion so this survives.
+    private const val NOTIFICATION_ID = FocusNotificationManager.FOCUS_NOTIFICATION_ID
     private const val BOUNDARY_NOTIFICATION_ID = 4203
+    // The folded-in completion auto-clears after a readable beat so it doesn't linger in the shade.
+    private const val COMPLETION_TIMEOUT_MS = 30_000L
 
     /**
      * Announces a split-session phase boundary while the app is backgrounded.
@@ -81,14 +86,16 @@ object FocusCompletionNotifier {
             NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_chronosflow_notification)
-                .setColor(ContextCompat.getColor(context, R.color.chronosflow_brand_accent))
                 .setContentTitle(title)
                 .setContentText(text)
                 .setColor(ContextCompat.getColor(context, R.color.notification_accent))
                 .setLargeIcon(focusBadge(context))
                 .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
+                // The live bar reaching 100% — the visual "the session you were watching is done".
+                .setProgress(1, 1, false)
                 .setAutoCancel(true)
                 .setOnlyAlertOnce(true)
+                .setTimeoutAfter(COMPLETION_TIMEOUT_MS)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .setContentIntent(
                     buildFocusNotificationContentIntent(

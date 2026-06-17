@@ -16,6 +16,9 @@ interface SleepTrackDao {
     @Query("SELECT * FROM sleep_tracks WHERE date BETWEEN :start AND :end ORDER BY date ASC")
     suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<SleepTrackEntity>
 
+    @Query("SELECT * FROM sleep_tracks WHERE date BETWEEN :start AND :end ORDER BY date ASC")
+    fun observeForDateRange(start: LocalDate, end: LocalDate): Flow<List<SleepTrackEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(track: SleepTrackEntity)
 

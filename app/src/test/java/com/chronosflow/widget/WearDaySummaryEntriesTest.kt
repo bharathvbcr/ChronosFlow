@@ -53,6 +53,7 @@ class WearDaySummaryEntriesTest {
 
         assertEquals("Deep work", entries[WearDaySummaryContract.KEY_NOW_TITLE])
         assertEquals(10 * 60, entries[WearDaySummaryContract.KEY_NOW_END_MINUTE])
+        assertEquals("b1", entries[WearDaySummaryContract.KEY_NOW_BLOCK_ID])
         assertEquals("Gym", entries[WearDaySummaryContract.KEY_NEXT_TITLE])
         assertEquals(16 * 60, entries[WearDaySummaryContract.KEY_NEXT_START_MINUTE])
         assertArrayEquals(
@@ -81,6 +82,43 @@ class WearDaySummaryEntriesTest {
     }
 
     @Test
+    fun `next break and next event are split, and now-category flows`() {
+        val overview = ChronosDayOverview(
+            blocks = listOf(
+                DayOverviewBlock(id = "b1", title = "Deep work", startMinuteOfDay = 9 * 60, endMinuteOfDay = 10 * 60, isCurrent = true, category = "WORK"),
+                DayOverviewBlock(id = "b2", title = "Coffee", startMinuteOfDay = 15 * 60, endMinuteOfDay = 15 * 60 + 15, isCurrent = false, category = "BREAK"),
+                DayOverviewBlock(id = "b3", title = "Gym", startMinuteOfDay = 16 * 60, endMinuteOfDay = 17 * 60, isCurrent = false, category = "WORK")
+            )
+        )
+
+        val entries = overview.toWearDaySummaryEntries()
+
+        // Current block's category flows for the watch's focus gating.
+        assertEquals("WORK", entries[WearDaySummaryContract.KEY_NOW_CATEGORY])
+        // "Next" is the next non-break EVENT (Gym), skipping the sooner break.
+        assertEquals("Gym", entries[WearDaySummaryContract.KEY_NEXT_TITLE])
+        assertEquals(16 * 60, entries[WearDaySummaryContract.KEY_NEXT_START_MINUTE])
+        // The break is carried separately.
+        assertEquals(15 * 60, entries[WearDaySummaryContract.KEY_NEXT_BREAK_START_MINUTE])
+        assertEquals("Coffee", entries[WearDaySummaryContract.KEY_NEXT_BREAK_TITLE])
+    }
+
+    @Test
+    fun `redaction drops the next-break title but keeps its start time`() {
+        val overview = ChronosDayOverview(
+            blocks = listOf(
+                DayOverviewBlock(id = "b1", title = "Therapy", startMinuteOfDay = 9 * 60, endMinuteOfDay = 10 * 60, isCurrent = true, category = "WORK"),
+                DayOverviewBlock(id = "b2", title = "Lunch", startMinuteOfDay = 12 * 60, endMinuteOfDay = 12 * 60 + 45, isCurrent = false, category = "BREAK")
+            )
+        )
+
+        val entries = overview.toWearDaySummaryEntries(redactTitles = true)
+
+        assertEquals(12 * 60, entries[WearDaySummaryContract.KEY_NEXT_BREAK_START_MINUTE])
+        assertFalse(entries.containsKey(WearDaySummaryContract.KEY_NEXT_BREAK_TITLE))
+    }
+
+    @Test
     fun `redaction keeps times and counts but strips every per-item payload`() {
         val overview = ChronosDayOverview(
             blocks = listOf(
@@ -95,6 +133,8 @@ class WearDaySummaryEntriesTest {
 
         assertEquals(REDACTED_BLOCK_TITLE, entries[WearDaySummaryContract.KEY_NOW_TITLE])
         assertEquals(10 * 60, entries[WearDaySummaryContract.KEY_NOW_END_MINUTE])
+        // The bare id carries no title, so it still flows under redaction (the watch can act on it).
+        assertEquals("b1", entries[WearDaySummaryContract.KEY_NOW_BLOCK_ID])
         // Block times carry no titles, so the dial survives redaction.
         assertArrayEquals(
             arrayOf("${9 * 60}$sep${10 * 60}"),
@@ -113,6 +153,7 @@ class WearDaySummaryEntriesTest {
         val entries = ChronosDayOverview().toWearDaySummaryEntries()
 
         assertFalse(entries.containsKey(WearDaySummaryContract.KEY_NOW_TITLE))
+        assertFalse(entries.containsKey(WearDaySummaryContract.KEY_NOW_BLOCK_ID))
         assertFalse(entries.containsKey(WearDaySummaryContract.KEY_NEXT_TITLE))
         assertEquals(0, entries[WearDaySummaryContract.KEY_OPEN_TASK_COUNT])
         assertEquals(0, entries[WearDaySummaryContract.KEY_HABITS_TOTAL])

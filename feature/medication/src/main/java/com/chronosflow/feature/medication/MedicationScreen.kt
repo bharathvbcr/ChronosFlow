@@ -1,5 +1,11 @@
 package com.chronosflow.feature.medication
 
+import com.chronosflow.core.ui.components.ChronosIconButton
+
+import com.chronosflow.core.ui.components.ChronosTextButton
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+import com.chronosflow.core.ui.components.ChronosFilledTonalButton
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -9,6 +15,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -66,6 +73,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chronosflow.core.ai.MedicationAssistRequest
 import com.chronosflow.core.domain.model.MedicationPlan
 import com.chronosflow.core.ui.components.ChronosScreenScaffold
+import com.chronosflow.core.ui.components.OneShotNavTrigger
 import com.chronosflow.core.ui.components.ChronosEmptyState
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosConfirmBottomSheet
@@ -78,6 +86,8 @@ import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
 import com.chronosflow.core.ui.settings.rememberChronosUiSettings
 import com.chronosflow.core.ui.shell.LocalChronosShellBottomInset
 import com.chronosflow.core.ui.theme.ChronosSpacing
+import java.time.LocalDate
+import java.time.LocalTime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,13 +96,15 @@ fun MedicationScreen(
     onBack: (() -> Unit)? = null,
     onOpenCommandPalette: (() -> Unit)? = null,
     openAddSheet: Boolean = false,
-    initialAddCapture: String? = null
+    initialAddCapture: String? = null,
+    navTargetGeneration: Int = 0
 ) {
     val plans by viewModel.plans.collectAsStateWithLifecycle()
     val recentHistoryTemplateIds by viewModel.recentHistoryTemplateIds.collectAsStateWithLifecycle()
     val status by viewModel.status.collectAsStateWithLifecycle()
     val showExactAlarmPermissionAction by viewModel.showExactAlarmPermissionAction.collectAsStateWithLifecycle()
     val assistState by viewModel.assistState.collectAsStateWithLifecycle()
+    val adherenceTrend by viewModel.adherenceTrend.collectAsStateWithLifecycle()
     val adherenceSuggestions by viewModel.adherenceSuggestions.collectAsStateWithLifecycle()
     val adherenceAssistSnapshot by viewModel.adherenceAssistSnapshot.collectAsStateWithLifecycle()
     val rewriteState by viewModel.rewriteState.collectAsStateWithLifecycle()
@@ -100,15 +112,11 @@ fun MedicationScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var sheetTarget by remember { mutableStateOf<MedicationSheetTarget?>(null) }
     val normalizedInitialAddCapture = initialAddCapture?.trim()?.takeIf(String::isNotBlank)
-    var initialAddConsumed by rememberSaveable(openAddSheet, normalizedInitialAddCapture) {
-        mutableStateOf(false)
-    }
     var planToArchive by remember { mutableStateOf<MedicationPlan?>(null) }
     var planContextTarget by remember { mutableStateOf<MedicationPlan?>(null) }
     val shellBottomInset = LocalChronosShellBottomInset.current
 
-    LaunchedEffect(openAddSheet, normalizedInitialAddCapture, initialAddConsumed) {
-        if (!openAddSheet || initialAddConsumed) return@LaunchedEffect
+    OneShotNavTrigger(openAddSheet, navTargetGeneration, normalizedInitialAddCapture) {
         sheetTarget = MedicationSheetTarget.Add(prefillName = normalizedInitialAddCapture)
         normalizedInitialAddCapture?.let { capture ->
             viewModel.requestMedicationAssist(
@@ -127,7 +135,6 @@ fun MedicationScreen(
                 )
             )
         }
-        initialAddConsumed = true
     }
 
     LaunchedEffect(status) {
@@ -160,21 +167,54 @@ fun MedicationScreen(
                 )
             }
             item {
+                val takenLast7 = adherenceTrend.takeLast(7).sumOf { it.takenCount }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                     ChronosMetricTile("Active", activePlans.size.toString(), Modifier.weight(1f))
-                    ChronosMetricTile("Missed", plans.sumOf { it.missedCount }.toString(), Modifier.weight(1f))
+                    ChronosMetricTile(
+                        "Taken 7d",
+                        takenLast7.toString(),
+                        Modifier.weight(1f),
+                        accent = MaterialTheme.colorScheme.tertiary
+                    )
+                    ChronosMetricTile(
+                        "Missed",
+                        plans.sumOf { it.missedCount }.toString(),
+                        Modifier.weight(1f),
+                        accent = MaterialTheme.colorScheme.error
+                    )
                 }
             }
             item {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = { sheetTarget = MedicationSheetTarget.Add() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Add medication", fontWeight = FontWeight.SemiBold)
                 }
             }
+            if (activePlans.isNotEmpty()) {
+                item(key = "med_next_dose") {
+                    val now = LocalTime.now()
+                    MedicationNextDoseCard(
+                        plans = plans,
+                        nowMinuteOfDay = now.hour * 60 + now.minute,
+                        today = LocalDate.now(),
+                        modifier = Modifier.animateItem()
+                    )
+                }
+            }
+            if (activePlans.any { it.safetyProfile?.refillSoon == true }) {
+                item(key = "med_refill_soon") {
+                    MedicationRefillCard(plans = plans, modifier = Modifier.animateItem())
+                }
+            }
             item {
                 MedicationAdherenceChart(plans = plans)
+            }
+            if (adherenceTrend.any { it.takenCount > 0 }) {
+                item(key = "med_adherence_trend") {
+                    MedicationAdherenceTrendCard(trend = adherenceTrend, modifier = Modifier.animateItem())
+                }
             }
             if (showExactAlarmPermissionAction) {
                 item(key = "med_attention_exact_alarm") {
@@ -414,10 +454,10 @@ private fun MedicationAdherencePanel(
                         )
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        FilledTonalButton(onClick = { onApply(suggestion) }) {
+                        ChronosFilledTonalButton(onClick = { onApply(suggestion) }) {
                             Text("Apply")
                         }
-                        TextButton(onClick = { onDismiss(suggestion) }) {
+                        ChronosTextButton(onClick = { onDismiss(suggestion) }) {
                             Text("Dismiss")
                         }
                     }
@@ -456,11 +496,11 @@ private fun MedicationAttentionCard(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onAction) {
+                ChronosTextButton(onClick = onAction) {
                     Text(actionLabel, fontWeight = FontWeight.SemiBold)
                 }
                 onDismiss?.let { dismiss ->
-                    TextButton(
+                    ChronosTextButton(
                         onClick = dismiss,
                         modifier = Modifier.semantics {
                             contentDescription = medicationAttentionDismissActionLabel(title)
@@ -511,10 +551,10 @@ private fun MedicationRow(
     ChronosListCard(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(
+            .chronosHapticClick(
+                onClick = onOpenContext,
                 onClickLabel = medicationContextActionLabel(plan),
-                role = Role.Button,
-                onClick = onOpenContext
+                role = Role.Button
             )
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
@@ -603,13 +643,13 @@ private fun MedicationRow(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    IconButton(onClick = onEdit) {
+                    ChronosIconButton(onClick = onEdit) {
                         Icon(Icons.Default.Edit, contentDescription = medicationEditActionLabel(plan))
                     }
-                    IconButton(onClick = onArchive) {
+                    ChronosIconButton(onClick = onArchive) {
                         Icon(Icons.Default.Archive, contentDescription = medicationArchiveActionLabel(plan))
                     }
-                    IconButton(onClick = { expanded = !expanded }) {
+                    ChronosIconButton(onClick = { expanded = !expanded }) {
                         Icon(
                             imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                             contentDescription = medicationDetailsActionLabel(plan, expanded)
@@ -658,7 +698,7 @@ private fun MedicationRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = onTaken,
                     modifier = Modifier
                         .weight(1f)
@@ -668,7 +708,7 @@ private fun MedicationRow(
                     Spacer(modifier = Modifier.size(8.dp))
                     Text(medicationTakenActionLabel(plan))
                 }
-                OutlinedButton(
+                ChronosOutlinedButton(
                     onClick = onMissed,
                     modifier = Modifier
                         .weight(1f)
@@ -746,7 +786,7 @@ private fun MedicationRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        FilledTonalButton(
+                        ChronosFilledTonalButton(
                             onClick = onSkip,
                             modifier = Modifier
                                 .weight(1f)
@@ -765,7 +805,7 @@ private fun MedicationRow(
                             label = "medicationPauseResumeAction"
                         ) { paused ->
                             if (paused) {
-                                FilledTonalButton(
+                                ChronosFilledTonalButton(
                                     onClick = onResume,
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -774,7 +814,7 @@ private fun MedicationRow(
                                     Text("Resume")
                                 }
                             } else {
-                                FilledTonalButton(
+                                ChronosFilledTonalButton(
                                     onClick = onPause,
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -830,7 +870,7 @@ private fun MedicationContextActionSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = onTaken,
                     modifier = Modifier
                         .weight(1f)
@@ -840,7 +880,7 @@ private fun MedicationContextActionSheet(
                     Spacer(modifier = Modifier.size(8.dp))
                     Text(medicationTakenActionLabel(plan))
                 }
-                OutlinedButton(
+                ChronosOutlinedButton(
                     onClick = onMissed,
                     modifier = Modifier
                         .weight(1f)
@@ -853,7 +893,7 @@ private fun MedicationContextActionSheet(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 listOf(15, 30, 60).forEach { minutes ->
-                    FilledTonalButton(
+                    ChronosFilledTonalButton(
                         onClick = { onSnooze(minutes) },
                         modifier = Modifier
                             .weight(1f)
@@ -867,7 +907,7 @@ private fun MedicationContextActionSheet(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = onSkip,
                     modifier = Modifier
                         .weight(1f)
@@ -877,7 +917,7 @@ private fun MedicationContextActionSheet(
                     Text(medicationSkipActionLabel(plan))
                 }
                 if (isPaused) {
-                    FilledTonalButton(
+                    ChronosFilledTonalButton(
                         onClick = onResume,
                         modifier = Modifier
                             .weight(1f)
@@ -886,7 +926,7 @@ private fun MedicationContextActionSheet(
                         Text(medicationResumeActionLabel(plan))
                     }
                 } else {
-                    FilledTonalButton(
+                    ChronosFilledTonalButton(
                         onClick = onPause,
                         modifier = Modifier
                             .weight(1f)
@@ -896,7 +936,7 @@ private fun MedicationContextActionSheet(
                     }
                 }
             }
-            OutlinedButton(
+            ChronosOutlinedButton(
                 onClick = onEdit,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -906,7 +946,7 @@ private fun MedicationContextActionSheet(
                 Spacer(modifier = Modifier.size(8.dp))
                 Text(medicationEditActionLabel(plan))
             }
-            TextButton(
+            ChronosTextButton(
                 onClick = onArchive,
                 modifier = Modifier
                     .fillMaxWidth()

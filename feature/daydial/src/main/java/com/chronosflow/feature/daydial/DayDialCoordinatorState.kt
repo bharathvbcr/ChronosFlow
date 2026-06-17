@@ -29,6 +29,14 @@ internal class DayDialCoordinatorState {
     private val currentMinuteState = MutableStateFlow(currentMinuteOfDay())
     val currentMinute = currentMinuteState.asStateFlow()
 
+    /**
+     * The real-world current date, refreshed by the same per-minute ticker as [currentMinute].
+     * Distinct only when the day actually rolls over, so collectors (e.g. the Insights trend window)
+     * advance to the new day while the app stays open without re-emitting every minute.
+     */
+    private val currentDateState = MutableStateFlow(LocalDate.now())
+    val currentDate = currentDateState.asStateFlow()
+
     val selectedDateValue: LocalDate
         get() = selectedDateState.value
 
@@ -44,6 +52,7 @@ internal class DayDialCoordinatorState {
 
     fun refreshCurrentMinute() {
         currentMinuteState.value = currentMinuteOfDay()
+        currentDateState.value = LocalDate.now()
     }
 
     fun selectDate(date: LocalDate) {

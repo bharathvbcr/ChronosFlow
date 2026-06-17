@@ -13,8 +13,10 @@ import com.chronosflow.core.domain.model.BlockFlexibility
 import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.DailyReviewSummary
 import com.chronosflow.core.domain.model.EnergyIntensity
+import com.chronosflow.core.domain.model.SleepReadiness
 import com.chronosflow.core.domain.model.SleepSchedule
 import com.chronosflow.core.domain.model.TimeBlock
+import com.chronosflow.core.domain.model.deriveSleepReadiness
 import com.chronosflow.core.domain.planner.GapFillBlock
 import com.chronosflow.core.domain.planner.GapFillHabitCandidate
 import com.chronosflow.core.domain.planner.GapFillPlanner
@@ -22,10 +24,12 @@ import com.chronosflow.core.domain.planner.GapFillProposal
 import com.chronosflow.core.domain.planner.PlannerOperationResult
 import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
+import com.chronosflow.core.domain.repository.SleepTrackRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
 import com.chronosflow.core.domain.usecase.ApplyAiPlanUseCase
 import com.chronosflow.core.ui.components.formatDisplayMinute
+import com.chronosflow.core.ui.theme.ChronosColors
 import com.chronosflow.feature.daydial.TimeBlockUiModel
 import java.time.Instant
 import java.time.LocalDate
@@ -49,7 +53,8 @@ class DayDialAiDelegate @Inject constructor(
     private val assistantPreferences: AssistantPreferences,
     private val gapFillPlanner: GapFillPlanner,
     private val taskRepository: TaskRepository,
-    private val habitRepository: HabitRepository
+    private val habitRepository: HabitRepository,
+    private val sleepTrackRepository: SleepTrackRepository
 ) {
     private val _aiPlanResult = MutableStateFlow<String?>(null)
     val aiPlanResult = _aiPlanResult.asStateFlow()
@@ -125,6 +130,7 @@ class DayDialAiDelegate @Inject constructor(
                 aiPlanner.refreshGenAiStatus()
                 val blocks = repository.getTimeBlocksByDate(date).first()
                 val sleepSchedule = sleepScheduleRepository.getSleepSchedule()
+                val readiness = readinessFor(date)
                 val review = reviewProvider(blocks)
                 val pendingTasks = runCatching { taskRepository.getAllTasks().first() }
                     .getOrDefault(emptyList())
@@ -134,7 +140,7 @@ class DayDialAiDelegate @Inject constructor(
                     .filter { it.isActive && isHabitReminderDueOnDate(it, date) }
                     .map { it.title.ifBlank { "Habit" } }
                 val result = aiPlanner.generateReviewBackedDayPlan(
-                    userPreferences = goals.withSleepWindow(sleepSchedule),
+                    userPreferences = goals.withSleepWindow(sleepSchedule).withSleepReadiness(readiness),
                     review = review,
                     existingBlocks = blocks,
                     currentTimeZone = ZoneId.systemDefault().id,
@@ -182,6 +188,8 @@ class DayDialAiDelegate @Inject constructor(
                 } else {
                     null
                 }
+                // Today's gap-fill leans lighter when last night ran short; other days are unaffected.
+                val readiness = readinessFor(date)
                 val habitCandidates = habits
                     .filter { it.isActive }
                     .filter { isHabitReminderDueOnDate(it, date) }
@@ -199,7 +207,8 @@ class DayDialAiDelegate @Inject constructor(
                     habitCandidates = habitCandidates,
                     sleepSchedule = sleepSchedule,
                     nowMinuteOfDay = nowMinuteOfDay,
-                    addBreaksAutomatically = addBreaksAutomatically
+                    addBreaksAutomatically = addBreaksAutomatically,
+                    readiness = readiness
                 )
                 if (proposal.proposedBlocks.isEmpty()) {
                     _suggestedBlocks.value = emptyList()
@@ -208,7 +217,12 @@ class DayDialAiDelegate @Inject constructor(
                         false
                     )
                 } else {
-                    val summary = gapFillSummaryMessage(proposal)
+                    val summary = gapFillSummaryMessage(proposal) +
+                        if (readiness == SleepReadiness.DEPLETED) {
+                            " · Lighter plan — last night's sleep ran short"
+                        } else {
+                            ""
+                        }
                     _aiPlanResult.value = summary
                     _suggestedBlocks.value = proposal.proposedBlocks.map { it.toUiSuggestion() }
                     onResult(
@@ -385,7 +399,7 @@ class DayDialAiDelegate @Inject constructor(
             title = title,
             startMinuteOfDay = startMinute,
             durationMinutes = durationMinutes,
-            color = Color(0xFF64B5F6),
+            color = ChronosColors.AssistSuggestion,
             provenance = BlockProvenance.AI_SUGGESTED.name,
             flexibility = BlockFlexibility.MOVABLE.name,
             category = category,
@@ -400,7 +414,7 @@ class DayDialAiDelegate @Inject constructor(
             title = title,
             startMinuteOfDay = startMinuteOfDay,
             durationMinutes = durationMinutes,
-            color = Color(0xFF64B5F6),
+            color = ChronosColors.AssistSuggestion,
             provenance = provenance.name,
             flexibility = flexibility.name,
             isLocked = isLocked,
@@ -447,6 +461,28 @@ class DayDialAiDelegate @Inject constructor(
         val sleepInstruction = "Avoid scheduling between ${formatDisplayMinute(sleepSchedule.startMinute)} and ${formatDisplayMinute(sleepSchedule.endMinute)}."
         return if (base.isBlank()) sleepInstruction else "$base. $sleepInstruction"
     }
+
+    /**
+     * Folds a recovery-oriented instruction into the AI plan preferences after a depleted night, so
+     * the generated plan itself leans lighter. Only DEPLETED adds a hint; other readiness states (and
+     * users who do not track sleep) leave the preferences untouched.
+     */
+    private fun String.withSleepReadiness(readiness: SleepReadiness): String {
+        if (readiness != SleepReadiness.DEPLETED) return this
+        val hint = "Last night's sleep ran short, so keep today lighter: fewer back-to-back focus " +
+            "blocks, more recovery breaks, and place demanding work later rather than first thing."
+        return if (isBlank()) hint else "$this $hint"
+    }
+
+    /** Readiness from last night, but only for today — last night does not bear on other dates. */
+    private suspend fun readinessFor(date: LocalDate): SleepReadiness =
+        if (date == LocalDate.now()) {
+            deriveSleepReadiness(
+                sleepTrackRepository.getForDateRange(date.minusDays(1), date).maxByOrNull { it.date }
+            )
+        } else {
+            SleepReadiness.UNKNOWN
+        }
 
     private fun initialPrivacyMode(): PrivacyMode {
         return runCatching {

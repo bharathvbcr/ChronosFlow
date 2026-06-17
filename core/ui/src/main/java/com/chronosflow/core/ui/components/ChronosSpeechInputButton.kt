@@ -56,7 +56,7 @@ fun ChronosSpeechInputButton(
         }
     }
 
-    FilledTonalButton(
+    ChronosFilledTonalButton(
         onClick = {
             try {
                 launcher.launch(speechIntent)

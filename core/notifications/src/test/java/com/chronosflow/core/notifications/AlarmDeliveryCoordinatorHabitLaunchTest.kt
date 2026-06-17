@@ -35,13 +35,16 @@ class AlarmDeliveryCoordinatorHabitLaunchTest {
     private val habitRepository: HabitRepository = mockk(relaxed = true)
     private val alarmScheduler: AlarmScheduler = mockk(relaxed = true)
 
+    private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator = mockk(relaxed = true)
+
     private val coordinator = AlarmDeliveryCoordinator(
         context = context,
         alarmRequestRepository = alarmRequestRepository,
         taskRepository = taskRepository,
         timeBlockRepository = timeBlockRepository,
         habitRepository = habitRepository,
-        alarmScheduler = alarmScheduler
+        alarmScheduler = alarmScheduler,
+        currentBlockNotificationCoordinator = currentBlockNotificationCoordinator
     )
 
     @Test

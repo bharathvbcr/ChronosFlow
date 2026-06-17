@@ -1,6 +1,6 @@
 package com.chronosflow.core.ui.components
 
-import androidx.compose.foundation.clickable
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -236,7 +236,7 @@ fun CommandPaletteDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 if (onAskAssistant != null) {
-                    TextButton(
+                    ChronosTextButton(
                         onClick = { if (activeQuery.isNotBlank()) onAskAssistant(activeQuery) },
                         enabled = activeQuery.isNotBlank() && !assistantIsAsking,
                         modifier = Modifier.fillMaxWidth()
@@ -362,7 +362,7 @@ fun CommandPaletteDialog(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    TextButton(
+                    ChronosTextButton(
                         onClick = onDismiss,
                         modifier = Modifier.semantics {
                             contentDescription = commandPaletteCloseActionLabel(activeQuery)
@@ -628,13 +628,13 @@ private fun AssistantReplyPanel(
                 ) {
                     if (onConfirm != null) {
                         proposalLabels.forEachIndexed { index, label ->
-                            TextButton(onClick = { onConfirm(index) }) {
+                            ChronosTextButton(onClick = { onConfirm(index) }) {
                                 Text("Run: ${label.take(40)}")
                             }
                         }
                     }
                     if (onDismiss != null) {
-                        TextButton(onClick = onDismiss) {
+                        ChronosTextButton(onClick = onDismiss) {
                             Text("Dismiss")
                         }
                     }
@@ -682,7 +682,7 @@ private fun CommandRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onRun),
+            .chronosHapticClick(onClick = onRun),
         colors = ListItemDefaults.colors(
             containerColor = if (highContrast) {
                 MaterialTheme.colorScheme.surfaceContainerHigh

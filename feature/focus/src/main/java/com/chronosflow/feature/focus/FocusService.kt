@@ -23,12 +23,14 @@ import com.chronosflow.core.domain.planner.FocusSessionReducer
 import com.chronosflow.core.domain.planner.PlannerService
 import com.chronosflow.core.domain.repository.TimeBlockRepository
 import com.chronosflow.core.domain.usecase.LogActualTimeUseCase
+import com.chronosflow.core.notifications.CurrentBlockNotificationCoordinator
 import com.chronosflow.core.notifications.FocusCompletionNotifier
 import com.chronosflow.core.notifications.FocusNotificationContent
 import com.chronosflow.core.notifications.FocusNotificationManager
+import com.chronosflow.core.notifications.FocusPhaseSegment
 import com.chronosflow.core.notifications.FocusProgressNotificationRenderer
-import com.chronosflow.core.notifications.LiveUpdateRenderer
 import com.chronosflow.core.notifications.buildFocusNotificationContentIntent
+import com.chronosflow.core.notifications.parseFocusPhasePlan
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,7 +52,6 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class FocusService : Service() {
     @Inject lateinit var notificationRenderer: FocusProgressNotificationRenderer
-    @Inject lateinit var liveUpdateRenderer: LiveUpdateRenderer
     @Inject lateinit var focusSessionDao: FocusSessionDao
     @Inject lateinit var focusSessionReducer: FocusSessionReducer
     @Inject lateinit var timeBlockRepository: TimeBlockRepository
@@ -60,6 +61,7 @@ class FocusService : Service() {
     @Inject lateinit var manualMissedBlockRegistry: ManualMissedBlockRegistry
     @Inject lateinit var proactiveAssistCache: ProactiveAssistCache
     @Inject lateinit var wearFocusBridge: WearFocusBridge
+    @Inject lateinit var currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator
 
     private val notificationManager: NotificationManager by lazy {
         getSystemService(NotificationManager::class.java)
@@ -78,6 +80,10 @@ class FocusService : Service() {
     // For a non-terminal phase, the prompt to post when its timer runs out (e.g.
     // "Time for a 5m break — tap to continue"). Null on the final split phase.
     private var currentBoundaryLabel: String? = null
+    // The full work/break plan of a split session ("F25,B5,…" decoded) and which phase is current,
+    // so the live notification can draw the whole segmented bar. Empty for a flat session.
+    private var currentPhaseSegments: List<FocusPhaseSegment> = emptyList()
+    private var currentPhaseIndex: Int = 0
     private var timerJob: Job? = null
     private var blockTitleJob: Job? = null
     private var sessionStartElapsedRealtime: Long = 0L
@@ -188,10 +194,17 @@ class FocusService : Service() {
                 if (logActualOnStop && snapshot.blockId != null) {
                     logLinkedBlockProgress(snapshot, clearMissed = true)
                 }
-                if (intent.getBooleanExtra(EXTRA_ARCHIVE_ON_STOP, true)) {
+                val archiveOnStop = intent.getBooleanExtra(EXTRA_ARCHIVE_ON_STOP, true)
+                if (archiveOnStop) {
                     persistSession(runtime.archive().state)
                 }
                 wearFocusBridge.clear()
+                // A real stop hands the live surface back to the "now" block notification; an
+                // intermediate split-phase stop (archiveOnStop=false) keeps it suppressed so the
+                // next phase resumes the focus notification cleanly.
+                if (archiveOnStop) {
+                    currentBlockNotificationCoordinator.onFocusEnded()
+                }
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -219,6 +232,8 @@ class FocusService : Service() {
         // read here (not on every command) — a periodic SYNC must never flip it.
         currentTerminal = intent?.getBooleanExtra(EXTRA_TERMINAL, true) ?: true
         currentBoundaryLabel = intent?.getStringExtra(EXTRA_BOUNDARY_LABEL)
+        currentPhaseSegments = parseFocusPhasePlan(intent?.getStringExtra(EXTRA_PHASE_PLAN))
+        currentPhaseIndex = intent?.getIntExtra(EXTRA_PHASE_INDEX, 0) ?: 0
         val requestedTotalSeconds = resolveRequestedTotalSeconds(intent)
         val requestedTimeLeft = resolveRequestedTimeLeft(intent, requestedTotalSeconds)
         return runtime.start(
@@ -291,15 +306,30 @@ class FocusService : Service() {
             text = text,
             timeLeftSeconds = snapshot.timeLeftSeconds,
             totalSeconds = snapshot.totalSeconds,
-            plannedEndAt = snapshot.plannedEndAt,
             isPaused = snapshot.isPaused,
             redactSensitiveTitles = redactSensitiveTitles,
             contentIntent = contentIntent,
             pauseIntent = if (snapshot.isPaused) null else pauseIntent,
             resumeIntent = if (snapshot.isPaused) resumeIntent else null,
             stopIntent = stopIntent,
-            extendIntent = extendIntent
+            extendIntent = extendIntent,
+            phaseSegments = currentPhaseSegments,
+            currentPhaseIndex = currentPhaseIndex,
+            subText = phaseIndicatorSubText()
         )
+    }
+
+    /** Header label naming the current split phase (e.g. "Focus 2 of 4"); null for a flat session. */
+    private fun phaseIndicatorSubText(): String? {
+        val segments = currentPhaseSegments
+        if (segments.size <= 1) return null
+        val idx = currentPhaseIndex.coerceIn(0, segments.lastIndex)
+        val resId = if (segments[idx].isBreak) {
+            com.chronosflow.core.notifications.R.string.focus_notification_phase_break
+        } else {
+            com.chronosflow.core.notifications.R.string.focus_notification_phase_focus
+        }
+        return getString(resId, idx + 1, segments.size)
     }
 
     private fun refreshBlockTitle(blockId: String?) {
@@ -322,26 +352,11 @@ class FocusService : Service() {
         }
     }
 
-    private fun focusTickerDelayMs(snapshot: FocusSessionSnapshot): Long {
-        if (!snapshot.isRunning) return 1_000L
-        return if (shouldRefreshNotificationEveryTick(snapshot)) {
-            FOCUS_NOTIFICATION_REFRESH_INTERVAL_MS
-        } else {
-            1_000L
-        }
-    }
-
-    private fun shouldRefreshNotificationEveryTick(snapshot: FocusSessionSnapshot): Boolean {
-        val redactSensitiveTitles = privacyPreferences.redactSensitiveNotifications()
-        val title = currentBlockTitle ?: getString(com.chronosflow.core.notifications.R.string.focus_notification_default_title)
-        val text = FocusNotificationContent.runningBody(this, snapshot.timeLeftSeconds, redactSensitiveTitles)
-        val decision = liveUpdateRenderer.latestDecision(
-            title = title,
-            text = text,
-            redactSensitiveTitles = redactSensitiveTitles
-        )
-        return !liveUpdateRenderer.usesSelfUpdatingMetricTimer(snapshot.isRunning, decision)
-    }
+    // The live notification renders the thick ProgressStyle bar on every capable device, and that
+    // bar only advances when the notification is re-posted — so while running we refresh on the
+    // notification cadence rather than every clock tick.
+    private fun focusTickerDelayMs(snapshot: FocusSessionSnapshot): Long =
+        if (snapshot.isRunning) FOCUS_NOTIFICATION_REFRESH_INTERVAL_MS else 1_000L
 
     private suspend fun ensureRuntimeLoaded(intent: Intent?) {
         val snapshot = runtime.snapshot()
@@ -404,6 +419,11 @@ class FocusService : Service() {
     private fun updateForegroundNotification(snapshot: FocusSessionSnapshot) {
         // A live countdown is back on screen — clear any "tap to continue" nudge.
         FocusCompletionNotifier.cancelPhaseBoundary(this)
+        // The focus notification is now the single live surface — stand the block "now"
+        // notification down so the two never show at once.
+        if (snapshot.isRunning || snapshot.isPaused) {
+            currentBlockNotificationCoordinator.onFocusStarted()
+        }
         currentSessionId = snapshot.sessionId
         currentBlockId = snapshot.blockId ?: currentBlockId
         refreshBlockTitle(currentBlockId)
@@ -463,6 +483,12 @@ class FocusService : Service() {
                     persistSession(runtime.snapshot().state)
                     val redactSensitiveTitles = privacyPreferences.redactSensitiveNotifications()
                     val boundaryLabel = currentBoundaryLabel
+                    val completed = currentTerminal || boundaryLabel == null
+                    // Release the foreground notification BEFORE re-posting: DETACH keeps id 4201 on
+                    // screen so the completion celebration updates it in place (folds into the live
+                    // slot — a clean channel swap on a detached notification); a phase boundary REMOVEs
+                    // it before the separate "tap to continue" nudge (id 4203) posts.
+                    stopForeground(if (completed) STOP_FOREGROUND_DETACH else STOP_FOREGROUND_REMOVE)
                     when {
                         // Legacy / final-phase completion: log actual time and announce.
                         currentTerminal -> {
@@ -491,14 +517,16 @@ class FocusService : Service() {
                             nextStepLine = buildNextBlockLine(redactSensitiveTitles)
                         )
                     }
+                    // Completion (terminal or final split phase) returns the live surface to the
+                    // "now" block notification; an intermediate phase boundary keeps it suppressed.
+                    if (completed) {
+                        currentBlockNotificationCoordinator.onFocusEnded()
+                    }
                     wearFocusBridge.clear()
-                    stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     break
                 }
-                if (shouldRefreshNotificationEveryTick(snapshot)) {
-                    updateForegroundNotification(snapshot)
-                }
+                updateForegroundNotification(snapshot)
                 delay(focusTickerDelayMs(snapshot))
             }
         }
@@ -600,6 +628,10 @@ class FocusService : Service() {
         const val EXTRA_ADJUST_SECONDS = "adjust_seconds"
         const val EXTRA_TERMINAL = "terminal"
         const val EXTRA_BOUNDARY_LABEL = "boundary_label"
+        // Full split plan ("F25,B5,…") and the index of the phase this session mirrors, so the live
+        // notification can draw the whole work/break bar.
+        const val EXTRA_PHASE_PLAN = "phase_plan"
+        const val EXTRA_PHASE_INDEX = "phase_index"
 
         private const val DEFAULT_FOCUS_SECONDS = 25 * 60
         private const val EXTEND_SECONDS = 15 * 60

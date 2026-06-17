@@ -76,6 +76,18 @@ class PlanTabStateTest {
 
         assertEquals("Show full planning calendar", planCalendarToggleActionLabel(fullCalendarVisible = false))
         assertEquals("Hide full planning calendar", planCalendarToggleActionLabel(fullCalendarVisible = true))
+        assertEquals(
+            "Sync device calendar events into this plan",
+            planCalendarSyncActionLabel(calendarReadGranted = true)
+        )
+        assertEquals(
+            "Connect your device calendar to sync events into this plan",
+            planCalendarSyncActionLabel(calendarReadGranted = false)
+        )
+        assertEquals(
+            "Syncing device calendar events",
+            planCalendarSyncActionLabel(calendarReadGranted = true, syncInProgress = true)
+        )
         assertEquals("Go to April 2026", planCalendarMonthNavigationLabel(selectedDate, monthOffset = -1))
         assertEquals("Go to June 2026", planCalendarMonthNavigationLabel(selectedDate, monthOffset = 1))
         assertEquals(
@@ -129,7 +141,6 @@ class PlanTabStateTest {
     fun `plan primary action labels describe the planning command`() {
         assertEquals("Generate a balanced plan with AI", planGenerateActionLabel())
         assertEquals("Rebalance today's plan", planRebalanceActionLabel())
-        assertEquals("Fill open gaps in today's plan", planFillGapsActionLabel())
         assertEquals("Add a block manually", planCreateBlockActionLabel())
     }
 
@@ -154,8 +165,6 @@ class PlanTabStateTest {
 
     @Test
     fun `plan suggestion footer action labels name the suggestion count`() {
-        assertEquals("Review 1 AI suggestion", planSuggestionReviewAllActionLabel(1))
-        assertEquals("Review 3 AI suggestions", planSuggestionReviewAllActionLabel(3))
         assertEquals("Apply 1 AI suggestion to today's plan", planSuggestionApplyAllActionLabel(1))
         assertEquals("Apply 3 AI suggestions to today's plan", planSuggestionApplyAllActionLabel(3))
     }

@@ -132,6 +132,32 @@ class ChronosUiSettingsTest {
     }
 
     @Test
+    fun `legacy parked journal and sleep false values are promoted once`() = runTest {
+        context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_JOURNAL_ENABLED, false)
+        context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_SLEEP_ENABLED, false)
+        context.writeChronosUiBooleanSetting(
+            ChronosUiSettingsKeys.KEY_FEATURE_COMPANION_DEFAULTS_PROMOTED,
+            false
+        )
+
+        val snapshot = context.readChronosUiSettingsSnapshotFromDataStore()
+
+        assertTrue(snapshot.featureFlags.journalEnabled)
+        assertTrue(snapshot.featureFlags.sleepEnabled)
+    }
+
+    @Test
+    fun `promoted journal and sleep can still be disabled explicitly`() = runTest {
+        context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_JOURNAL_ENABLED, false)
+        context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_SLEEP_ENABLED, false)
+
+        val snapshot = context.readChronosUiSettingsSnapshotFromDataStore()
+
+        assertFalse(snapshot.featureFlags.journalEnabled)
+        assertFalse(snapshot.featureFlags.sleepEnabled)
+    }
+
+    @Test
     fun `promoted habits and meds can still be disabled explicitly`() = runTest {
         context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_HABITS_ENABLED, false)
         context.writeChronosUiBooleanSetting(ChronosUiSettingsKeys.KEY_FEATURE_MEDICATION_ENABLED, false)

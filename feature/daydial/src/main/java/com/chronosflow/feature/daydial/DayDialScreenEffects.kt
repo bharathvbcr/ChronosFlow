@@ -4,7 +4,9 @@ import android.content.Context
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,7 +34,10 @@ internal fun rememberNotificationPermissionRequester(
             endDayReviewReminder = settings.endDayReviewReminder,
             sleepScheduleEnabled = settings.sleepScheduleEnabled,
             sleepScheduleStartMinute = settings.sleepScheduleStartMinute,
-            sleepScheduleEndMinute = settings.sleepScheduleEndMinute
+            sleepScheduleEndMinute = settings.sleepScheduleEndMinute,
+            journalRemindersEnabled = settings.featureFlags.journalEnabled,
+            sleepJournalLogReminder = settings.sleepJournalLogReminder,
+            sleepJournalRemindersEnabled = settings.featureFlags.sleepEnabled || settings.featureFlags.journalEnabled
         )
     }
 
@@ -81,7 +86,10 @@ internal fun DayDialScreenEffects(
         settings.endDayReviewReminder,
         settings.sleepScheduleEnabled,
         settings.sleepScheduleStartMinute,
-        settings.sleepScheduleEndMinute
+        settings.sleepScheduleEndMinute,
+        settings.featureFlags.journalEnabled,
+        settings.featureFlags.sleepEnabled,
+        settings.sleepJournalLogReminder
     ) {
         viewModel.refreshReminderSchedule(
             blockStartReminders = settings.blockStartReminders,
@@ -90,7 +98,10 @@ internal fun DayDialScreenEffects(
             endDayReviewReminder = settings.endDayReviewReminder,
             sleepScheduleEnabled = settings.sleepScheduleEnabled,
             sleepScheduleStartMinute = settings.sleepScheduleStartMinute,
-            sleepScheduleEndMinute = settings.sleepScheduleEndMinute
+            sleepScheduleEndMinute = settings.sleepScheduleEndMinute,
+            journalRemindersEnabled = settings.featureFlags.journalEnabled,
+            sleepJournalLogReminder = settings.sleepJournalLogReminder,
+            sleepJournalRemindersEnabled = settings.featureFlags.sleepEnabled || settings.featureFlags.journalEnabled
         )
     }
 
@@ -98,9 +109,22 @@ internal fun DayDialScreenEffects(
     val missedFromFocusMessage by viewModel.missedFromFocusMessage.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.snackbarMessage) {
-        uiState.snackbarMessage?.let {
-            snackbarHostState.showSnackbar(it)
+        uiState.snackbarMessage?.let { message ->
+            val actionLabel = uiState.snackbarActionLabel
+            val onAction = uiState.onSnackbarAction
+            // showSnackbar defaults to Indefinite when an actionLabel is set; an Undo bar
+            // should still auto-dismiss, so give it a bounded Long duration.
+            val result = snackbarHostState.showSnackbar(
+                message = message,
+                actionLabel = actionLabel,
+                duration = if (actionLabel == null) SnackbarDuration.Short else SnackbarDuration.Long
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                onAction?.invoke()
+            }
             uiState.snackbarMessage = null
+            uiState.snackbarActionLabel = null
+            uiState.onSnackbarAction = null
         }
     }
 

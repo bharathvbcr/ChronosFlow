@@ -115,12 +115,12 @@ class MlKitNanoPromptClientTest {
 
         override fun download(): Flow<NanoDownloadEvent> = emptyFlow()
 
-        override suspend fun generateText(prompt: String): String {
+        override suspend fun generateText(prompt: String, profile: GenerationProfile): String {
             generateCalls++
             return generatedText
         }
 
-        override fun generateTextStream(prompt: String): Flow<String> =
+        override fun generateTextStream(prompt: String, profile: GenerationProfile): Flow<String> =
             kotlinx.coroutines.flow.flowOf(generatedText)
     }
 }

@@ -14,7 +14,6 @@ import com.chronosflow.core.data.sync.RemoteTaskContactEntity
 import com.chronosflow.core.data.sync.RemoteTaskContactMethodEntity
 import com.chronosflow.core.data.sync.RemoteTaskEntity
 import com.chronosflow.core.data.sync.RemoteTimeBlockEntity
-import com.chronosflow.core.data.sync.toRemoteBatch
 import com.chronosflow.core.domain.model.ContactMethodKind
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TaskAction
@@ -31,6 +30,7 @@ import java.time.Instant
 import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
+import org.json.JSONObject
 
 const val PORTABLE_BACKUP_DIRECTORY = "android_transfer"
 const val PORTABLE_BACKUP_FILE_NAME = "chronosflow_portable_backup.json"
@@ -41,13 +41,17 @@ class ChronosPortableBackupRepository @Inject constructor(
     private val localSyncSource: LocalSyncSource,
     private val taskDao: TaskDao,
     private val timeBlockDao: TimeBlockDao,
-    private val codec: ChronosPortableBackupCodec
+    private val codec: ChronosPortableBackupCodec,
+    private val dataExportRepository: ChronosDataExportRepository,
+    private val dataImportRepository: ChronosDataImportRepository
 ) {
     suspend fun refreshSnapshot(): File {
         val backupFile = portableBackupFile()
         backupFile.parentFile?.mkdirs()
         val tempFile = File(backupFile.parentFile, "${backupFile.name}.tmp")
-        tempFile.writeText(codec.encode(localSyncSource.snapshot().toRemoteBatch()))
+        // Local state (prefs, DataStore) travels through the Android backup rules
+        // directly, so the snapshot only needs to carry the database tables.
+        tempFile.writeText(dataExportRepository.exportJson(includeLocalState = false).toString())
         if (backupFile.exists() && !backupFile.delete()) {
             tempFile.delete()
             error("Unable to replace existing ChronosFlow portable backup")
@@ -68,7 +72,15 @@ class ChronosPortableBackupRepository @Inject constructor(
             return PortableBackupRestoreResult.LocalDataAlreadyPresent
         }
 
-        val batch = codec.decode(backupFile.readText())
+        val text = backupFile.readText()
+        restoreFullFormat(text)?.let { return it }
+
+        // Legacy two-table snapshot written by builds that predate the full-export format.
+        val batch = try {
+            codec.decode(text)
+        } catch (_: Exception) {
+            return quarantineSnapshot(backupFile)
+        }
         batch.tasks.forEach { remoteTask ->
             importTask(remoteTask.toDomainTask())
         }
@@ -79,6 +91,40 @@ class ChronosPortableBackupRepository @Inject constructor(
             taskCount = batch.tasks.size,
             timeBlockCount = batch.timeBlocks.size
         )
+    }
+
+    /** Returns null when [text] is not a full-data export, so legacy decoding can run. */
+    private fun restoreFullFormat(text: String): PortableBackupRestoreResult? {
+        val isFullExport = runCatching {
+            JSONObject(text).optString(ChronosDataExportFormat.KEY_EXPORT_KIND) ==
+                ChronosDataExportFormat.EXPORT_KIND_FULL_DATA
+        }.getOrDefault(false)
+        if (!isFullExport) return null
+        return when (val result = dataImportRepository.importIntoEmptyTables(text)) {
+            is ChronosDataImportResult.Imported -> PortableBackupRestoreResult.RestoredFull(
+                tableCount = result.importedTableCount,
+                rowCount = result.importedRowCount,
+                skippedRowCount = result.skippedRowCount
+            )
+            ChronosDataImportResult.NothingToImport -> PortableBackupRestoreResult.RestoredFull(
+                tableCount = 0,
+                rowCount = 0,
+                skippedRowCount = 0
+            )
+            is ChronosDataImportResult.Unreadable -> quarantineSnapshot(portableBackupFile())
+        }
+    }
+
+    /**
+     * Parks an undecodable snapshot (corrupt, or written by a newer format) instead of
+     * throwing: the startup refresh that follows would otherwise overwrite the only
+     * copy of the transferred data with an empty export.
+     */
+    private fun quarantineSnapshot(backupFile: File): PortableBackupRestoreResult {
+        val quarantined = File(backupFile.parentFile, "$PORTABLE_BACKUP_FILE_NAME.unreadable")
+        quarantined.delete()
+        backupFile.renameTo(quarantined)
+        return PortableBackupRestoreResult.SnapshotUnreadable
     }
 
     private suspend fun importTask(task: Task) {
@@ -111,9 +157,15 @@ class ChronosPortableBackupRepository @Inject constructor(
 sealed interface PortableBackupRestoreResult {
     data object NoSnapshot : PortableBackupRestoreResult
     data object LocalDataAlreadyPresent : PortableBackupRestoreResult
+    data object SnapshotUnreadable : PortableBackupRestoreResult
     data class Restored(
         val taskCount: Int,
         val timeBlockCount: Int
+    ) : PortableBackupRestoreResult
+    data class RestoredFull(
+        val tableCount: Int,
+        val rowCount: Int,
+        val skippedRowCount: Int
     ) : PortableBackupRestoreResult
 }
 

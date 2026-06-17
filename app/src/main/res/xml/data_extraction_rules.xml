@@ -11,6 +11,9 @@
         <include domain="sharedpref" path="." />
         <include domain="file" path="datastore/daydial_ui_settings.preferences_pb" />
         <include domain="file" path="android_transfer/chronosflow_portable_backup.json" />
+        <!-- Device transfer is not subject to the cloud backup quota, so imported
+             attachment files can travel with the records that reference them. -->
+        <include domain="file" path="task_attachments/" />
         <exclude domain="sharedpref" path="chronos_secure_database.xml" />
         <exclude domain="sharedpref" path="chronos_db_migration.xml" />
     </device-transfer>

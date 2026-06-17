@@ -35,7 +35,9 @@ data class DayOverviewBlock(
     val startMinuteOfDay: Int,
     /** Planned end as start + duration; may exceed 1439 for blocks crossing midnight. */
     val endMinuteOfDay: Int,
-    val isCurrent: Boolean
+    val isCurrent: Boolean,
+    /** Raw block category (e.g. "WORK", "BREAK"); drives break/event split + focus eligibility. */
+    val category: String = ""
 )
 
 data class DayOverviewTask(

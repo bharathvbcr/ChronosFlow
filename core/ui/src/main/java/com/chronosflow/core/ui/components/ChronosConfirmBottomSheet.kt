@@ -74,10 +74,10 @@ fun ChronosConfirmBottomSheet(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                    ChronosOutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
                         Text(dismissLabel, fontWeight = FontWeight.SemiBold)
                     }
-                    Button(
+                    ChronosButton(
                         onClick = onConfirm,
                         modifier = Modifier.weight(1f),
                         colors = if (destructive) {

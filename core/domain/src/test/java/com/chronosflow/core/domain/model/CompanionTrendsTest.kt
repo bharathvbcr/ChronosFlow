@@ -96,6 +96,46 @@ class CompanionTrendsTest {
         assertEquals(1, trend.last().missedCount)
     }
 
+    @Test
+    fun `deriveSleepTrends emits one night per window day with wrap-around duration`() {
+        val tracks = listOf(
+            // Slept 23:00 (1380) -> 07:00 (420), wraps midnight = 8h.
+            sleepTrack(date = today, quality = 4, start = 1380, end = 420),
+            // Two days back, quality only, no window.
+            sleepTrack(date = today.minusDays(2), quality = 3, start = null, end = null)
+        )
+
+        val trends = deriveSleepTrends(tracks, windowDays = 3, today = today)
+
+        assertEquals(3, trends.nights.size)
+        assertEquals(today.minusDays(2), trends.nights.first().date)
+        // Day -1 is unlogged.
+        assertEquals(null, trends.nights[1].quality)
+        assertEquals(2, trends.loggedNights.size)
+        val lastNight = trends.nights.last()
+        assertEquals(4, lastNight.quality)
+        assertEquals(8 * 60, lastNight.durationMinutes)
+        assertEquals(8 * 60, trends.averageDurationMinutes)
+        assertEquals(3.5f, trends.averageQuality!!, 0.001f)
+    }
+
+    private fun sleepTrack(
+        date: LocalDate,
+        quality: Int,
+        start: Int?,
+        end: Int?
+    ) = SleepTrack(
+        id = "s-$date",
+        date = date,
+        plannedStartMinute = null,
+        plannedEndMinute = null,
+        actualStartMinute = start,
+        actualEndMinute = end,
+        sleepQuality = quality,
+        windDownNotes = null,
+        interruptedCount = 0
+    )
+
     private fun checkIn(date: LocalDate, hour: Int, mood: Int, energy: Int) = MoodEnergyCheckIn(
         id = "c-$date-$hour-$mood",
         blockId = null,

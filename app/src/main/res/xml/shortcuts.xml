@@ -28,6 +28,11 @@
             <extra
                 android:name="com.chronosflow.extra.INITIAL_SECTION"
                 android:value="day" />
+            <!-- Land on the day view AND open the New Block sheet, so the shortcut actually
+                 quick-adds a block instead of just opening the app (DayDialScreen "add-block"). -->
+            <extra
+                android:name="com.chronosflow.extra.DAY_TARGET"
+                android:value="add-block" />
         </intent>
     </shortcut>
     <shortcut

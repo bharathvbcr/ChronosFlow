@@ -1,16 +1,16 @@
 package com.chronosflow.feature.daydial.ui
 
+import com.chronosflow.core.ui.components.ChronosButton
+import com.chronosflow.core.ui.components.ChronosListCard
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -27,14 +27,11 @@ internal fun DailyActionStrip(
     onSecondary: (() -> Unit)?,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 2.dp
-    ) {
+    // Use the shared card surface (same 16dp radius, surface tone, and glass/high-contrast
+    // adaptation as every other Today card) instead of a bespoke Surface — the filled primary
+    // button is what marks this as the CTA, so the container no longer needs to look different.
+    ChronosListCard(modifier = modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -54,7 +51,7 @@ internal fun DailyActionStrip(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(
+                ChronosButton(
                     onClick = onPrimary,
                     modifier = Modifier.weight(1.2f),
                     shape = RoundedCornerShape(20.dp),
@@ -66,7 +63,7 @@ internal fun DailyActionStrip(
                     Text(action.primaryLabel, fontWeight = FontWeight.SemiBold)
                 }
                 action.secondaryLabel?.let { secondaryLabel ->
-                    OutlinedButton(
+                    ChronosOutlinedButton(
                         onClick = { onSecondary?.invoke() },
                         enabled = onSecondary != null,
                         modifier = Modifier.weight(1f),

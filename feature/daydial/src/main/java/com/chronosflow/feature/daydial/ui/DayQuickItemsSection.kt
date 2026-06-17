@@ -1,5 +1,9 @@
 package com.chronosflow.feature.daydial.ui
 
+import com.chronosflow.core.ui.components.ChronosButton
+import com.chronosflow.core.ui.components.ChronosTextButton
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,7 +26,6 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Medication
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -43,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import com.chronosflow.core.notifications.TaskContextCommandKind
 import com.chronosflow.core.notifications.launchAppTarget
 import com.chronosflow.core.notifications.launchTaskContextCommand
+import com.chronosflow.core.ui.components.ChronosAssistChip
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosSectionTitle
 import com.chronosflow.core.ui.theme.ChronosSpacing
@@ -195,7 +199,7 @@ private fun DayQuickEmptyActionButton(
     kind: DayQuickItemKind,
     onClick: () -> Unit
 ) {
-    OutlinedButton(
+    ChronosOutlinedButton(
         onClick = onClick,
         modifier = Modifier.semantics {
             contentDescription = dayQuickEmptyActionLabel(kind)
@@ -245,7 +249,7 @@ private fun DayQuickItemGroup(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            TextButton(
+            ChronosTextButton(
                 onClick = onOpenGroup,
                 modifier = Modifier.semantics {
                     contentDescription = dayQuickGroupOpenActionLabel(kind)
@@ -317,7 +321,7 @@ private fun DayQuickItemRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            AssistChip(
+            ChronosAssistChip(
                 onClick = {},
                 label = { Text(item.status) },
                 leadingIcon = if (item.isDone) {
@@ -345,7 +349,7 @@ private fun DayQuickItemRow(
             horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
             verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
         ) {
-            Button(
+            ChronosButton(
                 onClick = onPrimary,
                 enabled = !item.isDone,
                 modifier = Modifier.semantics {
@@ -356,7 +360,7 @@ private fun DayQuickItemRow(
                 Text(if (item.kind == DayQuickItemKind.MEDICATION) "Taken" else "Done")
             }
             if (item.kind == DayQuickItemKind.MEDICATION) {
-                OutlinedButton(
+                ChronosOutlinedButton(
                     onClick = onSecondary,
                     enabled = !item.isDone,
                     modifier = Modifier.semantics {
@@ -391,7 +395,7 @@ private fun DayQuickContextActionPill(
     action: DayQuickContextActionUiModel,
     onClick: () -> Unit
 ) {
-    AssistChip(
+    ChronosAssistChip(
         onClick = onClick,
         label = { Text(action.label) },
         leadingIcon = {

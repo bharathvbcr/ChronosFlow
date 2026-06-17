@@ -7,6 +7,8 @@ import com.chronosflow.core.data.ChronosMockDataSeederInstaller
 import com.chronosflow.core.data.ChronosPlaintextDatabaseMigrator
 import com.chronosflow.core.data.ChronosSecureDatabaseProvider
 import com.chronosflow.core.data.dao.AlarmDao
+import com.chronosflow.core.data.dao.AppUsageDao
+import com.chronosflow.core.data.dao.AppUsageOverrideDao
 import com.chronosflow.core.data.dao.CalendarEventDao
 import com.chronosflow.core.data.dao.DayPlanDao
 import com.chronosflow.core.data.dao.FocusSessionDao
@@ -29,10 +31,13 @@ import com.chronosflow.core.data.dao.TaskScheduleDao
 import com.chronosflow.core.data.dao.TimeBlockDao
 import com.chronosflow.core.data.repository.AlarmRequestRepositoryImpl
 import com.chronosflow.core.data.repository.CalendarEventRepositoryImpl
+import com.chronosflow.core.data.sync.CalendarSyncStatusStore
 import com.chronosflow.core.data.repository.DayPlanRepositoryImpl
 import com.chronosflow.core.data.repository.DeviceCalendarPlatform
 import com.chronosflow.core.data.repository.FocusSessionRepositoryImpl
 import com.chronosflow.core.data.repository.GoalRepositoryImpl
+import com.chronosflow.core.data.repository.AppUsageRepositoryImpl
+import com.chronosflow.core.data.repository.AppUsageOverrideRepositoryImpl
 import com.chronosflow.core.data.repository.HabitRepositoryImpl
 import com.chronosflow.core.data.repository.JournalRepositoryImpl
 import com.chronosflow.core.data.repository.MedicationRepositoryImpl
@@ -52,6 +57,8 @@ import com.chronosflow.core.domain.repository.CalendarEventRepository
 import com.chronosflow.core.domain.repository.DayPlanRepository
 import com.chronosflow.core.domain.repository.FocusSessionRepository
 import com.chronosflow.core.domain.repository.GoalRepository
+import com.chronosflow.core.domain.repository.AppUsageRepository
+import com.chronosflow.core.domain.repository.AppUsageOverrideRepository
 import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.JournalRepository
 import com.chronosflow.core.domain.repository.MedicationRepository
@@ -101,7 +108,10 @@ object DataModule {
                 ChronosDatabase.MIGRATION_14_15,
                 ChronosDatabase.MIGRATION_15_16,
                 ChronosDatabase.MIGRATION_16_17,
-                ChronosDatabase.MIGRATION_17_18
+                ChronosDatabase.MIGRATION_17_18,
+                ChronosDatabase.MIGRATION_18_19,
+                ChronosDatabase.MIGRATION_19_20,
+                ChronosDatabase.MIGRATION_20_21
             )
         )
             // Guard against opening a database written by a newer (uncommitted) schema:
@@ -175,6 +185,24 @@ object DataModule {
 
     @Provides
     fun provideRoutineDao(db: ChronosDatabase) = db.routineDao()
+
+    @Provides
+    fun provideAppUsageDao(db: ChronosDatabase) = db.appUsageDao()
+
+    @Provides
+    @Singleton
+    fun provideAppUsageRepository(dao: AppUsageDao): AppUsageRepository {
+        return AppUsageRepositoryImpl(dao)
+    }
+
+    @Provides
+    fun provideAppUsageOverrideDao(db: ChronosDatabase) = db.appUsageOverrideDao()
+
+    @Provides
+    @Singleton
+    fun provideAppUsageOverrideRepository(dao: AppUsageOverrideDao): AppUsageOverrideRepository {
+        return AppUsageOverrideRepositoryImpl(dao)
+    }
 
     @Provides
     @Singleton
@@ -264,9 +292,16 @@ object DataModule {
         @ApplicationContext context: Context,
         calendarEventDao: CalendarEventDao,
         timeBlockDao: TimeBlockDao,
-        deviceCalendarPlatform: DeviceCalendarPlatform
+        deviceCalendarPlatform: DeviceCalendarPlatform,
+        calendarSyncStatusStore: CalendarSyncStatusStore
     ): CalendarEventRepository {
-        return CalendarEventRepositoryImpl(context, calendarEventDao, timeBlockDao, deviceCalendarPlatform)
+        return CalendarEventRepositoryImpl(
+            context,
+            calendarEventDao,
+            timeBlockDao,
+            deviceCalendarPlatform,
+            calendarSyncStatusStore
+        )
     }
 
     @Provides

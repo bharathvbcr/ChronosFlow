@@ -1,6 +1,5 @@
 package com.chronosflow.core.ui.components
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -17,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
@@ -28,11 +27,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.chronosflow.core.ui.motion.chronosHapticClick
+import com.chronosflow.core.ui.theme.ChronosSpacing
 
 @Composable
 fun ChronosSectionTitle(
@@ -117,7 +120,7 @@ fun ChronosTooltipIconButton(
         state = rememberTooltipState(),
         modifier = modifier
     ) {
-        IconButton(
+        ChronosIconButton(
             onClick = onClick,
             enabled = enabled,
             modifier = Modifier.semantics {
@@ -129,10 +132,35 @@ fun ChronosTooltipIconButton(
     }
 }
 
+/**
+ * Dropdown menu item that fires the same `Confirm` haptic tick as the rest of the tappable
+ * family, so overflow / context-menu actions feel tactile. Forwards the params call sites use;
+ * `colors`/`contentPadding` stay on Material defaults.
+ */
+@Composable
+fun ChronosDropdownMenuItem(
+    text: @Composable () -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leadingIcon: @Composable (() -> Unit)? = null,
+    trailingIcon: @Composable (() -> Unit)? = null,
+    enabled: Boolean = true
+) {
+    val haptics = LocalHapticFeedback.current
+    DropdownMenuItem(
+        text = text,
+        onClick = haptics.confirmThen(onClick),
+        modifier = modifier,
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        enabled = enabled
+    )
+}
+
 @Composable
 fun ChronosActionRow(
     modifier: Modifier = Modifier,
-    horizontalArrangement: Arrangement.Horizontal = Arrangement.spacedBy(8.dp),
+    horizontalArrangement: Arrangement.Horizontal = Arrangement.spacedBy(ChronosSpacing.Small),
     content: @Composable RowScope.() -> Unit
 ) {
     Row(
@@ -154,7 +182,7 @@ fun ChronosListCard(
         onClick = onClick
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(ChronosSpacing.Standard),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             content()
@@ -179,10 +207,13 @@ fun ChronosSettingsRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onCheckedChange(!checked) }
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .chronosHapticClick(
+                    onClick = { onCheckedChange(!checked) },
+                    role = Role.Switch
+                )
+                .padding(horizontal = ChronosSpacing.Standard, vertical = ChronosSpacing.Compact),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)
         ) {
             if (leadingIcon != null) {
                 Icon(
@@ -201,7 +232,9 @@ fun ChronosSettingsRow(
                     )
                 }
             }
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
+            // The row's chronosHapticClick owns the toggle (and the tick); the switch is
+            // display-only so a thumb tap can't fire a second, haptic-less change.
+            ChronosSwitch(checked = checked, onCheckedChange = null)
         }
     }
 }

@@ -49,7 +49,8 @@ sealed interface AutoBackupOutcome {
 class ChronosAutoBackupManager @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val preferences: ChronosPreferencesDataSource,
-    private val dataExportRepository: ChronosDataExportRepository
+    private val dataExportRepository: ChronosDataExportRepository,
+    private val dataImportRepository: ChronosDataImportRepository
 ) {
     fun status(): AutoBackupStatus = AutoBackupStatus(
         enabled = preferences.getBoolean(KEY_ENABLED, false),
@@ -96,6 +97,36 @@ class ChronosAutoBackupManager @Inject constructor(
                 onFailure = { error -> recordFailure(error.message ?: "Backup failed") }
             )
         }
+    }
+
+    /**
+     * Restores a previously written backup file into the database. Only tables that
+     * are currently empty are filled, so running this on a device with existing data
+     * tops up what's missing and never overwrites anything.
+     */
+    suspend fun restoreBackup(documentUri: Uri): AutoBackupOutcome = withContext(Dispatchers.IO) {
+        runCatching {
+            val text = context.contentResolver.openInputStream(documentUri)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                ?: error("Could not open the selected backup file")
+            when (val result = dataImportRepository.importIntoEmptyTables(text)) {
+                is ChronosDataImportResult.Imported -> buildString {
+                    append("Restored ${result.importedRowCount} records into ${result.importedTableCount} tables")
+                    if (result.skippedNonEmptyTables.isNotEmpty()) {
+                        append("; left ${result.skippedNonEmptyTables.size} tables with existing data untouched")
+                    }
+                    if (result.skippedRowCount > 0) {
+                        append("; ${result.skippedRowCount} records could not be restored")
+                    }
+                }
+                ChronosDataImportResult.NothingToImport -> "The backup contains no data to restore"
+                is ChronosDataImportResult.Unreadable -> error(result.reason)
+            }
+        }.fold(
+            onSuccess = { message -> AutoBackupOutcome.Success(message) },
+            onFailure = { error -> AutoBackupOutcome.Failure(error.message ?: "Restore failed") }
+        )
     }
 
     private fun schedule() {

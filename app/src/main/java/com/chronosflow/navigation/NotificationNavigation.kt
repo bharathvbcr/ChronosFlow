@@ -1,39 +1,20 @@
 package com.chronosflow.navigation
 
-import androidx.navigation.NavHostController
 import com.chronosflow.core.notifications.NotificationLaunch
 import com.chronosflow.core.ui.settings.ChronosFeatureFlags
 
-internal data class NotificationNavigationSpec(
-    val route: String,
-    val popUpToRoute: String,
-    val inclusive: Boolean
-)
-
-internal fun buildNotificationNavigationSpec(
+/**
+ * Resolve the type-safe route a notification launch should navigate to. Day-target launches resolve
+ * to the Day key with the requested tab; everything else maps to its top-level section.
+ */
+internal fun routeForNotificationLaunch(
     launch: NotificationLaunch,
     featureFlags: ChronosFeatureFlags = ChronosFeatureFlags.AllEnabled
-): NotificationNavigationSpec {
-    val route = ChronosRoute.routeForNotificationLaunch(launch, featureFlags)
-    val isDayLaunch = launch.section == ChronosRoute.Day.section
-    return NotificationNavigationSpec(
-        route = route,
-        popUpToRoute = ChronosRoute.Day.route,
-        inclusive = isDayLaunch
-    )
-}
+): ChronosRoute = ChronosRoute.routeForNotificationLaunch(launch, featureFlags)
 
-fun NavHostController.navigateFromNotificationLaunch(
+fun ChronosNavigationState.navigateFromNotificationLaunch(
     launch: NotificationLaunch,
     featureFlags: ChronosFeatureFlags = ChronosFeatureFlags.AllEnabled
 ) {
-    val spec = buildNotificationNavigationSpec(launch, featureFlags)
-    navigate(spec.route) {
-        launchSingleTop = false
-        restoreState = false
-        popUpTo(spec.popUpToRoute) {
-            inclusive = spec.inclusive
-            saveState = false
-        }
-    }
+    navigate(routeForNotificationLaunch(launch, featureFlags))
 }

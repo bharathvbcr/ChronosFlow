@@ -5,6 +5,7 @@ import com.chronosflow.core.data.dao.MedicationDao
 import com.chronosflow.core.data.dao.MedicationDoseEventDao
 import com.chronosflow.core.data.dao.MedicationSafetyProfileDao
 import com.chronosflow.core.data.dao.MedicationScheduleDao
+import com.chronosflow.core.data.mapper.toEntity
 import com.chronosflow.core.data.model.MedicationDoseEventEntity
 import com.chronosflow.core.data.model.MedicationPlanEntity
 import com.chronosflow.core.data.model.MedicationSafetyProfileEntity
@@ -100,6 +101,31 @@ class MedicationRepositoryImplTest {
 
         coVerify { medicationDoseEventDao.insertEvent(any()) }
         coVerify { medicationDao.deleteMedicationPlan(any()) }
+    }
+
+    @Test
+    fun `observe dose events between maps entities to domain`() = runTest {
+        val start = LocalDate.parse("2026-01-01")
+        val end = LocalDate.parse("2026-01-07")
+        val event = MedicationDoseEvent(
+            id = "dose-1",
+            medicationPlanId = "plan-1",
+            type = MedicationDoseEventType.TAKEN,
+            eventDate = LocalDate.parse("2026-01-03"),
+            recordedAt = Instant.parse("2026-01-03T07:00:00Z"),
+            scheduledMinuteOfDay = 420,
+            reason = null,
+            doseAmount = "1 tab"
+        )
+        every { medicationDoseEventDao.observeEventsBetween(start, end) } returns flowOf(listOf(event.toEntity()))
+
+        repository.observeDoseEventsBetween(start, end).test {
+            val events = awaitItem()
+            assertEquals(1, events.size)
+            assertEquals("dose-1", events[0].id)
+            assertEquals(MedicationDoseEventType.TAKEN, events[0].type)
+            awaitComplete()
+        }
     }
 
     private fun planEntity(): MedicationPlanEntity = MedicationPlanEntity(

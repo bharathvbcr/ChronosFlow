@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -18,8 +17,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -61,6 +67,23 @@ fun ChronosTextRewriteRow(
     options: List<ChronosRewriteOption> = ChronosDefaultRewriteOptions,
     minLength: Int = CHRONOS_MIN_REWRITE_LENGTH
 ) {
+    // The rewrite is user-initiated (a style chip) but runs async behind a "Rewriting…" label, so
+    // confirm the result once it lands: a tick when a draft appears, a reject buzz when it fails.
+    val haptics = LocalHapticFeedback.current
+    var wasRewriting by remember { mutableStateOf(false) }
+    LaunchedEffect(rewriteState.isLoading) {
+        if (wasRewriting && !rewriteState.isLoading) {
+            haptics.performHapticFeedback(
+                if (rewriteState.rewritten != null) {
+                    HapticFeedbackType.Confirm
+                } else {
+                    HapticFeedbackType.Reject
+                }
+            )
+        }
+        wasRewriting = rewriteState.isLoading
+    }
+
     val canRewrite = text.trim().length >= minLength
     val hasRewriteActivity = rewriteState.isLoading ||
         rewriteState.rewritten != null ||
@@ -77,7 +100,7 @@ fun ChronosTextRewriteRow(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 options.forEach { option ->
-                    AssistChip(
+                    ChronosAssistChip(
                         onClick = { onRequestRewrite(text, option.style, option.label) },
                         enabled = !rewriteState.isLoading,
                         leadingIcon = {
@@ -144,10 +167,10 @@ fun ChronosTextRewriteRow(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { onApplyRewrite(rewritten) }) {
+                        ChronosTextButton(onClick = { onApplyRewrite(rewritten) }) {
                             Text("Use this wording")
                         }
-                        TextButton(onClick = onDismissRewrite) {
+                        ChronosTextButton(onClick = onDismissRewrite) {
                             Text("Keep mine")
                         }
                     }

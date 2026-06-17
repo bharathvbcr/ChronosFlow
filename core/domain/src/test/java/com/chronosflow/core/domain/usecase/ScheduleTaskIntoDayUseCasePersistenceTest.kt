@@ -5,6 +5,7 @@ import com.chronosflow.core.domain.model.BlockFlexibility
 import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.EnergyIntensity
 import com.chronosflow.core.domain.model.SleepSchedule
+import com.chronosflow.core.domain.model.SleepTrack
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TaskSchedule
 import com.chronosflow.core.domain.model.TimeBlock
@@ -14,6 +15,7 @@ import com.chronosflow.core.domain.model.MoodEnergyCheckIn
 import com.chronosflow.core.domain.planner.PlannerService
 import com.chronosflow.core.domain.repository.MoodEnergyRepository
 import com.chronosflow.core.domain.repository.SleepScheduleRepository
+import com.chronosflow.core.domain.repository.SleepTrackRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TaskScheduleRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
@@ -125,6 +127,15 @@ class ScheduleTaskIntoDayUseCasePersistenceTest {
         freeTimeCalculator = FreeTimeCalculator(),
         sleepScheduleRepository = object : SleepScheduleRepository {
             override fun getSleepSchedule(): SleepSchedule = SleepSchedule.default()
+        },
+        sleepTrackRepository = object : SleepTrackRepository {
+            override fun observeForDate(date: LocalDate): Flow<SleepTrack?> = flowOf(null)
+            override fun observeForDateRange(start: LocalDate, end: LocalDate): Flow<List<SleepTrack>> =
+                flowOf(emptyList())
+            override suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<SleepTrack> =
+                emptyList()
+            override suspend fun upsert(track: SleepTrack) = Unit
+            override suspend fun delete(id: String) = Unit
         },
         moodEnergyRepository = FakeMoodEnergyRepository()
     )

@@ -61,7 +61,7 @@ The product direction is intentionally narrow: Today, Plan, Focus, and a global 
 
 ### AI-Assisted Planning
 
-- Three-tier model strategy in `core/ai/genai/`: ML Kit GenAI Prompt API running Gemini Nano on AICore, explicit cloud Gemini fallback when the user enables it (key via `local.properties`), and local planning heuristics when neither is available.
+- Three-tier model strategy in `core/ai/genai/`: ML Kit GenAI Prompt API running Gemini Nano on AICore, explicit cloud Gemini fallback (Firebase AI Logic) when the user enables it and a Firebase project is configured, and local planning heuristics when neither is available.
 - Planning flows include generate-a-day, repair an overloaded plan, deep-work window detection, missed-habit rescheduling, plan explanation, and a conversational assistant.
 - Every suggestion is staged in a review sheet (`feature/daydial/ui/AiReviewSheet.kt`) with per-suggestion Accept/Reject/Modify and bulk Apply All/Dismiss All — no autonomous AI writes.
 - ML Kit text tools (summarization, proofreading, rewriting) back text-assist rows in forms.
@@ -183,12 +183,12 @@ sequenceDiagram
 - JDK 17 (the project is configured for Android Studio's bundled JBR; `scripts/gradlew-jbr.ps1` wraps Gradle with it on Windows)
 - An Android device or emulator on API 26+ (`minSdk 26`, `targetSdk 37`)
 - Optional: a Wear OS device or emulator for the `:wear` module
-- Optional: a Gemini API key for cloud planning fallback
+- Optional: a Firebase project (with Firebase AI Logic enabled) for the cloud planning fallback
 
 ## Setup
 
-1. Copy `local.properties.example` to `local.properties` and set `sdk.dir`.
-2. Optionally add `GEMINI_API_KEY=...` (from Google AI Studio) to `local.properties` to enable cloud Gemini planning when the privacy mode allows cloud use. Never commit `local.properties`.
+1. Copy `local.properties.example` to `local.properties` and set `sdk.dir`. Never commit `local.properties`.
+2. Optional cloud planning: connect a Firebase project (with Firebase AI Logic enabled) and drop its `google-services.json` into `app/`. Cloud Gemini stays dormant until then; on-device Gemini Nano and local heuristics work without it.
 
 ## Build And Run
 

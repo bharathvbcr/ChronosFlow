@@ -2,6 +2,8 @@ package com.chronosflow.core.notifications
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -27,6 +29,42 @@ class NotificationPermissionsTest {
                 NotificationPermissions.POST_PROMOTED_NOTIFICATIONS
             ),
             NotificationPermissions.requiredPermissionsForSdk(37)
+        )
+    }
+
+    @Test
+    fun `promotion nudge fires only when standard granted but promotion still missing on api 37`() {
+        // The gap that actually keeps the live update off the chip / always-on display.
+        assertTrue(
+            NotificationPermissions.shouldNudgeForPromotion(
+                sdkInt = 37,
+                hasStandardPermission = true,
+                hasPromotedPermission = false
+            )
+        )
+        // Already promoted — nothing to nudge.
+        assertFalse(
+            NotificationPermissions.shouldNudgeForPromotion(
+                sdkInt = 37,
+                hasStandardPermission = true,
+                hasPromotedPermission = true
+            )
+        )
+        // No standard permission yet — the standard request comes first, so do not nudge for promotion.
+        assertFalse(
+            NotificationPermissions.shouldNudgeForPromotion(
+                sdkInt = 37,
+                hasStandardPermission = false,
+                hasPromotedPermission = false
+            )
+        )
+        // Below API 37 there is no promotion to grant.
+        assertFalse(
+            NotificationPermissions.shouldNudgeForPromotion(
+                sdkInt = 36,
+                hasStandardPermission = true,
+                hasPromotedPermission = false
+            )
         )
     }
 

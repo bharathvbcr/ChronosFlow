@@ -42,11 +42,18 @@ class CalendarEventRepositoryImplTest {
     private val calendarEventDao: CalendarEventDao = mockk()
     private val timeBlockDao: TimeBlockDao = mockk()
     private val calendarPlatform: DeviceCalendarPlatform = mockk()
+    private val syncStatusStore: com.chronosflow.core.data.sync.CalendarSyncStatusStore = mockk(relaxed = true)
     private lateinit var repository: CalendarEventRepositoryImpl
 
     @Before
     fun setup() {
-        repository = CalendarEventRepositoryImpl(context, calendarEventDao, timeBlockDao, calendarPlatform)
+        repository = CalendarEventRepositoryImpl(
+            context,
+            calendarEventDao,
+            timeBlockDao,
+            calendarPlatform,
+            syncStatusStore
+        )
     }
 
     @Test
@@ -290,6 +297,33 @@ class CalendarEventRepositoryImplTest {
         coVerify(exactly = 0) { calendarEventDao.deleteEventsBetween(any(), any()) }
         coVerify(exactly = 0) { timeBlockDao.deleteImportedBlocksBetween(any(), any()) }
         coVerify(exactly = 0) { timeBlockDao.insertTimeBlock(any()) }
+        // A no-permission early-return is not a sync, so it must not stamp the "Synced X ago" time.
+        verify(exactly = 0) { syncStatusStore.recordSuccessfulSync() }
+    }
+
+    @Test
+    fun `syncFromDeviceCalendar records a successful sync even when the window is empty`() = runTest {
+        val contentResolver = mockk<ContentResolver>()
+        val cursor = mockk<Cursor>()
+        val instancesUri = mockk<Uri>()
+        val zoneId = ZoneId.systemDefault()
+        val syncedDate = LocalDate.parse("2026-05-08")
+        val start = syncedDate.atStartOfDay(zoneId).toInstant()
+        val end = syncedDate.plusDays(1).atStartOfDay(zoneId).toInstant()
+
+        every { context.checkSelfPermission(android.Manifest.permission.READ_CALENDAR) } returns PackageManager.PERMISSION_GRANTED
+        every { context.contentResolver } returns contentResolver
+        every { calendarPlatform.instancesUri(start, end) } returns instancesUri
+        every { contentResolver.query(instancesUri, any(), any(), any(), any()) } returns cursor
+        every { cursor.moveToNext() } returns false
+        every { cursor.close() } just runs
+        coEvery { calendarEventDao.deleteEventsBetween(any(), any()) } returns Unit
+        coEvery { timeBlockDao.deleteImportedBlocksBetween(any(), any()) } returns Unit
+
+        repository.syncFromDeviceCalendar(start, end)
+
+        // An empty device window is still a completed refresh, so the freshness time is stamped.
+        verify(exactly = 1) { syncStatusStore.recordSuccessfulSync() }
     }
 
     @Test

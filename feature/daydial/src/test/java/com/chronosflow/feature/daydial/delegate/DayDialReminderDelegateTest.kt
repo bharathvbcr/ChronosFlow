@@ -99,6 +99,133 @@ class DayDialReminderDelegateTest {
     }
 
     @Test
+    fun `daily review reminder is scheduled when journal feature enabled`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = FakeTimeBlockRepository(emptyList())
+        every { habitRepository.observeHabits() } returns flowOf(emptyList())
+        coEvery { alarmRequestRepository.getAlarmRequest(any()) } returns null
+        every { alarmScheduler.scheduleInexactAlarm("daydial:$date:day:review", any(), any(), any()) } returns
+            com.chronosflow.core.notifications.AlarmScheduleResult.Scheduled("daydial:$date:day:review", exact = false)
+        val delegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository)
+
+        delegate.refreshReminderSchedule(
+            scope = this,
+            date = date,
+            blockStartReminders = false,
+            breakReminders = false,
+            missedAlerts = false,
+            endDayReviewReminder = true,
+            sleepScheduleEnabled = false,
+            sleepScheduleStartMinute = 21 * 60,
+            sleepScheduleEndMinute = 7 * 60,
+            journalRemindersEnabled = true
+        )
+
+        coVerify {
+            alarmScheduler.scheduleInexactAlarm("daydial:$date:day:review", any(), "Daily review", any())
+        }
+    }
+
+    @Test
+    fun `daily review reminder is suppressed when journal feature disabled`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = FakeTimeBlockRepository(emptyList())
+        every { habitRepository.observeHabits() } returns flowOf(emptyList())
+        val delegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository)
+
+        delegate.refreshReminderSchedule(
+            scope = this,
+            date = date,
+            blockStartReminders = false,
+            breakReminders = false,
+            missedAlerts = false,
+            endDayReviewReminder = true,
+            sleepScheduleEnabled = false,
+            sleepScheduleStartMinute = 21 * 60,
+            sleepScheduleEndMinute = 7 * 60,
+            journalRemindersEnabled = false
+        )
+
+        coVerify(exactly = 0) {
+            alarmScheduler.scheduleInexactAlarm("daydial:$date:day:review", any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `sleep journal log reminder is scheduled when toggled on`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = FakeTimeBlockRepository(emptyList())
+        every { habitRepository.observeHabits() } returns flowOf(emptyList())
+        coEvery { alarmRequestRepository.getAlarmRequest(any()) } returns null
+        every { alarmScheduler.scheduleInexactAlarm("daydial:$date:day:logsleep", any(), any(), any()) } returns
+            com.chronosflow.core.notifications.AlarmScheduleResult.Scheduled("daydial:$date:day:logsleep", exact = false)
+        val delegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository)
+
+        delegate.refreshReminderSchedule(
+            scope = this,
+            date = date,
+            blockStartReminders = false,
+            breakReminders = false,
+            missedAlerts = false,
+            endDayReviewReminder = false,
+            sleepScheduleEnabled = false,
+            sleepScheduleStartMinute = 21 * 60,
+            sleepScheduleEndMinute = 7 * 60,
+            sleepJournalLogReminder = true
+        )
+
+        coVerify {
+            alarmScheduler.scheduleInexactAlarm("daydial:$date:day:logsleep", any(), "Log sleep & journal", any())
+        }
+    }
+
+    @Test
+    fun `sleep journal log reminder is suppressed when both capture surfaces disabled`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = FakeTimeBlockRepository(emptyList())
+        every { habitRepository.observeHabits() } returns flowOf(emptyList())
+        val delegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository)
+
+        delegate.refreshReminderSchedule(
+            scope = this,
+            date = date,
+            blockStartReminders = false,
+            breakReminders = false,
+            missedAlerts = false,
+            endDayReviewReminder = false,
+            sleepScheduleEnabled = false,
+            sleepScheduleStartMinute = 21 * 60,
+            sleepScheduleEndMinute = 7 * 60,
+            sleepJournalLogReminder = true,
+            sleepJournalRemindersEnabled = false
+        )
+
+        coVerify(exactly = 0) {
+            alarmScheduler.scheduleInexactAlarm("daydial:$date:day:logsleep", any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `sleep journal log reminder is not scheduled when toggled off`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = FakeTimeBlockRepository(emptyList())
+        every { habitRepository.observeHabits() } returns flowOf(emptyList())
+        val delegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository)
+
+        delegate.refreshReminderSchedule(
+            scope = this,
+            date = date,
+            blockStartReminders = false,
+            breakReminders = false,
+            missedAlerts = false,
+            endDayReviewReminder = false,
+            sleepScheduleEnabled = false,
+            sleepScheduleStartMinute = 21 * 60,
+            sleepScheduleEndMinute = 7 * 60,
+            sleepJournalLogReminder = false
+        )
+
+        coVerify(exactly = 0) {
+            alarmScheduler.scheduleInexactAlarm("daydial:$date:day:logsleep", any(), any(), any())
+        }
+    }
+
+    @Test
     fun `all day calendar imports do not schedule block reminders`() = runTest(UnconfinedTestDispatcher()) {
         val repository = FakeTimeBlockRepository(
             listOf(
@@ -263,6 +390,45 @@ class DayDialReminderDelegateTest {
         coVerify(exactly = 0) {
             alarmScheduler.scheduleInexactAlarm(any(), any(), any(), any())
         }
+    }
+
+    @Test
+    fun `completed block does not schedule block reminders`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = FakeTimeBlockRepository(
+            listOf(
+                timeBlock(
+                    id = "done-block",
+                    date = date,
+                    startMinute = 9 * 60,
+                    durationMinutes = 45
+                ).copy(
+                    actualStartMinuteOfDay = 9 * 60,
+                    actualEndMinuteOfDay = 9 * 60 + 45
+                )
+            )
+        )
+        every { alarmScheduler.scheduleInexactAlarm(any(), any(), any(), any()) } answers {
+            throw AssertionError("completed blocks should not schedule reminders")
+        }
+        every { alarmScheduler.scheduleExactAlarm(any(), any(), any(), any(), any()) } answers {
+            throw AssertionError("completed blocks should not schedule reminders")
+        }
+        every { habitRepository.observeHabits() } returns flowOf(emptyList())
+        val delegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository)
+
+        delegate.refreshReminderSchedule(
+            scope = this,
+            date = date,
+            blockStartReminders = true,
+            breakReminders = true,
+            missedAlerts = true,
+            endDayReviewReminder = false,
+            sleepScheduleEnabled = false,
+            sleepScheduleStartMinute = 21 * 60,
+            sleepScheduleEndMinute = 7 * 60
+        )
+
+        assertEquals("No upcoming reminders for this day", delegate.reminderScheduleStatus.value)
     }
 
     private fun timeBlock(

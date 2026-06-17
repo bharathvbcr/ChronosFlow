@@ -12,6 +12,6 @@ interface HabitRepository {
     suspend fun saveHabit(habit: Habit)
     suspend fun saveHabitSchedule(schedule: HabitSchedule)
     suspend fun addHabitEvent(event: HabitEvent)
-    suspend fun getHabitEventsBetween(start: LocalDate, end: LocalDate): List<HabitEvent>
+    fun observeHabitEventsBetween(start: LocalDate, end: LocalDate): Flow<List<HabitEvent>>
     suspend fun deleteHabit(habit: Habit)
 }

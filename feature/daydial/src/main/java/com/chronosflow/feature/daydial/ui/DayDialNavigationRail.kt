@@ -20,6 +20,8 @@ import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.chronosflow.feature.daydial.model.DayDialTab
 
@@ -36,17 +38,26 @@ internal fun DayDialNavigationRail(
         modifier = modifier,
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         header = {
+            val haptics = LocalHapticFeedback.current
             TooltipBox(
                 positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
                 tooltip = { PlainTooltip { Text("Quick create") } },
                 state = rememberTooltipState(),
                 modifier = Modifier.padding(vertical = 8.dp)
             ) {
+                // The outer combinedClickable handles the gestures (it carries the long-press),
+                // so the tap/long-press haptics live here — matching the shell's quick-add cues.
                 FloatingActionButton(
                     onClick = onQuickCreate,
                     modifier = Modifier.combinedClickable(
-                        onClick = onQuickCreate,
-                        onLongClick = onQuickCreateLong
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onQuickCreate()
+                        },
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onQuickCreateLong()
+                        }
                     ),
                     shape = CircleShape,
                     containerColor = MaterialTheme.colorScheme.primaryContainer,

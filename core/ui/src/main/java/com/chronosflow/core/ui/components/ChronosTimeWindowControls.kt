@@ -61,15 +61,15 @@ fun ChronosTimeWindowControls(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            FilledTonalButton(
+            ChronosFilledTonalButton(
                 onClick = { onNudgeStart(-15) },
                 modifier = Modifier.weight(1f)
             ) { Text("Start −15m") }
-            FilledTonalButton(
+            ChronosFilledTonalButton(
                 onClick = { onNudgeStart(15) },
                 modifier = Modifier.weight(1f)
             ) { Text("Start +15m") }
-            FilledTonalButton(
+            ChronosFilledTonalButton(
                 onClick = { onNudgeEnd(15) },
                 modifier = Modifier.weight(1f)
             ) { Text("End +15m") }

@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,25 +51,28 @@ fun FocusTimerRing(
         modifier = modifier.size(containerSize),
         contentAlignment = Alignment.Center
     ) {
+        val trackColor = MaterialTheme.colorScheme.outline
+        val primaryColor = accentColor ?: MaterialTheme.colorScheme.primary
+        val secondaryColor = MaterialTheme.colorScheme.tertiary
+        // Hoisted so the sweep shader is built once and reused across every animated
+        // frame of the progress sweep instead of reallocating a gradient each draw.
+        val progressBrush = remember(primaryColor, secondaryColor) {
+            Brush.sweepGradient(colors = listOf(primaryColor, secondaryColor, primaryColor))
+        }
+        // Ambient glow depends only on the accent color, not the per-second time label, so
+        // remember it — the ring recomposes every second and would otherwise rebuild it each tick.
+        val ambientGlowBrush = remember(primaryColor) {
+            Brush.radialGradient(colors = listOf(primaryColor.copy(alpha = 0.06f), Color.Transparent))
+        }
+
         if (!reduceMotionEnabled && !highContrastEnabled) {
             Box(
                 modifier = Modifier
                     .size(ringSize - 20.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                (accentColor ?: MaterialTheme.colorScheme.primary).copy(alpha = 0.06f),
-                                Color.Transparent
-                            )
-                        )
-                    )
+                    .background(ambientGlowBrush)
             )
         }
-
-        val trackColor = MaterialTheme.colorScheme.outline
-        val primaryColor = accentColor ?: MaterialTheme.colorScheme.primary
-        val secondaryColor = MaterialTheme.colorScheme.tertiary
 
         Canvas(modifier = Modifier.size(ringSize)) {
             drawArc(
@@ -88,9 +92,7 @@ fun FocusTimerRing(
                 )
             } else {
                 drawArc(
-                    brush = Brush.sweepGradient(
-                        colors = listOf(primaryColor, secondaryColor, primaryColor)
-                    ),
+                    brush = progressBrush,
                     startAngle = -90f,
                     sweepAngle = animatedSweepAngle,
                     useCenter = false,

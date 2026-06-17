@@ -2,10 +2,12 @@ package com.chronosflow.core.ai
 
 import android.content.Context
 import com.chronosflow.core.ai.genai.AssistGenAiSource
+import com.chronosflow.core.ai.genai.AssistTextGeneration
 import com.chronosflow.core.ai.genai.CloudGeminiModels
 import com.chronosflow.core.ai.genai.DayPlanResponseParser
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
 import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
+import com.chronosflow.core.ai.genai.GenerationProfile
 import com.chronosflow.core.ai.genai.LocalPlanningHeuristics
 import com.chronosflow.core.ai.genai.PlanningPromptBuilder
 import com.chronosflow.core.domain.model.BlockFlexibility
@@ -267,26 +269,24 @@ class ChronosAIPlanner @Inject constructor(
         privacyMode: PrivacyMode,
         pendingTasks: List<Task> = emptyList()
     ): StructuredDayPlanSuggestion {
-        val generation = genAiAssistCoordinator.generateAssistText(prompt, privacyMode)
-        generation.text?.let { raw ->
-            val parsed = DayPlanResponseParser.parse(
-                raw = raw,
-                timezone = timezone,
-                fallbackExplanation = when (generation.source) {
-                    AssistGenAiSource.CLOUD_GEMINI -> "Generated with cloud Gemini. Review before applying."
-                    AssistGenAiSource.GEMINI_NANO -> "Generated with Gemini Nano on-device via AICore. Review before applying."
-                    AssistGenAiSource.LOCAL -> "Generated with local heuristics."
-                }
-            )
-            if (parsed != null) {
-                return parsed.copy(
-                    reason = dayPlanReason(date, generation.source),
-                    explanation = dayPlanExplanation(parsed.explanation, generation.source),
-                    requireConfirmation = generation.source != AssistGenAiSource.LOCAL,
-                    explanationSource = generation.source
+        // Day plans must come back as schema-valid JSON, so sample near-deterministically — higher
+        // temperature is what makes small on-device models emit malformed JSON that fails to parse.
+        val generation = genAiAssistCoordinator.generateAssistText(prompt, privacyMode, GenerationProfile.DETERMINISTIC)
+        shapeDayPlan(generation, timezone, date)?.let { return it }
+
+        // One corrective retry before dropping to heuristics: small on-device models occasionally
+        // emit not-quite-JSON. Re-ask once with the malformed output echoed back and an explicit
+        // instruction to return only the JSON object — this rescues many near-misses for free.
+        generation.text
+            ?.takeIf { generation.source != AssistGenAiSource.LOCAL }
+            ?.let { malformed ->
+                val retry = genAiAssistCoordinator.generateAssistText(
+                    PlanningPromptBuilder.jsonRepairPrompt(prompt, malformed),
+                    privacyMode,
+                    GenerationProfile.DETERMINISTIC
                 )
+                shapeDayPlan(retry, timezone, date)?.let { return it }
             }
-        }
 
         val heuristic = LocalPlanningHeuristics.generateIdealDayPlan(
             packageName = context.packageName,
@@ -315,6 +315,30 @@ class ChronosAIPlanner @Inject constructor(
         } else {
             heuristic.copy(explanation = fallbackExplanation, explanationSource = resolvedSource)
         }
+    }
+
+    /** Parses a model day-plan response and stamps it with source-aware reason/explanation, or null if it is not valid. */
+    private fun shapeDayPlan(
+        generation: AssistTextGeneration,
+        timezone: String,
+        date: LocalDate
+    ): StructuredDayPlanSuggestion? {
+        val raw = generation.text ?: return null
+        val parsed = DayPlanResponseParser.parse(
+            raw = raw,
+            timezone = timezone,
+            fallbackExplanation = when (generation.source) {
+                AssistGenAiSource.CLOUD_GEMINI -> "Generated with cloud Gemini. Review before applying."
+                AssistGenAiSource.GEMINI_NANO -> "Generated with Gemini Nano on-device via AICore. Review before applying."
+                AssistGenAiSource.LOCAL -> "Generated with local heuristics."
+            }
+        ) ?: return null
+        return parsed.copy(
+            reason = dayPlanReason(date, generation.source),
+            explanation = dayPlanExplanation(parsed.explanation, generation.source),
+            requireConfirmation = generation.source != AssistGenAiSource.LOCAL,
+            explanationSource = generation.source
+        )
     }
 
     private fun dayPlanReason(date: LocalDate, source: AssistGenAiSource): String {

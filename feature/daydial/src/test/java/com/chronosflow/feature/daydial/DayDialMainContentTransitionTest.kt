@@ -164,19 +164,6 @@ class DayDialMainContentTransitionTest {
     }
 
     @Test
-    fun `move in blur resolves immediately for reduced motion`() {
-        assertEquals(8.0, dayDialMoveInBlurRadius(reducedMotion = false, entering = true).value.toDouble(), 0.0001)
-        assertEquals(12.0, dayDialMoveInTravel(reducedMotion = false, entering = true).value.toDouble(), 0.0001)
-        assertEquals(0.0, dayDialMoveInBlurRadius(reducedMotion = false, entering = false).value.toDouble(), 0.0001)
-        assertEquals(0.0, dayDialMoveInTravel(reducedMotion = false, entering = false).value.toDouble(), 0.0001)
-        assertEquals(0.0, dayDialMoveInLayerAlpha(reducedMotion = false, exiting = true).toDouble(), 0.0001)
-        assertEquals(1.0, dayDialMoveInLayerAlpha(reducedMotion = false, exiting = false).toDouble(), 0.0001)
-        assertEquals(0.0, dayDialMoveInBlurRadius(reducedMotion = true, entering = true).value.toDouble(), 0.0001)
-        assertEquals(0.0, dayDialMoveInTravel(reducedMotion = true, entering = true).value.toDouble(), 0.0001)
-        assertEquals(1.0, dayDialMoveInLayerAlpha(reducedMotion = true, exiting = true).toDouble(), 0.0001)
-    }
-
-    @Test
     fun `move in travel follows route direction`() {
         assertEquals(1, dayDialMoveInTravelMultiplier(ChronosTransitionDirection.Forward))
         assertEquals(-1, dayDialMoveInTravelMultiplier(ChronosTransitionDirection.Backward))

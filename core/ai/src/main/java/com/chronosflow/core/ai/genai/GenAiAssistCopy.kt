@@ -47,7 +47,7 @@ object GenAiAssistCopy {
                 if (status.cloudConfigured) {
                     "Suggestions use cloud Gemini first, then Gemini Nano through AICore when supported, then local heuristics. $base"
                 } else {
-                    "Add GEMINI_API_KEY to local.properties for cloud assist. Until then, ChronosFlow uses Gemini Nano when supported, otherwise local heuristics."
+                    "Connect a Firebase project with Firebase AI Logic for cloud assist. Until then, ChronosFlow uses Gemini Nano when supported, otherwise local heuristics."
                 }
             PrivacyMode.ON_DEVICE_ONLY ->
                 "Suggestions use Gemini Nano through AICore when supported. Otherwise ChronosFlow uses local heuristics. $base"

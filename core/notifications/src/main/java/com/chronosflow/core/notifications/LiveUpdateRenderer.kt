@@ -18,7 +18,6 @@ class LiveUpdateRenderer @Inject constructor(
         text: String,
         timeLeftSeconds: Int,
         totalSeconds: Int,
-        plannedEndAt: java.time.Instant? = null,
         isPaused: Boolean = false,
         redactSensitiveTitles: Boolean = false,
         promotedNotificationsAllowed: Boolean = true,
@@ -26,45 +25,34 @@ class LiveUpdateRenderer @Inject constructor(
         pauseIntent: PendingIntent? = null,
         resumeIntent: PendingIntent? = null,
         stopIntent: PendingIntent? = null,
-        extendIntent: PendingIntent? = null
+        extendIntent: PendingIntent? = null,
+        phaseSegments: List<FocusPhaseSegment> = emptyList(),
+        currentPhaseIndex: Int = 0,
+        subText: String? = null
     ): Notification {
         val decision = gateway.decide(
             title = title,
             text = text,
             redactSensitiveTitles = redactSensitiveTitles,
-            promotedNotificationsAllowed = promotedNotificationsAllowed
+            promotedNotificationsAllowed = promotedNotificationsAllowed,
+            // A flat (single-phase) focus timer takes the Android 17 MetricStyle big countdown; a
+            // split Pomodoro session keeps its segmented ProgressStyle bar.
+            metricCountdown = phaseSegments.size <= 1
         )
         return gateway.build(
             channelId = channelId,
             decision = decision,
             timeLeftSeconds = timeLeftSeconds,
             totalSeconds = totalSeconds,
-            plannedEndAt = plannedEndAt,
             isPaused = isPaused,
             contentIntent = contentIntent,
             pauseIntent = pauseIntent,
             resumeIntent = resumeIntent,
             stopIntent = stopIntent,
-            extendIntent = extendIntent
+            extendIntent = extendIntent,
+            phaseSegments = phaseSegments,
+            currentPhaseIndex = currentPhaseIndex,
+            subText = subText
         )
     }
-
-    fun latestDecision(
-        title: String,
-        text: String,
-        redactSensitiveTitles: Boolean = false,
-        promotedNotificationsAllowed: Boolean = true
-    ): LiveUpdateDecision = gateway.decide(
-        title = title,
-        text = text,
-        redactSensitiveTitles = redactSensitiveTitles,
-        promotedNotificationsAllowed = promotedNotificationsAllowed
-    )
-
-    fun usesSelfUpdatingMetricTimer(isRunning: Boolean, decision: LiveUpdateDecision): Boolean =
-        usesSelfUpdatingMetricTimer(
-            sdkInt = decision.sdkInt,
-            isRunning = isRunning,
-            canUsePromotedOngoing = decision.canUsePromotedOngoing
-        )
 }

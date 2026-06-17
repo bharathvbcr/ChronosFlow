@@ -7,7 +7,7 @@ import androidx.glance.appwidget.GlanceAppWidgetReceiver
 /**
  * Shared lifecycle for all ChronosFlow widget receivers: every widget type keeps the single
  * [WidgetRefreshWorker] loop armed, and the loop is only cancelled once the last widget of
- * any type has been removed.
+ * any type has been removed *and* no recently active watch still needs it.
  */
 abstract class ChronosWidgetReceiver : GlanceAppWidgetReceiver() {
 
@@ -28,7 +28,8 @@ abstract class ChronosWidgetReceiver : GlanceAppWidgetReceiver() {
 
     override fun onDisabled(context: Context) {
         super.onDisabled(context)
-        if (!ChronosWidgetHub.hasAnyWidgets(context)) {
+        // Keep the loop alive if a watch still relies on it; otherwise stop it.
+        if (!WidgetRefreshWorker.shouldKeepRunning(context)) {
             WidgetRefreshWorker.cancel(context)
         }
     }

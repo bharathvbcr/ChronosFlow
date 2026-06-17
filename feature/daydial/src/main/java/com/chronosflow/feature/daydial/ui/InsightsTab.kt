@@ -1,5 +1,8 @@
 package com.chronosflow.feature.daydial.ui
 
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+import com.chronosflow.core.ui.components.ChronosFilledTonalButton
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -27,7 +30,6 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -37,7 +39,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -50,9 +51,10 @@ import com.chronosflow.core.domain.model.ReviewInsight
 import com.chronosflow.core.domain.model.ReviewInsightSeverity
 import com.chronosflow.core.domain.model.TimeBlock
 import com.chronosflow.core.ui.components.ChronosEmptyState
+import com.chronosflow.core.ui.components.ChronosFilterChip
 import com.chronosflow.core.ui.components.ChronosListCard
-import com.chronosflow.core.ui.components.ChronosMetricTile
 import com.chronosflow.core.ui.components.ChronosSectionTitle
+import com.chronosflow.feature.daydial.ScreenTimeCard
 import com.chronosflow.core.ui.components.GenAiAssistBanner
 import com.chronosflow.core.ui.components.formatDurationLabel
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
@@ -72,8 +74,6 @@ private const val NO_PLAN_SUMMARY_ACTION_LABEL = "Create plan"
 private const val NO_PLAN_SUMMARY_MESSAGE =
     "Create one now to unlock completion, drift, and missed-block analysis."
 private const val NO_PLAN_SUMMARY_HEADER = "No plan set for today"
-private const val NO_PLAN_CHART_MESSAGE =
-    "Actual time from today is shown. Planned-vs-actual unlocks after a plan is created."
 private const val NO_PLAN_ACTUAL_NONE_MESSAGE = "No logged time yet"
 private const val EXECUTION_SCORE_NO_PLAN_MESSAGE = "No plan is active for today."
 private const val EXECUTION_SCORE_AHEAD_MESSAGE = "You are ahead of plan."
@@ -115,9 +115,12 @@ internal fun InsightsTab(
     onTrendRangeSelected: (Int) -> Unit = {},
     onOpenJournal: () -> Unit = {},
     onOpenSleepLog: () -> Unit = {},
+    journalEnabled: Boolean = true,
+    sleepEnabled: Boolean = true,
     period: InsightsPeriod = InsightsPeriod.DAY,
     periodSummary: InsightsPeriodSummary? = null,
-    onPeriodSelected: (InsightsPeriod) -> Unit = {}
+    onPeriodSelected: (InsightsPeriod) -> Unit = {},
+    onStartFocus: () -> Unit = {}
 ) {
     // For DAY the live selected-day inputs are used; week/month swap in the aggregated rollup.
     val effectiveReview = periodSummary?.review ?: review
@@ -173,64 +176,24 @@ internal fun InsightsTab(
 
         ChronosListCard(modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
-                Text(
-                    text = "Execution score",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ChronosMetricTile(
-                        "Completion",
-                        formatCompletionText(completion, isPlanSet),
-                        modifier = Modifier.weight(1f),
-                        accent = scoreColor(completion, isPlanSet)
+                    Text(
+                        text = "Execution score",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                    ChronosMetricTile(
-                        "Status",
-                        completionStatusText(completion, isPlanSet),
-                        Modifier.weight(1f),
-                        accent = scoreColor(completion, isPlanSet)
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
-                ) {
-                    ChronosMetricTile("Planned", plannedMinutesLabel, Modifier.weight(1f))
-                    ChronosMetricTile(
-                        "Actual",
-                        actualMinutesLabel,
-                        Modifier.weight(1f),
-                        accent = actualAccent
+                    Text(
+                        text = formatCompletionText(completion, isPlanSet),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = scoreColor(completion, isPlanSet)
                     )
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
-                ) {
-                    ChronosMetricTile(
-                        "Missed",
-                        missedMinutesLabel,
-                        Modifier.weight(1f),
-                        accent = missedAccent
-                    )
-                    ChronosMetricTile(
-                        "Drift",
-                        driftLabel,
-                        Modifier.weight(1f),
-                        accent = driftAccentColor
-                    )
-                }
-                ExecutionSummaryRow(
-                    isPlanSet = isPlanSet,
-                    missedSummary = missedSummary,
-                    onCreatePlan = onCreatePlan
-                )
                 val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
                 AnimatedVisibility(
                     visible = isPlanSet,
@@ -251,86 +214,47 @@ internal fun InsightsTab(
                         trackColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                 }
-
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
                 ) {
-                    FilledTonalButton(
-                        onClick = onOpenFullReview,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        Icon(Icons.Default.Visibility, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Open daily review", fontWeight = FontWeight.SemiBold)
-                    }
-                    OutlinedButton(
-                        onClick = onRefreshRecommendations,
-                        enabled = !isRefreshing,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        val refreshFade = ChronosValueAnimationFactory.stateChange<Float>(reduceMotion)
-                        AnimatedContent(
-                            targetState = isRefreshing,
-                            transitionSpec = { fadeIn(refreshFade) togetherWith fadeOut(refreshFade) },
-                            label = "refreshLeadingIndicator"
-                        ) { refreshing ->
-                            if (refreshing) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier
-                                        .height(18.dp)
-                                        .width(18.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null)
-                            }
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            if (isRefreshing) "Refreshing…" else "Refresh recommendations",
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
+                    ExecutionStat("Planned", plannedMinutesLabel, Modifier.weight(1f))
+                    ExecutionStat("Actual", actualMinutesLabel, Modifier.weight(1f), accent = actualAccent)
+                    ExecutionStat("Missed", missedMinutesLabel, Modifier.weight(1f), accent = missedAccent)
+                    ExecutionStat("Drift", driftLabel, Modifier.weight(1f), accent = driftAccentColor)
                 }
-                Text(
-                    text = executionNarrative,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isPlanSet) MaterialTheme.colorScheme.onSurfaceVariant else
-                        MaterialTheme.colorScheme.primary
+                ExecutionSummaryRow(
+                    isPlanSet = isPlanSet,
+                    missedSummary = missedSummary,
+                    onCreatePlan = onCreatePlan
                 )
-                Text(
-                    text = "Suggestion: $executionAction",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                if (isPlanSet) {
+                    Text(
+                        text = "$executionNarrative $executionAction",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                ChronosFilledTonalButton(
+                    onClick = onOpenFullReview,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Icon(Icons.Default.Visibility, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Open daily review", fontWeight = FontWeight.SemiBold)
+                }
             }
         }
 
         ChronosListCard(modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
-                Text("Planned vs actual", style = MaterialTheme.typography.labelLarge)
-                    PlannedVsActualChart(
-                        planned = periodPlanned,
-                        actual = periodActual,
-                        noPlan = shouldShowNoPlan,
-                        onCreatePlan = onCreatePlan
-                    )
                 Text(
                     text = "Category breakdown",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(top = ChronosSpacing.Small)
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-                if (categoryRows.isNotEmpty()) {
-                    Text(
-                        text = "Legend: ★ is your top focus category",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    FocusConcentrationLegend()
-                }
                 if (categoryRows.isEmpty()) {
                     Text(
                         "No blocks tracked yet",
@@ -339,56 +263,12 @@ internal fun InsightsTab(
                     )
                 } else {
                     val topRow = categoryRows.first()
-                    val concentrationProfile = focusConcentrationProfile(topRow.share, topRow.category, categoryRows.size)
-                    val topCategoryMix = focusTopCategoryMix(categoryRows)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
-                    ) {
-                        ChronosMetricTile(
-                            "Top focus",
-                            topRow.category,
-                            modifier = Modifier.weight(1f),
-                            accent = MaterialTheme.colorScheme.secondary
-                        )
-                        ChronosMetricTile(
-                            "Share",
-                            percentText(topRow.share),
-                            modifier = Modifier.weight(1f),
-                            accent = MaterialTheme.colorScheme.primary
-                        )
-                    }
                     Text(
-                        text = "Concentration: ${focusConcentrationLabel(topRow.share)}",
+                        text = "★ ${topRow.category} leads at ${percentText(topRow.share)} · " +
+                            "${focusConcentrationLabel(topRow.share)} concentration",
                         style = MaterialTheme.typography.bodySmall,
-                        color = concentrationProfile.color
+                        color = focusConcentrationColor(topRow.share)
                     )
-                    Text(
-                        text = "Dominant share: ${percentText(topRow.share)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (concentrationProfile.tip != null) {
-                        Text(
-                            text = concentrationProfile.tip,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    if (concentrationProfile.suggestion != null) {
-                        Text(
-                            text = "Suggested next action: ${concentrationProfile.suggestion}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    if (categoryRows.size > 1) {
-                        Text(
-                            text = "Top mix: $topCategoryMix",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                     categoryRows.forEachIndexed { index, row ->
                         val rowColor = if (index == 0) {
                             MaterialTheme.colorScheme.secondary
@@ -419,17 +299,25 @@ internal fun InsightsTab(
                             )
                         }
                     }
+                    focusConcentrationTip(topRow.share, topRow.category, categoryRows.size)?.let { tip ->
+                        Text(
+                            text = tip,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
         }
 
         if (orderedInsights.isNotEmpty()) {
-            ChronosSectionTitle(
-                title = "Review insights",
-                subtitle = "Priority: critical -> warning -> info"
-            )
-            orderedInsights.forEach { insight ->
-                ReviewInsightRow(insight = insight)
+            ChronosSectionTitle(title = "Review insights")
+            ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
+                    orderedInsights.forEach { insight ->
+                        ReviewInsightRow(insight = insight)
+                    }
+                }
             }
         } else {
             ChronosSectionTitle(title = "Review insights")
@@ -467,7 +355,42 @@ internal fun InsightsTab(
             }
         }
 
-        ChronosSectionTitle(title = "AI recommendations")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            ChronosSectionTitle(title = "AI recommendations")
+            ChronosOutlinedButton(
+                onClick = onRefreshRecommendations,
+                enabled = !isRefreshing,
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
+                val refreshFade = ChronosValueAnimationFactory.stateChange<Float>(reduceMotion)
+                AnimatedContent(
+                    targetState = isRefreshing,
+                    transitionSpec = { fadeIn(refreshFade) togetherWith fadeOut(refreshFade) },
+                    label = "refreshLeadingIndicator"
+                ) { refreshing ->
+                    if (refreshing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .height(18.dp)
+                                .width(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (isRefreshing) "Refreshing…" else "Refresh",
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
         ChronosListCard(modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
                 if (recommendations.isEmpty()) {
@@ -488,6 +411,10 @@ internal fun InsightsTab(
             }
         }
 
+        ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+            ScreenTimeCard(onStartFocus = onStartFocus)
+        }
+
         InsightsTrendSections(
             trendRangeDays = trendRangeDays,
             trends = trends,
@@ -495,7 +422,9 @@ internal fun InsightsTab(
             sleepTrack = sleepTrack,
             onTrendRangeSelected = onTrendRangeSelected,
             onOpenJournal = onOpenJournal,
-            onOpenSleepLog = onOpenSleepLog
+            onOpenSleepLog = onOpenSleepLog,
+            journalEnabled = journalEnabled,
+            sleepEnabled = sleepEnabled
         )
         Spacer(Modifier.height(bottomContentPadding))
     }
@@ -508,43 +437,33 @@ private fun InsightsPeriodSelector(
     onPeriodSelected: (InsightsPeriod) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    ChronosListCard(modifier = modifier) {
-        Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Rollup",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Micro)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
+        ) {
+            InsightsPeriod.values().forEach { option ->
+                ChronosFilterChip(
+                    selected = option == period,
+                    onClick = { onPeriodSelected(option) },
+                    label = { Text(option.label) }
                 )
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .height(16.dp)
-                            .width(16.dp),
-                        strokeWidth = 2.dp
-                    )
-                }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
-            ) {
-                InsightsPeriod.values().forEach { option ->
-                    FilterChip(
-                        selected = option == period,
-                        onClick = { onPeriodSelected(option) },
-                        label = { Text(option.label) }
-                    )
-                }
+            if (isLoading) {
+                Spacer(Modifier.weight(1f))
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .height(16.dp)
+                        .width(16.dp),
+                    strokeWidth = 2.dp
+                )
             }
+        }
+        if (period != InsightsPeriod.DAY) {
             Text(
                 text = insightsPeriodScopeNote(period),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -570,8 +489,20 @@ private fun ReviewInsightRow(insight: ReviewInsight) {
     val source = insight.assistSource?.let { name ->
         runCatching { AssistGenAiSource.valueOf(name) }.getOrNull()
     }
-    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
+    ) {
+        Icon(
+            imageVector = when (insight.severity) {
+                ReviewInsightSeverity.INFO -> Icons.Default.Visibility
+                ReviewInsightSeverity.WARNING -> Icons.Default.Analytics
+                ReviewInsightSeverity.CRITICAL -> Icons.Default.Schedule
+            },
+            contentDescription = insight.severity.name.lowercase().replaceFirstChar { it.uppercase() },
+            tint = severityColor
+        )
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(insight.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
                 insight.detail,
@@ -595,27 +526,6 @@ private fun ReviewInsightRow(insight: ReviewInsight) {
                     )
                 }
             }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(
-                    imageVector = when (insight.severity) {
-                        ReviewInsightSeverity.INFO -> Icons.Default.Visibility
-                        ReviewInsightSeverity.WARNING -> Icons.Default.Analytics
-                        ReviewInsightSeverity.CRITICAL -> Icons.Default.Schedule
-                    },
-                    contentDescription = null,
-                    tint = severityColor
-                )
-                Text(
-                    text = insight.severity.name.lowercase().replaceFirstChar { it.uppercase() },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = severityColor
-                )
-            }
         }
     }
 }
@@ -625,7 +535,7 @@ private fun NoPlanCreateAction(
     onCreatePlan: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    FilledTonalButton(
+    ChronosFilledTonalButton(
         onClick = onCreatePlan,
         modifier = modifier,
         shape = RoundedCornerShape(20.dp)
@@ -650,58 +560,19 @@ private fun ExecutionSummaryRow(
 }
 
 @Composable
-private fun NoPlanSummaryRow(
-    onCreatePlan: () -> Unit,
-    message: String = NO_PLAN_SUMMARY_MESSAGE,
-    showHeader: Boolean = true,
-    showAction: Boolean = true,
-    messageTextStyle: TextStyle = MaterialTheme.typography.labelSmall
-) {
+private fun NoPlanSummaryRow(onCreatePlan: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
-        if (showHeader) {
-            Text(
-                text = NO_PLAN_SUMMARY_HEADER,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-        if (showAction) {
-            NoPlanCreateAction(onCreatePlan = onCreatePlan)
-        }
         Text(
-            text = message,
-            style = messageTextStyle,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            text = NO_PLAN_SUMMARY_HEADER,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
         )
-    }
-}
-
-@Composable
-private fun NoPlanChartSummaryRow(
-    onCreatePlan: () -> Unit
-) {
-    NoPlanSummaryRow(
-        onCreatePlan = onCreatePlan,
-        message = NO_PLAN_CHART_MESSAGE,
-        showHeader = false,
-        showAction = true,
-        messageTextStyle = MaterialTheme.typography.bodySmall
-    )
-}
-
-@Composable
-private fun NoPlanMetricPlaceholderRow(
-    label: String,
-    value: String = METRIC_NOT_APPLICABLE,
-    valueColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.width(60.dp), style = MaterialTheme.typography.labelSmall)
+        NoPlanCreateAction(onCreatePlan = onCreatePlan)
         Text(
-            text = value,
+            text = NO_PLAN_SUMMARY_MESSAGE,
             style = MaterialTheme.typography.labelSmall,
-            color = valueColor
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -713,54 +584,6 @@ private fun PlanSetSummaryRow(missedSummary: String) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
-}
-
-@Composable
-private fun PlannedVsActualChart(
-    planned: Int,
-    actual: Int,
-    noPlan: Boolean,
-    onCreatePlan: () -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (noPlan) {
-            NoPlanChartSummaryRow(onCreatePlan = onCreatePlan)
-            NoPlanMetricPlaceholderRow(label = "Planned")
-            NoPlanMetricPlaceholderRow(
-                label = "Actual logged",
-                value = noPlanAwareActualMetricLabel(actual, false),
-                valueColor = noPlanAwareActualMetricColor(actual, false)
-            )
-        } else {
-            val safePlanned = planned.coerceAtLeast(0)
-            val safeActual = actual.coerceAtLeast(0)
-            val maxValue = max(safePlanned, safeActual).coerceAtLeast(1).toFloat()
-            val plannedWidth = safePlanned.toFloat() / maxValue
-            val actualWidth = safeActual.toFloat() / maxValue
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Planned", modifier = Modifier.width(60.dp), style = MaterialTheme.typography.labelSmall)
-                LinearProgressIndicator(
-                    progress = { plannedWidth },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(12.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Actual", modifier = Modifier.width(60.dp), style = MaterialTheme.typography.labelSmall)
-                LinearProgressIndicator(
-                    progress = { actualWidth },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(12.dp),
-                    color = MaterialTheme.colorScheme.secondary,
-                    trackColor = MaterialTheme.colorScheme.secondaryContainer
-                )
-            }
-        }
-    }
 }
 
 internal fun hasPlannedDayMinutes(plannedMinutes: Int): Boolean {
@@ -857,7 +680,7 @@ private fun RecommendationRow(
                 color = MaterialTheme.colorScheme.primary
             )
         }
-        OutlinedButton(onClick = onApply, shape = RoundedCornerShape(20.dp)) {
+        ChronosOutlinedButton(onClick = onApply, shape = RoundedCornerShape(20.dp)) {
             Text("Apply", fontWeight = FontWeight.SemiBold)
         }
     }
@@ -871,15 +694,26 @@ private fun formatDriftMinutes(driftMinutes: Int): String {
     return "$sign${formatInsightMinutes(abs(driftMinutes))}"
 }
 
-private fun completionStatusText(
-    completion: Int,
-    isPlanSet: Boolean
-): String = when {
-    !isPlanSet -> "No plan"
-    completion >= 95 -> "Ahead"
-    completion >= 80 -> "On track"
-    completion >= 60 -> "Some drift"
-    else -> "Behind"
+@Composable
+private fun ExecutionStat(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    accent: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = accent
+        )
+    }
 }
 
 internal fun executionScoreNarrative(
@@ -989,38 +823,18 @@ internal fun focusConcentrationLabel(share: Float): String = when {
     else -> "Balanced"
 }
 
-private data class FocusConcentrationProfile(
-    val color: androidx.compose.ui.graphics.Color,
-    val tip: String?,
-    val suggestion: String?
-)
-
-@Composable
-private fun focusConcentrationProfile(
+internal fun focusConcentrationTip(
     share: Float,
     topCategory: String,
     totalCategories: Int
-): FocusConcentrationProfile = when {
-    totalCategories == 1 -> FocusConcentrationProfile(
-        color = focusConcentrationColor(share),
-        tip = "Only one category appears today. Add a short block in another category tomorrow to reduce concentration risk.",
-        suggestion = null
-    )
-    share >= 0.85f -> FocusConcentrationProfile(
-        color = focusConcentrationColor(share),
-        tip = "Very high focus on $topCategory. Try splitting this category into two shorter focus blocks with a reset task in between.",
-        suggestion = "Split this category into smaller sessions and alternate with a 5-10 minute reset block."
-    )
-    share >= 0.7f -> FocusConcentrationProfile(
-        color = focusConcentrationColor(share),
-        tip = "You spent most of your day on $topCategory. A short complementary block could improve context recovery.",
-        suggestion = "Insert one short task or habit block before your next top-focus segment."
-    )
-    else -> FocusConcentrationProfile(
-        color = focusConcentrationColor(share),
-        tip = "Balanced distribution. You are spreading attention across multiple categories.",
-        suggestion = null
-    )
+): String? = when {
+    totalCategories == 1 ->
+        "Only one category appears today. Add a short block in another category tomorrow to reduce concentration risk."
+    share >= 0.85f ->
+        "Very high focus on $topCategory. Try splitting this category into two shorter focus blocks with a reset task in between."
+    share >= 0.7f ->
+        "You spent most of your day on $topCategory. A short complementary block could improve context recovery."
+    else -> null
 }
 
 @Composable
@@ -1030,29 +844,6 @@ private fun focusConcentrationColor(share: Float) = when {
     share >= 0.3f -> MaterialTheme.colorScheme.secondary
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
-
-@Composable
-private fun FocusConcentrationLegend() {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        LegendLine("High (>= 70%)", focusConcentrationColor(0.7f))
-        LegendLine("Moderate (>= 50%)", focusConcentrationColor(0.5f))
-        LegendLine("Even (>= 30%)", focusConcentrationColor(0.3f))
-        LegendLine("Balanced (< 30%)", focusConcentrationColor(0f))
-    }
-}
-
-@Composable
-private fun LegendLine(text: String, color: androidx.compose.ui.graphics.Color) {
-    Text(
-        text = "● $text",
-        style = MaterialTheme.typography.labelSmall,
-        color = color
-    )
-}
-
-internal fun focusTopCategoryMix(rows: List<InsightCategoryBreakdownRow>): String = rows
-    .take(2)
-    .joinToString(" • ") { "${it.category} ${percentText(it.share)}" }
 
 private fun percentText(value: Float): String = "${(value * 100).roundToInt()}%"
 

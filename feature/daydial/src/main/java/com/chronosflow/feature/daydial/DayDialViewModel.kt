@@ -9,6 +9,13 @@ import com.chronosflow.core.ai.FocusNextBlockSuggestion
 import com.chronosflow.core.ai.RecommendationQuickAction
 import com.chronosflow.core.ai.MoodEnergyCheckInAssistPlanner
 import com.chronosflow.core.ai.PrivacyMode
+import com.chronosflow.core.ai.RoutineAssistPlanner
+import com.chronosflow.core.ai.RoutineAssistRequest
+import com.chronosflow.core.ai.RoutineAssistSuggestion
+import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
+import com.chronosflow.core.ai.genai.GenAiAssistCopy
+import com.chronosflow.core.ai.genai.GenAiAssistUiSnapshot
+import com.chronosflow.core.ai.genai.refreshAssistUiSnapshot
 import com.chronosflow.core.domain.diagnostics.AppEventCategory
 import com.chronosflow.core.domain.diagnostics.AppEventLog
 import com.chronosflow.core.domain.model.DailyReviewSummary
@@ -60,14 +67,18 @@ import com.chronosflow.feature.daydial.model.InsightsTabUiState
 import com.chronosflow.feature.daydial.model.buildDayQuickItemsState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -89,6 +100,11 @@ typealias FocusExecutionState = com.chronosflow.feature.daydial.model.FocusExecu
 typealias FocusPhase = com.chronosflow.feature.daydial.model.FocusPhase
 typealias FocusPhaseKind = com.chronosflow.feature.daydial.model.FocusPhaseKind
 typealias DailyReview = com.chronosflow.feature.daydial.model.DailyReview
+
+/** Insights trend window bounds and default (days); user selections are coerced into this range. */
+private const val MIN_TREND_RANGE_DAYS = 7
+private const val MAX_TREND_RANGE_DAYS = 60
+private const val DEFAULT_TREND_RANGE_DAYS = 14
 
 data class CalendarConnectionState(
     val isWorking: Boolean = false,
@@ -122,8 +138,15 @@ private fun Long.formatBytes(): String = when {
     else -> "$this B"
 }
 
+data class RoutineAssistUiState(
+    val isLoading: Boolean = false,
+    val suggestions: List<RoutineAssistSuggestion> = emptyList(),
+    val message: String? = null,
+    val assistSnapshot: GenAiAssistUiSnapshot? = null
+)
+
 @HiltViewModel
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class DayDialViewModel @Inject constructor(
     private val repository: TimeBlockRepository,
     private val taskRepository: TaskRepository,
@@ -156,6 +179,8 @@ class DayDialViewModel @Inject constructor(
     private val routineRepository: RoutineRepository,
     private val applyRoutineToDateUseCase: ApplyRoutineToDateUseCase,
     private val completeRoutineForDateUseCase: CompleteRoutineForDateUseCase,
+    private val routineAssistPlanner: RoutineAssistPlanner,
+    private val genAiAssistCoordinator: GenAiAssistCoordinator,
     private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator,
     private val appEventLog: AppEventLog
 ) : ViewModel() {
@@ -168,6 +193,10 @@ class DayDialViewModel @Inject constructor(
     internal var dataExportDispatcher: CoroutineDispatcher = Dispatchers.IO
     internal var calendarSyncDispatcher: CoroutineDispatcher = Dispatchers.IO
     private val calendarAutoSyncGate = CalendarAutoSyncGate()
+    // Overridable like the dispatchers above so tests can drive the throttle clock.
+    internal var foregroundSyncClock: () -> Long = { System.currentTimeMillis() }
+    private var lastForegroundSyncAtMillis: Long? = null
+    private val foregroundSyncMinIntervalMillis = 60_000L
 
     private val plannerService = PlannerService(repository)
     private val freeTimeCalculator = FreeTimeCalculator()
@@ -189,6 +218,8 @@ class DayDialViewModel @Inject constructor(
     val dataExportState = _dataExportState.asStateFlow()
     val routines: kotlinx.coroutines.flow.StateFlow<List<Routine>> = routineRepository.observeRoutines()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _routineAssistState = MutableStateFlow(RoutineAssistUiState())
+    val routineAssistState = _routineAssistState.asStateFlow()
     val manualMissedBlockIds = combine(
         coordinatorState.selectedDate,
         manualMissedBlockRegistry.ids
@@ -259,6 +290,11 @@ class DayDialViewModel @Inject constructor(
     val lastResult = coordinatorState.lastResult
     private val _calendarConnectionState = MutableStateFlow(CalendarConnectionState())
     val calendarConnectionState = _calendarConnectionState.asStateFlow()
+    // Last successful device-calendar sync time, for the plan page's "Synced X ago" hint.
+    // Updates live across all sync paths (manual, foreground, periodic worker) via the store flow.
+    val lastCalendarSyncAtMillis: StateFlow<Long?> =
+        calendarEventRepository.observeLastDeviceSyncAtMillis()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
 
     val missedBlocks = reviewDelegate.missedBlocks(viewModelScope, selectedDate)
     val selectedFocusBlock = stateFlows.selectedFocusBlock
@@ -271,6 +307,22 @@ class DayDialViewModel @Inject constructor(
     private val _insightsTabState = MutableStateFlow(InsightsTabUiState())
     val insightsTabState = _insightsTabState.asStateFlow()
     private val _insightsPeriod = MutableStateFlow(InsightsPeriod.DAY)
+    private val _trendRangeDays = MutableStateFlow(DEFAULT_TREND_RANGE_DAYS)
+    val trendRangeDays: kotlinx.coroutines.flow.StateFlow<Int> = _trendRangeDays.asStateFlow()
+
+    /**
+     * Reactive companion trend sections for the Insights tab. Kept out of [insightsTabState] so the
+     * five Room-backed sources are only subscribed while the UI is observing (WhileSubscribed), and so
+     * an imperative recommendations refresh can't wipe the loaded trends. Re-subscribes when the range
+     * changes or the day rolls over.
+     */
+    val insightsTrends: kotlinx.coroutines.flow.StateFlow<CompanionTrendSections> =
+        combine(_trendRangeDays, coordinatorState.currentDate) { days, today -> days to today }
+            .flatMapLatest { (days, today) ->
+                trendsDelegate.observeTrends(days, today)
+                    .catch { emit(CompanionTrendSections()) }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CompanionTrendSections())
     private val periodInsights = reviewDelegate.observePeriodInsights(viewModelScope, selectedDate, _insightsPeriod)
     val moodEnergyCheckIns = moodEnergyDelegate.observeCheckIns(viewModelScope, selectedDate)
     val journalEntryForDay = journalDelegate.journalEntry(viewModelScope, selectedDate)
@@ -284,18 +336,7 @@ class DayDialViewModel @Inject constructor(
         viewModelScope.launch {
             selectedDate.collect { date ->
                 if (calendarAutoSyncGate.shouldSync(date)) {
-                    // Quiet refresh: the repository no-ops without READ_CALENDAR
-                    // permission and failures must not raise calendar banners —
-                    // the manual sync action reports status when the user asks.
-                    runCatching {
-                        val zone = java.time.ZoneId.systemDefault()
-                        withContext(calendarSyncDispatcher) {
-                            calendarEventRepository.syncFromDeviceCalendar(
-                                date.atStartOfDay(zone).toInstant(),
-                                date.plusDays(1).atStartOfDay(zone).toInstant()
-                            )
-                        }
-                    }
+                    quietSyncDeviceCalendar(date)
                 }
             }
         }
@@ -359,7 +400,6 @@ class DayDialViewModel @Inject constructor(
                     }
                 }
         }
-        refreshTrendSections()
         viewModelScope.launch {
             combine(_insightsPeriod, periodInsights) { period, summary -> period to summary }
                 .collect { (period, summary) ->
@@ -369,11 +409,21 @@ class DayDialViewModel @Inject constructor(
         viewModelScope.launch {
             combine(reviewInsights, selectedDate, timeBlocksDomain) { insights, date, blocks ->
                 Triple(insights, date, blocks)
-            }.collect { (insights, date, blocks) ->
-                val summary = runCatching {
-                    reviewDelegate.currentReviewSummary(date, blocks)
-                }.getOrNull()
-                val recommendations = reviewDelegate.localInsightRecommendations(summary, insights)
+            }
+                // Block edits arrive in bursts (the write plus its reactive re-emit). The review
+                // summary below runs 14-day mood/habit/medication reads + correlation analysis, so
+                // coalesce bursts instead of recomputing for every intermediate emission — this
+                // keeps the shared DB connection free for the timeline repaint after a delete.
+                .debounce(250L)
+                .collect { (insights, date, blocks) ->
+                // Heavy compute (DB fan-out + correlation analysis) runs off the main thread so it
+                // never competes with rendering the just-edited timeline.
+                val recommendations = withContext(Dispatchers.Default) {
+                    val summary = runCatching {
+                        reviewDelegate.currentReviewSummary(date, blocks)
+                    }.getOrNull()
+                    reviewDelegate.localInsightRecommendations(summary, insights)
+                }
                 // Fallback daily coach line for passive surfaces (widget): the
                 // Review screen writes the richer narrative, but only when opened.
                 val today = LocalDate.now()
@@ -400,18 +450,10 @@ class DayDialViewModel @Inject constructor(
 
     fun clearMissedFromFocusMessage() = manualMissedBlockRegistry.clearMissedFromFocusMessage()
 
-    fun setInsightsTrendRange(days: Int) = refreshTrendSections(days.coerceIn(7, 60))
-
-    private fun refreshTrendSections(
-        windowDays: Int = _insightsTabState.value.trendRangeDays
-    ) {
-        viewModelScope.launch {
-            val sections = runCatching { trendsDelegate.loadTrends(windowDays) }
-                .getOrDefault(CompanionTrendSections())
-            _insightsTabState.update { state ->
-                state.copy(trendRangeDays = windowDays, trends = sections)
-            }
-        }
+    fun setInsightsTrendRange(days: Int) {
+        // [trendRangeDays] is exposed directly from this source, so the chip reflects the new range
+        // immediately and [insightsTrends] re-subscribes for the new window.
+        _trendRangeDays.value = days.coerceIn(MIN_TREND_RANGE_DAYS, MAX_TREND_RANGE_DAYS)
     }
 
     fun saveJournalEntry(date: LocalDate, body: String, promptType: String?) {
@@ -514,6 +556,45 @@ class DayDialViewModel @Inject constructor(
                 setCalendarSuccess("Device calendar refreshed for ${selectedDate.value}")
             }.onFailure { throwable ->
                 setCalendarFailure("Calendar refresh failed: ${calendarErrorText(throwable)}")
+            }
+        }
+    }
+
+    /**
+     * Quietly pulls the latest device-calendar events for the day in view when the
+     * app returns to the foreground. Unlike [syncCalendar] this stays silent — no
+     * working banner or status message — so reopening the app picks up calendar
+     * edits made elsewhere without surfacing UI on every resume. The per-date
+     * [calendarAutoSyncGate] only covers the first visit to each date for the
+     * lifetime of the ViewModel, so a surviving instance needs this on re-open.
+     *
+     * Throttled to at most once per [foregroundSyncMinIntervalMillis]: each sync is
+     * a wipe-and-replace of the day's imported blocks, so rapid app-switching would
+     * otherwise churn the database and flicker the timeline on every return.
+     */
+    fun refreshCalendarForAppForeground() {
+        val now = foregroundSyncClock()
+        val last = lastForegroundSyncAtMillis
+        if (last != null && now - last < foregroundSyncMinIntervalMillis) return
+        lastForegroundSyncAtMillis = now
+        viewModelScope.launch {
+            quietSyncDeviceCalendar(selectedDate.value)
+        }
+    }
+
+    /**
+     * Quiet refresh: the repository no-ops without READ_CALENDAR permission and
+     * failures must not raise calendar banners — the manual sync action reports
+     * status when the user asks.
+     */
+    private suspend fun quietSyncDeviceCalendar(date: LocalDate) {
+        runCatching {
+            val zone = java.time.ZoneId.systemDefault()
+            withContext(calendarSyncDispatcher) {
+                calendarEventRepository.syncFromDeviceCalendar(
+                    date.atStartOfDay(zone).toInstant(),
+                    date.plusDays(1).atStartOfDay(zone).toInstant()
+                )
             }
         }
     }
@@ -633,7 +714,10 @@ class DayDialViewModel @Inject constructor(
             endDayReviewReminder = settings.endDayReviewReminder,
             sleepScheduleEnabled = settings.sleepScheduleEnabled,
             sleepScheduleStartMinute = settings.sleepScheduleStartMinute,
-            sleepScheduleEndMinute = settings.sleepScheduleEndMinute
+            sleepScheduleEndMinute = settings.sleepScheduleEndMinute,
+            journalRemindersEnabled = settings.journalEnabled,
+            sleepJournalLogReminder = settings.sleepJournalLogReminder,
+            sleepJournalRemindersEnabled = settings.sleepEnabled || settings.journalEnabled
         )
     }
 
@@ -644,7 +728,10 @@ class DayDialViewModel @Inject constructor(
         endDayReviewReminder: Boolean,
         sleepScheduleEnabled: Boolean,
         sleepScheduleStartMinute: Int,
-        sleepScheduleEndMinute: Int
+        sleepScheduleEndMinute: Int,
+        journalRemindersEnabled: Boolean = true,
+        sleepJournalLogReminder: Boolean = false,
+        sleepJournalRemindersEnabled: Boolean = true
     ) {
         reminderDelegate.refreshReminderSchedule(
             scope = viewModelScope,
@@ -655,7 +742,10 @@ class DayDialViewModel @Inject constructor(
             endDayReviewReminder = endDayReviewReminder,
             sleepScheduleEnabled = sleepScheduleEnabled,
             sleepScheduleStartMinute = sleepScheduleStartMinute,
-            sleepScheduleEndMinute = sleepScheduleEndMinute
+            sleepScheduleEndMinute = sleepScheduleEndMinute,
+            journalRemindersEnabled = journalRemindersEnabled,
+            sleepJournalLogReminder = sleepJournalLogReminder,
+            sleepJournalRemindersEnabled = sleepJournalRemindersEnabled
         )
     }
 
@@ -741,6 +831,43 @@ class DayDialViewModel @Inject constructor(
     }
 
     /**
+     * Drafts editable routine suggestions (name + step outline) from the current template-editor
+     * capture via [RoutineAssistPlanner]. Mirrors the habit/medication assist flow: best-effort
+     * on-device proofread of the name is merged in, and nothing is applied until the user taps a chip.
+     */
+    fun requestRoutineAssist(request: RoutineAssistRequest) {
+        viewModelScope.launch {
+            val snapshot = runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }.getOrNull()
+            _routineAssistState.value = RoutineAssistUiState(isLoading = true, assistSnapshot = snapshot)
+            val suggestions = runCatching { routineAssistPlanner.suggest(request) }
+                .getOrElse { throwable ->
+                    _routineAssistState.value = RoutineAssistUiState(
+                        message = throwable.message ?: "No suggestions available",
+                        assistSnapshot = snapshot
+                    )
+                    return@launch
+                }
+            val refinedTitle = runCatching {
+                request.title.takeIf { it.isNotBlank() }?.let { routineAssistPlanner.refineTitle(it) }
+            }.getOrNull()
+            val merged = (listOfNotNull(refinedTitle) + suggestions).distinctBy { it.id }
+            _routineAssistState.value = if (merged.isNotEmpty()) {
+                RoutineAssistUiState(
+                    suggestions = merged,
+                    assistSnapshot = snapshot,
+                    message = snapshot?.takeIf { it.aiDisabled }?.let { GenAiAssistCopy.disabledAssistMessage() }
+                )
+            } else {
+                RoutineAssistUiState(message = "No suggestions available", assistSnapshot = snapshot)
+            }
+        }
+    }
+
+    fun clearRoutineAssist() {
+        _routineAssistState.value = RoutineAssistUiState()
+    }
+
+    /**
      * One-time idempotent import of any legacy prefs-era templates into the routines table.
      * Runs [onComplete] once the routines table is guaranteed seeded, so the caller can stop
      * re-importing on later loads.
@@ -778,7 +905,11 @@ class DayDialViewModel @Inject constructor(
         }
     }
 
-    fun duplicateBlock(blockId: String) = blockDelegate.duplicateBlock(viewModelScope, blockId, ::handlePlannerResult)
+    fun duplicateBlock(blockId: String, onOutcome: (PlannerOperationResult) -> Unit = {}) =
+        blockDelegate.duplicateBlock(viewModelScope, blockId) { result, isFinalMove ->
+            handlePlannerResult(result, isFinalMove)
+            onOutcome(result)
+        }
 
     fun deleteBlock(blockId: String) {
         blockDelegate.deleteBlock(viewModelScope, blockId, ::handlePlannerResult) { deletedBlockId ->
@@ -901,8 +1032,20 @@ class DayDialViewModel @Inject constructor(
         deleteBlock(blockId)
     }
 
-    fun onAiPlanRequested(goals: List<String>) =
-        aiDelegate.requestPlan(viewModelScope, coordinatorState.selectedDateValue, goals, ::currentReviewSummary)
+    fun onAiPlanRequested(goals: List<String>) {
+        viewModelScope.launch {
+            val date = coordinatorState.selectedDateValue
+            // Same-day-gated focus signal: a high-distraction day nudges the planner to protect focus.
+            val distractionAboveUsual = date == LocalDate.now() &&
+                runCatching { trendsDelegate.isDistractionAboveUsualToday(date) }.getOrDefault(false)
+            aiDelegate.requestPlan(
+                viewModelScope,
+                date,
+                focusAwareGoals(goals, distractionAboveUsual),
+                ::currentReviewSummary
+            )
+        }
+    }
 
     fun applyInsightRecommendation(
         recommendation: String,
@@ -946,16 +1089,20 @@ class DayDialViewModel @Inject constructor(
             val result = runCatching {
                 reviewDelegate.refreshInsightsTab(coordinatorState.selectedDateValue)
             }.getOrNull()
-            _insightsTabState.value = if (result == null) {
-                _insightsTabState.value.copy(isRefreshing = false)
-            } else {
-                InsightsTabUiState(
-                    reviewInsights = result.reviewInsights,
-                    recommendations = result.recommendations,
-                    assistSnapshot = result.assistSnapshot,
-                    digest = result.digest,
-                    isRefreshing = false
-                )
+            _insightsTabState.update { state ->
+                if (result == null) {
+                    state.copy(isRefreshing = false)
+                } else {
+                    // copy() rather than a fresh instance so the reactively-maintained period/summary
+                    // fields aren't reset by an imperative recommendations refresh.
+                    state.copy(
+                        reviewInsights = result.reviewInsights,
+                        recommendations = result.recommendations,
+                        assistSnapshot = result.assistSnapshot,
+                        digest = result.digest,
+                        isRefreshing = false
+                    )
+                }
             }
         }
     }
@@ -1003,6 +1150,28 @@ class DayDialViewModel @Inject constructor(
         focusDelegate.finishFocusSession(viewModelScope, plannerService, note)
         coordinatorState.selectBlock(null)
         appEventLog.record(AppEventCategory.FOCUS, "Finished focus session")
+    }
+
+    /**
+     * Injects an immediate break of [breakMinutes] into the running session.
+     * For a flat session this promotes it to a split session automatically.
+     */
+    fun injectBreakNow(breakMinutes: Int) {
+        focusDelegate.injectBreakNow(breakMinutes)
+        appEventLog.record(AppEventCategory.FOCUS, "Injected ${breakMinutes}m break mid-session")
+    }
+
+    /**
+     * Ends the current break early. Normally drops to the phase boundary so the
+     * user taps "Back to focus" to resume the next interval; if the break is the
+     * final phase there's nothing to resume, so the session finishes instead.
+     */
+    fun endBreakEarly() {
+        if (focusDelegate.endBreakNow()) {
+            finishFocusSession("Complete")
+        } else {
+            appEventLog.record(AppEventCategory.FOCUS, "Ended break early")
+        }
     }
 
     fun endDayReview(markCompleted: List<String> = emptyList(), markMissed: List<String> = emptyList()) =
@@ -1193,3 +1362,16 @@ class DayDialViewModel @Inject constructor(
         _focusGuidance.value = null
     }
 }
+
+/** Hint appended to AI-plan goals on a high-distraction day so the generated plan protects focus. */
+internal const val FOCUS_PROTECT_GOAL_HINT =
+    "Screen time shows more distraction than usual today, so protect focus: include at least one " +
+        "protected focus or deep-work block and avoid many short, fragmented gaps."
+
+/**
+ * Appends [FOCUS_PROTECT_GOAL_HINT] to the AI-plan [goals] when today's distraction runs above the
+ * user's usual; otherwise returns [goals] unchanged. Pure so the focus-aware planning behaviour is
+ * unit-testable without constructing the view model.
+ */
+internal fun focusAwareGoals(goals: List<String>, distractionAboveUsual: Boolean): List<String> =
+    if (distractionAboveUsual) goals + FOCUS_PROTECT_GOAL_HINT else goals

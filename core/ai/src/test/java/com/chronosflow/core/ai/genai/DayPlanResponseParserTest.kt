@@ -63,6 +63,40 @@ class DayPlanResponseParserTest {
     }
 
     @Test
+    fun `tolerates trailing commas in objects and arrays`() {
+        val raw = """
+            {
+                "blocks": [
+                    { "title": "Deep work", "startMinuteOfDay": 540, "durationMinutes": 90, },
+                ],
+                "reason": "r",
+            }
+        """.trimIndent()
+
+        val result = DayPlanResponseParser.parse(raw, "UTC", "Fallback")
+
+        assertNotNull(result)
+        assertEquals(1, result?.proposedBlocks?.size)
+        assertEquals("Deep work", result?.proposedBlocks?.first()?.title)
+    }
+
+    @Test
+    fun `does not strip commas inside string values`() {
+        val raw = """
+            {
+                "blocks": [
+                    { "title": "Email Sam, then call", "startMinuteOfDay": 600, "durationMinutes": 30 }
+                ]
+            }
+        """.trimIndent()
+
+        val result = DayPlanResponseParser.parse(raw, "UTC", "Fallback")
+
+        assertNotNull(result)
+        assertEquals("Email Sam, then call", result?.proposedBlocks?.first()?.title)
+    }
+
+    @Test
     fun `returns null for invalid json`() {
         val raw = "Not a json string"
         val result = DayPlanResponseParser.parse(raw, "UTC", "Fallback")

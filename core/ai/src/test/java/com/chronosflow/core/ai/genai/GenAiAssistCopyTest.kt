@@ -94,7 +94,7 @@ class GenAiAssistCopyTest {
         assertTrue(disabledMessage.contains("Assist uses local heuristics only"))
         assertFalse(disabledMessage.contains("Cloud Gemini first"))
         assertTrue(onDeviceMessage.contains("Suggestions use Gemini Nano through AICore"))
-        assertTrue(cloudAllowedMessage.contains("Add GEMINI_API_KEY"))
+        assertTrue(cloudAllowedMessage.contains("Connect a Firebase project"))
     }
 
     @Test

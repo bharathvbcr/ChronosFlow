@@ -154,7 +154,6 @@ private fun BlockEditorSheetUnderTest(
         onAcceptAiSuggestion = {},
         onRejectAiSuggestion = {},
         onModifyAiSuggestion = { _, _, _, _ -> },
-        onSetPrivacyMode = {},
         onAdjustFocus = {},
         onMarkComplete = {},
         onMarkMissed = {},

@@ -1,11 +1,19 @@
 package com.chronosflow.feature.habits
 
+import com.chronosflow.core.ui.components.ChronosIconButton
+
+import com.chronosflow.core.ui.components.ChronosButton
+import com.chronosflow.core.ui.components.ChronosTextButton
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+import com.chronosflow.core.ui.components.ChronosFilledTonalButton
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -36,11 +44,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +68,7 @@ import com.chronosflow.core.ui.components.ChronosQuickAddChips
 import com.chronosflow.core.ui.components.ChronosCommandPaletteAction
 import com.chronosflow.core.ui.components.ChronosPageHeader
 import com.chronosflow.core.ui.components.ChronosScreenScaffold
+import com.chronosflow.core.ui.components.OneShotNavTrigger
 import com.chronosflow.core.ui.components.formatDisplayMinute
 import com.chronosflow.core.ui.motion.ChronosValueAnimationFactory
 import com.chronosflow.core.ui.settings.rememberChronosUiSettings
@@ -77,7 +84,8 @@ fun HabitScreen(
     onBack: (() -> Unit)? = null,
     onOpenCommandPalette: (() -> Unit)? = null,
     openAddSheet: Boolean = false,
-    initialAddCapture: String? = null
+    initialAddCapture: String? = null,
+    navTargetGeneration: Int = 0
 ) {
     val activeHabits by viewModel.activeHabits.collectAsStateWithLifecycle()
     val allHabits by viewModel.allHabits.collectAsStateWithLifecycle()
@@ -85,21 +93,18 @@ fun HabitScreen(
     val goalOptions = remember(goals) { goals.map { ChronosLinkOption(it.id, it.title) } }
     val recentHistoryTemplateIds by viewModel.recentHistoryTemplateIds.collectAsStateWithLifecycle()
     val streaks by viewModel.streaks.collectAsStateWithLifecycle()
+    val completionTrend by viewModel.completionTrend.collectAsStateWithLifecycle()
     val repairSuggestions by viewModel.repairSuggestions.collectAsStateWithLifecycle()
     val repairAssistSnapshot by viewModel.repairAssistSnapshot.collectAsStateWithLifecycle()
     val assistState by viewModel.assistState.collectAsStateWithLifecycle()
     var sheetTarget by remember { mutableStateOf<HabitSheetTarget?>(null) }
     val normalizedInitialAddCapture = initialAddCapture?.trim()?.takeIf(String::isNotBlank)
-    var initialAddConsumed by rememberSaveable(openAddSheet, normalizedInitialAddCapture) {
-        mutableStateOf(false)
-    }
     var habitToArchive by remember { mutableStateOf<Habit?>(null) }
     var habitContextTarget by remember { mutableStateOf<Habit?>(null) }
     val nowMinute = remember { LocalTime.now().hour * 60 + LocalTime.now().minute }
     val shellBottomInset = LocalChronosShellBottomInset.current
 
-    LaunchedEffect(openAddSheet, normalizedInitialAddCapture, initialAddConsumed) {
-        if (!openAddSheet || initialAddConsumed) return@LaunchedEffect
+    OneShotNavTrigger(openAddSheet, navTargetGeneration, normalizedInitialAddCapture) {
         sheetTarget = HabitSheetTarget.Add(prefillTitle = normalizedInitialAddCapture)
         normalizedInitialAddCapture?.let { capture ->
             viewModel.requestHabitAssist(
@@ -113,7 +118,6 @@ fun HabitScreen(
                 )
             )
         }
-        initialAddConsumed = true
     }
 
     ChronosScreenScaffold(
@@ -139,6 +143,7 @@ fun HabitScreen(
                 )
             }
             item {
+                val doneToday = activeHabits.count { it.lastCompletedDate == LocalDate.now() }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -149,16 +154,23 @@ fun HabitScreen(
                         (streaks.maxOfOrNull { it.streakCount } ?: 0).toString(),
                         Modifier.weight(1f)
                     )
+                    ChronosMetricTile(
+                        "Done today",
+                        doneToday.toString(),
+                        Modifier.weight(1f),
+                        accent = MaterialTheme.colorScheme.tertiary
+                    )
                 }
             }
             item {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = { sheetTarget = HabitSheetTarget.Add() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Add habit", fontWeight = FontWeight.SemiBold)
                 }
             }
+            item { HabitConsistencyCard(trend = completionTrend) }
             item { HabitStreakChart(streaks = streaks) }
             if (repairSuggestions.isNotEmpty()) {
                 item(key = "habit_repair_panel") {
@@ -365,7 +377,7 @@ private fun HabitRepairPanel(
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
-                    FilledTonalButton(
+                    ChronosFilledTonalButton(
                         onClick = { onComplete(suggestion) },
                         modifier = Modifier.semantics {
                             contentDescription = habitRepairCompleteActionLabel(suggestion)
@@ -411,10 +423,10 @@ private fun HabitRow(
     ChronosListCard(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(
+            .chronosHapticClick(
+                onClick = onOpenContext,
                 onClickLabel = habitContextActionLabel(habit),
-                role = Role.Button,
-                onClick = onOpenContext
+                role = Role.Button
             )
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -430,10 +442,10 @@ private fun HabitRow(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    IconButton(onClick = onEdit) {
+                    ChronosIconButton(onClick = onEdit) {
                         Icon(Icons.Default.Edit, contentDescription = habitEditActionLabel(habit))
                     }
-                    IconButton(onClick = onArchive) {
+                    ChronosIconButton(onClick = onArchive) {
                         Icon(Icons.Default.Archive, contentDescription = habitArchiveActionLabel(habit))
                     }
                 }
@@ -447,12 +459,21 @@ private fun HabitRow(
                     HabitStatusPill(label = "On day plan", emphasized = false, success = false)
                 }
                 HabitStatusPill(label = habit.cadence, emphasized = false, success = false)
-                HabitStatusPill(
-                    label = "Streak ${habit.analytics.currentStreak.takeIf { it > 0 } ?: habit.streakCount}",
-                    emphasized = habit.analytics.currentStreak > 0 || habit.streakCount > 0,
-                    success = habit.analytics.currentStreak > 0 || habit.streakCount > 0
-                )
+                val currentStreak = habit.analytics.currentStreak.takeIf { it > 0 } ?: habit.streakCount
+                val milestone = habitStreakMilestoneLabel(currentStreak)
+                if (milestone != null) {
+                    HabitStatusPill(label = milestone, emphasized = true, success = true)
+                } else {
+                    HabitStatusPill(
+                        label = "Streak $currentStreak",
+                        emphasized = currentStreak > 0,
+                        success = currentStreak > 0
+                    )
+                }
                 HabitStatusPill(label = "Adherence $adherence%", emphasized = adherence >= 80, success = adherence >= 80)
+                habit.analytics.bestCompletionMinuteOfDay?.let { minute ->
+                    HabitStatusPill(label = "Best ${formatDisplayMinute(minute)}", emphasized = false, success = false)
+                }
                 if (isPaused) {
                     HabitStatusPill(label = "Paused", emphasized = false, success = false)
                 }
@@ -465,6 +486,7 @@ private fun HabitRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            HabitWeekStrip(habit = habit)
             recentEventSummary?.let { summary ->
                 Text(
                     text = "Recent: $summary",
@@ -480,7 +502,7 @@ private fun HabitRow(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(
+                ChronosButton(
                     onClick = onComplete,
                     modifier = Modifier
                         .weight(1f)
@@ -500,7 +522,7 @@ private fun HabitRow(
                     label = "habitPauseResumeAction"
                 ) { paused ->
                     if (paused) {
-                        FilledTonalButton(
+                        ChronosFilledTonalButton(
                             onClick = onResume,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -509,7 +531,7 @@ private fun HabitRow(
                             Text("Resume")
                         }
                     } else {
-                        OutlinedButton(
+                        ChronosOutlinedButton(
                             onClick = onOpenContext,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -561,7 +583,7 @@ private fun HabitContextActionSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Button(
+            ChronosButton(
                 onClick = onComplete,
                 enabled = !isDone && !isPaused && !skippedToday,
                 modifier = Modifier
@@ -572,7 +594,7 @@ private fun HabitContextActionSheet(
                 Text(habitCompleteActionLabel(habit))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = onDefer,
                     modifier = Modifier
                         .weight(1f)
@@ -581,7 +603,7 @@ private fun HabitContextActionSheet(
                 ) {
                     Text(habitDeferActionLabel(habit))
                 }
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = onSkip,
                     modifier = Modifier
                         .weight(1f)
@@ -592,7 +614,7 @@ private fun HabitContextActionSheet(
                 }
             }
             if (isPaused) {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = onResume,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -601,7 +623,7 @@ private fun HabitContextActionSheet(
                     Text(habitResumeActionLabel(habit))
                 }
             } else {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = onPause,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -610,7 +632,7 @@ private fun HabitContextActionSheet(
                     Text(habitPauseActionLabel(habit))
                 }
             }
-            OutlinedButton(
+            ChronosOutlinedButton(
                 onClick = onEdit,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -619,7 +641,7 @@ private fun HabitContextActionSheet(
                 Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
                 Text(habitEditActionLabel(habit))
             }
-            TextButton(
+            ChronosTextButton(
                 onClick = onArchive,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -630,6 +652,17 @@ private fun HabitContextActionSheet(
             }
         }
     }
+}
+
+private val habitStreakMilestoneTiers = listOf(365, 100, 50, 30, 14, 7)
+
+/**
+ * A celebratory label for the highest streak milestone [streak] has reached, or null below the
+ * first tier (7 days). Surfaced as an emphasized pill so a strong streak feels like an achievement.
+ */
+internal fun habitStreakMilestoneLabel(streak: Int): String? {
+    val tier = habitStreakMilestoneTiers.firstOrNull { streak >= it } ?: return null
+    return "🔥 $tier-day streak"
 }
 
 internal fun habitContextActionLabel(habit: Habit): String = "Open actions for ${habit.title}"

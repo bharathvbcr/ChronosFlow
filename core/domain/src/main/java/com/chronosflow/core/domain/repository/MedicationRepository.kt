@@ -14,6 +14,6 @@ interface MedicationRepository {
     suspend fun saveMedicationSchedule(schedule: MedicationSchedule)
     suspend fun saveMedicationSafetyProfile(profile: MedicationSafetyProfile)
     suspend fun addMedicationDoseEvent(event: MedicationDoseEvent)
-    suspend fun getDoseEventsBetween(start: LocalDate, end: LocalDate): List<MedicationDoseEvent>
+    fun observeDoseEventsBetween(start: LocalDate, end: LocalDate): Flow<List<MedicationDoseEvent>>
     suspend fun deleteMedicationPlan(plan: MedicationPlan)
 }

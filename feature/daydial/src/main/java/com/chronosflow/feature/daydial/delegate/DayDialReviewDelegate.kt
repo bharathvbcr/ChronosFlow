@@ -22,9 +22,6 @@ import com.chronosflow.core.domain.model.ReviewInsightType
 import com.chronosflow.core.domain.model.TimeBlock
 import com.chronosflow.core.domain.model.AlarmDeliveryState
 import com.chronosflow.core.domain.model.AlarmRequestType
-import com.chronosflow.core.domain.model.deriveHabitCompletionTrend
-import com.chronosflow.core.domain.model.deriveMedicationAdherenceTrend
-import com.chronosflow.core.domain.model.deriveMoodEnergyTrends
 import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.MedicationRepository
 import com.chronosflow.core.domain.repository.MoodEnergyRepository
@@ -35,9 +32,14 @@ import com.chronosflow.core.domain.repository.ReviewRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TaskScheduleRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
+import com.chronosflow.core.domain.usecase.AdvanceRecurringTaskOccurrenceUseCase
 import com.chronosflow.core.domain.usecase.CompleteTaskOccurrenceUseCase
 import com.chronosflow.core.domain.usecase.CompleteDailyReviewUseCase
+import com.chronosflow.core.domain.usecase.CompleteTimeBlockUseCase
 import com.chronosflow.core.domain.usecase.LogActualTimeUseCase
+import com.chronosflow.core.domain.usecase.ObserveHabitCompletionTrendUseCase
+import com.chronosflow.core.domain.usecase.ObserveMedicationAdherenceTrendUseCase
+import com.chronosflow.core.domain.usecase.ObserveMoodEnergyTrendsUseCase
 import com.chronosflow.core.domain.usecase.SyncRecurringTaskAlarmsUseCase
 import com.chronosflow.core.notifications.AlarmScheduleResult
 import com.chronosflow.core.notifications.AlarmScheduler
@@ -88,7 +90,20 @@ class DayDialReviewDelegate @Inject constructor(
     private val reviewAssistPlanner: ReviewAssistPlanner,
     private val manualMissedBlockRegistry: ManualMissedBlockRegistry,
     private val plannerService: PlannerService = PlannerService(repository),
-    private val dailyReviewCalculator: DailyReviewCalculator = DailyReviewCalculator()
+    // Shared with the agent-facing completeTimeBlock AppFunction so both completion paths stay identical.
+    private val completeTimeBlockUseCase: CompleteTimeBlockUseCase =
+        CompleteTimeBlockUseCase(plannerService, reviewRepository),
+    private val advanceRecurringTaskOccurrenceUseCase: AdvanceRecurringTaskOccurrenceUseCase =
+        AdvanceRecurringTaskOccurrenceUseCase(taskRepository, taskScheduleRepository, completeTaskOccurrenceUseCase),
+    private val dailyReviewCalculator: DailyReviewCalculator = DailyReviewCalculator(),
+    // Trend derivation lives in these use cases; defaults keep manual (test) construction simple while
+    // Hilt injects the shared instances.
+    private val observeMoodEnergyTrendsUseCase: ObserveMoodEnergyTrendsUseCase =
+        ObserveMoodEnergyTrendsUseCase(moodEnergyRepository),
+    private val observeHabitCompletionTrendUseCase: ObserveHabitCompletionTrendUseCase =
+        ObserveHabitCompletionTrendUseCase(habitRepository),
+    private val observeMedicationAdherenceTrendUseCase: ObserveMedicationAdherenceTrendUseCase =
+        ObserveMedicationAdherenceTrendUseCase(medicationRepository)
 ) {
     fun missedBlocks(
         scope: CoroutineScope,
@@ -162,24 +177,12 @@ class DayDialReviewDelegate @Inject constructor(
         insights: List<ReviewInsight>
     ): List<InsightRecommendation> = insightsRecommendationsPlanner.localRecommendations(summary, insights)
 
-    private suspend fun companionTrendContext(today: LocalDate): CompanionTrendContext {
-        val start = today.minusDays(13)
-        return CompanionTrendContext(
-            moodEnergyTrends = deriveMoodEnergyTrends(
-                moodEnergyRepository.observeForDateRange(start, today).first()
-            ),
-            habitCompletion = deriveHabitCompletionTrend(
-                habitRepository.getHabitEventsBetween(start, today),
-                windowDays = 14,
-                today = today
-            ),
-            medicationAdherence = deriveMedicationAdherenceTrend(
-                medicationRepository.getDoseEventsBetween(start, today),
-                windowDays = 14,
-                today = today
-            )
+    private suspend fun companionTrendContext(today: LocalDate): CompanionTrendContext =
+        CompanionTrendContext(
+            moodEnergyTrends = observeMoodEnergyTrendsUseCase(today = today).first(),
+            habitCompletion = observeHabitCompletionTrendUseCase(today = today).first(),
+            medicationAdherence = observeMedicationAdherenceTrendUseCase(today = today).first()
         )
-    }
 
     /**
      * Live execution metrics across the trailing window of [period] ending at the selected date.
@@ -296,15 +299,23 @@ class DayDialReviewDelegate @Inject constructor(
     fun markBlockComplete(scope: CoroutineScope, blockId: String) {
         scope.launch {
             val source = repository.getTimeBlockById(blockId) ?: return@launch
-            plannerService.logActualWindow(
-                blockId = source.id,
-                actualStartMinute = source.startMinuteOfDay,
-                actualEndMinute = (source.startMinuteOfDay + source.durationMinutes).coerceIn(0, 1440)
-            )
-            logActualTimeUseCase(source.toActualSegment(source.startMinuteOfDay, source.startMinuteOfDay + source.durationMinutes))
-            completeRecurringTaskOccurrence(source)
-            manualMissedBlockRegistry.clearMissed(blockId, source.date)
+            applyBlockCompletion(source)
         }
+    }
+
+    /**
+     * Idempotently records [block] as completed: fills its planned window as actual time, advances
+     * any linked recurring task, and clears a stale missed flag. A block that already has actual
+     * time is left untouched (only the missed flag is cleared) so re-completing never appends a
+     * duplicate actual-time segment — segments are keyed by random id and are not deduped on insert.
+     */
+    private suspend fun applyBlockCompletion(block: TimeBlock) {
+        // Shared idempotent completion (also used by the agent completeTimeBlock AppFunction):
+        // logs the planned window as actual time, or no-ops if the block is already complete.
+        if (completeTimeBlockUseCase(block)) {
+            completeRecurringTaskOccurrence(block)
+        }
+        manualMissedBlockRegistry.clearMissed(block.id, block.date)
     }
 
     fun logActualRange(
@@ -321,19 +332,10 @@ class DayDialReviewDelegate @Inject constructor(
     }
 
     private suspend fun completeRecurringTaskOccurrence(block: TimeBlock) {
-        val taskId = block.taskId ?: return
-        val occurrenceDate = block.taskOccurrenceDate ?: return
-        val task = taskRepository.getTaskById(taskId) ?: return
-        val existingSchedule = taskScheduleRepository.getTaskSchedule(taskId) ?: return
-        if (existingSchedule.nextOccurrenceDate != occurrenceDate) {
-            return
-        }
-        val updatedSchedule = completeTaskOccurrenceUseCase(
-            taskId = taskId,
-            completedOccurrenceDate = occurrenceDate
-        ) ?: return
+        // Schedule advancement is shared with the agent path; this layer adds alarm rescheduling.
+        val (task, updatedSchedule) = advanceRecurringTaskOccurrenceUseCase(block) ?: return
         syncRecurringTaskAlarmsUseCase(task, updatedSchedule)
-        schedulePersistedTaskAlarms(taskId)
+        schedulePersistedTaskAlarms(task.id)
     }
 
     private suspend fun schedulePersistedTaskAlarms(taskId: String) {
@@ -362,14 +364,7 @@ class DayDialReviewDelegate @Inject constructor(
             val byId = blocks.associateBy { it.id }
             markCompleted.forEach { blockId ->
                 val source = byId[blockId] ?: return@forEach
-                plannerService.logActualWindow(
-                    blockId = source.id,
-                    actualStartMinute = source.startMinuteOfDay,
-                    actualEndMinute = (source.startMinuteOfDay + source.durationMinutes).coerceIn(0, 1440)
-                )
-                logActualTimeUseCase(source.toActualSegment(source.startMinuteOfDay, source.startMinuteOfDay + source.durationMinutes))
-                completeRecurringTaskOccurrence(source)
-                manualMissedBlockRegistry.clearMissed(blockId, date)
+                applyBlockCompletion(source)
             }
             markMissed.forEach { blockId ->
                 manualMissedBlockRegistry.markMissed(blockId, date)

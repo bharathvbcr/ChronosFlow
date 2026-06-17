@@ -2,6 +2,7 @@ package com.chronosflow.core.ai
 
 import com.chronosflow.core.ai.genai.AssistGenAiSource
 import com.chronosflow.core.ai.genai.GenAiAssistCoordinator
+import com.chronosflow.core.ai.genai.GenerationProfile
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -63,7 +64,10 @@ class ConversationalAssistant @Inject constructor(
         userMessage: String,
         commands: List<CommandAssistCandidate>
     ): AssistantResponse {
-        val generation = genAiAssistCoordinator.generateAssistText(buildPrompt(history, userMessage, commands))
+        val generation = genAiAssistCoordinator.generateAssistText(
+            buildPrompt(history, userMessage, commands),
+            profile = GenerationProfile.CREATIVE
+        )
         return generation.text
             ?.let { parseResponse(it, commands, generation.source) }
             ?: localResponse(userMessage, commands)
@@ -76,7 +80,7 @@ class ConversationalAssistant @Inject constructor(
     ): Flow<AssistantStreamEvent> = flow {
         val prompt = buildPrompt(history, userMessage, commands)
         var lastCumulative = ""
-        genAiAssistCoordinator.generateAssistTextStream(prompt).collect { cumulative ->
+        genAiAssistCoordinator.generateAssistTextStream(prompt, profile = GenerationProfile.CREATIVE).collect { cumulative ->
             lastCumulative = cumulative
             emit(AssistantStreamEvent.Partial(displayText(cumulative)))
         }

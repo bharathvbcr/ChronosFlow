@@ -2,8 +2,10 @@ package com.chronosflow.core.notifications
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 
 object NotificationPermissions {
@@ -37,6 +39,38 @@ object NotificationPermissions {
 
     fun areFocusNotificationsReady(context: Context): Boolean {
         return hasStandardPermission(context) && hasPromotedPermission(context)
+    }
+
+    /**
+     * Whether to proactively nudge the user toward granting promoted ("Live Update") notifications.
+     * True only in the gap that actually keeps the live notification off the status-bar chip /
+     * always-on display: the platform supports promotion (API 37+), the standard post permission is
+     * already granted (so the notification posts at all), yet the promoted permission is missing.
+     * Below API 37 there is nothing to grant, and without the standard permission the standard
+     * request comes first — so neither nudges.
+     */
+    internal fun shouldNudgeForPromotion(
+        sdkInt: Int,
+        hasStandardPermission: Boolean,
+        hasPromotedPermission: Boolean
+    ): Boolean = sdkInt >= 37 && hasStandardPermission && !hasPromotedPermission
+
+    /** Context-aware [shouldNudgeForPromotion] using the live permission state of [context]. */
+    fun shouldNudgeForPromotion(context: Context): Boolean = shouldNudgeForPromotion(
+        sdkInt = Build.VERSION.SDK_INT,
+        hasStandardPermission = hasStandardPermission(context),
+        hasPromotedPermission = hasPromotedPermission(context)
+    )
+
+    /**
+     * Intent to the system screen where the user grants promoted ("Live Update") notifications, so a
+     * nudge can route there directly. Null below API 37, where that screen does not exist and the
+     * caller should hide the nudge entirely.
+     */
+    fun promotionSettingsIntent(context: Context): Intent? {
+        if (Build.VERSION.SDK_INT < 37) return null
+        return Intent(Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
     }
 
     fun missingPermissions(context: Context): Array<String> {

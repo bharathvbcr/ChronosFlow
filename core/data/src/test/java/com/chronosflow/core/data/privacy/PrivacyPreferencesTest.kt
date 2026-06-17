@@ -22,10 +22,10 @@ class PrivacyPreferencesTest {
     }
 
     @Test
-    fun `notification redaction defaults to enabled`() {
-        every { dataSource.getBoolean(PrivacyPreferences.KEY_REDACT_NOTIFICATIONS, defaultValue = true) } returns true
+    fun `notification redaction defaults to disabled`() {
+        every { dataSource.getBoolean(PrivacyPreferences.KEY_REDACT_NOTIFICATIONS, defaultValue = false) } returns false
 
-        assertTrue(preferences.redactSensitiveNotifications())
+        assertFalse(preferences.redactSensitiveNotifications())
     }
 
     @Test
@@ -65,7 +65,7 @@ class PrivacyPreferencesTest {
 
     @Test
     fun `redaction keys are independent`() {
-        every { dataSource.getBoolean(PrivacyPreferences.KEY_REDACT_NOTIFICATIONS, defaultValue = true) } returns false
+        every { dataSource.getBoolean(PrivacyPreferences.KEY_REDACT_NOTIFICATIONS, defaultValue = false) } returns false
         every { dataSource.getBoolean(PrivacyPreferences.KEY_REDACT_COMMAND_SEARCH, defaultValue = true) } returns true
         every { dataSource.getBoolean(PrivacyPreferences.KEY_REDACT_WIDGET_MEDICATION, defaultValue = true) } returns true
 

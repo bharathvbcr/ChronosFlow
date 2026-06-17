@@ -4,11 +4,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,17 +16,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import com.chronosflow.core.domain.model.SleepTrack
+import com.chronosflow.core.ui.components.ChronosButton
 import com.chronosflow.core.ui.components.ChronosTimePickerField
 import com.chronosflow.core.ui.components.formatDisplayMinute
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private val sleepDateFormatter = DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault())
 private const val UNSET_MINUTE = -1
+private const val MAX_INTERRUPTIONS = 10
 
 @Composable
 internal fun SleepLogSheetContent(
@@ -66,20 +69,32 @@ internal fun SleepLogSheetContent(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Text(
-            text = "Quality",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
-            (1..5).forEach { level ->
-                FilterChip(
-                    selected = quality == level,
-                    onClick = { quality = level },
-                    label = { Text(level.toString()) }
-                )
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Quality",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "$quality of 5 · ${sleepQualityLabel(quality)}",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
+        Slider(
+            value = quality.toFloat(),
+            onValueChange = { quality = it.roundToInt() },
+            valueRange = 1f..5f,
+            steps = 3,
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = sleepQualityContentDescription(quality) }
+        )
         ChronosTimePickerField(
             label = "Bed time",
             value = bedMinute.takeIf { it != UNSET_MINUTE }?.let { formatDisplayMinute(it) } ?: "Not set",
@@ -92,30 +107,72 @@ internal fun SleepLogSheetContent(
             selectedMinute = wakeMinute.takeIf { it != UNSET_MINUTE },
             onTimeSelected = { wakeMinute = it }
         )
+        val bedArg = bedMinute.takeIf { it != UNSET_MINUTE }
+        val wakeArg = wakeMinute.takeIf { it != UNSET_MINUTE }
+        sleepWindowLabel(bedArg, wakeArg)?.let { window ->
+            Text(
+                text = window,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            val detail = listOfNotNull(
+                sleepDurationSummary(bedArg, wakeArg),
+                sleepVsRecommendedLabel(bedArg, wakeArg)
+            ).joinToString(" · ")
+            if (detail.isNotEmpty()) {
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        sleepDurationHint(bedArg, wakeArg)?.let { hint ->
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
         Row(
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
                 text = "Interruptions",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            OutlinedButton(
-                onClick = { interruptions = (interruptions - 1).coerceAtLeast(0) },
-                enabled = interruptions > 0
-            ) { Text("−") }
-            Text(text = interruptions.toString(), style = MaterialTheme.typography.titleMedium)
-            OutlinedButton(onClick = { interruptions += 1 }) { Text("+") }
+            Text(
+                text = if (interruptions >= MAX_INTERRUPTIONS) "$MAX_INTERRUPTIONS+" else interruptions.toString(),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
+        Slider(
+            value = interruptions.toFloat().coerceIn(0f, MAX_INTERRUPTIONS.toFloat()),
+            onValueChange = { interruptions = it.roundToInt() },
+            valueRange = 0f..MAX_INTERRUPTIONS.toFloat(),
+            steps = MAX_INTERRUPTIONS - 1,
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = sleepInterruptionsContentDescription(interruptions) }
+        )
+        Text(
+            text = sleepRestfulnessLabel(quality, interruptions),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         OutlinedTextField(
             value = notes,
             onValueChange = { notes = it },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("Wind-down notes (optional)") }
         )
-        Button(
+        ChronosButton(
             onClick = {
                 onSave(
                     quality,

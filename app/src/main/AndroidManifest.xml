@@ -12,8 +12,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Health Connect: read-only import of sleep sessions, including from a background WorkManager job. -->
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+    <!-- Usage access: read per-app screen time (the data Digital Wellbeing is built on) for the
+         focused-vs-distracted Insights. Special access the user grants in system settings. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
 
     <queries>
+        <!-- Resolve the Health Connect provider so availability checks work on Android &lt; 14. -->
+        <package android:name="com.google.android.apps.healthdata" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -62,10 +72,23 @@
             android:exported="true"
             android:launchMode="singleTop"
             android:resizeableActivity="true"
-            android:theme="@style/Theme.ChronosFlow">
+            android:theme="@style/Theme.ChronosFlow.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Receive text shared from another app (Chrome, Keep, Gmail, messaging, …) and
+                 turn it into a new task via the capture sheet. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <!-- Text-selection toolbar "ChronosFlow" action: capture selected text as a task. -->
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
             <!-- "Open on phone" handoff from the Wear app (RemoteActivityHelper). -->
             <intent-filter>
@@ -74,7 +97,24 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="chronosflow" android:host="open" />
             </intent-filter>
+            <!-- Health Connect permission rationale: shown when the user reviews ChronosFlow's
+                 sleep access. Android 13 and below dispatches the legacy action; 14+ uses the
+                 platform permission-usage screen. -->
+            <intent-filter>
+                <action android:name="androidx.health.connect.action.SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
         </activity>
+
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity=".MainActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
 
         <activity
             android:name=".core.ui.bubble.BubbleActivity"

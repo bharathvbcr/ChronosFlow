@@ -27,6 +27,17 @@ object WearActionContract {
     /** Acknowledge a medication dose as taken; [arg] is the medication plan id. */
     const val TYPE_DOSE = "dose"
 
+    /** Mark a planned time block complete; [arg] is the block id. */
+    const val TYPE_BLOCK = "block"
+
+    /**
+     * Ask the phone to re-publish the day-summary mirror now; [arg] is unused (empty). Sent by the
+     * watch when it opens with a missing or stale mirror, so the phone pushes a fresh summary even
+     * when the phone app is foregrounded (its other publish triggers only fire on background / the
+     * widget-refresh worker). The listener wakes the phone process and re-runs the same publish.
+     */
+    const val TYPE_SYNC = "sync"
+
     const val FOCUS_START = "start"
     const val FOCUS_PAUSE = "pause"
     const val FOCUS_RESUME = "resume"

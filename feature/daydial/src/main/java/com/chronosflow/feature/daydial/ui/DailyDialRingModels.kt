@@ -1,5 +1,7 @@
 package com.chronosflow.feature.daydial.ui
 
+import com.chronosflow.core.ui.components.ChronosTextButton
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.chronosflow.core.domain.planner.DialRing
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.formatDurationLabel
+import com.chronosflow.core.ui.theme.ChronosColors
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import com.chronosflow.core.ui.theme.categoryColor
 import com.chronosflow.feature.daydial.DailyReview
@@ -38,7 +41,7 @@ import java.util.Locale
 
 private const val DAY_IN_MINUTES = 1440
 private const val RING_GUIDE_DESCRIPTION =
-    "Outer is fixed time, middle is your plan, inner is action-oriented routines. Tap any lane to add in context. The shaded indigo band marks your sleep window."
+    "Three lanes: Calendar holds fixed events, Plan is your flexible blocks, Actions are tasks, habits, and meds. Tap a lane to add there. The indigo band marks your sleep window."
 
 internal data class DailyDialCenterState(
     val title: String,
@@ -121,9 +124,12 @@ internal fun buildDailyDialCenterState(
 
     val nextStart = nextBlock?.startMinuteOfDay
     val freeMinutes = nextStart?.let { minutesUntil(currentMinute, it) } ?: 0
+    // Open time leads with the clock, not the words "Open time" — the action strip and the
+    // "Now & next" card below already carry that label, so repeating it in the hub three times
+    // over read as clutter. The clock + "Free for …" status is the at-a-glance answer here.
     return DailyDialCenterState(
-        title = "Open time",
-        timeWindow = formatDialClockMinute(currentMinute),
+        title = formatDialClockMinute(currentMinute),
+        timeWindow = "",
         status = if (nextStart != null) "Free for ${formatReviewMinutes(freeMinutes)}" else "Day is open",
         supporting = if (nextBlock != null) {
             "Next: ${nextBlock.title} at ${formatDialClockMinute(nextBlock.startMinuteOfDay)}"
@@ -135,8 +141,10 @@ internal fun buildDailyDialCenterState(
         } else {
             "Tap a ring to schedule this day"
         },
-        categoryLabel = "Open window",
-        accentColor = Color(0xFF4DB6AC),
+        // No category pill for open time — the "Open time" title already says it, so a
+        // duplicate "Open window" chip just adds noise. Blank → the hub skips the pill.
+        categoryLabel = "",
+        accentColor = ChronosColors.DialRingTeal,
         progressLine = progressLine
     )
 }
@@ -153,21 +161,21 @@ internal fun dailyDialLegendItems(): List<DailyDialLegendItem> {
             title = "Calendar",
             description = "Imported events and fixed holds",
             quickCreateLabel = "Calendar hold",
-            accentColor = Color(0xFF8E99F3)
+            accentColor = ChronosColors.DialRingIndigo
         ),
         DailyDialLegendItem(
             ring = DialRing.MIDDLE,
             title = "Plan",
             description = "Flexible blocks you can shape",
             quickCreateLabel = "Focus Block",
-            accentColor = Color(0xFF4CAF50)
+            accentColor = ChronosColors.DialRingGreen
         ),
         DailyDialLegendItem(
             ring = DialRing.INNER,
             title = "Actions",
             description = "Tasks habits and medication",
             quickCreateLabel = "Routine checkpoint",
-            accentColor = Color(0xFFFF9800)
+            accentColor = ChronosColors.DialRingAmber
         )
     )
 }
@@ -177,9 +185,14 @@ internal fun DailyDialCenterOverlay(
     state: DailyDialCenterState,
     modifier: Modifier = Modifier
 ) {
+    // Kept deliberately compact: the dial's inner rings are only ~120dp across on the
+    // phone layout, so the center hub shows just what's happening *now* (category, title,
+    // time, status) and the idle day-progress. The "Next: …" line and tap hints live in the
+    // "Now & next" card below and on the ring arcs themselves, so repeating them here only
+    // crowded the hub and hid the ring blocks behind it.
     Surface(
-        modifier = modifier.widthIn(max = 168.dp),
-        shape = RoundedCornerShape(24.dp),
+        modifier = modifier.widthIn(max = 150.dp),
+        shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
         tonalElevation = 4.dp,
         shadowElevation = 6.dp
@@ -189,22 +202,27 @@ internal fun DailyDialCenterOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .background(
-                        color = state.accentColor.copy(alpha = 0.16f),
-                        shape = CircleShape
+            // The category pill names a block's lane (Work, Meeting, …). Open time has no
+            // category, so it leaves this blank and the pill is skipped — otherwise it just
+            // echoed the "Open time" title below it.
+            if (state.categoryLabel.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .background(
+                            color = state.accentColor.copy(alpha = 0.16f),
+                            shape = CircleShape
+                        )
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = state.categoryLabel,
+                        color = state.accentColor,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = state.categoryLabel,
-                    color = state.accentColor,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                }
             }
             Text(
                 text = state.title,
@@ -215,12 +233,14 @@ internal fun DailyDialCenterOverlay(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(
-                text = state.timeWindow,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
-            )
+            if (state.timeWindow.isNotBlank()) {
+                Text(
+                    text = state.timeWindow,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
             Text(
                 text = state.status,
                 style = MaterialTheme.typography.labelLarge,
@@ -230,24 +250,20 @@ internal fun DailyDialCenterOverlay(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(
-                text = state.supporting,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            // Day progress reads better at a glance than the static tap hint.
-            Text(
-                text = state.progressLine ?: state.actionHint,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                lineHeight = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            // Idle day-progress is the one extra line worth keeping — it isn't shown anywhere
+            // else on the hub and reads at a glance. When a block is focused it's null, so the
+            // hub collapses to four tight lines instead of six.
+            state.progressLine?.let { progress ->
+                Text(
+                    text = progress,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
@@ -298,7 +314,7 @@ internal fun DailyDialLegendTip(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            TextButton(
+            ChronosTextButton(
                 onClick = onDismiss,
                 modifier = Modifier.semantics { contentDescription = "Dismiss ring guide tip" }
             ) {

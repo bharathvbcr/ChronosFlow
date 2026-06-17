@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>ChronosFlow</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>UILaunchScreen</key>
+    <dict/>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <!-- Live Activities for the focus session (ActivityKit) -->
+    <key>NSSupportsLiveActivities</key>
+    <true/>
+    <key>NSSupportsLiveActivitiesFrequentUpdates</key>
+    <true/>
+    <!-- HealthKit sleep import (iOS analogue of Android Health Connect) -->
+    <key>NSHealthShareUsageDescription</key>
+    <string>ChronosFlow reads your sleep data to show how you slept and adapt your day plan.</string>
+    <!-- Face ID / Touch ID gate for the Medications tab (iOS analogue of the Android app-lock). -->
+    <key>NSFaceIDUsageDescription</key>
+    <string>ChronosFlow uses Face ID to keep your medications private.</string>
+    <!-- Calendar overlay on the dial (EventKit; iOS 17+ uses the full-access key) -->
+    <key>NSCalendarsUsageDescription</key>
+    <string>ChronosFlow overlays your calendar events on the Chronos Dial.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>ChronosFlow overlays your calendar events on the Chronos Dial so you can plan around fixed commitments.</string>
+    <!-- Voice dictation for journal entries (Speech + microphone). -->
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>ChronosFlow transcribes your speech so you can dictate journal entries.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>ChronosFlow uses the microphone to dictate journal entries.</string>
+    <!-- Background scheduled auto-backup (BGTaskScheduler). -->
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>com.chronosflow.autobackup</string>
+    </array>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>fetch</string>
+    </array>
+</dict>
+</plist>

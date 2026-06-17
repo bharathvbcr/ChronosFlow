@@ -495,13 +495,127 @@ class DayDialBlockDelegateTest {
         assertEquals(listOf("other-day"), repository.blocks.keys.toList())
     }
 
+    @Test
+    fun `duplicateBlock places the copy in the next free gap at full duration`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = InMemoryTimeBlockRepository(
+            listOf(timeBlock(id = "block-1", date = date, startMinute = 9 * 60, durationMinutes = 60))
+        )
+        every { sleepScheduleRepository.getSleepSchedule() } returns SleepSchedule.default()
+        val delegate = newDelegate(repository)
+        var result: PlannerOperationResult? = null
+
+        delegate.duplicateBlock(this, "block-1") { operation, _ -> result = operation }
+
+        assertTrue(result is PlannerOperationResult.Applied)
+        val copy = repository.blocks.values.single { it.id != "block-1" }
+        // Lands right after the original (10:00), keeping its full 60-minute duration.
+        assertEquals(10 * 60, copy.startMinuteOfDay)
+        assertEquals(60, copy.durationMinutes)
+        assertTrue(copy.title.endsWith("(Copy)"))
+    }
+
+    @Test
+    fun `duplicateBlock shrinks the copy to fit the only remaining gap`() = runTest(UnconfinedTestDispatcher()) {
+        // Day packed except a 20-minute gap at 10:00-10:20; a full 60-minute copy cannot fit.
+        val repository = InMemoryTimeBlockRepository(
+            listOf(
+                timeBlock(id = "early", date = date, startMinute = 0, durationMinutes = 9 * 60),
+                timeBlock(id = "block-1", date = date, startMinute = 9 * 60, durationMinutes = 60),
+                timeBlock(id = "rest", date = date, startMinute = 10 * 60 + 20, durationMinutes = 13 * 60 + 40)
+            )
+        )
+        every { sleepScheduleRepository.getSleepSchedule() } returns SleepSchedule.default()
+        val delegate = newDelegate(repository)
+        var result: PlannerOperationResult? = null
+
+        delegate.duplicateBlock(this, "block-1") { operation, _ -> result = operation }
+
+        assertTrue(result is PlannerOperationResult.Applied)
+        val copy = repository.blocks.values.single { it.title.endsWith("(Copy)") }
+        assertEquals(10 * 60, copy.startMinuteOfDay)
+        assertEquals(20, copy.durationMinutes)
+    }
+
+    @Test
+    fun `duplicateBlock reports no free time on a fully packed day`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = InMemoryTimeBlockRepository(
+            listOf(
+                timeBlock(id = "early", date = date, startMinute = 0, durationMinutes = 9 * 60),
+                timeBlock(id = "block-1", date = date, startMinute = 9 * 60, durationMinutes = 60),
+                timeBlock(id = "rest", date = date, startMinute = 10 * 60, durationMinutes = 14 * 60)
+            )
+        )
+        every { sleepScheduleRepository.getSleepSchedule() } returns SleepSchedule.default()
+        val delegate = newDelegate(repository)
+        var result: PlannerOperationResult? = null
+
+        delegate.duplicateBlock(this, "block-1") { operation, _ -> result = operation }
+
+        assertTrue(result is PlannerOperationResult.Rejected)
+        assertEquals("No free time to duplicate this block", result?.message)
+        assertEquals(3, repository.blocks.size)
+    }
+
+    @Test
+    fun `duplicateBlock produces a clean standalone copy of a locked fixed linked block`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = InMemoryTimeBlockRepository(
+            listOf(
+                timeBlock(
+                    id = "block-1",
+                    date = date,
+                    startMinute = 9 * 60,
+                    durationMinutes = 60,
+                    provenance = BlockProvenance.CALENDAR_IMPORTED,
+                    calendarEventId = 42L,
+                    flexibility = BlockFlexibility.FIXED,
+                    isLocked = true,
+                    taskId = "task-7",
+                    habitId = "habit-3",
+                    medicationPlanId = "med-2",
+                    recurrenceRuleId = "rule-9"
+                )
+            )
+        )
+        every { sleepScheduleRepository.getSleepSchedule() } returns SleepSchedule.default()
+        val delegate = newDelegate(repository)
+        var result: PlannerOperationResult? = null
+
+        delegate.duplicateBlock(this, "block-1") { operation, _ -> result = operation }
+
+        // A locked/FIXED source used to be silently rejected by createBlock/validatePlacement.
+        assertTrue(result is PlannerOperationResult.Applied)
+        val copy = repository.blocks.values.single { it.id != "block-1" }
+        assertEquals(false, copy.isLocked)
+        assertEquals(BlockFlexibility.MOVABLE, copy.flexibility)
+        assertEquals(BlockProvenance.USER_CREATED, copy.provenance)
+        assertNull(copy.taskId)
+        assertNull(copy.habitId)
+        assertNull(copy.medicationPlanId)
+        assertNull(copy.recurrenceRuleId)
+        assertNull(copy.calendarEventId)
+    }
+
+    private fun newDelegate(repository: TimeBlockRepository) = DayDialBlockDelegate(
+        repository = repository,
+        sleepScheduleRepository = sleepScheduleRepository,
+        moveBlockUseCase = moveBlockUseCase,
+        resizeBlockUseCase = resizeBlockUseCase,
+        calendarEventRepository = calendarEventRepository,
+    )
+
     private fun timeBlock(
         id: String,
         date: LocalDate,
         startMinute: Int,
         durationMinutes: Int,
         provenance: BlockProvenance = BlockProvenance.USER_CREATED,
-        calendarEventId: Long? = null
+        calendarEventId: Long? = null,
+        flexibility: BlockFlexibility = BlockFlexibility.RESIZABLE,
+        isLocked: Boolean = false,
+        taskId: String? = null,
+        habitId: String? = null,
+        medicationPlanId: String? = null,
+        recurrenceRuleId: String? = null
     ): TimeBlock {
         val now = Instant.parse("2026-05-08T12:00:00Z")
         return TimeBlock(
@@ -513,16 +627,16 @@ class DayDialBlockDelegateTest {
             durationMinutes = durationMinutes,
             timezone = "UTC",
             provenance = provenance,
-            flexibility = BlockFlexibility.RESIZABLE,
+            flexibility = flexibility,
             energyLevel = EnergyIntensity.MODERATE,
             source = "TEST",
-            taskId = null,
+            taskId = taskId,
             calendarEventId = calendarEventId,
-            medicationPlanId = null,
-            habitId = null,
-            isLocked = false,
+            medicationPlanId = medicationPlanId,
+            habitId = habitId,
+            isLocked = isLocked,
             isProtected = false,
-            recurrenceRuleId = null,
+            recurrenceRuleId = recurrenceRuleId,
             actualStartMinuteOfDay = null,
             actualEndMinuteOfDay = null,
             createdAt = now,

@@ -11,6 +11,8 @@ import androidx.wear.protolayout.material.Typography
 import androidx.wear.tiles.RequestBuilders
 import androidx.wear.tiles.TileBuilders
 import androidx.wear.tiles.TileService
+import com.chronosflow.wear.presentation.WearFormat
+import com.chronosflow.wear.presentation.WearStartPage
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 
@@ -58,39 +60,67 @@ class ChronosTodayTileProvider : TileService() {
 
     private fun scheduleLayout(): LayoutElementBuilders.LayoutElement {
         val summary = DaySummaryStore.read(this)
+        val now = java.time.LocalTime.now()
+        val nowMinute = now.hour * 60 + now.minute
         val rows = mutableListOf<LayoutElementBuilders.LayoutElement>(
             ChronosTileUi.title(this, "Now"),
             ChronosTileUi.spacer(6f)
         )
+        // The schedule is time-relative; warn on the glance itself when the mirror is too old.
+        WearFormat.syncAgeLabel(summary.receivedAtMillis, System.currentTimeMillis())?.let { label ->
+            rows += ChronosTileUi.caption(this, "⚠ $label", ChronosTileUi.WARN_COLOR)
+            rows += ChronosTileUi.spacer(4f)
+        }
         val nowTitle = summary.nowTitle
         when {
             nowTitle != null -> {
                 rows += ChronosTileUi.body(this, nowTitle)
+                // Full start–end window when the dial knows this block, else the bare end time.
+                val windowOrEnd = com.chronosflow.wear.model.currentBlock(summary.blocks, nowMinute)
+                    ?.let { WearFormat.windowLabel(it.startMinute, it.endMinute) }
+                    ?: "until ${ChronosTileUi.formatMinuteOfDay(summary.nowEndMinute)}"
                 rows += ChronosTileUi.caption(
                     this,
-                    "until ${ChronosTileUi.formatMinuteOfDay(summary.nowEndMinute)}"
+                    "${WearFormat.remainingLabel(summary.nowEndMinute, nowMinute)} · $windowOrEnd"
                 )
             }
-            summary.nextTitle == null -> rows += ChronosTileUi.body(this, EMPTY_LABEL)
+            summary.nextTitle == null -> rows += ChronosTileUi.body(
+                this,
+                if (summary.receivedAtMillis == 0L) SYNC_LABEL else EMPTY_LABEL
+            )
         }
         summary.nextTitle?.let { next ->
             rows += ChronosTileUi.spacer(4f)
             rows += ChronosTileUi.body(
                 this,
-                "Next: $next · ${ChronosTileUi.formatMinuteOfDay(summary.nextStartMinute)}"
+                "Next: $next · ${WearFormat.startsInLabel(summary.nextStartMinute, nowMinute)}"
+            )
+        }
+        if (summary.nextBreakStartMinute > 0) {
+            val breakName = summary.nextBreakTitle?.takeIf { it.isNotBlank() && !it.equals("Break", ignoreCase = true) }
+            rows += ChronosTileUi.caption(
+                this,
+                "Break ${WearFormat.startsInLabel(summary.nextBreakStartMinute, nowMinute)}" +
+                    (breakName?.let { " · $it" } ?: "")
             )
         }
         rows += ChronosTileUi.spacer(6f)
         rows += ChronosTileUi.caption(
             this,
-            if (summary.openTaskCount == 0) "No open tasks" else "${summary.openTaskCount} tasks open"
+            tileDayLine(
+                com.chronosflow.wear.model.upcomingBlockCount(summary.blocks, nowMinute),
+                summary.openTaskCount
+            )
         )
         // Present only when the phone syncs task entries (privacy redaction strips them).
         summary.tasks.firstOrNull()?.let { topTask ->
             rows += ChronosTileUi.caption(this, "Next: ${topTask.title}")
         }
 
-        return ChronosTileUi.column(*rows.toTypedArray())
+        return ChronosTileUi.column(
+            ChronosTileUi.launchModifiers(this, WearStartPage.NOW),
+            *rows.toTypedArray()
+        )
     }
 
     private fun focusLayout(state: WearFocusStateStore.FocusState): LayoutElementBuilders.LayoutElement {
@@ -129,6 +159,7 @@ class ChronosTodayTileProvider : TileService() {
             .build()
 
         return LayoutElementBuilders.Box.Builder()
+            .setModifiers(ChronosTileUi.launchModifiers(this, WearStartPage.FOCUS))
             .addContent(
                 CircularProgressIndicator.Builder()
                     .setProgress(progress)
@@ -155,9 +186,24 @@ class ChronosTodayTileProvider : TileService() {
 
     companion object {
         const val EMPTY_LABEL = "Nothing scheduled"
+        const val SYNC_LABEL = "Open phone to sync"
         const val RUNNING_LABEL = "Focusing"
         const val PAUSED_LABEL = "Paused"
         const val DEFAULT_ACTIVE_TITLE = "Focus session"
         private const val ACTIVE_FRESHNESS_MILLIS = 60 * 1000L
+    }
+}
+
+/**
+ * The schedule tile's bottom "day line": the remaining-block count folded in with the open-task
+ * count ("2 blocks left · 3 tasks open"), so the tile carries the same schedule-load glance the
+ * Now home page does without spending an extra row. Pure, so it is unit-tested directly.
+ */
+internal fun tileDayLine(blocksLeft: Int, openTaskCount: Int): String {
+    val tasks = if (openTaskCount == 0) "No open tasks" else "$openTaskCount tasks open"
+    return if (blocksLeft > 0) {
+        "$blocksLeft block${if (blocksLeft == 1) "" else "s"} left · $tasks"
+    } else {
+        tasks
     }
 }

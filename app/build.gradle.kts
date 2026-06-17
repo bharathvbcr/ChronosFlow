@@ -5,22 +5,34 @@ plugins {
     alias(libs.plugins.kover)
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
 }
 
-val localProperties = Properties().apply {
-    val localFile = rootProject.file("local.properties")
-    if (localFile.exists()) {
-        localFile.inputStream().use { load(it) }
-    }
-}
-val geminiApiKey = (localProperties.getProperty("GEMINI_API_KEY") ?: "").trim()
 val enableDebugCoverage = providers.gradleProperty("chronos.enableDebugCoverage")
     .map(String::toBoolean)
     .orElse(false)
 
+// Shared release signing: the phone (:app) and watch (:wear) must be signed with the SAME key so
+// the Wearable Data Layer pairs them. Credentials live in the gitignored root keystore.properties
+// (see keystore.properties.example); absent that file the release variant is simply left unsigned.
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+
 extensions.configure<ApplicationExtension> {
+    if (keystorePropsFile.exists()) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
     namespace = "com.chronosflow"
     compileSdk = 37
 
@@ -28,11 +40,10 @@ extensions.configure<ApplicationExtension> {
         applicationId = "com.chronosflow"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = providers.gradleProperty("chronos.versionCode").map(String::toInt).orElse(1).get()
+        versionName = providers.gradleProperty("chronos.versionName").orElse("0.1.0").get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "GEMINI_API_KEY", "\"${geminiApiKey.replace("\"", "\\\"")}\"")
     }
 
     lint {
@@ -55,6 +66,9 @@ extensions.configure<ApplicationExtension> {
         debug {
             enableUnitTestCoverage = enableDebugCoverage.get()
             enableAndroidTestCoverage = enableDebugCoverage.get()
+        }
+        if (keystorePropsFile.exists()) {
+            release { signingConfig = signingConfigs.getByName("release") }
         }
         create("benchmark") {
             initWith(getByName("release"))
@@ -100,8 +114,11 @@ dependencies {
     implementation(project(":feature:medication"))
 
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.navigation3.runtime)
+    implementation(libs.androidx.navigation3.ui)
+    implementation(libs.androidx.lifecycle.viewmodel.navigation3)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.foundation)
@@ -138,7 +155,6 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.robolectric)
-    testImplementation(libs.androidx.navigation.testing)
 
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)

@@ -16,7 +16,7 @@ interface MedicationDoseEventDao {
     suspend fun getEventsForPlan(medicationPlanId: String): List<MedicationDoseEventEntity>
 
     @Query("SELECT * FROM medication_dose_events WHERE eventDate BETWEEN :start AND :end ORDER BY eventDate ASC")
-    suspend fun getEventsBetween(start: java.time.LocalDate, end: java.time.LocalDate): List<MedicationDoseEventEntity>
+    fun observeEventsBetween(start: java.time.LocalDate, end: java.time.LocalDate): Flow<List<MedicationDoseEventEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvent(event: MedicationDoseEventEntity)

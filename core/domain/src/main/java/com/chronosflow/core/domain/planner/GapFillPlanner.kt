@@ -1,5 +1,6 @@
 package com.chronosflow.core.domain.planner
 
+import com.chronosflow.core.domain.model.SleepReadiness
 import com.chronosflow.core.domain.model.SleepSchedule
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TimeBlock
@@ -47,8 +48,13 @@ class GapFillPlanner @Inject constructor(
         sleepSchedule: SleepSchedule,
         nowMinuteOfDay: Int?,
         addBreaksAutomatically: Boolean,
-        minGapMinutes: Int = MIN_GAP_MINUTES
+        minGapMinutes: Int = MIN_GAP_MINUTES,
+        readiness: SleepReadiness = SleepReadiness.UNKNOWN
     ): GapFillProposal {
+        // After a depleted night, recovery breaks come after a shorter focus stretch and run longer.
+        val depleted = readiness == SleepReadiness.DEPLETED
+        val focusStretchMinutes = if (depleted) DEPLETED_FOCUS_STRETCH_MINUTES else FOCUS_STRETCH_MINUTES
+        val breakDurationMinutes = if (depleted) DEPLETED_BREAK_DURATION_MINUTES else BREAK_DURATION_MINUTES
         val gaps = excludeSleepMinutes(freeTimeCalculator.calculate(blocks), sleepSchedule)
             .mapNotNull { gap -> clipGapToNow(gap, nowMinuteOfDay) }
             .filter { it.endMinute - it.startMinute >= minGapMinutes }
@@ -98,12 +104,12 @@ class GapFillPlanner @Inject constructor(
                     if (
                         addBreaksAutomatically &&
                         available >= BREAK_MIN_GAP_MINUTES &&
-                        focusMinutesBefore(blocks, gap.startMinute) + placedMinutes >= FOCUS_STRETCH_MINUTES
+                        focusMinutesBefore(blocks, gap.startMinute) + placedMinutes >= focusStretchMinutes
                     ) {
                         proposed += GapFillBlock(
                             title = "Recovery break",
                             startMinute = cursor,
-                            durationMinutes = BREAK_DURATION_MINUTES,
+                            durationMinutes = breakDurationMinutes.coerceAtMost(available),
                             category = "RECOVERY"
                         )
                     }
@@ -141,6 +147,8 @@ class GapFillPlanner @Inject constructor(
         const val BREAK_MIN_GAP_MINUTES = 30
         const val BREAK_DURATION_MINUTES = 20
         const val FOCUS_STRETCH_MINUTES = 90
+        const val DEPLETED_BREAK_DURATION_MINUTES = 25
+        const val DEPLETED_FOCUS_STRETCH_MINUTES = 60
     }
 }
 

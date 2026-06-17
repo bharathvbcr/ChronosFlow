@@ -17,6 +17,7 @@ import com.chronosflow.core.domain.model.JournalEntry
 import com.chronosflow.core.domain.model.MedicationDoseEvent
 import com.chronosflow.core.domain.model.MedicationDoseEventType
 import com.chronosflow.core.domain.model.MoodEnergyCheckIn
+import com.chronosflow.core.domain.model.SleepSource
 import com.chronosflow.core.domain.model.SleepTrack
 import com.chronosflow.core.domain.model.Task
 import com.chronosflow.core.domain.model.TimeBlock
@@ -34,6 +35,7 @@ import com.chronosflow.core.domain.repository.RoutineRepository
 import com.chronosflow.core.domain.repository.SleepTrackRepository
 import com.chronosflow.core.domain.repository.TaskRepository
 import com.chronosflow.core.domain.repository.TimeBlockRepository
+import com.chronosflow.core.data.focus.ManualMissedBlockRegistry
 import com.chronosflow.core.domain.usecase.ApplyRoutineToDateUseCase
 import com.chronosflow.core.domain.usecase.RecordSleepUseCase
 import com.chronosflow.feature.focus.FocusService
@@ -66,8 +68,11 @@ class ChronosAppFunctions @Inject constructor(
     private val sleepTrackRepository: SleepTrackRepository,
     private val recordSleepUseCase: RecordSleepUseCase,
     private val applyRoutineToDateUseCase: ApplyRoutineToDateUseCase,
+    private val timeBlockCompletionHandler: TimeBlockCompletionHandler,
     private val plannerService: PlannerService,
-    private val focusSessionRepository: FocusSessionRepository
+    private val focusSessionRepository: FocusSessionRepository,
+    private val manualMissedBlockRegistry: ManualMissedBlockRegistry,
+    private val featureFlagsSource: ChronosFeatureFlagsSource
 ) {
 
     /**
@@ -184,6 +189,7 @@ class ChronosAppFunctions @Inject constructor(
         reason: String? = null
     ): Boolean {
         return runAppFunction {
+            if (!featureEnabled { it.habitsEnabled }) return@runAppFunction false
             val normalizedHabitId = habitId.requiredText() ?: return@runAppFunction false
             val now = Instant.now()
             val event = HabitEvent(
@@ -218,6 +224,7 @@ class ChronosAppFunctions @Inject constructor(
         reason: String? = null
     ): Boolean {
         return runAppFunction {
+            if (!featureEnabled { it.habitsEnabled }) return@runAppFunction false
             val normalizedHabitId = habitId.requiredText() ?: return@runAppFunction false
             val now = Instant.now()
             val event = HabitEvent(
@@ -254,6 +261,7 @@ class ChronosAppFunctions @Inject constructor(
         reason: String? = null
     ): Boolean {
         return runAppFunction {
+            if (!featureEnabled { it.medicationEnabled }) return@runAppFunction false
             val normalizedPlanId = medicationPlanId.requiredText() ?: return@runAppFunction false
             val now = Instant.now()
             val event = MedicationDoseEvent(
@@ -288,6 +296,7 @@ class ChronosAppFunctions @Inject constructor(
         reason: String? = null
     ): Boolean {
         return runAppFunction {
+            if (!featureEnabled { it.medicationEnabled }) return@runAppFunction false
             val normalizedPlanId = medicationPlanId.requiredText() ?: return@runAppFunction false
             val now = Instant.now()
             val event = MedicationDoseEvent(
@@ -469,6 +478,73 @@ class ChronosAppFunctions @Inject constructor(
     }
 
     /**
+     * Marks an existing planned time block as completed.
+     * Call this when the user says they finished, completed, or did a block that is already on
+     * their plan — especially when they forgot to start its focus timer and just want it counted.
+     *
+     * Unlike [logActualTimeSegment], which records a free-floating activity, this links the
+     * completion to a specific planned block and fills its full planned window as actual time, so
+     * the daily review counts the block as done. Calling it again on an already-completed block is
+     * a safe no-op (no duplicate time is logged).
+     *
+     * Identify the block by either [blockId] (from [getTodaySchedule], most precise) or [blockTitle]
+     * for natural voice use (e.g. "I finished my deep work block"). When only a title is given, a
+     * matching block on today's plan that is not yet completed is preferred.
+     *
+     * @param blockId The ID of the planned time block to mark complete (takes precedence).
+     * @param blockTitle The title of a block on today's plan to mark complete, if no id is given.
+     * @return True if the block is now (or was already) complete, false if no block matched.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun completeTimeBlock(
+        appFunctionContext: AppFunctionContext,
+        blockId: String? = null,
+        blockTitle: String? = null
+    ): Boolean {
+        return runAppFunction {
+            withContext(Dispatchers.IO) {
+                val block = resolveTimeBlock(blockId, blockTitle)
+                    ?: return@withContext false
+                // Same path as the in-app action and the watch's complete-block action: logs the
+                // planned window (idempotent), advances any recurring task + alarms on a fresh
+                // completion, and clears a stale missed flag.
+                timeBlockCompletionHandler.complete(block)
+                true
+            }
+        }
+    }
+
+    /**
+     * Marks a planned time block as missed (skipped or not done).
+     * Call this when the user says they skipped, missed, or did not get to a block on their plan.
+     * This is the inverse of [completeTimeBlock]; the block then surfaces as missed in the day
+     * review.
+     *
+     * Identify the block by either [blockId] (from [getTodaySchedule], most precise) or [blockTitle]
+     * for natural voice use (e.g. "I skipped my workout"). When only a title is given, a matching
+     * block on today's plan that is not yet completed is preferred.
+     *
+     * @param blockId The ID of the planned time block to mark missed (takes precedence).
+     * @param blockTitle The title of a block on today's plan to mark missed, if no id is given.
+     * @return True if the block was marked missed, false if no block matched.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun markTimeBlockMissed(
+        appFunctionContext: AppFunctionContext,
+        blockId: String? = null,
+        blockTitle: String? = null
+    ): Boolean {
+        return runAppFunction {
+            withContext(Dispatchers.IO) {
+                val block = resolveTimeBlock(blockId, blockTitle)
+                    ?: return@withContext false
+                manualMissedBlockRegistry.markMissed(block.id, block.date)
+                true
+            }
+        }
+    }
+
+    /**
      * Synchronizes and imports calendar events from the Android device's local calendar for the next 7 days.
      * Call this when the user requests to sync, update, refresh, or import their calendar events or schedule.
      *
@@ -507,6 +583,7 @@ class ChronosAppFunctions @Inject constructor(
         targetDateOptional: String? = null
     ): Boolean {
         return runAppFunction {
+            if (!featureEnabled { it.goalsEnabled }) return@runAppFunction false
             val normalizedTitle = title.requiredText() ?: return@runAppFunction false
             val normalizedDescription = description?.trim()?.takeIf { it.isNotEmpty() }
             val goal = Goal(
@@ -542,6 +619,7 @@ class ChronosAppFunctions @Inject constructor(
         promptOptional: String? = null
     ): Boolean {
         return runAppFunction {
+            if (!featureEnabled { it.journalEnabled }) return@runAppFunction false
             val normalizedBody = text.requiredText() ?: return@runAppFunction false
             val now = Instant.now()
             val entry = JournalEntry(
@@ -582,6 +660,7 @@ class ChronosAppFunctions @Inject constructor(
         windDownNotes: String? = null
     ): Boolean {
         return runAppFunction {
+            if (!featureEnabled { it.sleepEnabled }) return@runAppFunction false
             val normalizedQuality = quality?.coerceIn(1, 5) ?: return@runAppFunction false
             val actualStartMinute = bedTimeIso.requiredText()?.let {
                 val time = LocalTime.parse(it)
@@ -615,7 +694,9 @@ class ChronosAppFunctions @Inject constructor(
                         actualStartMinute = actualStartMinute ?: base.actualStartMinute,
                         actualEndMinute = actualEndMinute ?: base.actualEndMinute,
                         windDownNotes = normalizedNotes ?: base.windDownNotes,
-                        interruptedCount = normalizedInterruptions ?: base.interruptedCount
+                        interruptedCount = normalizedInterruptions ?: base.interruptedCount,
+                        // User-driven log; claim ownership so Health Connect sync won't overwrite it.
+                        source = SleepSource.MANUAL
                     )
                 )
             }
@@ -698,7 +779,9 @@ class ChronosAppFunctions @Inject constructor(
     suspend fun getTodaySchedule(
         appFunctionContext: AppFunctionContext
     ): List<ScheduledBlock> = withContext(Dispatchers.IO) {
-        timeBlockRepository.getTimeBlocksByDate(LocalDate.now()).first()
+        val today = LocalDate.now()
+        val missedIds = manualMissedBlockRegistry.missedIdsForDate(today, manualMissedBlockRegistry.ids.value)
+        timeBlockRepository.getTimeBlocksByDate(today).first()
             .sortedBy { it.startMinuteOfDay }
             .map { block ->
                 ScheduledBlock(
@@ -706,7 +789,9 @@ class ChronosAppFunctions @Inject constructor(
                     title = block.title,
                     category = block.category,
                     startMinuteOfDay = block.startMinuteOfDay,
-                    durationMinutes = block.durationMinutes
+                    durationMinutes = block.durationMinutes,
+                    completed = block.actualStartMinuteOfDay != null,
+                    missed = block.id in missedIds
                 )
             }
     }
@@ -745,6 +830,7 @@ class ChronosAppFunctions @Inject constructor(
     suspend fun listHabits(
         appFunctionContext: AppFunctionContext
     ): List<HabitSummary> = withContext(Dispatchers.IO) {
+        if (!featureEnabled { it.habitsEnabled }) return@withContext emptyList()
         habitRepository.observeHabits().first()
             .filter { it.isActive }
             .map { habit ->
@@ -768,6 +854,7 @@ class ChronosAppFunctions @Inject constructor(
     suspend fun listMedications(
         appFunctionContext: AppFunctionContext
     ): List<MedicationSummary> = withContext(Dispatchers.IO) {
+        if (!featureEnabled { it.medicationEnabled }) return@withContext emptyList()
         medicationRepository.observeMedicationPlans().first()
             .filter { it.isActive }
             .map { plan ->
@@ -782,12 +869,36 @@ class ChronosAppFunctions @Inject constructor(
             }
     }
 
+    /**
+     * Resolves the target block for the block-status AppFunctions. Prefers an explicit [blockId];
+     * otherwise matches [blockTitle] (case-insensitive) against today's plan, favouring a block
+     * that still needs action when titles repeat. Returns null when neither identifies a block.
+     */
+    private suspend fun resolveTimeBlock(blockId: String?, blockTitle: String?): TimeBlock? {
+        blockId.requiredText()?.let { id ->
+            return timeBlockRepository.getTimeBlockById(id)
+        }
+        val title = blockTitle.requiredText() ?: return null
+        val matches = timeBlockRepository.getTimeBlocksByDate(LocalDate.now()).first()
+            .filter { it.title.equals(title, ignoreCase = true) }
+        return matches.firstOrNull { it.actualStartMinuteOfDay == null } ?: matches.firstOrNull()
+    }
+
     private suspend fun runAppFunction(block: suspend () -> Boolean): Boolean =
         try {
             block()
         } catch (e: Exception) {
             false
         }
+
+    /**
+     * True when the feature gating [select] is enabled in Developer settings. Agent-facing
+     * functions for a disabled feature return false/empty so the assistant cannot create or
+     * surface a surface the user has hidden.
+     */
+    private suspend fun featureEnabled(
+        select: (com.chronosflow.core.ui.settings.ChronosFeatureFlags) -> Boolean
+    ): Boolean = select(featureFlagsSource.current())
 
     private fun String?.requiredText(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
 
@@ -812,7 +923,11 @@ data class ScheduledBlock(
     /** Minute of the day the block starts (0 to 1439, where 480 is 8:00 AM). */
     val startMinuteOfDay: Int,
     /** Duration of the block in minutes. */
-    val durationMinutes: Int
+    val durationMinutes: Int,
+    /** True if the block already has actual time logged (completed); pass false ones to completeTimeBlock. */
+    val completed: Boolean,
+    /** True if the block was marked missed/skipped. A block is neither completed nor missed until acted on. */
+    val missed: Boolean
 )
 
 /**

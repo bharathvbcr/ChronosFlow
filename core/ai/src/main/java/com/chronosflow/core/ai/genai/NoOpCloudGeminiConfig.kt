@@ -5,5 +5,5 @@ import javax.inject.Singleton
 
 @Singleton
 class NoOpCloudGeminiConfig @Inject constructor() : CloudGeminiConfig {
-    override val apiKey: String? = null
+    override val isCloudConfigured: Boolean = false
 }

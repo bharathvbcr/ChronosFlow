@@ -1,5 +1,6 @@
 package com.chronosflow.widget
 
+
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.DpSize
@@ -70,11 +71,10 @@ class MedicationGlanceWidget : GlanceAppWidget() {
                 .fillMaxSize()
                 .padding(16.dp)
                 .background(GlanceTheme.colors.background)
+                .clickable(openSectionAction(LocalContext.current, SECTION_MEDICATION))
         ) {
             Row(
-                modifier = GlanceModifier
-                    .fillMaxWidth()
-                    .clickable(openSectionAction(LocalContext.current, SECTION_MEDICATION))
+                modifier = GlanceModifier.fillMaxWidth()
             ) {
                 Text(
                     text = "Medication",

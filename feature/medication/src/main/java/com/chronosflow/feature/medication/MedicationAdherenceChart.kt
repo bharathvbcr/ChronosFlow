@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.chronosflow.core.domain.model.MedicationPlan
 import com.chronosflow.core.ui.components.ChronosListCard
+import com.chronosflow.core.ui.theme.ChronosColors
 
 @Composable
 fun MedicationAdherenceChart(
@@ -128,7 +129,7 @@ private fun MedicationAdherenceRow(plan: MedicationPlan) {
 private fun adherenceColor(score: Float): Color {
     return when {
         score >= 0.9f -> MaterialTheme.colorScheme.primary
-        score >= 0.7f -> Color(0xFF6B5300)
+        score >= 0.7f -> ChronosColors.AdherenceMid
         else -> MaterialTheme.colorScheme.error
     }
 }

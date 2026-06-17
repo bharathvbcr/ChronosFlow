@@ -111,12 +111,15 @@ class DailyDialRingModelsTest {
             nextBlock = nextBlock
         )
 
-        assertEquals("Open time", state.title)
-        assertEquals("5:20 PM", state.timeWindow)
+        // Open time leads with the clock (not the words "Open time", which the strip and
+        // Now & next card already show); the time-window slot is blank and skipped in the hub.
+        assertEquals("5:20 PM", state.title)
+        assertEquals("", state.timeWindow)
         assertEquals("Free for 40m", state.status)
         assertEquals("Next: Workout at 6:00 PM", state.supporting)
         assertEquals("Tap a ring to add a block", state.actionHint)
-        assertEquals("Open window", state.categoryLabel)
+        // Open time has no category pill — blank so the hub skips it (no "Open window" echo).
+        assertEquals("", state.categoryLabel)
     }
 
     @Test

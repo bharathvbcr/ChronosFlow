@@ -1,5 +1,6 @@
 package com.chronosflow.core.domain.usecase
 
+import com.chronosflow.core.domain.model.BlockProvenance
 import com.chronosflow.core.domain.model.FocusSessionState
 import com.chronosflow.core.domain.model.MedicationDoseEvent
 import com.chronosflow.core.domain.model.MedicationDoseEventType
@@ -64,6 +65,44 @@ class GetChronosDayOverviewUseCaseTest {
         assertEquals(10 * 60, overview.currentBlock!!.endMinuteOfDay)
         assertEquals("next", overview.nextBlock?.id)
         assertFalse(overview.nextBlock!!.isCurrent)
+    }
+
+    @Test
+    fun `drops completed blocks even when their planned window is still open`() = runTest {
+        stubEmpty()
+        every { timeBlockRepository.getTimeBlocksByDate(date) } returns flowOf(
+            listOf(
+                UseCaseTestFixtures.timeBlock(id = "done", startMinute = 9 * 60, durationMinutes = 60)
+                    .copy(actualStartMinuteOfDay = 9 * 60, actualEndMinuteOfDay = 9 * 60 + 20),
+                UseCaseTestFixtures.timeBlock(id = "next", startMinute = 11 * 60, durationMinutes = 30)
+            )
+        )
+
+        val overview = useCase(today = date, nowMinuteOfDay = 9 * 60 + 30)
+
+        assertEquals(listOf("next"), overview.blocks.map { it.id })
+        assertNull(overview.currentBlock)
+        assertEquals("next", overview.nextBlock?.id)
+    }
+
+    @Test
+    fun `all-day calendar notes are not treated as the current block`() = runTest {
+        stubEmpty()
+        every { timeBlockRepository.getTimeBlocksByDate(date) } returns flowOf(
+            listOf(
+                UseCaseTestFixtures.timeBlock(id = "birthday", startMinute = 0, durationMinutes = 1440).copy(
+                    title = "Birthday",
+                    provenance = BlockProvenance.CALENDAR_IMPORTED,
+                    calendarEventId = 42L
+                ),
+                UseCaseTestFixtures.timeBlock(id = "now", startMinute = 9 * 60, durationMinutes = 60)
+            )
+        )
+
+        val overview = useCase(today = date, nowMinuteOfDay = 9 * 60 + 30)
+
+        assertEquals(listOf("now"), overview.blocks.map { it.id })
+        assertEquals("now", overview.currentBlock?.id)
     }
 
     @Test

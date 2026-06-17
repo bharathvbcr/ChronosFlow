@@ -2,6 +2,7 @@ package com.chronosflow.feature.daydial
 
 import android.content.Context
 import com.chronosflow.core.domain.model.SleepSchedule
+import com.chronosflow.core.ui.settings.ChronosUiSettingsKeys
 import com.chronosflow.core.ui.settings.readChronosUiBooleanSetting
 import com.chronosflow.core.ui.settings.readChronosUiIntSetting
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -30,6 +31,10 @@ class DayDialReminderPreferencesReader @Inject constructor(
                 DayDialReminderSettingsKeys.END_DAY_REVIEW_REMINDER,
                 DayDialReminderSettingsKeys.DEFAULT_END_DAY_REVIEW_REMINDER
             ),
+            sleepJournalLogReminder = context.readChronosUiBooleanSetting(
+                DayDialReminderSettingsKeys.SLEEP_JOURNAL_LOG_REMINDER,
+                DayDialReminderSettingsKeys.DEFAULT_SLEEP_JOURNAL_LOG_REMINDER
+            ),
             sleepScheduleEnabled = context.readChronosUiBooleanSetting(
                 SleepSchedule.KEY_ENABLED,
                 false
@@ -41,6 +46,14 @@ class DayDialReminderPreferencesReader @Inject constructor(
             sleepScheduleEndMinute = context.readChronosUiIntSetting(
                 SleepSchedule.KEY_END_MINUTE,
                 SleepSchedule.DEFAULT_END_MINUTE
+            ),
+            journalEnabled = context.readChronosUiBooleanSetting(
+                ChronosUiSettingsKeys.KEY_FEATURE_JOURNAL_ENABLED,
+                true
+            ),
+            sleepEnabled = context.readChronosUiBooleanSetting(
+                ChronosUiSettingsKeys.KEY_FEATURE_SLEEP_ENABLED,
+                true
             )
         )
     }

@@ -1,9 +1,16 @@
 <!-- ChronosFlow dial mark used as the tile-picker icon for the wear tile service. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="48dp"
-    android:height="48dp"
+    android:width="108dp"
+    android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Enlarged brand mark: scaled up about the dial centre (54,54) so the logo fills
+         more of the icon canvas instead of sitting small with heavy padding. -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="1.5"
+        android:scaleY="1.5">
     <path
         android:strokeColor="#6C63FF"
         android:strokeAlpha="0.35"
@@ -39,4 +46,5 @@
     <path
         android:fillColor="#F7C948"
         android:pathData="M50,54 a4,4 0 1 0 8,0 a4,4 0 1 0 -8,0 z" />
+    </group>
 </vector>

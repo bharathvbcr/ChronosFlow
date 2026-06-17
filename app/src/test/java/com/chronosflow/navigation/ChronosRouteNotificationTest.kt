@@ -14,19 +14,19 @@ class ChronosRouteNotificationTest {
     @Test
     fun `notification launch maps to nav routes`() {
         assertEquals(
-            ChronosRoute.Medication.route,
+            ChronosRoute.Medication(),
             ChronosRoute.routeForNotificationLaunch(NotificationLaunch(SECTION_MEDICATION))
         )
         assertEquals(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_INSIGHTS),
+            ChronosRoute.Day(ChronosRoute.Day.TARGET_INSIGHTS),
             ChronosRoute.routeForNotificationLaunch(NotificationLaunch(SECTION_REVIEW))
         )
         assertEquals(
-            ChronosRoute.Tasks.route,
+            ChronosRoute.Tasks(),
             ChronosRoute.routeForNotificationLaunch(NotificationLaunch(SECTION_TASKS))
         )
         assertEquals(
-            "${SECTION_TASKS}?taskId=task-9&target=${TASK_LAUNCH_TARGET_CONTEXT}",
+            ChronosRoute.Tasks(taskId = "task-9", target = TASK_LAUNCH_TARGET_CONTEXT),
             ChronosRoute.routeForNotificationLaunch(
                 NotificationLaunch(
                     section = SECTION_TASKS,
@@ -36,13 +36,13 @@ class ChronosRouteNotificationTest {
             )
         )
         assertEquals(
-            "${ChronosRoute.Day.section}?target=${ChronosRoute.Day.TARGET_FOCUS_PLANNER}",
+            ChronosRoute.Day(ChronosRoute.Day.TARGET_FOCUS_PLANNER),
             ChronosRoute.routeForNotificationLaunch(
                 NotificationLaunch(SECTION_FOCUS, focusBlockId = "block-9")
             )
         )
         assertEquals(
-            "${SECTION_DAY}?target=today",
+            ChronosRoute.Day("today"),
             ChronosRoute.routeForNotificationLaunch(
                 NotificationLaunch(SECTION_DAY, dayTarget = "today")
             )

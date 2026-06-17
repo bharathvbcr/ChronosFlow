@@ -77,6 +77,19 @@ object PlanningPromptBuilder {
             }
             .ifBlank { "- none" }
 
+    /**
+     * Corrective re-ask used when a day-plan response failed to parse as JSON. Echoes the original
+     * instructions plus the malformed reply and demands a bare JSON object, which is usually enough
+     * to coax a schema-valid retry out of a small on-device model before falling back to heuristics.
+     */
+    fun jsonRepairPrompt(originalPrompt: String, malformedResponse: String): String = """
+        $originalPrompt
+
+        Your previous response could not be parsed as JSON:
+        ${malformedResponse.take(600)}
+        Return only the JSON object described above. No prose, no markdown fences, no trailing commas.
+    """.trimIndent()
+
     fun repairPrompt(currentPlan: String, conflictDescription: String): String = """
         You are ChronosFlow plan repair. Return plain text with numbered steps (max 6) to resolve the conflict.
         Keep advice on-device actionable. Do not mention cloud services.

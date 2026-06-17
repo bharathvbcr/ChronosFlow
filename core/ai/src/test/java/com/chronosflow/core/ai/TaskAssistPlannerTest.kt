@@ -442,13 +442,18 @@ class TaskAssistPlannerTest {
         )
         val planner = TaskAssistPlanner(coordinator)
 
-        val suggestions = planner.suggest(TaskAssistRequest(title = "Submit launch notes by 2026-06-15"))
+        // Anchor to a fixed offset from today so the date is always in the future. An explicit
+        // calendar date that happens to land on today/tomorrow renders as "Target today"/
+        // "Target tomorrow" (see localTargetDateLabel), which would make this assertion fail
+        // whenever the suite runs on that calendar day.
+        val target = java.time.LocalDate.now().plusMonths(3)
+        val suggestions = planner.suggest(TaskAssistRequest(title = "Submit launch notes by $target"))
 
         val schedule = suggestions
             .filterIsInstance<TaskAssistSuggestion.Schedule>()
             .single { it.payload.targetDate != null }
-        assertEquals(java.time.LocalDate.of(2026, 6, 15), schedule.payload.targetDate)
-        assertEquals("Target 2026-06-15", schedule.label)
+        assertEquals(target, schedule.payload.targetDate)
+        assertEquals("Target $target", schedule.label)
     }
 
     @Test

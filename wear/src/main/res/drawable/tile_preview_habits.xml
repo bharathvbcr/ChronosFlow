@@ -1,0 +1,39 @@
+<!-- Tile-picker preview for the "Habits" tile (ChronosHabitsTileProvider): today's habit
+     progress and the top habits with their done-check, on the round watch surface. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="400dp"
+    android:height="400dp"
+    android:viewportWidth="400"
+    android:viewportHeight="400">
+
+    <!-- Dark tile surface (system clips to the watch shape). -->
+    <path
+        android:fillColor="#16191D"
+        android:pathData="M0,0 L400,0 L400,400 L0,400 Z" />
+
+    <!-- "Habits" title (brand teal). -->
+    <path
+        android:fillColor="#18B8A6"
+        android:pathData="M155,78 L245,78 A12,12 0 0 1 245,102 L155,102 A12,12 0 0 1 155,78 Z" />
+
+    <!-- "2/3 done today" progress caption. -->
+    <path
+        android:fillColor="#E5E7EB"
+        android:pathData="M140,141 L260,141 A9,9 0 0 1 260,159 L140,159 A9,9 0 0 1 140,141 Z" />
+
+    <!-- Habit row 1: completed check dot + label. -->
+    <path
+        android:fillColor="#18B8A6"
+        android:pathData="M110,210 a10,10 0 1 0 20,0 a10,10 0 1 0 -20,0 Z" />
+    <path
+        android:fillColor="#E5E7EB"
+        android:pathData="M145,201 L290,201 A9,9 0 0 1 290,219 L145,219 A9,9 0 0 1 145,201 Z" />
+
+    <!-- Habit row 2: pending dot + label. -->
+    <path
+        android:fillColor="#3A4048"
+        android:pathData="M110,255 a10,10 0 1 0 20,0 a10,10 0 1 0 -20,0 Z" />
+    <path
+        android:fillColor="#E5E7EB"
+        android:pathData="M145,246 L275,246 A9,9 0 0 1 275,264 L145,264 A9,9 0 0 1 145,246 Z" />
+</vector>

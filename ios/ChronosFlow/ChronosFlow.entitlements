@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Shared store for the app, widget extension, and (future) watch app. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.chronosflow.shared</string>
+    </array>
+    <!-- HealthKit sleep import (iOS analogue of Android Health Connect). -->
+    <key>com.apple.developer.healthkit</key>
+    <true/>
+    <!--
+      iCloud / CloudKit mirroring is opt-in. To enable cross-device sync, add the iCloud
+      capability with the `iCloud.com.chronosflow` container and flip ChronosStore.cloudSyncEnabled:
+
+      <key>com.apple.developer.icloud-container-identifiers</key>
+      <array><string>iCloud.com.chronosflow</string></array>
+      <key>com.apple.developer.icloud-services</key>
+      <array><string>CloudKit</string></array>
+    -->
+</dict>
+</plist>

@@ -11,5 +11,6 @@ data class SleepTrack(
     val actualEndMinute: Int?,
     val sleepQuality: Int,
     val windDownNotes: String?,
-    val interruptedCount: Int
+    val interruptedCount: Int,
+    val source: SleepSource = SleepSource.MANUAL
 )

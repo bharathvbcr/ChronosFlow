@@ -1,5 +1,10 @@
 package com.chronosflow.feature.tasks
 
+import com.chronosflow.core.ui.components.ChronosIconButton
+
+import com.chronosflow.core.ui.components.ChronosTextButton
+import com.chronosflow.core.ui.components.ChronosFilledTonalButton
+
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
@@ -12,6 +17,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
@@ -25,12 +32,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EventAvailable
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PriorityHigh
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -54,6 +62,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.chronosflow.core.ai.TaskAssistRequest
@@ -77,6 +87,8 @@ import com.chronosflow.core.ui.components.ChronosTextRewriteRow
 import com.chronosflow.core.ui.components.ChronosCollapsibleSection
 import com.chronosflow.core.ui.components.ChronosSpeechInputButton
 import com.chronosflow.core.ui.components.ChronosDatePickerField
+import com.chronosflow.core.ui.components.ChronosCheckbox
+import com.chronosflow.core.ui.components.ChronosFilterChip
 import com.chronosflow.core.ui.components.ChronosModalActionLabels
 import com.chronosflow.core.ui.components.ChronosFormBottomSheet
 import com.chronosflow.core.ui.components.commandPaletteSpeechQuery
@@ -103,12 +115,33 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.temporal.TemporalAdjusters
 import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** Signature shared by the sheet's confirm and "add another" callbacks. */
+internal typealias AddTaskConfirm = (
+    title: String,
+    description: String,
+    priority: Int,
+    dueDate: Instant?,
+    alarmEnabled: Boolean,
+    preferredDurationMinutes: Int?,
+    preferredStartMinuteOfDay: Int?,
+    targetDate: LocalDate?,
+    checklist: List<TaskChecklistItem>,
+    linkedContact: TaskContactSnapshot?,
+    actions: List<TaskAction>,
+    attachments: List<TaskAttachment>,
+    recurringConfig: TaskRecurringConfig,
+    goalId: String?
+) -> Unit
+
 internal sealed class TaskSheetTarget {
-    data class Add(val prefillTitle: String? = null) : TaskSheetTarget()
+    // instanceId lets "add another" re-open a structurally-new Add sheet so its remembered draft
+    // state resets cleanly (it participates in the form's rememberSaveable key).
+    data class Add(val prefillTitle: String? = null, val instanceId: Int = 0) : TaskSheetTarget()
     data class Edit(val task: Task, val schedule: TaskSchedule? = null) : TaskSheetTarget()
 }
 
@@ -208,7 +241,13 @@ internal fun TaskFormSheet(
     onClearAssist: (() -> Unit)? = null,
     rewriteState: RewriteAssistUiState = RewriteAssistUiState(),
     onRequestRewrite: ((text: String, style: RewriteStyle, styleLabel: String) -> Unit)? = null,
-    onClearRewrite: (() -> Unit)? = null
+    onClearRewrite: (() -> Unit)? = null,
+    existingTaskTitles: List<String> = emptyList(),
+    taskTemplates: List<TaskTemplate> = emptyList(),
+    onSaveTemplate: ((TaskTemplate) -> Unit)? = null,
+    onDeleteTemplate: ((String) -> Unit)? = null,
+    onAddAnother: AddTaskConfirm? = null,
+    onOpenExistingTask: ((title: String) -> Unit)? = null
 ) {
     if (target == null) return
 
@@ -217,10 +256,11 @@ internal fun TaskFormSheet(
     val initialTask = (target as? TaskSheetTarget.Edit)?.task
     val initialSchedule = (target as? TaskSheetTarget.Edit)?.schedule
     val prefillTitle = (target as? TaskSheetTarget.Add)?.prefillTitle
+    val addInstanceId = (target as? TaskSheetTarget.Add)?.instanceId ?: 0
     val prefillDraft = remember(prefillTitle) {
         taskTranscriptDraft(prefillTitle.orEmpty())
     }
-    val taskKey = initialTask?.id ?: "new-${prefillTitle.orEmpty()}"
+    val taskKey = initialTask?.id ?: "new-${prefillTitle.orEmpty()}-$addInstanceId"
 
     var taskTitle by rememberSaveable(taskKey) {
         mutableStateOf(initialTask?.title ?: prefillDraft.title ?: prefillTitle.orEmpty())
@@ -363,8 +403,14 @@ internal fun TaskFormSheet(
         mutableStateOf(initialSchedule?.toRecurringConfig()?.enabled == true)
     }
     var connectedFilesExpanded by rememberSaveable(taskKey) { mutableStateOf(true) }
+    var templatesExpanded by rememberSaveable(taskKey) { mutableStateOf(false) }
     var titleEverFilled by rememberSaveable(taskKey) { mutableStateOf(initialTask?.title?.isNotBlank() == true) }
     var lastAutoAssistCapture by rememberSaveable(taskKey) { mutableStateOf("") }
+    // Title that the offline smart-fill banner was last dismissed for, so it stays hidden
+    // until the user types something with new scheduling tokens.
+    var smartFillDismissedTitle by rememberSaveable(taskKey) { mutableStateOf("") }
+    // Intentionally NOT keyed by taskKey: it must persist as "add another" re-opens fresh sheets.
+    var addAnother by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(taskKey) {
         onClearRewrite?.invoke()
     }
@@ -529,6 +575,129 @@ internal fun TaskFormSheet(
             }
         }
     }
+
+    // Applies the offline (deterministic, no-AI) parse of the typed title: pushes the detected
+    // scheduling/priority values into their fields, reveals the relevant sections, and replaces
+    // the title with the noise-stripped version so the field stays clean.
+    fun applyTitleSmartFill(fill: TaskTitleSmartFill) {
+        fill.targetDate?.let { date ->
+            customTargetDateIso = date.toString()
+            scheduleDateOption = resolveScheduleDateOption(date)
+            scheduleExpanded = true
+        }
+        fill.scheduleDateOption?.let { option ->
+            scheduleDateOption = option
+            scheduleExpanded = true
+        }
+        fill.preferredStartMinute?.let { minute ->
+            preferredStartTime = formatDisplayMinute(minute)
+            scheduleTimeOption = resolveScheduleTimeOption(minute)
+            scheduleExpanded = true
+        }
+        fill.durationMinutes?.let { duration ->
+            preferredDurationMinutes = duration
+            scheduleExpanded = true
+        }
+        fill.priority?.let { detected ->
+            priority = detected.coerceIn(0, 2)
+            if (priority > 0) priorityReminderExpanded = true
+        }
+        fill.recurrence?.let { detected ->
+            recurringConfig = recurringConfig.copy(
+                enabled = true,
+                cadence = detected.cadence,
+                interval = detected.interval,
+                weekdays = if (detected.cadence == TaskRecurringCadence.WEEKLY && detected.weekdays.isNotEmpty()) {
+                    detected.weekdays
+                } else {
+                    recurringConfig.weekdays
+                }
+            )
+            recurrenceExpanded = true
+        }
+        if (fill.actionPreview != null) {
+            val pendingAction = taskTranscriptActionDraft(
+                capture = taskTitle,
+                isPrimary = actionDrafts.none { it.isPrimary }
+            )
+            if (
+                pendingAction != null &&
+                actionDrafts.none {
+                    it.type == pendingAction.type && it.value.equals(pendingAction.value, ignoreCase = true)
+                }
+            ) {
+                if (pendingAction.isPrimary) {
+                    actionDrafts.indices.forEach { index ->
+                        actionDrafts[index] = actionDrafts[index].copy(isPrimary = false)
+                    }
+                }
+                actionDrafts.add(pendingAction)
+                connectExpanded = true
+            }
+        }
+        if (fill.cleanedTitle.isNotBlank()) {
+            taskTitle = fill.cleanedTitle
+            titleEverFilled = true
+        }
+    }
+
+    fun applyTaskTemplate(template: TaskTemplate) {
+        taskTitle = template.name
+        titleEverFilled = true
+        if (!template.description.isNullOrBlank()) {
+            description = template.description
+        }
+        priority = template.priority.coerceIn(0, 2)
+        if (priority > 0) priorityReminderExpanded = true
+        preferredDurationMinutes = template.durationMinutes
+        template.preferredStartMinute?.let { minute ->
+            preferredStartTime = formatDisplayMinute(minute)
+            scheduleTimeOption = resolveScheduleTimeOption(minute)
+        }
+        if (template.durationMinutes != null || template.preferredStartMinute != null) {
+            scheduleExpanded = true
+        }
+        if (template.checklistLabels.isNotEmpty()) {
+            checklistItems.clear()
+            template.checklistLabels.forEach { label ->
+                checklistItems.add(
+                    TaskChecklistItemDraft(
+                        id = UUID.randomUUID().toString(),
+                        label = label,
+                        isCompleted = false
+                    )
+                )
+            }
+            checklistExpanded = true
+        }
+        template.recurrenceCadence?.let { cadence ->
+            recurringConfig = recurringConfig.copy(
+                enabled = true,
+                cadence = cadence,
+                interval = template.recurrenceInterval.coerceAtLeast(1),
+                weekdays = if (cadence == TaskRecurringCadence.WEEKLY && template.recurrenceWeekdays.isNotEmpty()) {
+                    template.recurrenceWeekdays
+                } else {
+                    recurringConfig.weekdays
+                }
+            )
+            recurrenceExpanded = true
+        }
+    }
+
+    fun currentDraftAsTemplate(): TaskTemplate = TaskTemplate(
+        name = taskTitle.trim(),
+        description = description.trim().ifBlank { null },
+        priority = priority,
+        durationMinutes = preferredDurationMinutes,
+        // Recomputed here (rather than reusing the derived val declared later in this body).
+        preferredStartMinute = taskPreferredStartPickerMinutes(scheduleTimeOption)
+            ?: parseFlexibleMinute(preferredStartTime),
+        checklistLabels = checklistItems.map { it.label.trim() }.filter { it.isNotBlank() },
+        recurrenceCadence = recurringConfig.cadence.takeIf { recurringConfig.enabled },
+        recurrenceInterval = recurringConfig.interval,
+        recurrenceWeekdays = recurringConfig.weekdays
+    )
 
     val isUrgent = priority >= 2
     val parsedReminderMinute = parseFlexibleMinute(reminder)
@@ -807,38 +976,44 @@ internal fun TaskFormSheet(
     )
     val actionLabels = taskModalActionLabels(target is TaskSheetTarget.Add)
 
+    // Hoisted so both the sheet's confirm button and the title field's keyboard "Done" action
+    // can submit — letting a lite user type a title and press enter to add a quick task.
+    val keepAddingAfterConfirm = target is TaskSheetTarget.Add && addAnother && onAddAnother != null
+    val submitTask: () -> Unit = {
+        coroutineScope.launch {
+            val dueDate = if (isUrgent && alarmEnabled) resolvedDueInstant else null
+            val resolvedAttachments = resolveTaskAttachmentDrafts(context, normalizedAttachmentDrafts)
+            val confirmCallback = if (keepAddingAfterConfirm) onAddAnother!! else onConfirm
+            confirmCallback(
+                taskTitle,
+                description,
+                priority,
+                dueDate,
+                isUrgent && alarmEnabled,
+                preferredDurationMinutes,
+                parsedPreferredStartMinute,
+                resolvedTargetDate,
+                normalizedChecklist,
+                linkedContact,
+                normalizedActions,
+                resolvedAttachments,
+                recurringConfig.copy(
+                    startsOn = recurringConfig.startsOn,
+                    reminderDrafts = recurringConfig.reminderDrafts
+                ),
+                selectedGoalId
+            )
+        }
+    }
+
     ChronosFormBottomSheet(
         visible = true,
         title = title,
         subtitle = subtitle,
-        confirmLabel = actionLabels.confirm,
+        confirmLabel = if (keepAddingAfterConfirm) "Add & new" else actionLabels.confirm,
         validationHint = validationHint,
         onDismiss = onDismiss,
-        onConfirm = {
-            coroutineScope.launch {
-                val dueDate = if (isUrgent && alarmEnabled) resolvedDueInstant else null
-                val resolvedAttachments = resolveTaskAttachmentDrafts(context, normalizedAttachmentDrafts)
-                onConfirm(
-                    taskTitle,
-                    description,
-                    priority,
-                    dueDate,
-                    isUrgent && alarmEnabled,
-                    preferredDurationMinutes,
-                    parsedPreferredStartMinute,
-                    resolvedTargetDate,
-                    normalizedChecklist,
-                    linkedContact,
-                    normalizedActions,
-                    resolvedAttachments,
-                    recurringConfig.copy(
-                        startsOn = recurringConfig.startsOn,
-                        reminderDrafts = recurringConfig.reminderDrafts
-                    ),
-                    selectedGoalId
-                )
-            }
-        },
+        onConfirm = submitTask,
         enabled = isValid,
         onDuplicate = if (initialTask != null && onDuplicate != null) {
             { onDuplicate(initialTask) }
@@ -864,6 +1039,20 @@ internal fun TaskFormSheet(
                 selected = taskTitle
             )
 
+            if (target is TaskSheetTarget.Add) {
+                val recentTaskTitleChips = remember(existingTaskTitles) {
+                    recentTaskTitleOptions(existingTaskTitles)
+                }
+                if (recentTaskTitleChips.isNotEmpty()) {
+                    ChronosQuickAddChips(
+                        label = "Reuse a recent task",
+                        options = recentTaskTitleChips,
+                        onSelect = { suggestion -> taskTitle = suggestion },
+                        selected = taskTitle
+                    )
+                }
+            }
+
             OutlinedTextField(
                 value = taskTitle,
                 onValueChange = {
@@ -873,6 +1062,11 @@ internal fun TaskFormSheet(
                 label = { Text("Title") },
                 placeholder = { Text("What needs to get done?") },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(onDone = { if (isValid) submitTask() }),
                 isError = titleEverFilled && taskTitle.isBlank(),
                 supportingText = if (taskTitle.isBlank()) {
                     { Text("Required") }
@@ -882,13 +1076,50 @@ internal fun TaskFormSheet(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            // Offline natural-language parse of whatever was typed into the title. Detects dates,
+            // times, durations and priority words instantly (no AI dependency) and offers a one-tap
+            // fill that also tidies the title — the "magic" power users expect, invisible to lite users.
+            val titleSmartFill = remember(taskTitle) { taskTitleSmartFill(taskTitle) }
+            if (
+                target is TaskSheetTarget.Add &&
+                titleSmartFill != null &&
+                !taskTitle.equals(smartFillDismissedTitle, ignoreCase = true)
+            ) {
+                TaskTitleSmartFillCard(
+                    fill = titleSmartFill,
+                    onApply = { applyTitleSmartFill(titleSmartFill) },
+                    onDismiss = { smartFillDismissedTitle = taskTitle }
+                )
+            }
+
+            // Gentle nudge when the typed title matches an existing task, so quick captures don't
+            // silently create duplicates. Non-blocking — the user can still add it.
+            val duplicateTaskWarning = if (target is TaskSheetTarget.Add) {
+                taskTitleDuplicateWarning(taskTitle, existingTaskTitles)
+            } else {
+                null
+            }
+            if (duplicateTaskWarning != null) {
+                Text(
+                    text = duplicateTaskWarning,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+                if (onOpenExistingTask != null) {
+                    ChronosTextButton(onClick = { onOpenExistingTask(taskTitle) }) {
+                        Text("Open the existing task instead")
+                    }
+                }
+            }
+
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
                 label = { Text("Description") },
                 placeholder = { Text("Optional context or next step") },
                 modifier = Modifier.fillMaxWidth(),
-                minLines = 2
+                minLines = 2,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
             )
 
             if (onRequestRewrite != null) {
@@ -1003,7 +1234,7 @@ internal fun TaskFormSheet(
             )
 
             if (onRequestAssist != null) {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = {
                         onRequestAssist(
                             TaskAssistRequest(
@@ -1063,6 +1294,90 @@ internal fun TaskFormSheet(
                     onApplyAll = ::applyAllAssistSuggestions
                 )
             }
+
+            if (target is TaskSheetTarget.Add && goalOptions.isNotEmpty()) {
+                val detectedGoalId = remember(taskTitle, description, goalOptions) {
+                    detectGoalIdFromText("$taskTitle $description", goalOptions)
+                }
+                val detectedGoalLabel = goalOptions.firstOrNull { it.id == detectedGoalId }?.label
+                if (detectedGoalId != null && detectedGoalId != selectedGoalId && detectedGoalLabel != null) {
+                    ChronosFilledTonalButton(
+                        onClick = {
+                            selectedGoalId = detectedGoalId
+                            goalExpanded = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Link to goal: $detectedGoalLabel")
+                    }
+                }
+            }
+        }
+
+        if (target is TaskSheetTarget.Add && (taskTemplates.isNotEmpty() || onSaveTemplate != null)) {
+            ChronosCollapsibleSection(
+                title = "Templates",
+                summary = if (taskTemplates.isEmpty()) {
+                    "Save this task as a reusable template"
+                } else {
+                    "${pluralizeCount(taskTemplates.size, "template")} saved — tap to reuse"
+                },
+                expanded = templatesExpanded,
+                onExpandedChange = { templatesExpanded = it }
+            ) {
+                taskTemplates.asReversed().forEach { template ->
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = template.name,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                text = taskTemplateSummary(template),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                ChronosFilledTonalButton(
+                                    onClick = { applyTaskTemplate(template) },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Use")
+                                }
+                                if (onDeleteTemplate != null) {
+                                    ChronosTextButton(
+                                        onClick = { onDeleteTemplate(template.id) },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Delete")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (onSaveTemplate != null) {
+                    ChronosFilledTonalButton(
+                        onClick = { onSaveTemplate(currentDraftAsTemplate()) },
+                        enabled = taskTitle.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Save current task as template")
+                    }
+                }
+            }
+        }
+
+        if (target is TaskSheetTarget.Add && onAddAnother != null) {
+            ChronosFormSwitchRow(
+                title = "Keep adding after this",
+                subtitle = "Stay here and reset the form so you can add several tasks in a row.",
+                checked = addAnother,
+                onCheckedChange = { addAnother = it }
+            )
         }
 
         if (goalOptions.isNotEmpty() || selectedGoalId != null) {
@@ -1184,8 +1499,13 @@ internal fun TaskFormSheet(
                                 preferredDurationMinutes?.let { "${formatTaskDurationBlock(it)} block" }
                                     ?: "Flexible duration"
                             )
-                            parsedPreferredStartMinute?.let {
-                                append(" • Start around ${formatDisplayMinute(it)}")
+                            parsedPreferredStartMinute?.let { start ->
+                                append(" • Start around ${formatDisplayMinute(start)}")
+                                preferredDurationMinutes?.let { duration ->
+                                    val end = start + duration
+                                    append(" → ends ~${formatDisplayMinute(end)}")
+                                    if (end >= 24 * 60) append(" (next day)")
+                                }
                             }
                         },
                         style = MaterialTheme.typography.bodySmall
@@ -1299,7 +1619,7 @@ internal fun TaskFormSheet(
                     ) {
                         DayOfWeek.values().forEach { day ->
                             val selected = day in recurringConfig.weekdays
-                            FilterChip(
+                            ChronosFilterChip(
                                 selected = selected,
                                 onClick = {
                                     recurringConfig = recurringConfig.copy(
@@ -1409,7 +1729,7 @@ internal fun TaskFormSheet(
                                         singleLine = true
                                     )
                                 }
-                                TextButton(
+                                ChronosTextButton(
                                     onClick = {
                                         recurringConfig = recurringConfig.copy(
                                             reminderDrafts = recurringConfig.reminderDrafts.toMutableList().also { reminders ->
@@ -1424,7 +1744,7 @@ internal fun TaskFormSheet(
                         }
                     }
                 }
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = {
                         recurringConfig = recurringConfig.copy(
                             reminderDrafts = recurringConfig.reminderDrafts + TaskReminderDraft(
@@ -1515,12 +1835,12 @@ internal fun TaskFormSheet(
 
                 if (alarmEnabled) {
                     if (!notificationPermissionGranted && onRequestNotificationPermission != null) {
-                        TextButton(onClick = onRequestNotificationPermission) {
+                        ChronosTextButton(onClick = onRequestNotificationPermission) {
                             Text("Enable notification access")
                         }
                     }
                     if (!exactAlarmPermissionGranted && onOpenExactAlarmSettings != null) {
-                        TextButton(onClick = onOpenExactAlarmSettings) {
+                        ChronosTextButton(onClick = onOpenExactAlarmSettings) {
                             Text("Enable exact alarm access")
                         }
                     }
@@ -1554,14 +1874,14 @@ internal fun TaskFormSheet(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            FilledTonalButton(
+                            ChronosFilledTonalButton(
                                 onClick = {
                                     reminder = nudgeMinuteText(reminder, -30, parsedReminderMinute ?: 18 * 60)
                                     reminderPreset = "Custom"
                                 },
                                 modifier = Modifier.weight(1f)
                             ) { Text("−30m") }
-                            FilledTonalButton(
+                            ChronosFilledTonalButton(
                                 onClick = {
                                     reminder = nudgeMinuteText(reminder, 30, parsedReminderMinute ?: 18 * 60)
                                     reminderPreset = "Custom"
@@ -1581,7 +1901,7 @@ internal fun TaskFormSheet(
                     }
 
                     if (onOpenExactAlarmSettings != null && exactAlarmPermissionGranted) {
-                        TextButton(onClick = onOpenExactAlarmSettings) {
+                        ChronosTextButton(onClick = onOpenExactAlarmSettings) {
                             Text("Manage exact alarm settings")
                         }
                     }
@@ -1603,12 +1923,19 @@ internal fun TaskFormSheet(
             expanded = showTaskChecklistDetails,
             onExpandedChange = { checklistExpanded = it }
         ) {
+            if (checklistStepCount > 0) {
+                LinearProgressIndicator(
+                    progress = { completedChecklistStepCount.toFloat() / checklistStepCount.toFloat() },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
             checklistItems.forEachIndexed { index, item ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Checkbox(
+                    ChronosCheckbox(
                         checked = item.isCompleted,
                         onCheckedChange = { checked ->
                             checklistItems[index] = item.copy(isCompleted = checked)
@@ -1623,7 +1950,33 @@ internal fun TaskFormSheet(
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
-                    TextButton(
+                    if (checklistItems.size > 1) {
+                        ChronosIconButton(
+                            onClick = {
+                                if (index > 0) checklistItems.add(index - 1, checklistItems.removeAt(index))
+                            },
+                            enabled = index > 0
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowUp,
+                                contentDescription = "Move step ${index + 1} up"
+                            )
+                        }
+                        ChronosIconButton(
+                            onClick = {
+                                if (index < checklistItems.size - 1) {
+                                    checklistItems.add(index + 1, checklistItems.removeAt(index))
+                                }
+                            },
+                            enabled = index < checklistItems.size - 1
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowDown,
+                                contentDescription = "Move step ${index + 1} down"
+                            )
+                        }
+                    }
+                    ChronosTextButton(
                         onClick = { checklistItems.removeAt(index) },
                         modifier = Modifier.semantics {
                             contentDescription = taskChecklistRemoveActionLabel(item.label, index)
@@ -1631,6 +1984,28 @@ internal fun TaskFormSheet(
                     ) {
                         Text("Remove")
                     }
+                }
+            }
+            val descriptionStepCandidates = descriptionChecklistCandidates(
+                description = description,
+                existingLabels = checklistItems.map { it.label }
+            )
+            if (descriptionStepCandidates.size >= 2) {
+                ChronosFilledTonalButton(
+                    onClick = {
+                        descriptionStepCandidates.forEach { label ->
+                            checklistItems.add(
+                                TaskChecklistItemDraft(
+                                    id = UUID.randomUUID().toString(),
+                                    label = label,
+                                    isCompleted = false
+                                )
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Add ${pluralizeCount(descriptionStepCandidates.size, "step")} from description")
                 }
             }
             ChronosQuickAddChips(
@@ -1659,22 +2034,13 @@ internal fun TaskFormSheet(
                     }
                 }
             )
-            OutlinedTextField(
-                value = newChecklistItem,
-                onValueChange = { newChecklistItem = it },
-                label = { Text("New checklist item") },
-                placeholder = { Text("Add the next concrete step") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilledTonalButton(
-                    onClick = {
-                        val label = newChecklistItem.trim()
-                        if (label.isNotEmpty()) {
+            // Shared by the button and the keyboard "Done" action so power users can rattle off
+            // steps without leaving the keyboard. Skips blanks and case-insensitive duplicates.
+            val addCurrentChecklistStep: () -> Unit = {
+                val pieces = splitChecklistInput(newChecklistItem)
+                if (pieces.isNotEmpty()) {
+                    pieces.forEach { label ->
+                        if (checklistItems.none { it.label.equals(label, ignoreCase = true) }) {
                             checklistItems.add(
                                 TaskChecklistItemDraft(
                                     id = UUID.randomUUID().toString(),
@@ -1682,15 +2048,36 @@ internal fun TaskFormSheet(
                                     isCompleted = false
                                 )
                             )
-                            newChecklistItem = ""
                         }
-                    },
+                    }
+                    newChecklistItem = ""
+                }
+            }
+            OutlinedTextField(
+                value = newChecklistItem,
+                onValueChange = { newChecklistItem = it },
+                label = { Text("New checklist item") },
+                placeholder = { Text("Add a step — or paste several: a; b; c") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(onDone = { addCurrentChecklistStep() })
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ChronosFilledTonalButton(
+                    onClick = addCurrentChecklistStep,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Add step")
                 }
                 if (checklistItems.isNotEmpty()) {
-                    TextButton(
+                    ChronosTextButton(
                         onClick = { checklistItems.clear() },
                         modifier = Modifier.weight(1f)
                     ) {
@@ -1789,14 +2176,14 @@ internal fun TaskFormSheet(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        FilledTonalButton(
+                        ChronosFilledTonalButton(
                             onClick = ::launchContactPicker,
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(if (linkedContact == null) "Pick contact" else "Change contact")
                         }
                         if (linkedContact != null) {
-                            TextButton(
+                            ChronosTextButton(
                                 onClick = { linkedContact = null },
                                 modifier = Modifier.weight(1f)
                             ) {
@@ -1850,7 +2237,7 @@ internal fun TaskFormSheet(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                FilledTonalButton(
+                                ChronosFilledTonalButton(
                                     onClick = {
                                         actionDrafts.indices.forEach { actionIndex ->
                                             actionDrafts[actionIndex] = actionDrafts[actionIndex].copy(
@@ -1870,7 +2257,7 @@ internal fun TaskFormSheet(
                                 ) {
                                     Text(if (draft.isPrimary) "Primary action" else "Make primary")
                                 }
-                                TextButton(
+                                ChronosTextButton(
                                     onClick = { actionDrafts.removeAt(index) },
                                     modifier = Modifier
                                         .weight(1f)
@@ -1928,7 +2315,7 @@ internal fun TaskFormSheet(
                     }
                 )
             }
-            FilledTonalButton(
+            ChronosFilledTonalButton(
                 onClick = {
                     val newDraft = TaskActionDraft(
                         id = UUID.randomUUID().toString(),
@@ -2046,7 +2433,7 @@ internal fun TaskFormSheet(
                                 )
                             }
                             if (draft.kind == TaskAttachmentKind.IMAGE) {
-                                FilledTonalButton(
+                                ChronosFilledTonalButton(
                                     onClick = {
                                         val updated = attachmentDrafts.toList().map { item ->
                                             item.copy(isFeaturedImage = item.id == draft.id)
@@ -2067,7 +2454,7 @@ internal fun TaskFormSheet(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                FilledTonalButton(
+                                ChronosFilledTonalButton(
                                     onClick = {
                                         if (previewAttachment != null) {
                                             openTaskAttachment(context, previewAttachment)
@@ -2081,7 +2468,7 @@ internal fun TaskFormSheet(
                                 ) {
                                     Text("Open")
                                 }
-                                TextButton(
+                                ChronosTextButton(
                                     onClick = {
                                         val updated = attachmentDrafts.toMutableList().apply { removeAt(index) }
                                         attachmentDrafts.clear()
@@ -2101,7 +2488,7 @@ internal fun TaskFormSheet(
                 }
             }
 
-            FilledTonalButton(
+            ChronosFilledTonalButton(
                 onClick = { attachmentPickerLauncher.launch(arrayOf("*/*")) },
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -3107,13 +3494,324 @@ private data class TaskTranscriptDraft(
 
 private fun taskTranscriptDraft(capture: String): TaskTranscriptDraft {
     val normalized = capture.lowercase()
+    val range = taskTranscriptTimeRange(capture)
     return TaskTranscriptDraft(
         title = taskTranscriptTitle(capture, normalized),
         priority = taskTranscriptPriority(normalized),
-        durationMinutes = taskTranscriptDurationMinutes(normalized),
-        preferredStartMinute = taskTranscriptPreferredStartMinute(capture, normalized),
+        durationMinutes = range?.second ?: taskTranscriptDurationMinutes(normalized),
+        preferredStartMinute = range?.first ?: taskTranscriptPreferredStartMinute(capture, normalized),
         scheduleDateOption = taskTranscriptScheduleDateOption(normalized)
     )
+}
+
+/**
+ * Result of the offline (no-AI) natural-language parse of a typed task title. Carries the detected
+ * scheduling/priority values plus a noise-stripped [cleanedTitle], and exposes a human-readable
+ * [detectedChips] preview for the inline smart-fill banner.
+ */
+internal data class TaskTitleSmartFill(
+    val cleanedTitle: String,
+    val priority: Int?,
+    val durationMinutes: Int?,
+    val preferredStartMinute: Int?,
+    val scheduleDateOption: String?,
+    val targetDate: LocalDate? = null,
+    val actionPreview: String? = null,
+    val recurrence: TaskRecurringConfig? = null
+) {
+    val detectedChips: List<String>
+        get() = buildList {
+            targetDate?.let { add(formatTaskTargetDateLabel(it).replaceFirstChar(Char::titlecase)) }
+            scheduleDateOption?.takeIf { it != "Any day" }?.let { add(it) }
+            preferredStartMinute?.let { add(formatDisplayMinute(it)) }
+            durationMinutes?.let { add(formatTaskDurationBlock(it)) }
+            recurrence?.let { add(taskRecurrenceChipLabel(it)) }
+            when (priority) {
+                2 -> add("Urgent")
+                1 -> add("High")
+                0 -> add("Low priority")
+            }
+            actionPreview?.let { add(it) }
+        }
+
+    val hasDetection: Boolean
+        get() = scheduleDateOption != null ||
+            targetDate != null ||
+            preferredStartMinute != null ||
+            durationMinutes != null ||
+            priority != null ||
+            actionPreview != null ||
+            recurrence != null
+}
+
+/** Detects "every day / weekly / every 2 weeks / every monday / weekdays / monthly" in a title. */
+internal fun taskTitleRecurrence(capture: String, today: LocalDate): TaskRecurringConfig? {
+    val cadenceName = contextualTaskRecurringCadenceContextOptions(capture).firstOrNull() ?: return null
+    val cadence = TaskRecurringCadence.valueOf(cadenceName)
+    val interval = contextualTaskRecurringInterval(capture, cadence) ?: 1
+    val weekdays = if (cadence == TaskRecurringCadence.WEEKLY) {
+        contextualTaskWeeklyDays(capture)
+    } else {
+        emptySet()
+    }
+    return TaskRecurringConfig(
+        enabled = true,
+        cadence = cadence,
+        interval = interval,
+        weekdays = weekdays,
+        startsOn = today
+    )
+}
+
+private fun taskRecurrenceChipLabel(config: TaskRecurringConfig): String = when {
+    config.interval > 1 -> when (config.cadence) {
+        TaskRecurringCadence.DAILY -> "Every ${config.interval} days"
+        TaskRecurringCadence.WEEKLY -> "Every ${config.interval} weeks"
+        TaskRecurringCadence.MONTHLY_DAY_OF_MONTH,
+        TaskRecurringCadence.MONTHLY_ORDINAL_WEEKDAY -> "Every ${config.interval} months"
+    }
+    config.cadence == TaskRecurringCadence.DAILY -> "Repeats daily"
+    config.cadence == TaskRecurringCadence.WEEKLY -> "Repeats weekly"
+    else -> "Repeats monthly"
+}
+
+private fun taskTemplateSummary(template: TaskTemplate): String {
+    val parts = buildList {
+        when (template.priority) {
+            2 -> add("Urgent")
+            1 -> add("High")
+        }
+        template.durationMinutes?.let { add(formatTaskDurationBlock(it)) }
+        template.preferredStartMinute?.let { add(formatDisplayMinute(it)) }
+        if (template.checklistLabels.isNotEmpty()) {
+            add(pluralizeCount(template.checklistLabels.size, "step"))
+        }
+        template.recurrenceCadence?.let { cadence ->
+            add(
+                taskRecurrenceChipLabel(
+                    TaskRecurringConfig(
+                        enabled = true,
+                        cadence = cadence,
+                        interval = template.recurrenceInterval
+                    )
+                )
+            )
+        }
+    }
+    return if (parts.isEmpty()) "Title only" else parts.joinToString(" • ")
+}
+
+/**
+ * Parses the typed title for inline scheduling/priority hints using the same deterministic engine
+ * that powers speech capture. Returns null when there is nothing worth surfacing — i.e. no
+ * scheduling tokens were found and the title carries no strippable noise.
+ */
+internal fun taskTitleSmartFill(
+    title: String,
+    today: LocalDate = LocalDate.now()
+): TaskTitleSmartFill? {
+    val capture = title.trim()
+    if (capture.length < 3) return null
+    val draft = taskTranscriptDraft(capture)
+    val cleaned = draft.title?.takeIf { it.isNotBlank() } ?: capture
+    // Today/tomorrow already resolve to a friendly option; richer phrases ("next tuesday",
+    // "in 3 days", "this weekend") resolve to a concrete date that the Schedule section can adopt.
+    val targetDate = if (draft.scheduleDateOption == null) {
+        taskTranscriptTargetDate(capture.lowercase(), today)
+    } else {
+        null
+    }
+    // An email / phone / link / app mentioned in the title becomes a one-tap attachable action.
+    val actionPreview = taskTranscriptActionDraft(capture, isPrimary = true)?.let { draft0 ->
+        "${taskActionTypeLabel(draft0.type)}: ${draft0.value}"
+    }
+    val recurrence = taskTitleRecurrence(capture, today)
+    val fill = TaskTitleSmartFill(
+        cleanedTitle = cleaned,
+        priority = draft.priority,
+        durationMinutes = draft.durationMinutes,
+        preferredStartMinute = draft.preferredStartMinute,
+        scheduleDateOption = draft.scheduleDateOption,
+        targetDate = targetDate,
+        actionPreview = actionPreview,
+        recurrence = recurrence
+    )
+    val titleWouldChange = !cleaned.equals(capture, ignoreCase = true)
+    return fill.takeIf { (it.hasDetection || titleWouldChange) && it.detectedChips.isNotEmpty() }
+}
+
+/** Most recent distinct, non-blank titles the user has created — surfaced as one-tap reuse chips. */
+internal fun recentTaskTitleOptions(existingTitles: List<String>, limit: Int = 6): List<String> =
+    existingTitles.asSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .take(limit)
+        .toList()
+
+/** "1 step" / "3 steps" — count with a correctly pluralized unit. */
+internal fun pluralizeCount(count: Int, singular: String, plural: String = singular + "s"): String =
+    "$count ${if (count == 1) singular else plural}"
+
+/**
+ * Finds an existing goal whose name appears as a whole word in the task text, so the form can offer
+ * a one-tap link. Requires a label of 3+ chars to avoid matching trivially short goal names.
+ */
+internal fun detectGoalIdFromText(text: String, goals: List<ChronosLinkOption>): String? {
+    val normalized = text.lowercase()
+    return goals.firstOrNull { option ->
+        val label = option.label.trim().lowercase()
+        label.length >= 3 && Regex("""\b${Regex.escape(label)}\b""").containsMatchIn(normalized)
+    }?.id
+}
+
+/** Warns when the typed title already matches an existing task (case-insensitive), to avoid dupes. */
+internal fun taskTitleDuplicateWarning(title: String, existingTitles: List<String>): String? {
+    val trimmed = title.trim()
+    if (trimmed.length < 3) return null
+    val match = existingTitles.firstOrNull { it.trim().equals(trimmed, ignoreCase = true) } ?: return null
+    return "You already have a task called “${match.trim()}”."
+}
+
+/** Splits a checklist-entry field into multiple steps on newlines or semicolons (paste a list). */
+internal fun splitChecklistInput(raw: String): List<String> =
+    raw.split('\n', ';')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+
+private val TASK_DESCRIPTION_BULLET_PATTERN = Regex("""^(?:[-*•·]|\d+[.)])\s+""")
+
+/**
+ * Pulls candidate checklist steps out of a multi-line description (stripping bullet/number markers),
+ * skipping anything already present as a step. Lets a pasted/typed list become a checklist in one tap.
+ */
+internal fun descriptionChecklistCandidates(
+    description: String,
+    existingLabels: List<String>
+): List<String> {
+    val existing = existingLabels.map { it.trim().lowercase() }.toSet()
+    return description.split("\n")
+        .map { line -> line.trim().replaceFirst(TASK_DESCRIPTION_BULLET_PATTERN, "").trim() }
+        .filter { it.length in 2..120 }
+        .distinctBy { it.lowercase() }
+        .filterNot { it.lowercase() in existing }
+}
+
+private val TASK_RELATIVE_IN_DAYS_PATTERN = Regex(
+    """\bin\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,3})\s+(day|days|week|weeks|month|months)\b""",
+    RegexOption.IGNORE_CASE
+)
+
+private fun taskRelativeAmount(token: String): Int? = when (token.lowercase()) {
+    "a", "an", "one" -> 1
+    "two" -> 2
+    "three" -> 3
+    "four" -> 4
+    "five" -> 5
+    "six" -> 6
+    "seven" -> 7
+    "eight" -> 8
+    "nine" -> 9
+    "ten" -> 10
+    else -> token.toIntOrNull()
+}
+private val TASK_RELATIVE_WEEKDAY_PATTERN = Regex(
+    """\b(this|next|on|by|coming|come)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)\b""",
+    RegexOption.IGNORE_CASE
+)
+
+/**
+ * Resolves relative/weekday date phrases ("next tuesday", "in 3 days", "this weekend",
+ * "day after tomorrow") to a concrete [LocalDate]. [today] is injected for deterministic tests.
+ * Weekday names require a leading qualifier (on/by/this/next/come) so a stray weekday in a title
+ * (e.g. "Monday report") is not mistaken for a date.
+ */
+internal fun taskTranscriptTargetDate(normalized: String, today: LocalDate): LocalDate? {
+    if (Regex("""\bday after tomorrow\b""").containsMatchIn(normalized)) return today.plusDays(2)
+    TASK_RELATIVE_IN_DAYS_PATTERN.find(normalized)?.let { match ->
+        val amount = taskRelativeAmount(match.groupValues[1])
+        if (amount != null && amount in 1..365) {
+            val unit = match.groupValues[2].lowercase()
+            return when {
+                unit.startsWith("month") -> today.plusMonths(amount.toLong())
+                unit.startsWith("week") -> today.plusDays(amount * 7L)
+                else -> today.plusDays(amount.toLong())
+            }
+        }
+    }
+    if (Regex("""\bnext weekend\b""").containsMatchIn(normalized)) {
+        return today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SATURDAY)).plusWeeks(1)
+    }
+    if (Regex("""\bthis weekend\b""").containsMatchIn(normalized)) {
+        return today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SATURDAY))
+    }
+    if (Regex("""\bend of (the )?month\b""").containsMatchIn(normalized)) {
+        return today.with(TemporalAdjusters.lastDayOfMonth())
+    }
+    if (Regex("""\bnext week\b""").containsMatchIn(normalized)) {
+        return today.with(TemporalAdjusters.next(DayOfWeek.MONDAY))
+    }
+    if (Regex("""\bnext month\b""").containsMatchIn(normalized)) {
+        return today.plusMonths(1)
+    }
+    TASK_RELATIVE_WEEKDAY_PATTERN.find(normalized)?.let { match ->
+        val day = taskWeekdayFromToken(match.groupValues[2]) ?: return@let
+        return if (match.groupValues[1].lowercase() == "next") {
+            today.with(TemporalAdjusters.next(day))
+        } else {
+            today.with(TemporalAdjusters.nextOrSame(day))
+        }
+    }
+    return null
+}
+
+private fun taskWeekdayFromToken(token: String): DayOfWeek? = when (token.lowercase()) {
+    "monday", "mon" -> DayOfWeek.MONDAY
+    "tuesday", "tue", "tues" -> DayOfWeek.TUESDAY
+    "wednesday", "wed", "weds" -> DayOfWeek.WEDNESDAY
+    "thursday", "thu", "thur", "thurs" -> DayOfWeek.THURSDAY
+    "friday", "fri" -> DayOfWeek.FRIDAY
+    "saturday", "sat" -> DayOfWeek.SATURDAY
+    "sunday", "sun" -> DayOfWeek.SUNDAY
+    else -> null
+}
+
+@Composable
+private fun TaskTitleSmartFillCard(
+    fill: TaskTitleSmartFill,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Detected in your text",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = fill.detectedChips.joinToString("  •  "),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = "Apply the detected details and tidy the title to “${fill.cleanedTitle}”.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ChronosFilledTonalButton(onClick = onApply, modifier = Modifier.weight(1f)) {
+                    Text("Smart fill")
+                }
+                ChronosTextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                    Text("Dismiss")
+                }
+            }
+        }
+    }
 }
 
 private fun taskTranscriptTitle(capture: String, normalized: String): String? {
@@ -3170,8 +3868,47 @@ private val TASK_TRANSCRIPT_TIME_PATTERN = Regex(
     """\b(?:at\s+)?(\d{1,2}:\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm)|noon|midnight)\b""",
     RegexOption.IGNORE_CASE
 )
+
+// A clock range like "2 to 4pm" / "from 9am to 10:30am" / "2-4pm". The end MUST carry am/pm so a
+// quantity range ("5-10 items") is never mistaken for a time. groups: 1=start, 2=start meridiem,
+// 3=end, 4=end meridiem.
+private val TASK_TIME_RANGE_PATTERN = Regex(
+    """\b(?:from\s+)?(\d{1,2}(?::\d{2})?)\s*(am|pm)?\s*(?:to|until|till|[-–—])\s*(\d{1,2}(?::\d{2})?)\s*(am|pm)\b""",
+    RegexOption.IGNORE_CASE
+)
+
+private fun parseClock12(token: String, meridiem: String): Int? {
+    val parts = token.split(":")
+    val hour = parts[0].toIntOrNull() ?: return null
+    val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    if (hour !in 1..12 || minute !in 0..59) return null
+    val resolvedHour = when {
+        meridiem == "pm" && hour != 12 -> hour + 12
+        meridiem == "am" && hour == 12 -> 0
+        else -> hour
+    }
+    return resolvedHour * 60 + minute
+}
+
+/** Parses a clock range into (startMinuteOfDay, durationMinutes), inferring the start's am/pm from the end. */
+internal fun taskTranscriptTimeRange(capture: String): Pair<Int, Int>? {
+    val match = TASK_TIME_RANGE_PATTERN.find(capture) ?: return null
+    val endMeridiem = match.groupValues[4].lowercase()
+    val startMeridiem = match.groupValues[2].lowercase().ifBlank { endMeridiem }
+    val endMin = parseClock12(match.groupValues[3], endMeridiem) ?: return null
+    var startMin = parseClock12(match.groupValues[1], startMeridiem) ?: return null
+    // "11 to 1pm": the inferred-pm start lands after the end, so it's really the am half.
+    if (startMin >= endMin) startMin -= 12 * 60
+    if (startMin < 0) return null
+    val duration = endMin - startMin
+    return if (duration in TaskDurationMinMinutes..(12 * 60)) {
+        startMin to duration.coerceAtMost(TaskDurationMaxMinutes)
+    } else {
+        null
+    }
+}
 private val DURATION_CONTEXT_PATTERN = Regex(
-    """\b(15|30|45|60|90|120)\s*-?\s*(?:m|min|mins|minute|minutes)\b""",
+    """\b(\d{1,3})\s*-?\s*(?:m|min|mins|minute|minutes)\b""",
     RegexOption.IGNORE_CASE
 )
 private val HOUR_DURATION_CONTEXT_PATTERN = Regex(
@@ -3184,8 +3921,14 @@ private val CASUAL_DURATION_CONTEXT_PATTERN = Regex(
 )
 
 private val TASK_TRANSCRIPT_TITLE_NOISE_PATTERNS = listOf(
-    Regex("""\b(urgent|asap|critical|important|low priority|optional)\b""", RegexOption.IGNORE_CASE),
-    Regex("""\b(today|tomorrow|tonight|morning|afternoon|evening|at night)\b""", RegexOption.IGNORE_CASE),
+    // Leading capture filler that people type/dictate ("remind me to…", "todo:") but isn't the task.
+    Regex("""^\s*(?:please\s+)?(?:remind me to|reminder to|don'?t forget to|i need to|i have to|i should|need to|have to|gotta|to-?do:|task:)\s+""", RegexOption.IGNORE_CASE),
+    Regex("""\b(urgent|asap|critical|important|high priority|high-priority|low priority|optional|p[1-4])\b""", RegexOption.IGNORE_CASE),
+    Regex("""\b(?:today|tomorrow|tonight|first thing|end of day|eod|(?:early |late )?(?:morning|afternoon|evening|midday)|at night)\b""", RegexOption.IGNORE_CASE),
+    Regex("""\b(this weekend|next weekend|end of (the )?month|next week|next month|day after)\b""", RegexOption.IGNORE_CASE),
+    TASK_RELATIVE_IN_DAYS_PATTERN,
+    TASK_RELATIVE_WEEKDAY_PATTERN,
+    TASK_TIME_RANGE_PATTERN,
     TASK_TRANSCRIPT_TIME_PATTERN,
     DURATION_CONTEXT_PATTERN,
     HOUR_DURATION_CONTEXT_PATTERN,
@@ -3193,9 +3936,10 @@ private val TASK_TRANSCRIPT_TITLE_NOISE_PATTERNS = listOf(
 )
 
 private fun taskTranscriptPriority(normalized: String): Int? = when {
-    Regex("""\b(urgent|asap|critical|important|deadline|due today|due tomorrow)\b""")
+    Regex("""\b(urgent|asap|critical|important|deadline|due today|due tomorrow|p1)\b""")
         .containsMatchIn(normalized) -> 2
-    Regex("""\b(low priority|someday|whenever|optional)\b""").containsMatchIn(normalized) -> 0
+    Regex("""\b(high priority|high-priority|p2)\b""").containsMatchIn(normalized) -> 1
+    Regex("""\b(low priority|someday|whenever|optional|p3|p4)\b""").containsMatchIn(normalized) -> 0
     else -> null
 }
 
@@ -3213,13 +3957,13 @@ private fun taskDurationMentionMinutes(normalized: String): Int? {
     HOUR_DURATION_CONTEXT_PATTERN.find(normalized)?.let { match ->
         val hours = taskDurationHourValue(match.groupValues.getOrNull(1).orEmpty()) ?: return@let
         val minutes = match.groupValues.getOrNull(2)?.toIntOrNull() ?: 0
-        return (hours * 60 + minutes).takeIf { it in durationPresets }
+        return (hours * 60 + minutes).takeIf { it in TaskDurationMinMinutes..TaskDurationMaxMinutes }
     }
     return DURATION_CONTEXT_PATTERN.find(normalized)
         ?.groupValues
         ?.getOrNull(1)
         ?.toIntOrNull()
-        ?.takeIf { it in durationPresets }
+        ?.takeIf { it in TaskDurationMinMinutes..TaskDurationMaxMinutes }
 }
 
 private fun taskDurationHourValue(value: String): Int? = when (value.lowercase()) {
@@ -3235,12 +3979,28 @@ private fun taskTranscriptPreferredStartMinute(capture: String, normalized: Stri
         ?.value
         ?.let(::parseFlexibleMinute)
         ?.let { return it }
+    // More specific phrases first so e.g. "late morning" / "after lunch" aren't swallowed by the
+    // bare "morning" / "lunch" branches.
     return when {
+        "first thing" in normalized -> 8 * 60
+        "before work" in normalized -> 8 * 60
+        "early morning" in normalized -> 7 * 60
+        "late morning" in normalized -> 11 * 60
         "morning" in normalized || "breakfast" in normalized -> 9 * 60
+        "before noon" in normalized -> 11 * 60
         "noon" in normalized || "midday" in normalized -> 12 * 60
+        "before lunch" in normalized -> 11 * 60 + 30
+        "after lunch" in normalized -> 14 * 60
         "lunch" in normalized -> 13 * 60
+        "early afternoon" in normalized -> 13 * 60
+        "late afternoon" in normalized -> 16 * 60
         "afternoon" in normalized -> 13 * 60
+        "after work" in normalized -> 17 * 60 + 30
+        "end of day" in normalized || "eod" in normalized -> 17 * 60
+        "after dinner" in normalized -> 20 * 60
+        "late evening" in normalized -> 20 * 60
         "evening" in normalized || "dinner" in normalized || "tonight" in normalized -> 18 * 60
+        "midnight" in normalized -> 0
         else -> null
     }
 }
@@ -3500,7 +4260,7 @@ private fun TaskConnectQuickChips(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         visibleChips.forEach { chip ->
-            FilterChip(
+            ChronosFilterChip(
                 selected = chip.rank <= TASK_CONNECT_SUGGESTED_RANK,
                 onClick = chip.action,
                 label = { Text(chip.displayLabel) }

@@ -12,4 +12,14 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
     </style>
+
+    <!-- Brand cold-start splash (androidx.core SplashScreen API). Backed by the same cream the
+         first Compose surface uses, so the hand-off into the app is seamless. -->
+    <color name="chronos_splash_background">#F6F4EF</color>
+
+    <style name="Theme.ChronosFlow.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/chronos_splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_chronosflow_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.ChronosFlow</item>
+    </style>
 </resources>

@@ -1050,6 +1050,178 @@ class MedicationAssistPlanner @Inject constructor(
     }
 }
 
+data class RoutineAssistRequest(
+    val title: String,
+    val stepCount: Int
+)
+
+/** A single proposed routine step. Times are absolute minutes-of-day to match the template editor. */
+data class RoutineAssistStep(
+    val title: String,
+    val startMinute: Int,
+    val durationMinutes: Int,
+    val category: String = ROUTINE_STEP_CATEGORY
+)
+
+sealed interface RoutineAssistSuggestion {
+    val id: String
+    val label: String
+    val reason: String
+    val source: RoutineAssistSource
+
+    data class Title(
+        override val id: String,
+        override val label: String,
+        override val reason: String,
+        override val source: RoutineAssistSource,
+        val title: String
+    ) : RoutineAssistSuggestion
+
+    data class Steps(
+        override val id: String,
+        override val label: String,
+        override val reason: String,
+        override val source: RoutineAssistSource,
+        val steps: List<RoutineAssistStep>
+    ) : RoutineAssistSuggestion
+}
+
+class RoutineAssistPlanner @Inject constructor(
+    private val genAiAssistCoordinator: GenAiAssistCoordinator
+) {
+    suspend fun suggest(request: RoutineAssistRequest): List<RoutineAssistSuggestion> {
+        val generation = genAiAssistCoordinator.generateAssistText(buildPrompt(request))
+        generation.text?.let { raw ->
+            val parsed = parseAssistSuggestions(raw, generation.source.toRoutineAssistSource())
+            if (parsed.isNotEmpty()) return parsed
+        }
+        return localSuggestions(request)
+    }
+
+    /**
+     * On-demand wording clean-up for a typed or dictated routine [title] using the on-device ML Kit
+     * GenAI Proofreading feature. Returns a [RoutineAssistSuggestion.Title] only when the model
+     * produced a materially different, non-empty name; otherwise null so the field is left untouched.
+     */
+    suspend fun refineTitle(title: String): RoutineAssistSuggestion.Title? {
+        val trimmed = title.trim()
+        if (trimmed.length < MIN_ROUTINE_REFINE_LENGTH) return null
+        val generation = genAiAssistCoordinator.proofread(trimmed)
+        val cleaned = generation.text?.trim().orEmpty().take(MAX_ROUTINE_TITLE_LENGTH)
+        if (cleaned.isBlank() || cleaned.equals(trimmed, ignoreCase = true)) return null
+        val source = generation.source.toRoutineAssistSource()
+        return RoutineAssistSuggestion.Title(
+            id = "${source.name.lowercase(Locale.getDefault())}:routine:proofread",
+            label = cleaned,
+            reason = "Tidied spelling and grammar on-device.",
+            source = source,
+            title = cleaned
+        )
+    }
+
+    private fun buildPrompt(request: RoutineAssistRequest): String = buildString {
+        appendLine("Parse this typed or dictated capture into a manual routine outline for ChronosFlow.")
+        appendLine("Return one suggestion per line as kind|label|value|reason.")
+        appendLine("Kinds: title, step.")
+        appendLine("Step value is name,startMinute,durationMinutes. startMinute is minutes after midnight.")
+        appendLine("Extract a concise routine name and ordered, non-overlapping steps from user-provided text only.")
+        appendLine("Return the title and several step suggestions together, because the user applies them one at a time.")
+        appendLine("For dictated fragments, keep each step name separate from its time and duration words.")
+        appendLine("Do not say to apply automatically.")
+        appendLine("Examples:")
+        appendLine("Input: morning routine")
+        appendLine("title|Morning routine|Morning routine|Use a concise routine name.")
+        appendLine("step|Hydrate|Hydrate,420,5|Start the morning with water.")
+        appendLine("step|Stretch|Stretch,425,10|A short mobility block wakes the body up.")
+        appendLine("step|Plan the day|Plan the day,435,10|Reviewing the plan sets the day's focus.")
+        appendLine("Input: evening wind down 9pm")
+        appendLine("title|Evening wind down|Evening wind down|Keep the wind-down intent in the name.")
+        appendLine("step|Tidy up|Tidy up,1260,10|A quick reset closes the day.")
+        appendLine("step|Reflect|Reflect,1270,10|A short reflection helps the day land.")
+        appendLine("step|Wind down screen-free|Wind down screen-free,1280,20|Screen-free time supports sleep.")
+        appendLine("Input: gym session")
+        appendLine("title|Gym session|Gym session|Use a concise routine name.")
+        appendLine("step|Warm up|Warm up,1080,10|A warm-up reduces injury risk.")
+        appendLine("step|Main workout|Main workout,1090,40|The main training block.")
+        appendLine("step|Cool down|Cool down,1130,10|A cool-down closes the session.")
+        appendLine("Current title: ${request.title}")
+        appendLine("Current step count: ${request.stepCount}")
+    }
+
+    private fun parseAssistSuggestions(text: String, source: RoutineAssistSource): List<RoutineAssistSuggestion> {
+        val titles = mutableListOf<RoutineAssistSuggestion.Title>()
+        val steps = mutableListOf<RoutineAssistStep>()
+        text.lineSequence()
+            .map { it.trim().trim('-', '*') }
+            .filter { it.isNotBlank() && it.count { char -> char == '|' } >= 3 }
+            .forEachIndexed { index, line ->
+                val parts = line.split("|").map(String::trim)
+                val kind = parts.getOrNull(0)?.lowercase(Locale.getDefault()) ?: return@forEachIndexed
+                val label = parts.getOrNull(1).orEmpty()
+                val value = parts.getOrNull(2).orEmpty()
+                val reason = parts.drop(3).joinToString("|").ifBlank { defaultRoutineReasonFor(source) }
+                when (kind) {
+                    "title" -> value.takeIf(String::isNotBlank)?.let {
+                        titles += RoutineAssistSuggestion.Title(
+                            id = "${source.name.lowercase(Locale.getDefault())}:routine:title:$index",
+                            label = label.ifBlank { it },
+                            reason = reason,
+                            source = source,
+                            title = it.take(MAX_ROUTINE_TITLE_LENGTH)
+                        )
+                    }
+                    "step" -> parseRoutineStep(value)?.let { steps += it }
+                }
+            }
+        return buildList {
+            addAll(titles)
+            if (steps.isNotEmpty()) {
+                add(
+                    RoutineAssistSuggestion.Steps(
+                        id = "${source.name.lowercase(Locale.getDefault())}:routine:steps",
+                        label = "${steps.size}-step outline",
+                        reason = defaultRoutineReasonFor(source),
+                        source = source,
+                        steps = steps.take(MAX_ROUTINE_STEPS)
+                    )
+                )
+            }
+        }.take(MAX_SUGGESTIONS)
+    }
+
+    private fun localSuggestions(request: RoutineAssistRequest): List<RoutineAssistSuggestion> {
+        val normalized = request.title.lowercase(Locale.getDefault())
+        return buildList {
+            // Routine names legitimately contain time-of-day words ("Morning routine"), so local
+            // title cleanup is left to on-device proofread (refineTitle); only draft a name when blank.
+            if (request.title.isBlank()) {
+                add(
+                    RoutineAssistSuggestion.Title(
+                        id = "local:routine:title:0",
+                        label = "Draft routine name",
+                        reason = "Local fallback because Gemini Nano is unavailable.",
+                        source = RoutineAssistSource.LOCAL,
+                        title = "Daily routine"
+                    )
+                )
+            }
+            if (request.stepCount == 0) {
+                cannedRoutineSteps(normalized)?.let { steps ->
+                    add(
+                        RoutineAssistSuggestion.Steps(
+                            id = "local:routine:steps",
+                            label = "${steps.size}-step starter outline",
+                            reason = "Matched common wording in the routine name.",
+                            source = RoutineAssistSource.LOCAL,
+                            steps = steps
+                        )
+                    )
+                }
+            }
+        }.distinctBy { it.id }.take(MAX_SUGGESTIONS)
+    }
+}
+
 private data class MedicationDetailsCandidate(
     val name: String? = null,
     val dosage: String? = null,
@@ -1465,7 +1637,44 @@ private fun defaultRoutineReasonFor(source: RoutineAssistSource): String = when 
 private const val MAX_ROUTINE_TITLE_LENGTH = 72
 private const val MAX_MEDICATION_NOTE_LENGTH = 120
 private const val MAX_SUGGESTIONS = 6
+private const val MAX_ROUTINE_STEPS = 8
 private const val MIN_ROUTINE_REFINE_LENGTH = 3
+private const val ROUTINE_STEP_CATEGORY = "ROUTINE"
+
+private fun parseRoutineStep(value: String): RoutineAssistStep? {
+    val parts = value.split(',', ';').map(String::trim)
+    val title = parts.getOrNull(0)?.takeIf(String::isNotBlank)?.take(MAX_ROUTINE_TITLE_LENGTH) ?: return null
+    val start = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 1439) ?: return null
+    val duration = parts.getOrNull(2)?.toIntOrNull()?.coerceIn(5, 600) ?: return null
+    return RoutineAssistStep(title = title, startMinute = start, durationMinutes = duration)
+}
+
+private fun cannedRoutineSteps(normalizedText: String): List<RoutineAssistStep>? = when {
+    "morning" in normalizedText || "wake" in normalizedText || "breakfast" in normalizedText -> listOf(
+        RoutineAssistStep("Hydrate", 7 * 60, 5),
+        RoutineAssistStep("Stretch", 7 * 60 + 5, 10),
+        RoutineAssistStep("Plan the day", 7 * 60 + 15, 10)
+    )
+    "wind down" in normalizedText ||
+        "wind-down" in normalizedText ||
+        "evening" in normalizedText ||
+        "night" in normalizedText ||
+        "bedtime" in normalizedText ||
+        "sleep" in normalizedText -> listOf(
+        RoutineAssistStep("Tidy up", 21 * 60, 10),
+        RoutineAssistStep("Reflect", 21 * 60 + 10, 10),
+        RoutineAssistStep("Wind down screen-free", 21 * 60 + 20, 20)
+    )
+    "gym" in normalizedText ||
+        "workout" in normalizedText ||
+        "exercise" in normalizedText ||
+        "training" in normalizedText -> listOf(
+        RoutineAssistStep("Warm up", 18 * 60, 10),
+        RoutineAssistStep("Main workout", 18 * 60 + 10, 40),
+        RoutineAssistStep("Cool down", 18 * 60 + 50, 10)
+    )
+    else -> null
+}
 
 private val MEDICATION_DOSAGE_PATTERN = Regex(
     """\b(½|1/2|\d+(?:\.\d+)?)\s*(mg|mcg|micrograms?|ug|g|ml|milliliters?|teaspoons?|tsps?|tsp|tablespoons?|tbsps?|tbsp|iu|international\s+units?|units?|tablets?|tabs?|capsules?|caps?|drops?|puffs?|sprays?|doses?|dose)\b""",

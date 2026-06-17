@@ -1,4 +1,6 @@
 package com.chronosflow.feature.habits
+
+import com.chronosflow.core.ui.components.ChronosFilledTonalButton
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -14,7 +16,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -46,6 +47,7 @@ import com.chronosflow.core.domain.model.HabitRecurrencePeriodUnit
 import com.chronosflow.core.domain.model.HabitSchedule
 import com.chronosflow.core.domain.model.normalizeAppLaunchTarget
 import com.chronosflow.core.ui.components.ChronosAssistSuggestionChips
+import com.chronosflow.core.ui.components.ChronosFilterChip
 import com.chronosflow.core.ui.components.GenAiAssistBanner
 import com.chronosflow.core.ui.components.withSelectedOption
 import com.chronosflow.core.ui.settings.ChronosUiSettingsKeys
@@ -686,7 +688,7 @@ internal fun HabitFormSheet(
                 modifier = Modifier.fillMaxWidth()
             )
             if (onRequestAssist != null) {
-                FilledTonalButton(
+                ChronosFilledTonalButton(
                     onClick = {
                         onRequestAssist(
                             HabitAssistRequest(
@@ -917,7 +919,7 @@ internal fun HabitFormSheet(
             }
             if (initialHabit != null && onCompleteToday != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    FilledTonalButton(
+                    ChronosFilledTonalButton(
                         onClick = {
                             onCompleteToday(initialHabit)
                             onDismiss()
@@ -999,7 +1001,7 @@ internal fun HabitFormSheet(
                     }
                 }
             )
-            FilledTonalButton(
+            ChronosFilledTonalButton(
                 onClick = { recurrenceCustomExpanded = !customRecurrenceVisible },
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -1037,7 +1039,7 @@ internal fun HabitFormSheet(
                         ) {
                             DayOfWeek.values().forEach { day ->
                                 val selected = day in recurrenceState.weekdays
-                                FilterChip(
+                                ChronosFilterChip(
                                     selected = selected,
                                     onClick = {
                                         recurrenceState = recurrenceState.copy(
@@ -1091,7 +1093,7 @@ internal fun HabitFormSheet(
                         ) {
                             DayOfWeek.values().forEach { day ->
                                 val selected = day in recurrenceState.weekdays
-                                FilterChip(
+                                ChronosFilterChip(
                                     selected = selected,
                                     onClick = {
                                         recurrenceState = recurrenceState.copy(

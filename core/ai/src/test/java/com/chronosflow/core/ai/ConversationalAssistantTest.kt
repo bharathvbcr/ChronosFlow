@@ -23,8 +23,8 @@ class ConversationalAssistantTest {
 
     @Test
     fun `respond maps an action line to a confirmable proposal`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = "Sure, I can start a focus session.\nACTION: focus.start",
             source = AssistGenAiSource.GEMINI_NANO
         )
@@ -40,8 +40,8 @@ class ConversationalAssistantTest {
 
     @Test
     fun `respond ignores action ids that are not in the catalog`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = "Here you go.\nACTION: delete.everything",
             source = AssistGenAiSource.GEMINI_NANO
         )
@@ -54,8 +54,8 @@ class ConversationalAssistantTest {
 
     @Test
     fun `respond falls back to local routing when AI unavailable`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = null,
             source = AssistGenAiSource.LOCAL
         )
@@ -69,8 +69,8 @@ class ConversationalAssistantTest {
 
     @Test
     fun `respondStream emits partial text then a final response`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        every { coordinator.generateAssistTextStream(any()) } returns flowOf(
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        every { coordinator.generateAssistTextStream(any(), any(), any()) } returns flowOf(
             "Opening",
             "Opening the add task screen.\nACTION: task.add"
         )
@@ -92,8 +92,8 @@ class ConversationalAssistantTest {
             "Create task from \"call mom\"",
             setOf("add", "create", "capture")
         )
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = "I'll draft that task.\nACTION: capture.create.task | call mom tomorrow at 2pm",
             source = AssistGenAiSource.GEMINI_NANO
         )
@@ -108,8 +108,8 @@ class ConversationalAssistantTest {
 
     @Test
     fun `respond returns multiple proposals in order and ignores unknown ids`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = "Both would help.\nACTION: focus.start\nACTION: delete.everything\nACTION: task.add",
             source = AssistGenAiSource.GEMINI_NANO
         )
@@ -124,8 +124,8 @@ class ConversationalAssistantTest {
 
     @Test
     fun `respond ignores payloads on non-capture commands`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = "Starting focus.\nACTION: focus.start | 45 minutes",
             source = AssistGenAiSource.GEMINI_NANO
         )
@@ -139,9 +139,9 @@ class ConversationalAssistantTest {
 
     @Test
     fun `respondStream retries the non-streaming path when the stream is empty`() = runTest {
-        val coordinator = mockk<GenAiAssistCoordinator>()
-        every { coordinator.generateAssistTextStream(any()) } returns flowOf()
-        coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(
+        val coordinator = mockk<GenAiAssistCoordinator>(relaxed = true)
+        every { coordinator.generateAssistTextStream(any(), any(), any()) } returns flowOf()
+        coEvery { coordinator.generateAssistText(any(), any(), any()) } returns AssistTextGeneration(
             text = "Opening the add task screen.\nACTION: task.add",
             source = AssistGenAiSource.CLOUD_GEMINI
         )

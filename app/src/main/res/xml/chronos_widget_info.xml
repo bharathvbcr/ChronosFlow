@@ -4,6 +4,7 @@
     android:minWidth="110dp"
     android:minHeight="110dp"
     android:description="@string/widget_desc_focus"
+    android:initialLayout="@layout/glance_default_loading_layout"
     android:previewImage="@drawable/widget_chronos_preview"
     android:previewLayout="@layout/widget_chronos_preview"
     android:resizeMode="horizontal|vertical"

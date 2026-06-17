@@ -178,19 +178,6 @@ class MainActivityStartupTest {
     }
 
     @Test
-    fun `sidebar notification day target starts on the routed day target`() {
-        assertEquals(
-            ChronosRoute.Day.createRoute(ChronosRoute.Day.TARGET_TASKS),
-            startRouteForNotificationLaunch(
-                NotificationLaunch(
-                    section = ChronosRoute.Day.section,
-                    dayTarget = ChronosRoute.Day.TARGET_TASKS
-                )
-            )
-        )
-    }
-
-    @Test
     fun `sidebar notification day target seeds the first shell state`() {
         assertEquals(
             ChronosRoute.Day.TARGET_TASKS,

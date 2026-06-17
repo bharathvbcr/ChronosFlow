@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.ApplicationExtension
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.kover)
@@ -6,8 +7,31 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Shared release signing: the phone (:app) and watch (:wear) must be signed with the SAME key so
+// the Wearable Data Layer pairs them. Credentials live in the gitignored root keystore.properties
+// (see keystore.properties.example); absent that file the release variant is simply left unsigned.
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+
 extensions.configure<ApplicationExtension> {
-    buildTypes { debug { enableUnitTestCoverage = true; enableAndroidTestCoverage = true } }
+    if (keystorePropsFile.exists()) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+    buildTypes {
+        debug { enableUnitTestCoverage = true; enableAndroidTestCoverage = true }
+        if (keystorePropsFile.exists()) {
+            release { signingConfig = signingConfigs.getByName("release") }
+        }
+    }
     namespace = "com.chronosflow.wear"
     compileSdk = 37
 
@@ -17,8 +41,11 @@ extensions.configure<ApplicationExtension> {
         applicationId = "com.chronosflow"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        // Wear OS multi-APK delivery requires a versionCode distinct from (and conventionally higher
+        // than) the phone APK's; derive it from the shared base in a reserved +100000 band so the two
+        // never collide as the version increments. See gradle.properties.
+        versionCode = providers.gradleProperty("chronos.versionCode").map(String::toInt).orElse(1).get() + 100000
+        versionName = providers.gradleProperty("chronos.versionName").orElse("0.1.0").get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -67,6 +94,7 @@ dependencies {
     implementation(libs.androidx.wear.compose.foundation)
     implementation(libs.androidx.wear.compose.navigation)
     implementation(libs.androidx.wear.remote.interactions)
+    implementation(libs.androidx.wear.watchface.complications.datasource.ktx)
     implementation(libs.kotlinx.coroutines.core)
 
     debugImplementation(libs.androidx.compose.ui.tooling)

@@ -121,40 +121,63 @@ class DayDialScreenAutoDismissTest {
     }
 
     @Test
-    fun `in-place insights tab handles system back by returning to today`() {
-        assertEquals(
-            DayDialTab.TODAY,
+    fun `non-today primary tabs return to today on system back`() {
+        listOf(DayDialTab.PLAN, DayDialTab.FOCUS, DayDialTab.INSIGHTS).forEach { tab ->
+            assertEquals(
+                "back from $tab should return to Today",
+                DayDialTab.TODAY,
+                dayDialBackFallbackTab(
+                    currentTab = tab,
+                    launchTab = DayDialTab.TODAY,
+                    activeSheet = null
+                )
+            )
+        }
+    }
+
+    @Test
+    fun `today, deep-link roots, and active sheets leave system back to their owners`() {
+        // Today is the home/root — back exits.
+        assertNull(
+            dayDialBackFallbackTab(
+                currentTab = DayDialTab.TODAY,
+                launchTab = DayDialTab.TODAY,
+                activeSheet = null
+            )
+        )
+        // A tab the app was launched / deep-linked straight into is its own root — back exits.
+        listOf(DayDialTab.PLAN, DayDialTab.FOCUS, DayDialTab.INSIGHTS).forEach { tab ->
+            assertNull(
+                "deep-link root $tab should let back exit",
+                dayDialBackFallbackTab(
+                    currentTab = tab,
+                    launchTab = tab,
+                    activeSheet = null
+                )
+            )
+        }
+        // An open sheet owns back.
+        assertNull(
             dayDialBackFallbackTab(
                 currentTab = DayDialTab.INSIGHTS,
-                launchTarget = null,
-                activeSheet = null
+                launchTab = DayDialTab.TODAY,
+                activeSheet = SheetTarget.EndOfDayReview
             )
         )
     }
 
     @Test
-    fun `routed insights and active sheets leave system back to their owners`() {
-        assertNull(
-            dayDialBackFallbackTab(
-                currentTab = DayDialTab.INSIGHTS,
-                launchTarget = "insights",
-                activeSheet = null
-            )
-        )
-        assertNull(
-            dayDialBackFallbackTab(
-                currentTab = DayDialTab.INSIGHTS,
-                launchTarget = null,
-                activeSheet = SheetTarget.EndOfDayReview
-            )
-        )
-        assertNull(
-            dayDialBackFallbackTab(
-                currentTab = DayDialTab.PLAN,
-                launchTarget = null,
-                activeSheet = null
-            )
-        )
+    fun `launch target maps to its day tab`() {
+        assertEquals(DayDialTab.TODAY, dayDialTabForLaunchTarget(null))
+        assertEquals(DayDialTab.TODAY, dayDialTabForLaunchTarget(""))
+        assertEquals(DayDialTab.TODAY, dayDialTabForLaunchTarget("today"))
+        assertEquals(DayDialTab.PLAN, dayDialTabForLaunchTarget("plan"))
+        assertEquals(DayDialTab.FOCUS, dayDialTabForLaunchTarget("focus-planner"))
+        assertEquals(DayDialTab.INSIGHTS, dayDialTabForLaunchTarget("insights"))
+        assertEquals(DayDialTab.INSIGHTS, dayDialTabForLaunchTarget("review"))
+        // Sidebar / one-shot-sheet targets keep the underlying Today tab.
+        assertEquals(DayDialTab.TODAY, dayDialTabForLaunchTarget("day-tools"))
+        assertEquals(DayDialTab.TODAY, dayDialTabForLaunchTarget("journal"))
     }
 
     @Test

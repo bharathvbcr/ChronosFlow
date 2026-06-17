@@ -1,13 +1,16 @@
 package com.chronosflow.di
 
+import android.content.Context
+import com.chronosflow.appfunctions.ChronosFeatureFlagsSource
 import com.chronosflow.core.ai.genai.AppForegroundGate
-import com.chronosflow.core.ai.genai.CloudGeminiConfig
 import com.chronosflow.core.ai.genai.ProcessLifecycleAppForegroundGate
+import com.chronosflow.core.ui.settings.readChronosUiSettingsSnapshotFromDataStore
 import dagger.Binds
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import javax.inject.Inject
 import javax.inject.Singleton
 
 @Module
@@ -15,22 +18,15 @@ import javax.inject.Singleton
 abstract class AppAiModule {
     @Binds
     @Singleton
-    abstract fun bindCloudGeminiConfig(impl: BuildTimeCloudGeminiConfig): CloudGeminiConfig
-
-    @Binds
-    @Singleton
     abstract fun bindAppForegroundGate(impl: ProcessLifecycleAppForegroundGate): AppForegroundGate
-}
 
-@Singleton
-class BuildTimeCloudGeminiConfig @Inject constructor() : CloudGeminiConfig {
-    override val apiKey: String? =
-        buildConfigGeminiApiKey().takeIf { it.isNotBlank() }
-
-    private fun buildConfigGeminiApiKey(): String =
-        runCatching {
-            Class.forName("com.chronosflow.BuildConfig")
-                .getField("GEMINI_API_KEY")
-                .get(null) as? String
-        }.getOrNull().orEmpty()
+    companion object {
+        @Provides
+        @Singleton
+        fun provideFeatureFlagsSource(
+            @ApplicationContext context: Context
+        ): ChronosFeatureFlagsSource = ChronosFeatureFlagsSource {
+            context.readChronosUiSettingsSnapshotFromDataStore().featureFlags
+        }
+    }
 }

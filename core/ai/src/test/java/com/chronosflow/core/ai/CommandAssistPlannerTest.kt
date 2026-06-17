@@ -26,6 +26,32 @@ class CommandAssistPlannerTest {
     }
 
     @Test
+    fun `localRankCommandIds matches on a single overlapping token`() {
+        val planner = CommandAssistPlanner(mockk(relaxed = true), mockk(relaxed = true))
+        val candidates = listOf(
+            CommandAssistCandidate("focus.start", "Start focus session", setOf("focus", "pomodoro"))
+        )
+
+        // Only the "focus" token overlaps; the old >=2-token rule scored this 0 and returned nothing.
+        val ids = planner.localRankCommandIds("i need focus time", candidates)
+
+        assertEquals(listOf("focus.start"), ids)
+    }
+
+    @Test
+    fun `localRankCommandIds ranks stronger token overlap higher`() {
+        val planner = CommandAssistPlanner(mockk(relaxed = true), mockk(relaxed = true))
+        val candidates = listOf(
+            CommandAssistCandidate("habit.add", "Add a habit", setOf("habit")),
+            CommandAssistCandidate("habit.track", "Track habit", setOf("habit", "streak", "daily", "progress"))
+        )
+
+        val ids = planner.localRankCommandIds("track my daily habit progress", candidates)
+
+        assertEquals("habit.track", ids.first())
+    }
+
+    @Test
     fun `rankCommandIdsWithAssist prefers model-selected ids`() = runTest {
         val coordinator = mockk<GenAiAssistCoordinator>()
         coEvery { coordinator.generateAssistText(any()) } returns AssistTextGeneration(

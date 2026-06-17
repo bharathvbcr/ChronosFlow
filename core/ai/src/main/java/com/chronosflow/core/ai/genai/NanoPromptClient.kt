@@ -58,10 +58,10 @@ interface NanoModelHandle {
 
     fun download(): Flow<NanoDownloadEvent>
 
-    suspend fun generateText(prompt: String): String
+    suspend fun generateText(prompt: String, profile: GenerationProfile = GenerationProfile.BALANCED): String
 
     /** Streams the response as a growing cumulative string, one emission per model chunk. */
-    fun generateTextStream(prompt: String): Flow<String>
+    fun generateTextStream(prompt: String, profile: GenerationProfile = GenerationProfile.BALANCED): Flow<String>
 }
 
 interface NanoModelClientFactory {
@@ -73,9 +73,9 @@ interface NanoPromptClient {
 
     fun download(): Flow<NanoDownloadEvent>
 
-    suspend fun generateText(prompt: String): String
+    suspend fun generateText(prompt: String, profile: GenerationProfile = GenerationProfile.BALANCED): String
 
-    fun generateTextStream(prompt: String): Flow<String>
+    fun generateTextStream(prompt: String, profile: GenerationProfile = GenerationProfile.BALANCED): Flow<String>
 
     fun selectionState(): NanoModelSelectionState
 }
@@ -102,14 +102,14 @@ class MlKitNanoPromptClient @Inject constructor(
         emitAll(resolved.handle.download())
     }
 
-    override suspend fun generateText(prompt: String): String {
+    override suspend fun generateText(prompt: String, profile: GenerationProfile): String {
         val resolved = ensureActiveHandle()
-        return resolved.handle.generateText(prompt)
+        return resolved.handle.generateText(prompt, profile)
     }
 
-    override fun generateTextStream(prompt: String): Flow<String> = flow {
+    override fun generateTextStream(prompt: String, profile: GenerationProfile): Flow<String> = flow {
         val resolved = ensureActiveHandle()
-        emitAll(resolved.handle.generateTextStream(prompt))
+        emitAll(resolved.handle.generateTextStream(prompt, profile))
     }
 
     override fun selectionState(): NanoModelSelectionState = currentSelectionState
@@ -209,22 +209,26 @@ class MlKitNanoModelClientFactory @Inject constructor() : NanoModelClientFactory
                 }
             }
 
-            override suspend fun generateText(prompt: String): String {
+            override suspend fun generateText(prompt: String, profile: GenerationProfile): String {
                 val response = model.generateContent(
                     generateContentRequest(TextPart(prompt)) {
-                        temperature = 0.35f
-                        topK = 16
+                        temperature = profile.temperature
+                        topK = profile.topK
                         candidateCount = 1
+                        maxOutputTokens = profile.maxOutputTokens
+                        seed = profile.seed
                     }
                 )
                 return response.candidates.firstOrNull()?.text?.trim().orEmpty()
             }
 
-            override fun generateTextStream(prompt: String): Flow<String> {
+            override fun generateTextStream(prompt: String, profile: GenerationProfile): Flow<String> {
                 val request = generateContentRequest(TextPart(prompt)) {
-                    temperature = 0.35f
-                    topK = 16
+                    temperature = profile.temperature
+                    topK = profile.topK
                     candidateCount = 1
+                    maxOutputTokens = profile.maxOutputTokens
+                    seed = profile.seed
                 }
                 return model.generateContentStream(request)
                     .map { response -> response.candidates.firstOrNull()?.text.orEmpty() }

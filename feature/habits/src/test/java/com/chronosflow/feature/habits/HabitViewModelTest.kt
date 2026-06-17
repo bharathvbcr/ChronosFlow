@@ -13,6 +13,7 @@ import com.chronosflow.core.ai.genai.GenAiRuntimeStatus
 import com.chronosflow.core.ai.genai.assistUiSnapshot
 import com.chronosflow.core.ai.genai.refreshAssistUiSnapshot
 import com.chronosflow.core.domain.model.Habit
+import com.chronosflow.core.domain.model.HabitDailyCompletion
 import com.chronosflow.core.domain.model.HabitEventType
 import com.chronosflow.core.domain.model.HabitSchedule
 import com.chronosflow.core.domain.model.PlannerRecurrence
@@ -23,6 +24,7 @@ import com.chronosflow.core.domain.repository.PlannerPreferencesRepository
 import com.chronosflow.core.domain.usecase.CompleteHabitUseCase
 import com.chronosflow.core.domain.usecase.GetActiveHabitsUseCase
 import com.chronosflow.core.domain.usecase.HabitStreak
+import com.chronosflow.core.domain.usecase.ObserveHabitCompletionTrendUseCase
 import com.chronosflow.core.domain.usecase.ObserveHabitStreaksUseCase
 import com.chronosflow.core.notifications.HabitReminderScheduler
 import io.mockk.coEvery
@@ -34,6 +36,8 @@ import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -52,6 +56,7 @@ class HabitViewModelTest {
     private val plannerPreferencesRepository: PlannerPreferencesRepository = mockk(relaxed = true)
     private val getActiveHabitsUseCase: GetActiveHabitsUseCase = mockk()
     private val observeHabitStreaksUseCase: ObserveHabitStreaksUseCase = mockk()
+    private val observeHabitCompletionTrendUseCase: ObserveHabitCompletionTrendUseCase = mockk()
     private val completeHabitUseCase: CompleteHabitUseCase = mockk()
     private val habitAssistPlanner: HabitAssistPlanner = mockk()
     private val habitRepairAssistPlanner: HabitRepairAssistPlanner = mockk()
@@ -67,13 +72,16 @@ class HabitViewModelTest {
         get() = genAiAssistCoordinator.assistUiSnapshot()
 
     private lateinit var viewModel: HabitViewModel
+    private val testDispatcher = UnconfinedTestDispatcher()
 
     @Before
     fun setup() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
+        Dispatchers.setMain(testDispatcher)
         every { habitRepository.observeHabits() } returns allHabits
         every { getActiveHabitsUseCase() } returns activeHabits
         every { observeHabitStreaksUseCase() } returns streaks
+        every { observeHabitCompletionTrendUseCase(any(), any()) } returns
+            MutableStateFlow(emptyList<HabitDailyCompletion>())
         coEvery { habitRepairAssistPlanner.suggestRepairs(any(), any(), any()) } returns emptyList()
         coEvery { habitAssistPlanner.suggest(any()) } returns emptyList()
         coEvery { habitRepository.saveHabit(any()) } returns Unit
@@ -85,11 +93,12 @@ class HabitViewModelTest {
 
     @After
     fun tearDown() {
+        viewModel.viewModelScope.cancel()
         Dispatchers.resetMain()
     }
 
     @Test
-    fun `addHabit is ignored when title is blank`() = runTest {
+    fun `addHabit is ignored when title is blank`() = runTest(testDispatcher) {
         viewModel.addHabit("   ")
         runCurrent()
 
@@ -98,7 +107,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `addHabit normalizes title and clamps numeric window and difficulty`() = runTest {
+    fun `addHabit normalizes title and clamps numeric window and difficulty`() = runTest(testDispatcher) {
         viewModel.addHabit(
             title = "  Morning run  ",
             cadence = "Daily",
@@ -127,7 +136,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `updateHabit is ignored when title is blank`() = runTest {
+    fun `updateHabit is ignored when title is blank`() = runTest(testDispatcher) {
         val habit = habit(id = "h-update", title = "Morning")
 
         viewModel.updateHabit(
@@ -145,7 +154,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `updateHabit trims title and clamps values`() = runTest {
+    fun `updateHabit trims title and clamps values`() = runTest(testDispatcher) {
         val habit = habit(id = "h-update", title = "Morning")
         coEvery { habitRepository.saveHabit(any()) } returns Unit
 
@@ -179,7 +188,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `completeHabit uses updated habit when repository lookup is empty`() = runTest {
+    fun `completeHabit uses updated habit when repository lookup is empty`() = runTest(testDispatcher) {
         val habit = habit(id = "h-complete", title = "Read")
         coEvery { completeHabitUseCase(any(), any()) } returns Unit
         coEvery { habitRepository.getHabitById("h-complete") } returns null
@@ -202,7 +211,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `pauseHabit saves paused state and appends pause event`() = runTest {
+    fun `pauseHabit saves paused state and appends pause event`() = runTest(testDispatcher) {
         val habit = habit(id = "h-pause", title = "Meditate", isBundled = false)
         coEvery { habitRepository.saveHabit(any()) } returns Unit
         coEvery { habitRepository.addHabitEvent(any()) } returns Unit
@@ -232,7 +241,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `resumeHabit clears pause state and appends resume event`() = runTest {
+    fun `resumeHabit clears pause state and appends resume event`() = runTest(testDispatcher) {
         val habit = habit(
             id = "h-resume",
             title = "Read",
@@ -268,7 +277,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `skipHabitToday appends skip event and updates schedule`() = runTest {
+    fun `skipHabitToday appends skip event and updates schedule`() = runTest(testDispatcher) {
         val habit = habit(id = "h-skip", title = "Stretch", isBundled = false)
         coEvery { habitRepository.saveHabit(any()) } returns Unit
         coEvery { habitRepository.addHabitEvent(any()) } returns Unit
@@ -297,7 +306,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `deferHabit saves deferred schedule and records defer event`() = runTest {
+    fun `deferHabit saves deferred schedule and records defer event`() = runTest(testDispatcher) {
         val habit = habit(id = "h-defer", title = "Run", isBundled = false)
         coEvery { habitRepository.saveHabit(any()) } returns Unit
         coEvery { habitRepository.addHabitEvent(any()) } returns Unit
@@ -326,7 +335,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `archiveHabit disables habit and cancels reminders`() = runTest {
+    fun `archiveHabit disables habit and cancels reminders`() = runTest(testDispatcher) {
         val habit = habit(id = "h-archive", title = "Archive me", isActive = true)
         coEvery { habitRepository.saveHabit(any()) } returns Unit
 
@@ -342,7 +351,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `duplicateHabit copies habit and resets progress counters`() = runTest {
+    fun `duplicateHabit copies habit and resets progress counters`() = runTest(testDispatcher) {
         val original = habit(id = "h-duplicate", title = "Write", streakCount = 3, lastCompletedDate = LocalDate.now())
         coEvery { habitRepository.saveHabit(any()) } returns Unit
 
@@ -363,7 +372,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `rememberHistoryTemplateSelection prepends selection and persists ids`() = runTest {
+    fun `rememberHistoryTemplateSelection prepends selection and persists ids`() = runTest(testDispatcher) {
         viewModel = createViewModel(listOf("one", "two", "three", "four", "five"))
         viewModel.rememberHistoryTemplateSelection("three")
 
@@ -372,7 +381,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `rememberHistoryTemplateSelection keeps selected id unique and capped`() = runTest {
+    fun `rememberHistoryTemplateSelection keeps selected id unique and capped`() = runTest(testDispatcher) {
         viewModel = createViewModel(listOf("one", "two", "three", "four", "five"))
         viewModel.rememberHistoryTemplateSelection("new")
 
@@ -381,7 +390,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `requestHabitAssist saves non-empty suggestions and snapshot`() = runTest {
+    fun `requestHabitAssist saves non-empty suggestions and snapshot`() = runTest(testDispatcher) {
         val request = HabitAssistRequest(
             title = "Read",
             cadence = "Daily",
@@ -412,7 +421,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `requestHabitAssist handles no suggestions from planner`() = runTest {
+    fun `requestHabitAssist handles no suggestions from planner`() = runTest(testDispatcher) {
         val request = HabitAssistRequest(
             title = "Read",
             cadence = "Daily",
@@ -434,7 +443,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `requestHabitAssist surfaces snapshot and message on planner failure`() = runTest {
+    fun `requestHabitAssist surfaces snapshot and message on planner failure`() = runTest(testDispatcher) {
         val request = HabitAssistRequest(
             title = "Read",
             cadence = "Daily",
@@ -457,7 +466,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `clearHabitAssist resets UI state`() = runTest {
+    fun `clearHabitAssist resets UI state`() = runTest(testDispatcher) {
         val request = HabitAssistRequest(
             title = "Read",
             cadence = "Daily",
@@ -485,7 +494,7 @@ class HabitViewModelTest {
     }
 
     @Test
-    fun `repair suggestion uses planner output when habits become due`() = runTest {
+    fun `repair suggestion uses planner output when habits become due`() = runTest(testDispatcher) {
         coEvery { habitRepairAssistPlanner.suggestRepairs(any(), any(), any()) } returns
             listOf(
                 HabitRepairAssistResult(
@@ -527,6 +536,7 @@ class HabitViewModelTest {
             plannerPreferencesRepository = plannerPreferencesRepository,
             getActiveHabitsUseCase = getActiveHabitsUseCase,
             observeHabitStreaksUseCase = observeHabitStreaksUseCase,
+            observeHabitCompletionTrendUseCase = observeHabitCompletionTrendUseCase,
             completeHabitUseCase = completeHabitUseCase,
             habitAssistPlanner = habitAssistPlanner,
             habitRepairAssistPlanner = habitRepairAssistPlanner,

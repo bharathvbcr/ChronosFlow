@@ -51,16 +51,20 @@ class InsightsTabStateTest {
     }
 
     @Test
-    fun `focus top category mix lists two highest categories`() {
-        val rows = insightCategoryBreakdownRows(
-            timeBlocks = listOf(
-                block(id = "task", durationMinutes = 60, taskId = "task-1"),
-                block(id = "habit", durationMinutes = 30, habitId = "habit-1"),
-                block(id = "block", durationMinutes = 10)
-            )
+    fun `focus concentration tip only appears for risky concentration`() {
+        assertEquals(
+            "Only one category appears today. Add a short block in another category tomorrow to reduce concentration risk.",
+            focusConcentrationTip(1f, "Task", totalCategories = 1)
         )
-
-        assertEquals("Task 60% • Habit 30%", focusTopCategoryMix(rows))
+        assertEquals(
+            "Very high focus on Task. Try splitting this category into two shorter focus blocks with a reset task in between.",
+            focusConcentrationTip(0.9f, "Task", totalCategories = 2)
+        )
+        assertEquals(
+            "You spent most of your day on Task. A short complementary block could improve context recovery.",
+            focusConcentrationTip(0.7f, "Task", totalCategories = 2)
+        )
+        assertEquals(null, focusConcentrationTip(0.5f, "Task", totalCategories = 3))
     }
 
     @Test

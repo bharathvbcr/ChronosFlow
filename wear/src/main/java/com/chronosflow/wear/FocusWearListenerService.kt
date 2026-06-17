@@ -75,6 +75,7 @@ class FocusWearListenerService : WearableListenerService() {
         runCatching {
             TileService.getUpdater(this).requestUpdate(ChronosTodayTileProvider::class.java)
         }
+        requestChronosComplicationUpdates(this)
     }
 
     private fun showFocusOngoingActivity(
@@ -92,17 +93,24 @@ class FocusWearListenerService : WearableListenerService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // Convert the phone's wall-clock end time into this device's elapsed-realtime base.
+        val runningRemainingMs = (plannedEndAtMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+        val remainingSeconds = if (paused) {
+            pausedTimeLeftSeconds.coerceAtLeast(0)
+        } else {
+            (runningRemainingMs / 1000L).toInt()
+        }
+        val stateColor = focusOngoingActivityColor(paused, remainingSeconds, ChronosTileUi.accent(this))
+
         val status = if (paused) {
             Status.Builder()
                 .addTemplate("Paused #left#")
                 .addPart("left", Status.TextPart(formatMmSs(pausedTimeLeftSeconds)))
                 .build()
         } else {
-            // Convert the phone's wall-clock end time into this device's elapsed-realtime base.
-            val remainingMs = (plannedEndAtMillis - System.currentTimeMillis()).coerceAtLeast(0L)
             Status.Builder()
                 .addTemplate("#focusTimer#")
-                .addPart("focusTimer", Status.TimerPart(SystemClock.elapsedRealtime() + remainingMs))
+                .addPart("focusTimer", Status.TimerPart(SystemClock.elapsedRealtime() + runningRemainingMs))
                 .build()
         }
 
@@ -110,6 +118,10 @@ class FocusWearListenerService : WearableListenerService() {
             .setSmallIcon(R.drawable.ic_chronosflow_notification)
             .setContentTitle(title)
             .setContentText(if (paused) "Focus paused" else "Focus in progress")
+            // Tint the ongoing activity with the phone's mirrored Material You accent (brand-teal
+            // fallback), shifting to muted/warm for paused/ending-soon — parity with the phone bar.
+            .setColor(stateColor)
+            .setColorized(false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
@@ -153,4 +165,18 @@ class FocusWearListenerService : WearableListenerService() {
         const val NOTIFICATION_ID = 4201
         const val DEFAULT_TITLE = "Focus session"
     }
+}
+
+/** Final stretch where the live update turns warm; mirrors the phone's FOCUS_BAR_ENDING_SOON_THRESHOLD_SECONDS. */
+internal const val ENDING_SOON_THRESHOLD_SECONDS = 60
+
+/**
+ * Color for the watch focus ongoing-activity, mirroring the phone live bar's state palette: muted
+ * while paused, the warm coral in the final stretch, and the (already-resolved, phone-mirrored)
+ * [accentColor] otherwise. Pure so it can be unit-tested without a watch theme/Context.
+ */
+internal fun focusOngoingActivityColor(paused: Boolean, remainingSeconds: Int, accentColor: Int): Int = when {
+    paused -> ChronosTileUi.MUTED_COLOR
+    remainingSeconds in 1..ENDING_SOON_THRESHOLD_SECONDS -> ChronosTileUi.WARN_COLOR
+    else -> accentColor
 }

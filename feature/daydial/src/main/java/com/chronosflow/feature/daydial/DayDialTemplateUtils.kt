@@ -19,7 +19,7 @@ internal fun parseDayDialBackupBlocks(text: String): List<TemplateBlockBlueprint
         .mapNotNull { line ->
             val parts = splitBackupFields(line)
             if (parts.size < 5) return@mapNotNull null
-            val start = parseMinute(parts[2]) ?: return@mapNotNull null
+            val start = parseMinuteOfDay(parts[2]) ?: return@mapNotNull null
             val duration = parts[3].toIntOrNull()?.coerceIn(5, 240) ?: return@mapNotNull null
             TemplateBlockBlueprint(
                 title = parts[1].ifBlank { "Imported Block" },
@@ -83,15 +83,6 @@ fun findNextBlock(
         .filter { it.actualEndMinuteOfDay == null }
         .filter { it.startMinuteOfDay > currentMinute }
         .minByOrNull { it.startMinuteOfDay }
-}
-
-private fun parseMinute(value: String): Int? {
-    val parts = value.trim().split(":")
-    if (parts.size != 2) return null
-    val hour = parts[0].toIntOrNull() ?: return null
-    val minute = parts[1].toIntOrNull() ?: return null
-    if (hour !in 0..23 || minute !in 0..59) return null
-    return hour * 60 + minute
 }
 
 private fun splitBackupFields(line: String): List<String> {

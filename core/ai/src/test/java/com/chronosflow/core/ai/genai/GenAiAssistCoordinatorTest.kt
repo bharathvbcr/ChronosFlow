@@ -106,6 +106,19 @@ class GenAiAssistCoordinatorTest {
     }
 
     @Test
+    fun `prewarm readies the on-device model unless disabled`() = runTest {
+        val preferences = mockk<AssistantPreferences>()
+        every { preferences.assistantPrivacyModeValue() } returns PrivacyMode.ON_DEVICE_ONLY.name
+        val onDevice = FakeAssistGateway(NanoModelStatus.DOWNLOADABLE, "nano")
+        val coordinator = GenAiAssistCoordinator(preferences, onDevice, FakeCloudGateway("cloud"), FakeTextToolsGateway())
+
+        coordinator.prewarm()
+        coordinator.prewarm(PrivacyMode.DISABLED)
+
+        assertEquals(1, onDevice.ensureReadyCount)
+    }
+
+    @Test
     fun `text tools skip model calls when disabled`() = runTest {
         val preferences = mockk<AssistantPreferences>()
         every { preferences.assistantPrivacyModeValue() } returns PrivacyMode.DISABLED.name
@@ -130,19 +143,23 @@ private class FakeAssistGateway(
     private val response: String
 ) : OnDeviceGeminiGateway {
     var generateCount = 0
+    var ensureReadyCount = 0
 
     override val runtimeStatus = MutableStateFlow(GenAiRuntimeStatus(nanoStatus = status))
 
     override suspend fun refreshStatus(): NanoModelStatus = status
 
-    override suspend fun ensureReadyForInference(): NanoModelStatus = status
+    override suspend fun ensureReadyForInference(): NanoModelStatus {
+        ensureReadyCount++
+        return status
+    }
 
-    override suspend fun generateText(prompt: String): Result<String> {
+    override suspend fun generateText(prompt: String, profile: GenerationProfile): Result<String> {
         generateCount++
         return Result.success(response)
     }
 
-    override fun generateTextStream(prompt: String): kotlinx.coroutines.flow.Flow<String> =
+    override fun generateTextStream(prompt: String, profile: GenerationProfile): kotlinx.coroutines.flow.Flow<String> =
         kotlinx.coroutines.flow.flowOf(response)
 }
 

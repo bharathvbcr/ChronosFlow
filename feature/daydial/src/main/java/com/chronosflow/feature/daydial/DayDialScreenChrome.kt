@@ -182,6 +182,7 @@ internal fun DayDialScreenChrome(
     snackbarHostState: SnackbarHostState,
     renderedCurrentTab: DayDialTab = uiState.currentTab,
     renderedActiveSidebarPage: SidebarPage? = uiState.activeSidebarPage,
+    reviewBackProgress: Float = 0f,
     requestNotificationPermission: () -> Unit,
     calendarPermissionStatus: CalendarPermissionStatus,
     showCalendarPermissionRationale: Boolean,
@@ -377,6 +378,7 @@ internal fun DayDialScreenChrome(
                                 showRingGuide = settings.showRingGuide,
                                 protectFocusBlocks = settings.protectFocusBlocks,
                                 addBreaksAutomatically = settings.addBreaksAutomatically,
+                                defaultFocusBreakPreset = settings.defaultFocusBreakPreset,
                                 preserveManualBlocks = settings.preserveManualBlocks,
                                 syncCloud = settings.syncCloud,
                                 syncStatus = settings.syncStatus,
@@ -384,6 +386,7 @@ internal fun DayDialScreenChrome(
                                 breakReminders = settings.breakReminders,
                                 missedAlerts = settings.missedAlerts,
                                 endDayReviewReminder = settings.endDayReviewReminder,
+                                sleepJournalLogReminder = settings.sleepJournalLogReminder,
                                 sleepScheduleEnabled = settings.sleepScheduleEnabled,
                                 sleepScheduleStartMinute = settings.sleepScheduleStartMinute,
                                 sleepScheduleEndMinute = settings.sleepScheduleEndMinute,
@@ -414,6 +417,7 @@ internal fun DayDialScreenChrome(
                                 onBreakRemindersChanged = { settings.breakReminders = it },
                                 onMissedAlertsChanged = { settings.missedAlerts = it },
                                 onEndDayReviewReminderChanged = { settings.endDayReviewReminder = it },
+                                onSleepJournalLogReminderChanged = { settings.sleepJournalLogReminder = it },
                                 onSleepScheduleEnabledChanged = { settings.sleepScheduleEnabled = it },
                                 onSleepScheduleStartMinuteChanged = { settings.sleepScheduleStartMinute = it },
                                 onSleepScheduleEndMinuteChanged = { settings.sleepScheduleEndMinute = it },
@@ -477,7 +481,11 @@ internal fun DayDialScreenChrome(
                                     uiState.activeSidebarPage = null
                                 },
                                 showMessage = { uiState.snackbarMessage = it },
+                                onShowUndoSnackbar = { message, onUndo ->
+                                    uiState.showSnackbar(message, actionLabel = "Undo", onAction = onUndo)
+                                },
                                 sidebarBackProgress = sidebarBackProgress,
+                                reviewBackProgress = reviewBackProgress,
                                 currentTab = renderedCurrentTab,
                                 activeSidebarPage = renderedActiveSidebarPage
                             )

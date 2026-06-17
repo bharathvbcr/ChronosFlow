@@ -1,0 +1,14 @@
+package com.chronosflow.core.notifications
+
+import com.chronosflow.core.domain.notifications.ScreenTimeNudgePresenter
+import dagger.Binds
+import dagger.Module
+import dagger.hilt.InstallIn
+import dagger.hilt.components.SingletonComponent
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class ScreenTimeNotificationsModule {
+    @Binds
+    abstract fun bindScreenTimeNudgePresenter(impl: ScreenTimeNudgeNotifier): ScreenTimeNudgePresenter
+}

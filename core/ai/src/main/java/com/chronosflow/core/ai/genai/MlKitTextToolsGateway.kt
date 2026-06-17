@@ -117,16 +117,29 @@ class MlKitTextToolsGateway @Inject constructor(
     private val foregroundGate: AppForegroundGate,
     private val client: TextToolsClient
 ) : OnDeviceTextToolsGateway {
+    /** Time source, overridable in tests; drives the replay cache TTL. */
+    internal var nowMs: () -> Long = { System.currentTimeMillis() }
+
+    /**
+     * Replay cache for text-tool results, symmetric with the prompt gateway: re-proofreading,
+     * re-summarizing, or re-rewriting the same input returns instantly instead of re-running
+     * inference. Keyed by operation + style + input so distinct requests never collide.
+     */
+    private val cache = GenAiResponseCache(maxEntries = CACHE_MAX_ENTRIES, ttlMs = CACHE_TTL_MS)
+
     override suspend fun summarize(text: String, style: SummaryStyle): Result<String> =
-        guarded { client.summarize(text, style) }
+        guarded("sum:${style.name}:$text") { client.summarize(text, style) }
 
     override suspend fun proofread(text: String): Result<String> =
-        guarded { client.proofread(text) }
+        guarded("proof:$text") { client.proofread(text) }
 
     override suspend fun rewrite(text: String, style: RewriteStyle): Result<String> =
-        guarded { client.rewrite(text, style) }
+        guarded("rw:${style.name}:$text") { client.rewrite(text, style) }
 
-    private suspend fun guarded(block: suspend () -> String): Result<String> {
+    private suspend fun guarded(cacheKey: String, block: suspend () -> String): Result<String> {
+        // A cache hit replays the user's own prior on-device output, so serve it before the
+        // foreground gate — it never runs inference.
+        cache.get(cacheKey, nowMs())?.let { return Result.success(it) }
         if (!foregroundGate.isAppInForeground()) {
             return Result.failure(
                 IllegalStateException("On-device text tools require ChronosFlow to be in the foreground.")
@@ -138,6 +151,11 @@ class MlKitTextToolsGateway @Inject constructor(
                 throw IllegalStateException("On-device text tool returned an empty response.")
             }
             result
-        }
+        }.onSuccess { cache.put(cacheKey, it, nowMs()) }
+    }
+
+    private companion object {
+        const val CACHE_MAX_ENTRIES = 32
+        const val CACHE_TTL_MS = 10L * 60 * 1000
     }
 }

@@ -7,6 +7,7 @@ import androidx.wear.tiles.RequestBuilders
 import androidx.wear.tiles.TileBuilders
 import com.chronosflow.wear.model.WearDaySummary
 import com.chronosflow.wear.model.WearTask
+import com.chronosflow.wear.presentation.WearStartPage
 import com.google.common.util.concurrent.ListenableFuture
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
@@ -44,11 +45,21 @@ class ChronosTodayTileProviderTest {
     }
 
     @Test
-    fun `empty store renders the nothing-scheduled state`() {
+    fun `a never-synced store prompts to open the phone`() {
         val tile = requestTile()
 
-        assertTrue(tile.toString().contains(ChronosTodayTileProvider.EMPTY_LABEL))
+        assertTrue(tile.toString().contains(ChronosTodayTileProvider.SYNC_LABEL))
         assertTrue(tile.toString().contains("No open tasks"))
+    }
+
+    @Test
+    fun `a synced but empty day renders the nothing-scheduled state`() {
+        DaySummaryStore.write(
+            RuntimeEnvironment.getApplication(),
+            WearDaySummary(receivedAtMillis = System.currentTimeMillis())
+        )
+
+        assertTrue(requestTile().toString().contains(ChronosTodayTileProvider.EMPTY_LABEL))
     }
 
     @Test
@@ -68,10 +79,58 @@ class ChronosTodayTileProviderTest {
         val rendered = requestTile().toString()
 
         assertTrue(rendered.contains("Deep work"))
+        // "until HH:mm" stays; the leading "Xm left" / next "in Xm" are now-relative (covered
+        // deterministically by WearFormatTest), so assert only the time-stable substrings here.
         assertTrue(rendered.contains("until 14:30"))
-        assertTrue(rendered.contains("Next: Gym · 16:00"))
+        assertTrue(rendered.contains("Next: Gym"))
         assertTrue(rendered.contains("3 tasks open"))
         assertTrue(rendered.contains("File taxes"))
+    }
+
+    @Test
+    fun `a stale mirror surfaces a sync-age warning on the tile`() {
+        DaySummaryStore.write(
+            RuntimeEnvironment.getApplication(),
+            WearDaySummary(nowTitle = "Deep work", receivedAtMillis = 1_000L)
+        )
+
+        assertTrue(requestTile().toString().contains("Synced"))
+    }
+
+    @Test
+    fun `a freshly-synced mirror shows no sync-age warning`() {
+        DaySummaryStore.write(
+            RuntimeEnvironment.getApplication(),
+            WearDaySummary(nowTitle = "Deep work", receivedAtMillis = System.currentTimeMillis())
+        )
+
+        assertTrue(!requestTile().toString().contains("Synced"))
+    }
+
+    @Test
+    fun `schedule tile is tappable and opens the app at the Now page`() {
+        val rendered = requestTile().toString()
+
+        assertTrue(rendered.contains("MainActivity"))
+        assertTrue(rendered.contains(WearStartPage.NOW))
+    }
+
+    @Test
+    fun `active focus tile is tappable and opens the Focus screen`() {
+        WearFocusStateStore.write(
+            RuntimeEnvironment.getApplication(),
+            WearFocusStateStore.FocusState(
+                active = true,
+                title = "Deep work",
+                plannedEndAtMillis = System.currentTimeMillis() + 25 * 60 * 1000L,
+                totalSeconds = 25 * 60
+            )
+        )
+
+        val rendered = requestTile().toString()
+
+        assertTrue(rendered.contains("MainActivity"))
+        assertTrue(rendered.contains(WearStartPage.FOCUS))
     }
 
     @Test

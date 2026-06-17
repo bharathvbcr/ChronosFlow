@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.provider.CalendarContract
 import com.chronosflow.core.data.dao.CalendarEventDao
 import com.chronosflow.core.data.dao.TimeBlockDao
+import com.chronosflow.core.data.sync.CalendarSyncStatusStore
 import com.chronosflow.core.data.mapper.toDomain
 import com.chronosflow.core.data.mapper.toEntity
 import com.chronosflow.core.domain.model.ALL_DAY_CALENDAR_EVENT_CATEGORY
@@ -20,6 +21,8 @@ import com.chronosflow.core.domain.model.classifyImportedEventEnergy
 import com.chronosflow.core.domain.repository.CalendarEventRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -32,8 +35,12 @@ class CalendarEventRepositoryImpl @Inject constructor(
     @param:ApplicationContext private val appContext: Context,
     private val calendarEventDao: CalendarEventDao,
     private val timeBlockDao: TimeBlockDao,
-    private val calendarPlatform: DeviceCalendarPlatform
+    private val calendarPlatform: DeviceCalendarPlatform,
+    private val syncStatusStore: CalendarSyncStatusStore
 ) : CalendarEventRepository {
+    // Serializes device-calendar syncs: each is a wipe-and-replace over its window.
+    private val syncMutex = Mutex()
+
     override fun observeEventsBetween(start: Instant, end: Instant): Flow<List<CalendarEvent>> {
         return calendarEventDao.observeEventsBetween(start, end).map { events -> events.map { it.toDomain() } }
     }
@@ -54,7 +61,12 @@ class CalendarEventRepositoryImpl @Inject constructor(
         if (appContext.checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
             return
         }
+        // Serialize so a background-worker sync overlapping a foreground/manual one can't
+        // interleave its wipe-and-replace and drop the other's just-imported blocks.
+        syncMutex.withLock { performDeviceCalendarSync(start, end) }
+    }
 
+    private suspend fun performDeviceCalendarSync(start: Instant, end: Instant) {
         val syncZone = ZoneId.systemDefault()
         val startDate = start.atZone(syncZone).toLocalDate()
         val endDate = end.minusMillis(1).atZone(syncZone).toLocalDate()
@@ -116,7 +128,14 @@ class CalendarEventRepositoryImpl @Inject constructor(
                 }
             }
         }
+
+        // Reaching here means the window was refreshed (the cursor may be empty —
+        // that is still a successful sync), so record it for the "Synced X ago" hint.
+        syncStatusStore.recordSuccessfulSync()
     }
+
+    override fun observeLastDeviceSyncAtMillis(): Flow<Long?> =
+        syncStatusStore.observeLastSuccessfulSyncAtMillis()
 
     override suspend fun exportTimeBlock(timeBlock: TimeBlock): Long? {
         if (!hasCalendarAccess(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)) {

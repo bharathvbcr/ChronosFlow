@@ -7,6 +7,7 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.chronosflow.core.domain.model.AlarmDeliveryState
+import com.chronosflow.core.domain.model.AlarmRequest
 import com.chronosflow.core.domain.model.AlarmRequestType
 import com.chronosflow.core.domain.model.AppLaunchTarget
 import com.chronosflow.core.domain.model.MedicationPlan
@@ -34,7 +35,8 @@ class AlarmDeliveryCoordinator @Inject constructor(
     private val taskRepository: TaskRepository,
     private val timeBlockRepository: TimeBlockRepository,
     private val habitRepository: HabitRepository,
-    private val alarmScheduler: AlarmScheduler
+    private val alarmScheduler: AlarmScheduler,
+    private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator
 ) {
     suspend fun deliverFromAlarmIntent(intent: Intent, receiverClass: Class<*>) {
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "ChronosFlow Reminder"
@@ -42,6 +44,19 @@ class AlarmDeliveryCoordinator @Inject constructor(
         val requestId = intent.getStringExtra(EXTRA_ID)
 
         val alarmRequest = requestId?.let { alarmRequestRepository.getAlarmRequest(it) }
+
+        // Unified "now" surface: a plain planner-block start refreshes the live current-block
+        // notification (which alerts once as the block begins) instead of posting a separate
+        // transient reminder + group summary. Habit/task/medication reminders are untouched, and
+        // this falls back to the normal reminder when the user has turned the "now" notification off.
+        if (isReroutableBlockStart(alarmRequest) && currentBlockNotificationCoordinator.isEnabled()) {
+            currentBlockNotificationCoordinator.refresh(alert = true)
+            markDelivered(requestId)
+            if (requestId != null) {
+                alarmScheduler.cancelAlarm(requestId)
+            }
+            return
+        }
         // For the end-of-day review reminder, prefer the proactive digest that Gemini Nano
         // pre-generated while the app was foregrounded (cached in shared prefs) over the static copy.
         val message = dailyReviewDigestOverride(alarmRequest?.type) ?: defaultMessage
@@ -71,7 +86,6 @@ class AlarmDeliveryCoordinator @Inject constructor(
         val notificationId = requestId?.hashCode() ?: System.currentTimeMillis().toInt()
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_chronosflow_notification)
-            .setColor(ContextCompat.getColor(context, R.color.chronosflow_brand_accent))
             .setContentTitle(title)
             .setContentText(message)
             .setColor(accentColorFor(channelId))
@@ -201,6 +215,10 @@ class AlarmDeliveryCoordinator @Inject constructor(
 
         val isHabitCategory = habitId != null || habitLaunchTarget != null
         val isTaskCategory = task != null
+        // Sticky habit/task reminders: ongoing (can't be swiped away) so they persist until you act,
+        // while autoCancel still clears them on a body tap or via the Mark Done action. Medication,
+        // block-start, review, and low-supply reminders are intentionally left swipe-dismissable.
+        notification.setOngoing(isHabitCategory || isTaskCategory)
         notification.setSubText(
             ReminderNotificationGroups.categoryLabel(
                 isMedication = isMedication,
@@ -239,7 +257,6 @@ class AlarmDeliveryCoordinator @Inject constructor(
         val message = "Only $remaining ${plan.unit}(s) left of ${plan.name}. Please request a refill soon."
         val builtNotification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_chronosflow_notification)
-            .setColor(ContextCompat.getColor(context, R.color.chronosflow_brand_accent))
             .setContentTitle("Low Medication Supply: ${plan.name}")
             .setContentText(message)
             .setSubText(ReminderNotificationGroups.categoryLabel(isMedication = true, isHabit = false, isTask = false))
@@ -365,6 +382,18 @@ class AlarmDeliveryCoordinator @Inject constructor(
     ): List<TaskContextCommand> {
         if (task == null) return emptyList()
         return safeExternalTaskContextCommands(context, task, limit = 3)
+    }
+
+    /**
+     * True for a plain planner time-block start (the alarm that used to post "Your planned block
+     * starts now"). Habit starts (blockId "habit-…"), medication doses, and task reminders keep
+     * their own dedicated notifications, so they are excluded from the "now" reroute.
+     */
+    private fun isReroutableBlockStart(request: AlarmRequest?): Boolean {
+        if (request?.type != AlarmRequestType.BLOCK_START) return false
+        if (request.medicationPlanId != null) return false
+        val blockId = request.blockId ?: return false
+        return !blockId.startsWith("habit-")
     }
 
     private fun accentColorFor(channelId: String): Int {

@@ -13,6 +13,7 @@ import com.chronosflow.core.domain.usecase.LogActualTimeUseCase
 import com.chronosflow.feature.daydial.DialUtils
 import com.chronosflow.feature.daydial.FocusExecutionState
 import com.chronosflow.feature.daydial.FocusExecutionStatus
+import com.chronosflow.feature.daydial.model.FocusPhase
 import com.chronosflow.feature.daydial.model.FocusPhaseKind
 import com.chronosflow.feature.daydial.model.FocusPhasePlanner
 import java.time.Instant
@@ -195,6 +196,99 @@ class DayDialFocusDelegate @Inject constructor(
         val blockId = _focusExecutionState.value.blockId
         applyState(FocusExecutionState(status = FocusExecutionStatus.SKIPPED))
         blockId?.let(onSkippedBlock)
+    }
+
+    /**
+     * Injects an immediate break of [breakMinutes] into the current session.
+     *
+     * - **Split sessions**: inserts a BREAK phase right after the current
+     *   position, then continues with the remainder of the original plan.
+     * - **Flat (no-split) sessions**: splits remaining time into
+     *   [elapsed so far as focus] → [break] → [remaining-after-break as focus].
+     *   The session is promoted to a split session automatically.
+     *
+     * If the session is not active, or already on a break, this is a no-op.
+     */
+    fun injectBreakNow(breakMinutes: Int) {
+        val state = _focusExecutionState.value
+        if (state.status != FocusExecutionStatus.RUNNING &&
+            state.status != FocusExecutionStatus.PAUSED
+        ) return
+        if (state.isOnBreak) return
+        if (breakMinutes <= 0) return
+
+        val elapsedSec = focusElapsedSeconds(state)
+        val remainingSec = focusRemainingSeconds(state)
+        val elapsedMin = (elapsedSec / 60).toInt().coerceAtLeast(1)
+        val remainingMinAfterBreak = ((remainingSec / 60) - breakMinutes).toInt()
+
+        val breakPhase = FocusPhase(kind = FocusPhaseKind.BREAK, durationMinutes = breakMinutes)
+
+        if (state.isSplitSession) {
+            // Insert the break phase right after the current index.
+            val updatedPhases = state.phases.toMutableList().also { list ->
+                list.add(state.currentPhaseIndex + 1, breakPhase)
+            }
+            applyState(
+                state.copy(
+                    phases = updatedPhases,
+                    // The current focus phase keeps its original duration; the
+                    // break will be next when the user advances (or time runs out).
+                )
+            )
+        } else {
+            // Promote a flat session to a split session on-the-fly.
+            // Phase 0: focus time elapsed so far (already done).
+            // Phase 1: the injected break.
+            // Phase 2: any focus time left after the break (only if > 0).
+            val newPhases = buildList {
+                add(FocusPhase(FocusPhaseKind.FOCUS, elapsedMin))
+                add(breakPhase)
+                if (remainingMinAfterBreak > 0) {
+                    add(FocusPhase(FocusPhaseKind.FOCUS, remainingMinAfterBreak))
+                }
+            }
+            // The elapsed focus is already spent, so drop straight to the phase
+            // boundary: the "Start Xm break" prompt shows immediately instead of
+            // flashing the focus ring at 0:00 for a tick. This is the same hold a
+            // split session reaches when an interval ends, so the notification
+            // bridge restarts cleanly for the break.
+            applyState(
+                state.copy(
+                    phases = newPhases,
+                    currentPhaseIndex = 0,
+                    plannedDurationMinutes = elapsedMin,
+                    status = FocusExecutionStatus.PAUSED,
+                    awaitingPhaseAdvance = true,
+                    pausedAtEpochMs = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    /**
+     * Ends the current break early. When a later phase exists, this drops to the
+     * same phase boundary a break reaches when it elapses naturally (PAUSED +
+     * [FocusExecutionState.awaitingPhaseAdvance]), so the notification bridge tears
+     * down and restarts the live notification cleanly for the next focus interval —
+     * the user then taps "Back to focus" to resume.
+     *
+     * Returns true when the break is the final phase (nothing to return to) so the
+     * caller should finish the session instead; false otherwise (handled here, or a
+     * no-op when not on a running break).
+     */
+    fun endBreakNow(): Boolean {
+        val state = _focusExecutionState.value
+        if (state.status != FocusExecutionStatus.RUNNING || !state.isOnBreak) return false
+        if (state.isLastPhase) return true
+        applyState(
+            state.copy(
+                status = FocusExecutionStatus.PAUSED,
+                awaitingPhaseAdvance = true,
+                pausedAtEpochMs = System.currentTimeMillis()
+            )
+        )
+        return false
     }
 
     /** Aligns tab UI when full-screen Focus skips the same linked block. Returns true if state changed. */

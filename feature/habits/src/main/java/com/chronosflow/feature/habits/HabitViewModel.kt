@@ -23,6 +23,7 @@ import com.chronosflow.core.domain.repository.HabitRepository
 import com.chronosflow.core.domain.repository.PlannerPreferencesRepository
 import com.chronosflow.core.domain.usecase.CompleteHabitUseCase
 import com.chronosflow.core.domain.usecase.GetActiveHabitsUseCase
+import com.chronosflow.core.domain.usecase.ObserveHabitCompletionTrendUseCase
 import com.chronosflow.core.domain.usecase.ObserveHabitStreaksUseCase
 import com.chronosflow.core.notifications.HabitReminderScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -61,6 +62,7 @@ class HabitViewModel @Inject constructor(
     private val plannerPreferencesRepository: PlannerPreferencesRepository,
     getActiveHabitsUseCase: GetActiveHabitsUseCase,
     observeHabitStreaksUseCase: ObserveHabitStreaksUseCase,
+    observeHabitCompletionTrendUseCase: ObserveHabitCompletionTrendUseCase,
     private val completeHabitUseCase: CompleteHabitUseCase,
     private val habitAssistPlanner: HabitAssistPlanner,
     private val habitRepairAssistPlanner: HabitRepairAssistPlanner,
@@ -77,6 +79,10 @@ class HabitViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val streaks = observeHabitStreaksUseCase()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Per-day completed/missed counts over the trailing 14 days, oldest first. */
+    val completionTrend = observeHabitCompletionTrendUseCase(windowDays = 14)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _repairSuggestions = MutableStateFlow<List<HabitRepairSuggestion>>(emptyList())

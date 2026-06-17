@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Advertises this watch app to the paired phone over the Wearable Data Layer. The phone queries
+  this capability (CapabilityClient) to confirm the ChronosFlow watch app is actually installed and
+  reachable before reporting the link as connected. The literal MUST match
+  com.chronosflow.core.domain.wear.WearLinkContract.WEAR_APP_CAPABILITY.
+-->
+<resources>
+    <string-array name="android_wear_capabilities">
+        <item>chronos_wear_app</item>
+    </string-array>
+</resources>

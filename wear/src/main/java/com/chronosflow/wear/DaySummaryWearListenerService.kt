@@ -30,16 +30,22 @@ class DaySummaryWearListenerService : WearableListenerService() {
                 }
                 DataEvent.TYPE_CHANGED -> {
                     val map = DataMapItem.fromDataItem(event.dataItem).dataMap
-                    DaySummaryStore.write(
+                    DaySummaryStore.writeSynced(
                         this,
                         WearDaySummary(
                             nowTitle = map.getString(WearDaySummaryContract.KEY_NOW_TITLE),
                             nowEndMinute = map.getInt(WearDaySummaryContract.KEY_NOW_END_MINUTE, 0),
+                            nowBlockId = map.getString(WearDaySummaryContract.KEY_NOW_BLOCK_ID)
+                                ?.takeIf { it.isNotBlank() },
+                            nowCategory = map.getString(WearDaySummaryContract.KEY_NOW_CATEGORY).orEmpty(),
                             blocks = parseBlocks(
                                 map.getStringArray(WearDaySummaryContract.KEY_BLOCK_ENTRIES)?.toList().orEmpty()
                             ),
                             nextTitle = map.getString(WearDaySummaryContract.KEY_NEXT_TITLE),
                             nextStartMinute = map.getInt(WearDaySummaryContract.KEY_NEXT_START_MINUTE, 0),
+                            nextBreakStartMinute = map.getInt(WearDaySummaryContract.KEY_NEXT_BREAK_START_MINUTE, 0),
+                            nextBreakTitle = map.getString(WearDaySummaryContract.KEY_NEXT_BREAK_TITLE)
+                                ?.takeIf { it.isNotBlank() },
                             openTaskCount = map.getInt(WearDaySummaryContract.KEY_OPEN_TASK_COUNT, 0),
                             tasks = parseTasks(
                                 map.getStringArray(WearDaySummaryContract.KEY_TASK_ENTRIES)?.toList().orEmpty()
@@ -63,6 +69,7 @@ class DaySummaryWearListenerService : WearableListenerService() {
         }
         if (changed) {
             requestTileUpdates()
+            requestChronosComplicationUpdates(this)
         }
     }
 

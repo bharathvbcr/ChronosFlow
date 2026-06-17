@@ -1,7 +1,16 @@
 package com.chronosflow.feature.daydial.ui
 
+import com.chronosflow.core.notifications.NotificationPermissions
+import com.chronosflow.core.ui.components.ChronosIconButton
+
+import com.chronosflow.core.ui.components.ChronosButton
+import com.chronosflow.core.ui.components.ChronosTextButton
+import com.chronosflow.core.ui.components.ChronosOutlinedButton
+import com.chronosflow.core.ui.components.ChronosFilledTonalButton
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -29,22 +38,26 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.SettingsSuggest
+import com.chronosflow.core.ui.components.ChronosCheckbox
 import com.chronosflow.core.ui.components.ChronosCollapsibleSection
+import com.chronosflow.core.ui.components.ChronosSegmentedButton
+import com.chronosflow.core.ui.components.ChronosDropdownMenuItem
+import com.chronosflow.core.ui.components.ChronosFilterChip
 import com.chronosflow.core.ui.components.ChronosFlowLogo
 import com.chronosflow.core.ui.components.ChronosListCard
 import com.chronosflow.core.ui.components.ChronosMetricTile
 import com.chronosflow.core.ui.components.ChronosSectionTitle
 import com.chronosflow.core.ui.components.ChronosWarningBanner
+import com.chronosflow.core.ui.components.formatLastSyncedLabel
+import com.chronosflow.core.domain.wear.WearLinkStatus
+import kotlinx.coroutines.launch
+import com.chronosflow.core.ui.theme.ChronosColors
 import com.chronosflow.core.ui.theme.ChronosSpacing
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Icon
@@ -56,6 +69,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -157,13 +171,13 @@ internal fun backdropThemeSwatchBrush(theme: ChronosBackdropTheme): Brush =
 
 internal fun backdropThemeSwatchColors(theme: ChronosBackdropTheme): List<Color> =
     when (theme) {
-        ChronosBackdropTheme.LIQUID -> listOf(Color(0xFF8B5CF6), Color(0xFF38BDF8))
-        ChronosBackdropTheme.SMOKE -> listOf(Color(0xFF94A3B8), Color(0xFF475569))
-        ChronosBackdropTheme.WATER_DROPS -> listOf(Color(0xFF38BDF8), Color(0xFFBAE6FD))
-        ChronosBackdropTheme.AURORA -> listOf(Color(0xFF22C55E), Color(0xFF38BDF8))
-        ChronosBackdropTheme.SUNSET_GLOW -> listOf(Color(0xFFF59E0B), Color(0xFFEF4444))
-        ChronosBackdropTheme.NEBULA -> listOf(Color(0xFF6366F1), Color(0xFFEC4899))
-        ChronosBackdropTheme.MINIMAL -> listOf(Color(0xFFE2E8F0), Color(0xFFCBD5E1))
+        ChronosBackdropTheme.LIQUID -> listOf(ChronosColors.BackdropLiquidStart, ChronosColors.BackdropLiquidEnd)
+        ChronosBackdropTheme.SMOKE -> listOf(ChronosColors.BackdropSmokeStart, ChronosColors.BackdropSmokeEnd)
+        ChronosBackdropTheme.WATER_DROPS -> listOf(ChronosColors.BackdropWaterStart, ChronosColors.BackdropWaterEnd)
+        ChronosBackdropTheme.AURORA -> listOf(ChronosColors.BackdropAuroraStart, ChronosColors.BackdropAuroraEnd)
+        ChronosBackdropTheme.SUNSET_GLOW -> listOf(ChronosColors.BackdropSunsetStart, ChronosColors.BackdropSunsetEnd)
+        ChronosBackdropTheme.NEBULA -> listOf(ChronosColors.BackdropNebulaStart, ChronosColors.BackdropNebulaEnd)
+        ChronosBackdropTheme.MINIMAL -> listOf(ChronosColors.BackdropMinimalStart, ChronosColors.BackdropMinimalEnd)
     }
 
 @Composable
@@ -218,6 +232,8 @@ internal fun SidebarPageContent(
     onMissedAlertsChanged: (Boolean) -> Unit,
     endDayReviewReminder: Boolean,
     onEndDayReviewReminderChanged: (Boolean) -> Unit,
+    sleepJournalLogReminder: Boolean,
+    onSleepJournalLogReminderChanged: (Boolean) -> Unit,
     sleepScheduleEnabled: Boolean,
     onSleepScheduleEnabledChanged: (Boolean) -> Unit,
     sleepScheduleStartMinute: Int,
@@ -366,7 +382,7 @@ internal fun SidebarPageContent(
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             ChronosSectionTitle(title = "Plan", subtitle = "Shape today's schedule")
                             if (featureFlags.aiAdvisorEnabled) {
-                                Button(onClick = onGeneratePlan, modifier = Modifier.fillMaxWidth()) {
+                                ChronosButton(onClick = onGeneratePlan, modifier = Modifier.fillMaxWidth()) {
                                     Text("Generate Plan")
                                 }
                             }
@@ -374,10 +390,10 @@ internal fun SidebarPageContent(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                FilledTonalButton(onClick = onFillGaps, modifier = Modifier.weight(1f)) {
+                                ChronosFilledTonalButton(onClick = onFillGaps, modifier = Modifier.weight(1f)) {
                                     Text("Fill gaps")
                                 }
-                                FilledTonalButton(onClick = onRebalance, modifier = Modifier.weight(1f)) {
+                                ChronosFilledTonalButton(onClick = onRebalance, modifier = Modifier.weight(1f)) {
                                     Text("Rebalance")
                                 }
                             }
@@ -390,14 +406,14 @@ internal fun SidebarPageContent(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                OutlinedButton(onClick = onSaveTemplate, modifier = Modifier.weight(1f)) {
+                                ChronosOutlinedButton(onClick = onSaveTemplate, modifier = Modifier.weight(1f)) {
                                     Text("Save template")
                                 }
-                                OutlinedButton(onClick = onRestorePrevious, modifier = Modifier.weight(1f)) {
+                                ChronosOutlinedButton(onClick = onRestorePrevious, modifier = Modifier.weight(1f)) {
                                     Text("Restore previous")
                                 }
                             }
-                            OutlinedButton(onClick = onOpenMissed, modifier = Modifier.fillMaxWidth()) {
+                            ChronosOutlinedButton(onClick = onOpenMissed, modifier = Modifier.fillMaxWidth()) {
                                 Text(dayToolsReviewMissedLabel(missedBlocks.size))
                             }
                         }
@@ -405,7 +421,7 @@ internal fun SidebarPageContent(
                     // Destructive action sits apart from the routine tools and asks first:
                     // clearCurrentDay bypasses undo history, so this genuinely can't be undone.
                     var showClearDayConfirm by rememberSaveable { mutableStateOf(false) }
-                    OutlinedButton(
+                    ChronosOutlinedButton(
                         onClick = { showClearDayConfirm = true },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(
@@ -418,7 +434,7 @@ internal fun SidebarPageContent(
                             title = { Text("Clear this day?") },
                             text = { Text(clearDayConfirmationMessage(timeBlocks.size, selectedDate)) },
                             confirmButton = {
-                                TextButton(
+                                ChronosTextButton(
                                     onClick = {
                                         showClearDayConfirm = false
                                         onClearDay()
@@ -428,7 +444,7 @@ internal fun SidebarPageContent(
                                 }
                             },
                             dismissButton = {
-                                TextButton(onClick = { showClearDayConfirm = false }) { Text("Cancel") }
+                                ChronosTextButton(onClick = { showClearDayConfirm = false }) { Text("Cancel") }
                             }
                         )
                     }
@@ -471,31 +487,31 @@ internal fun SidebarPageContent(
                                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    TextButton(
+                                    ChronosTextButton(
                                         onClick = { onApplyTemplateToday(template) },
                                         modifier = Modifier.semantics {
                                             contentDescription = routineApplyTodayActionLabel(template)
                                         }
                                     ) { Text("Apply today") }
-                                    TextButton(
+                                    ChronosTextButton(
                                         onClick = { onApplyTemplateTomorrow(template) },
                                         modifier = Modifier.semantics {
                                             contentDescription = routineApplyTomorrowActionLabel(template)
                                         }
                                     ) { Text("Apply tomorrow") }
-                                    TextButton(
+                                    ChronosTextButton(
                                         onClick = { onApplyTemplate(template) },
                                         modifier = Modifier.semantics {
                                             contentDescription = templateApplyActionLabel(template)
                                         }
                                     ) { Text("Seed day") }
-                                    TextButton(
+                                    ChronosTextButton(
                                         onClick = { onEditTemplate(template) },
                                         modifier = Modifier.semantics {
                                             contentDescription = templateEditActionLabel(template)
                                         }
                                     ) { Text("Edit") }
-                                    TextButton(
+                                    ChronosTextButton(
                                         onClick = { onDuplicateTemplate(template) },
                                         modifier = Modifier.semantics {
                                             contentDescription = templateCopyActionLabel(template)
@@ -505,7 +521,7 @@ internal fun SidebarPageContent(
                             }
                         }
                     }
-                    Button(onClick = onSaveTemplate, modifier = Modifier.fillMaxWidth()) { Text("Save current day as routine") }
+                    ChronosButton(onClick = onSaveTemplate, modifier = Modifier.fillMaxWidth()) { Text("Save current day as routine") }
                 }
                 SidebarPage.CALENDARS -> {
                     val previousMonthLabel = calendarMonthNavigationLabel(selectedDate, monthOffset = -1)
@@ -514,11 +530,11 @@ internal fun SidebarPageContent(
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { onSelectDate(selectedDate.minusMonths(1)) }) {
+                                ChronosIconButton(onClick = { onSelectDate(selectedDate.minusMonths(1)) }) {
                                     Icon(Icons.Default.ChevronLeft, contentDescription = previousMonthLabel)
                                 }
                                 Text(selectedDate.format(DateTimeFormatter.ofPattern("MMMM yyyy")), style = MaterialTheme.typography.titleMedium)
-                                IconButton(onClick = { onSelectDate(selectedDate.plusMonths(1)) }) {
+                                ChronosIconButton(onClick = { onSelectDate(selectedDate.plusMonths(1)) }) {
                                     Icon(Icons.Default.ChevronRight, contentDescription = nextMonthLabel)
                                 }
                             }
@@ -553,10 +569,11 @@ internal fun SidebarPageContent(
                                                         .semantics {
                                                             contentDescription = dayLabel
                                                         }
-                                                        .clickable(
+                                                        .chronosHapticClick(
+                                                            onClick = { onSelectDate(date) },
                                                             onClickLabel = calendarDaySelectionLabel(date, isSelected = false),
                                                             role = Role.Button
-                                                        ) { onSelectDate(date) },
+                                                        ),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Text(
@@ -652,10 +669,10 @@ internal fun SidebarPageContent(
                                         message = "Calendar imports are connected. ChronosFlow needs write access to keep exported DayDial blocks linked."
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Button(onClick = onRequestCalendarExportAccess) {
+                                        ChronosButton(onClick = onRequestCalendarExportAccess) {
                                             Text("Continue")
                                         }
-                                        TextButton(onClick = onDismissCalendarPermissionRationale) {
+                                        ChronosTextButton(onClick = onDismissCalendarPermissionRationale) {
                                             Text("Not now")
                                         }
                                     }
@@ -679,7 +696,7 @@ internal fun SidebarPageContent(
                                         message = "Android won't let ChronosFlow import or export calendar items until you re-enable permission in app settings."
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Button(onClick = onOpenCalendarSettings) {
+                                        ChronosButton(onClick = onOpenCalendarSettings) {
                                             Text("Open settings")
                                         }
                                     }
@@ -690,10 +707,10 @@ internal fun SidebarPageContent(
                                         message = "ChronosFlow reads your device calendar to avoid duplicate plans and writes linked exports so block edits stay in sync."
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Button(onClick = onRequestCalendarSync) {
+                                        ChronosButton(onClick = onRequestCalendarSync) {
                                             Text("Continue")
                                         }
-                                        TextButton(onClick = onDismissCalendarPermissionRationale) {
+                                        ChronosTextButton(onClick = onDismissCalendarPermissionRationale) {
                                             Text("Not now")
                                         }
                                     }
@@ -705,10 +722,10 @@ internal fun SidebarPageContent(
                                         color = backdropMutedText
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Button(onClick = onRequestCalendarSync) {
+                                        ChronosButton(onClick = onRequestCalendarSync) {
                                             Text("Connect calendar")
                                         }
-                                        OutlinedButton(onClick = onOpenCalendarSettings) {
+                                        ChronosOutlinedButton(onClick = onOpenCalendarSettings) {
                                             Text("Open settings")
                                         }
                                     }
@@ -754,7 +771,7 @@ internal fun SidebarPageContent(
                             ) {
                                 SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
                                     CalendarTimelinePreset.segments.forEachIndexed { index, preset ->
-                                        SegmentedButton(
+                                        ChronosSegmentedButton(
                                             selected = currentPreset == preset,
                                             onClick = {
                                                 timelineSourcesForPreset(preset)?.let(setVisibleTimelineSources)
@@ -769,7 +786,7 @@ internal fun SidebarPageContent(
                                 }
                                 Box {
                                     var filterMenuOpen by rememberSaveable { mutableStateOf(false) }
-                                    IconButton(
+                                    ChronosIconButton(
                                         onClick = { filterMenuOpen = true },
                                         modifier = Modifier.semantics {
                                             contentDescription = "Timeline filters"
@@ -781,18 +798,18 @@ internal fun SidebarPageContent(
                                         expanded = filterMenuOpen,
                                         onDismissRequest = { filterMenuOpen = false }
                                     ) {
-                                        DropdownMenuItem(
+                                        ChronosDropdownMenuItem(
                                             text = { Text("Hide completed") },
                                             leadingIcon = {
-                                                Checkbox(checked = hideCompletedItems, onCheckedChange = null)
+                                                ChronosCheckbox(checked = hideCompletedItems, onCheckedChange = null)
                                             },
                                             onClick = { hideCompletedItems = !hideCompletedItems }
                                         )
-                                        DropdownMenuItem(
+                                        ChronosDropdownMenuItem(
                                             text = { Text("Connected calendar only") },
                                             enabled = calendarPermissionStatus.readGranted,
                                             leadingIcon = {
-                                                Checkbox(
+                                                ChronosCheckbox(
                                                     checked = connectedSourcesOnly,
                                                     onCheckedChange = null,
                                                     enabled = calendarPermissionStatus.readGranted
@@ -807,10 +824,10 @@ internal fun SidebarPageContent(
                                         )
                                         HorizontalDivider()
                                         CalendarTimelineSourceLabels.forEach { source ->
-                                            DropdownMenuItem(
+                                            ChronosDropdownMenuItem(
                                                 text = { Text(source) },
                                                 leadingIcon = {
-                                                    Checkbox(
+                                                    ChronosCheckbox(
                                                         checked = source in visibleTimelineSources,
                                                         onCheckedChange = null
                                                     )
@@ -881,7 +898,7 @@ internal fun SidebarPageContent(
                 SidebarPage.AI_SETTINGS -> {
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ChronosSectionTitle(title = "AI planner", subtitle = "Privacy and planning style")
+                            ChronosSectionTitle(title = "Privacy", subtitle = "Where AI runs and which model it uses")
                             PrivacyModeSelector(privacyMode, onPrivacyModeSelected)
                             CheckboxSetting(
                                 "Use preview Gemini Nano model",
@@ -893,6 +910,11 @@ internal fun SidebarPageContent(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = backdropMutedText
                             )
+                        }
+                    }
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ChronosSectionTitle(title = "Planning", subtitle = "How AI builds and adjusts your plan")
                             var autoApplyAssist by rememberPersistentUiBooleanSetting(
                                 ChronosUiSettingsKeys.KEY_ASSIST_AUTO_APPLY,
                                 false
@@ -906,9 +928,10 @@ internal fun SidebarPageContent(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = backdropMutedText
                             )
+                            Text("Planning style", style = MaterialTheme.typography.labelLarge)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                 listOf("Strict", "Balanced", "Flexible").forEach { style ->
-                                    FilterChip(
+                                    ChronosFilterChip(
                                         selected = planningStyle == style,
                                         onClick = { onPlanningStyleSelected(style) },
                                         label = { Text(style) }
@@ -918,7 +941,7 @@ internal fun SidebarPageContent(
                             CheckboxSetting("Protect focus blocks", protectFocusBlocks, onProtectFocusChanged)
                             CheckboxSetting("Add breaks automatically", addBreaksAutomatically, onAddBreaksAutomaticallyChanged)
                             CheckboxSetting("Preserve manual blocks", preserveManualBlocks, onPreserveManualBlocksChanged)
-                            Button(
+                            ChronosButton(
                                 onClick = onOpenAiPlan,
                                 enabled = featureFlags.aiAdvisorEnabled,
                                 modifier = Modifier.fillMaxWidth()
@@ -942,8 +965,30 @@ internal fun SidebarPageContent(
                     }
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ChronosSectionTitle(title = "Privacy and sync", subtitle = "On-device AI and checkpoints")
-                            PrivacyModeSelector(privacyMode, onPrivacyModeSelected)
+                            ChronosSectionTitle(
+                                title = "Sensitive content",
+                                subtitle = "What shows on your watch and in notifications"
+                            )
+                            val privacyPreferences = rememberPrivacyPreferences()
+                            var hideSensitiveTitles by remember {
+                                mutableStateOf(privacyPreferences.redactSensitiveNotifications())
+                            }
+                            CheckboxSetting("Hide sensitive titles", hideSensitiveTitles) {
+                                hideSensitiveTitles = it
+                                privacyPreferences.setRedactSensitiveNotifications(it)
+                            }
+                            Text(
+                                "When on, task and event titles are replaced with a generic label on the " +
+                                    "paired watch and in focus notifications, and per-item task, habit, and " +
+                                    "medication lists are hidden. Off by default.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = backdropMutedText
+                            )
+                        }
+                    }
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ChronosSectionTitle(title = "Cloud sync", subtitle = "Encrypted checkpoints")
                             CheckboxSetting("Sync checkpoints", syncCloud, onSyncCloudChanged)
                             Text("Last checkpoint: $syncStatus", style = MaterialTheme.typography.bodySmall, color = backdropMutedText)
                             ActionGrid(
@@ -954,6 +999,9 @@ internal fun SidebarPageContent(
                                 )
                             )
                         }
+                    }
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        WearLinkStatusCard(backdropMutedText = backdropMutedText, showMessage = showMessage)
                     }
                 }
                 SidebarPage.NOTIFICATIONS -> {
@@ -972,6 +1020,11 @@ internal fun SidebarPageContent(
                             CheckboxSetting("Break reminders", breakReminders, onBreakRemindersChanged)
                             CheckboxSetting("Missed block alerts", missedAlerts, onMissedAlertsChanged)
                             CheckboxSetting("End-of-day review", endDayReviewReminder, onEndDayReviewReminderChanged)
+                            CheckboxSetting(
+                                "Log sleep & journal",
+                                sleepJournalLogReminder,
+                                onSleepJournalLogReminderChanged
+                            )
                             var currentBlockLive by rememberPersistentBoolean(
                                 "notifications.currentBlockLive",
                                 false
@@ -982,12 +1035,23 @@ internal fun SidebarPageContent(
                                 onCheckedChange = { currentBlockLive = it }
                             )
                             if (currentBlockLive && !canPostPromotedNotificationsCompat(notificationsContext)) {
-                                Text(
-                                    text = "Live updates won't show in the status bar — allow " +
-                                        "promoted notifications for ChronosFlow in system notification settings.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = "Live updates won't show in the status bar — allow " +
+                                            "promoted notifications so the current block appears on the " +
+                                            "lock screen and always-on display.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    NotificationPermissions.promotionSettingsIntent(notificationsContext)
+                                        ?.let { promotionIntent ->
+                                            ChronosTextButton(
+                                                onClick = {
+                                                    runCatching { notificationsContext.startActivity(promotionIntent) }
+                                                }
+                                            ) { Text("Allow promoted notifications") }
+                                        }
+                                }
                             }
                             CheckboxSetting("Sleep schedule", sleepScheduleEnabled, onSleepScheduleEnabledChanged)
                             ChronosTimeWindowControls(
@@ -1041,11 +1105,11 @@ internal fun SidebarPageContent(
                             }
                             Text(reminderScheduleStatus, style = MaterialTheme.typography.bodySmall, color = backdropMutedText)
                             Text(medicationReliabilityStatus, style = MaterialTheme.typography.bodySmall, color = backdropMutedText)
-                            OutlinedButton(onClick = onRequestNotificationPermission, modifier = Modifier.fillMaxWidth()) {
+                            ChronosOutlinedButton(onClick = onRequestNotificationPermission, modifier = Modifier.fillMaxWidth()) {
                                 Icon(Icons.Default.Notifications, contentDescription = null)
                                 Text("Notification permission")
                             }
-                            OutlinedButton(onClick = onOpenExactAlarmSettings, modifier = Modifier.fillMaxWidth()) {
+                            ChronosOutlinedButton(onClick = onOpenExactAlarmSettings, modifier = Modifier.fillMaxWidth()) {
                                 Icon(Icons.Default.Settings, contentDescription = null)
                                 Text("Exact alarm settings")
                             }
@@ -1061,7 +1125,7 @@ internal fun SidebarPageContent(
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                 AppearanceMode.entries.forEach { mode ->
-                                    FilterChip(
+                                    ChronosFilterChip(
                                         selected = appearanceMode == mode,
                                         onClick = { onAppearanceModeSelected(mode) },
                                         label = { Text(mode.label) },
@@ -1090,7 +1154,7 @@ internal fun SidebarPageContent(
                                     .horizontalScroll(rememberScrollState())
                             ) {
                                 ChronosBackdropTheme.entries.forEach { theme ->
-                                    FilterChip(
+                                    ChronosFilterChip(
                                         selected = backdropTheme == theme,
                                         onClick = { onBackdropThemeSelected(theme) },
                                         label = { Text(theme.label) },
@@ -1174,6 +1238,12 @@ internal fun SidebarPageContent(
                     ActionGrid(listOf("View Diagnostics" to onOpenDiagnostics, "View Logs" to onOpenLogs))
                 }
                 SidebarPage.ABOUT -> {
+                    val aboutContext = LocalContext.current
+                    val versionLabel = remember(aboutContext) { aboutVersionLabel(aboutContext) }
+                    var privacyExpanded by rememberSaveable { mutableStateOf(false) }
+                    var termsExpanded by rememberSaveable { mutableStateOf(false) }
+                    var licensesExpanded by rememberSaveable { mutableStateOf(false) }
+
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -1187,8 +1257,79 @@ internal fun SidebarPageContent(
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = backdropMutedText
                                 )
-                                Text("Version 0.1.0", style = MaterialTheme.typography.labelMedium, color = backdropMutedText)
+                                Text(versionLabel, style = MaterialTheme.typography.labelMedium, color = backdropMutedText)
                             }
+                        }
+                    }
+
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ChronosSectionTitle(title = "What ChronosFlow is")
+                            Text(aboutOverviewText(), style = MaterialTheme.typography.bodyMedium, color = backdropMutedText)
+                            ChronosSectionTitle(title = "Your data stays yours", subtitle = "Privacy-first by design")
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                aboutPrivacyHighlights().forEach { highlight ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text("•", color = backdropMutedText)
+                                        Text(highlight, style = MaterialTheme.typography.bodyMedium, color = backdropMutedText)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    ChronosCollapsibleSection(
+                        title = "Privacy Policy",
+                        summary = "How ChronosFlow handles your data",
+                        expanded = privacyExpanded,
+                        onExpandedChange = { privacyExpanded = it }
+                    ) {
+                        Text(aboutPrivacyPolicyText(), style = MaterialTheme.typography.bodyMedium, color = backdropMutedText)
+                    }
+
+                    ChronosCollapsibleSection(
+                        title = "Terms of Use",
+                        summary = "The agreement for using ChronosFlow",
+                        expanded = termsExpanded,
+                        onExpandedChange = { termsExpanded = it }
+                    ) {
+                        Text(aboutTermsText(), style = MaterialTheme.typography.bodyMedium, color = backdropMutedText)
+                    }
+
+                    ChronosCollapsibleSection(
+                        title = "Open-source licenses",
+                        summary = "Libraries that power ChronosFlow",
+                        expanded = licensesExpanded,
+                        onExpandedChange = { licensesExpanded = it }
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            aboutOpenSourceLicenses().forEach { (library, license) ->
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(library, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                    Text(license, style = MaterialTheme.typography.labelMedium, color = backdropMutedText)
+                                }
+                            }
+                        }
+                    }
+
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ChronosSectionTitle(
+                                title = "Support & feedback",
+                                subtitle = "Questions, bugs, or ideas? Reach out."
+                            )
+                            ActionGrid(
+                                listOf(
+                                    "Email support" to {
+                                        launchAboutFeedbackEmail(aboutContext, versionLabel, showMessage)
+                                    }
+                                )
+                            )
+                            Text(
+                                "© 2026 ChronosFlow · Made for focused days.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = backdropMutedText
+                            )
                         }
                     }
                 }
@@ -1464,9 +1605,9 @@ private fun DayQuickItemUiModel.toSidebarTimelineItem(
         isDone = isDone,
         sortMinute = scheduledMinute,
         accentColor = when (kind) {
-            DayQuickItemKind.TASK -> Color(0xFF2F6BEA)
-            DayQuickItemKind.HABIT -> Color(0xFF5DAA54)
-            DayQuickItemKind.MEDICATION -> Color(0xFFD17A2A)
+            DayQuickItemKind.TASK -> ChronosColors.QuickItemTask
+            DayQuickItemKind.HABIT -> ChronosColors.QuickItemHabit
+            DayQuickItemKind.MEDICATION -> ChronosColors.QuickItemMedication
         },
         primaryActionLabel = primaryActionLabel,
         onPrimaryAction = onPrimaryAction,
@@ -1492,7 +1633,7 @@ private fun SidebarTimelineItemRow(item: SidebarTimelineItem) {
                 .fillMaxWidth()
                 .then(
                     if (item.onRowClick != null) {
-                        Modifier.clickable(
+                        Modifier.chronosHapticClick(
                             onClick = item.onRowClick,
                             onClickLabel = item.title
                         )
@@ -1534,7 +1675,7 @@ private fun SidebarTimelineItemRow(item: SidebarTimelineItem) {
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
                     if (item.primaryActionLabel != null) {
-                        Button(
+                        ChronosButton(
                             onClick = item.onPrimaryAction ?: {},
                             enabled = item.onPrimaryAction != null,
                             shape = RoundedCornerShape(18.dp)
@@ -1543,7 +1684,7 @@ private fun SidebarTimelineItemRow(item: SidebarTimelineItem) {
                         }
                     }
                     if (!item.isDone && item.secondaryActionLabel != null && item.onSecondaryAction != null) {
-                        OutlinedButton(
+                        ChronosOutlinedButton(
                             onClick = item.onSecondaryAction,
                             shape = RoundedCornerShape(18.dp)
                         ) {
@@ -1557,3 +1698,81 @@ private fun SidebarTimelineItemRow(item: SidebarTimelineItem) {
 }
 
 private fun DayQuickItemUiModel.baseMedicationPlanId(): String = id.substringBefore(":")
+
+internal const val AboutSupportEmail = "bharath.vbcr@gmail.com"
+
+internal fun aboutVersionLabel(context: android.content.Context): String =
+    runCatching {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        val code = if (android.os.Build.VERSION.SDK_INT >= 28) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+        "Version ${info.versionName} · build $code"
+    }.getOrDefault("Version 0.1.0")
+
+internal fun aboutOverviewText(): String =
+    "An offline-first day planner that pairs intentional scheduling with focus execution and " +
+        "honest, actual-time insights. Plan your day on the dial, run focus sessions, track habits, " +
+        "medications, and goals, then review how the day really went."
+
+internal fun aboutPrivacyHighlights(): List<String> = listOf(
+    "Your schedule, tasks, and notes live in a local database on this device.",
+    "On-device AI (Gemini Nano) is the default — nothing leaves the device for it.",
+    "Cloud AI is opt-in and clearly labeled; you decide when it is used.",
+    "Backups and exports are created only when you ask, and stay where you put them."
+)
+
+internal fun aboutPrivacyPolicyText(): String = """
+    ChronosFlow is built privacy-first.
+
+    What we store
+    • Your schedule, tasks, habits, goals, medications, journal, and sleep entries are stored locally in an on-device database. They are not uploaded to any ChronosFlow server.
+
+    AI features
+    • On-device AI (Gemini Nano) runs entirely on your device. Prompts and results never leave it.
+    • Cloud AI is optional and off unless you turn it on. When enabled, only the text needed for a request is sent to the configured provider to generate a response, governed by that provider's policy.
+
+    Connected data
+    • Calendar and Health Connect data are read only after you grant permission, and are used solely to show and plan your day on this device.
+
+    Backups & exports
+    • Backups and exports are generated on demand and saved to the location you choose. You control where that data goes.
+
+    Your control
+    • Remove entries or clear app data at any time. Uninstalling the app removes the local database.
+""".trimIndent()
+
+internal fun aboutTermsText(): String = """
+    By using ChronosFlow you agree to the following.
+
+    • ChronosFlow is provided "as is", without warranties of any kind. It is a personal planning aid, not medical, legal, or professional advice.
+    • Medication, health, and sleep features are reminders and records to support you — always follow guidance from a qualified professional.
+    • You are responsible for keeping your own backups of important data.
+    • AI-generated suggestions can be inaccurate; review them before acting.
+    • Continued use after an update means you accept the current version of these terms.
+""".trimIndent()
+
+internal fun aboutOpenSourceLicenses(): List<Pair<String, String>> = listOf(
+    "Jetpack Compose & AndroidX" to "Apache License 2.0",
+    "Kotlin & Coroutines" to "Apache License 2.0",
+    "Room" to "Apache License 2.0",
+    "Hilt / Dagger" to "Apache License 2.0",
+    "Material Components & Icons" to "Apache License 2.0",
+    "ML Kit GenAI (Gemini Nano)" to "Google APIs Terms of Service"
+)
+
+private fun launchAboutFeedbackEmail(
+    context: android.content.Context,
+    versionLabel: String,
+    showMessage: (String) -> Unit
+) {
+    val intent = android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
+        data = android.net.Uri.parse("mailto:$AboutSupportEmail")
+        putExtra(android.content.Intent.EXTRA_SUBJECT, "ChronosFlow feedback ($versionLabel)")
+    }
+    runCatching { context.startActivity(intent) }
+        .onFailure { showMessage("No email app available") }
+}

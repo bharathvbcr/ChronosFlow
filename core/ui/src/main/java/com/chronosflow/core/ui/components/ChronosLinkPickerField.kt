@@ -3,7 +3,7 @@ package com.chronosflow.core.ui.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import com.chronosflow.core.ui.motion.chronosHapticClick
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -123,7 +123,7 @@ private fun LinkChip(
             .clip(MaterialTheme.shapes.small)
             .background(baseColor)
             .border(1.dp, borderCol, MaterialTheme.shapes.small)
-            .clickable(onClick = onClick)
+            .chronosHapticClick(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
         Text(

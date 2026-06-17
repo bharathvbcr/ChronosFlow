@@ -18,7 +18,9 @@ import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.TransformOrigin
+import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 
 enum class ChronosTransitionDirection {
@@ -50,9 +52,11 @@ object ChronosMotionDefaults {
     const val ChromeDurationMillis = 110
     // Increased from 0.08 — gives visible directional motion without feeling slow
     const val SharedAxisSlideFraction = 0.14f
-    const val PrimaryTabSlideFraction = 0.09f
-    const val PrimaryTabSpringDampingRatio = 0.78f
-    const val PrimaryTabSpringStiffness = 760f
+    // iOS-style spring slide for primary tab switches — a visible directional glide.
+    const val PrimaryTabSlideFraction = 0.16f
+    // Smooth, lightly bouncy spring (~0.72 damping → a few % overshoot) that still reads as fast.
+    const val PrimaryTabSpringDampingRatio = 0.72f
+    const val PrimaryTabSpringStiffness = 480f
     // Wider scale range eliminates the flat fade that caused the white-flash percept
     const val SharedAxisEnterScale = 0.93f
     const val SharedAxisExitScale = 1.07f
@@ -60,8 +64,15 @@ object ChronosMotionDefaults {
     // Enter alpha starts early so route transitions never fall through to the app/window backdrop.
     const val EnterFadeDelayFraction = 0.12f
     const val ExitFadeDurationFraction = 1f
+    // Leaving page's opacity at a full predictive-back peek is (1 - this); shared by every
+    // in-shell back gesture via chronosBackPeek.
+    const val BackPeekFadeFraction = 0.6f
     const val ChromeScaleDampingRatio = 0.86f
     const val ChromeScaleStiffness = 900f
+    // Quick-add FAB +/× icon rotation — snappy spring with a small playful overshoot,
+    // so the toggle bounces in the same iOS idiom as the page/nav-pill springs.
+    const val QuickAddSpringDampingRatio = 0.6f
+    const val QuickAddSpringStiffness = 750f
     // Focus timer ring sweep — slower than navigation so per-second progress reads as a glide.
     const val FocusProgressDurationMillis = 500
     // Selection state changes (drawer pills, chips) — quicker than full-screen navigation.
@@ -249,6 +260,52 @@ object ChronosTransitionFactory {
     }
 }
 
+/**
+ * Single source of truth for ChronosFlow's cross-section navigation motion — the Material
+ * shared-axis used by every full-screen destination switch, whether it is a Navigation 3
+ * NavDisplay route or an in-shell page shown with AnimatedVisibility. Both paths must build
+ * their transition from this so the forward push, the pop, and the predictive-back preview stay
+ * identical and can never drift apart.
+ */
+fun chronosCrossSectionTransitionSet(
+    direction: ChronosTransitionDirection,
+    reducedMotion: Boolean
+): ChronosTransitionSet {
+    val config = if (reducedMotion) {
+        ChronosMotionDefaults.Navigation.reducedMotion()
+    } else {
+        ChronosMotionDefaults.Navigation
+    }
+    return ChronosTransitionFactory.materialSharedAxis(
+        durationMillis = config.durationMillis,
+        easing = config.easing,
+        direction = direction,
+        slideFraction = config.slideFraction,
+        enterScale = config.enterScale,
+        exitScale = config.exitScale
+    )
+}
+
+/**
+ * Single source of truth for the manual predictive-back PEEK transform, applied inside a
+ * graphicsLayer block to in-shell destinations whose back gesture is not driven by NavDisplay's
+ * own predictive animation (the sidebar pages and the primary tabs). It mirrors the shared-axis
+ * pop exit — a FIXED +X slide (never mirrored by swipe edge), a grow toward
+ * [ChronosMotionDefaults.SharedAxisExitScale], and a fade — so the gesture is identical to the
+ * route pop no matter which screen edge the swipe starts from. Only the magnitude of
+ * [backProgress] is used; its sign is intentionally ignored.
+ */
+fun GraphicsLayerScope.chronosBackPeek(backProgress: Float, reducedMotion: Boolean) {
+    val progress = backProgress.absoluteValue
+    val slideFraction = if (reducedMotion) 0f else ChronosMotionDefaults.SharedAxisSlideFraction
+    val peekScale = if (reducedMotion) 1f else ChronosMotionDefaults.SharedAxisExitScale
+    translationX = size.width * slideFraction * progress
+    val peek = 1f + (peekScale - 1f) * progress
+    scaleX = peek
+    scaleY = peek
+    alpha = 1f - progress * ChronosMotionDefaults.BackPeekFadeFraction
+}
+
 object ChronosValueAnimationFactory {
     fun navigationChromeScale(reducedMotion: Boolean): FiniteAnimationSpec<Float> =
         if (reducedMotion) {
@@ -264,9 +321,9 @@ object ChronosValueAnimationFactory {
         if (reducedMotion) {
             snap()
         } else {
-            tween(
-                durationMillis = ChronosMotionDefaults.ChromeDurationMillis,
-                easing = ChronosMotionDefaults.MaterialStandardEasing
+            spring(
+                dampingRatio = ChronosMotionDefaults.QuickAddSpringDampingRatio,
+                stiffness = ChronosMotionDefaults.QuickAddSpringStiffness
             )
         }
 
@@ -299,6 +356,20 @@ object ChronosValueAnimationFactory {
             tween(
                 durationMillis = ChronosMotionDefaults.SelectionDurationMillis,
                 easing = ChronosMotionDefaults.MaterialStandardEasing
+            )
+        }
+
+    /**
+     * Bouncy glide for the bottom-nav selection pill — mirrors the primary-tab spring so the
+     * pill and the page content it accompanies settle with the same iOS-style motion.
+     */
+    fun navIndicator(reducedMotion: Boolean): FiniteAnimationSpec<Float> =
+        if (reducedMotion) {
+            snap()
+        } else {
+            spring(
+                dampingRatio = ChronosMotionDefaults.PrimaryTabSpringDampingRatio,
+                stiffness = ChronosMotionDefaults.PrimaryTabSpringStiffness
             )
         }
 
