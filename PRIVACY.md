@@ -136,7 +136,7 @@ ChronosFlow is not directed at children and does not knowingly collect data from
 ## 10. Changes to this policy
 
 If this policy changes, the "Last updated" date above will change and the revised policy
-will be published at https://bharathvbcr.github.io/ChronosFlow/
+will be published at https://gist.github.com/bharathvbcr/97888bbc4d024eef147732110f7af725
 
 ## 11. Contact
 
