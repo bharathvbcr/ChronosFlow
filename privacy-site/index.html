@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChronosFlow — Privacy Policy</title>
+  <meta name="description" content="Privacy policy for ChronosFlow (com.chronosflow) on Android and Wear OS.">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --text: #1a1a1a;
+      --muted: #555;
+      --border: #ddd;
+      --bg: #fff;
+      --link: #1565c0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --text: #eee;
+        --muted: #aaa;
+        --border: #333;
+        --bg: #121212;
+        --link: #90caf9;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: var(--text);
+      background: var(--bg);
+      margin: 0;
+      padding: 1.5rem;
+    }
+    main {
+      max-width: 44rem;
+      margin: 0 auto;
+    }
+    h1 { font-size: 1.75rem; margin-top: 0; }
+    h2 { font-size: 1.25rem; margin-top: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+    p, li { margin: 0.75rem 0; }
+    .updated { color: var(--muted); font-style: italic; }
+    .summary {
+      background: color-mix(in srgb, var(--border) 25%, transparent);
+      border-left: 4px solid var(--link);
+      padding: 0.75rem 1rem;
+      margin: 1.25rem 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+      margin: 1rem 0;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.5rem 0.65rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: color-mix(in srgb, var(--border) 40%, transparent); }
+    a { color: var(--link); }
+    code { font-size: 0.9em; }
+    footer {
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.875rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ChronosFlow — Privacy Policy</h1>
+    <p class="updated">Last updated: 16 June 2026</p>
+
+    <p>ChronosFlow (&ldquo;the app&rdquo;, &ldquo;we&rdquo;) is a personal day-planning app for Android and Wear OS.
+    This policy explains what data the app accesses, why, where it is stored, and the
+    choices you have. It applies to the ChronosFlow app published under the package
+    <code>com.chronosflow</code> and its companion Wear OS app.</p>
+
+    <div class="summary">
+      <p><strong>Plain-language summary:</strong> ChronosFlow is built to run on your device. Your plans,
+      tasks, habits, medication logs, mood check-ins, sleep data, and screen-time data are
+      stored <strong>locally on your device</strong>. We do not operate accounts, we do not have servers
+      that collect your personal planning data, and we do not sell or share your data with
+      third parties or advertisers. The only time information leaves your device is when
+      <strong>you</strong> explicitly trigger it (optional cloud AI suggestions, exporting a backup, or
+      syncing to your own paired watch).</p>
+    </div>
+
+    <h2>1. Who is responsible for your data</h2>
+    <p>ChronosFlow is developed and published by the ChronosFlow developer
+    (contact: <strong>bharath.vbcr@gmail.com</strong>). For privacy questions or data requests, email
+    that address.</p>
+
+    <h2>2. What data the app handles, and why</h2>
+    <p>All of the following is stored <strong>on your device</strong> unless a section says otherwise.</p>
+    <table>
+      <thead>
+        <tr><th>Data</th><th>Why it is used</th><th>Leaves your device?</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Time blocks, tasks, habits, day templates, focus sessions</td><td>Core planning features</td><td>No</td></tr>
+        <tr><td>Medication plans, schedules, and dose logs</td><td>Reminders and adherence tracking</td><td>No</td></tr>
+        <tr><td>Mood / energy / stress check-ins</td><td>Energy-aware planning and insights</td><td>No</td></tr>
+        <tr><td>Sleep sessions (via Health Connect)</td><td>Sleep-aware next-day planning and trends</td><td>No (read-only import)</td></tr>
+        <tr><td>Per-app screen-time (via Usage Access)</td><td>&ldquo;Focused vs. distracted&rdquo; insights</td><td>No</td></tr>
+        <tr><td>Calendar events</td><td>Showing and syncing fixed commitments on the dial</td><td>Stays within your device&rsquo;s calendar</td></tr>
+        <tr><td>Contacts</td><td>Optionally linking a contact to a task</td><td>No</td></tr>
+        <tr><td>Journal entries, goals, routines</td><td>Companion tracking features</td><td>No</td></tr>
+      </tbody>
+    </table>
+    <p>ChronosFlow has <strong>no user accounts, no login, and no analytics or advertising SDKs.</strong>
+    We do not collect device identifiers, location, usage telemetry, or crash analytics
+    tied to you.</p>
+
+    <h2>3. Sensitive permissions explained</h2>
+    <p>ChronosFlow requests the following sensitive permissions. Each is <strong>optional</strong>, granted
+    by you through the system, and used only for the stated purpose:</p>
+    <ul>
+      <li><strong>Health Connect — Sleep (<code>health.READ_SLEEP</code>, <code>health.READ_HEALTH_DATA_IN_BACKGROUND</code>):</strong>
+        Read-only access to sleep sessions you have stored in Health Connect, used to adjust
+        next-day planning (e.g. deferring demanding work after a poor night) and to show sleep
+        trends. ChronosFlow <strong>never writes</strong> health data and <strong>never shares</strong> it. Background
+        access is used solely to keep sleep trends current via an on-device sync job. You can
+        revoke this at any time in Health Connect or Android settings.</li>
+      <li><strong>Usage Access (<code>PACKAGE_USAGE_STATS</code>):</strong> Reads on-device app usage statistics (the
+        same data that powers Android Digital Wellbeing) to calculate focused-vs-distracted
+        screen time in Insights. This is <strong>off by default</strong>, opt-in, and you grant it in
+        system settings. The data is processed on-device and never transmitted.</li>
+      <li><strong>Calendar (<code>READ_CALENDAR</code>, <code>WRITE_CALENDAR</code>):</strong> Reads your calendar to display fixed
+        commitments on the dial and, when you choose, writes planned blocks back to your
+        calendar. Calendar data stays within your device&rsquo;s calendar provider.</li>
+      <li><strong>Contacts (<code>READ_CONTACTS</code>):</strong> Used only when you link a contact to a task. Contact
+        data is not uploaded.</li>
+      <li><strong>Notifications (<code>POST_NOTIFICATIONS</code>, <code>POST_PROMOTED_NOTIFICATIONS</code>):</strong> Used for
+        reminders, focus-session progress, and live &ldquo;now&rdquo; updates.</li>
+      <li><strong>Exact alarms (<code>SCHEDULE_EXACT_ALARM</code>):</strong> Used so medication and focus reminders fire
+        at the precise time you set.</li>
+      <li><strong>Biometric (<code>USE_BIOMETRIC</code>):</strong> Used to lock sensitive areas (medication, data export)
+        behind your device authentication. ChronosFlow does not see or store your biometric data.</li>
+      <li><strong>Foreground service (<code>FOREGROUND_SERVICE_SPECIAL_USE</code>):</strong> Keeps an active focus-session
+        timer running while the app is in the background. It runs only during a session you start.</li>
+    </ul>
+
+    <h2>4. On-device AI</h2>
+    <p>ChronosFlow generates planning suggestions using <strong>on-device AI (Gemini Nano via Android
+    ML Kit GenAI / AICore)</strong>. This processing happens <strong>entirely on your device</strong> — your plan
+    data is not sent anywhere for on-device suggestions.</p>
+    <p><strong>Optional cloud AI:</strong> If — and only if — a cloud AI provider is configured for your build
+    (Firebase AI Logic / Gemini), and you choose to use cloud-assisted suggestions, the
+    relevant prompt text is sent to Google&rsquo;s Gemini API to generate a response. This is
+    <strong>dormant and disabled by default</strong> in standard builds. When enabled and used, that
+    request is governed by
+    <a href="https://policies.google.com/privacy">Google&rsquo;s Privacy Policy</a> and the
+    <a href="https://firebase.google.com/terms/data-processing-terms">Firebase AI / Gemini API terms</a>.
+    Every AI suggestion — on-device or cloud — is staged for your explicit review before it
+    changes your plan.</p>
+
+    <h2>5. Backups, export, and device transfer</h2>
+    <ul>
+      <li><strong>Your own backups:</strong> You can export your data to a file you control and restore it
+        later. These exports stay where you put them.</li>
+      <li><strong>Android system backup:</strong> The app supports Android&rsquo;s backup/restore and device-transfer
+        mechanisms (<code>allowBackup</code>). Database encryption keys are <strong>excluded</strong> from backup so that
+        encrypted data cannot be restored without your device. System backups are handled by
+        Android/Google under your device&rsquo;s backup settings, not by us.</li>
+      <li><strong>Encryption at rest:</strong> Sensitive on-device data can be stored in an encrypted database
+        (SQLCipher), and sensitive screens can be locked behind biometric/device authentication.</li>
+    </ul>
+
+    <h2>6. Companion Wear OS app</h2>
+    <p>The Wear OS app mirrors your day summary, focus controls, and reminders to your paired
+    watch over the Android <strong>Wearable Data Layer</strong>. This is a direct device-to-device channel
+    between your phone and your own watch; the data is not sent to us or to third parties. An
+    option to hide sensitive titles on the watch and in notifications is available.</p>
+
+    <h2>7. Data sharing and selling</h2>
+    <p>We <strong>do not</strong> sell your personal data, and we <strong>do not</strong> share it with advertisers, data
+    brokers, or analytics providers. The only outbound flows are the optional, user-initiated
+    ones described above (cloud AI, your own exports, your own paired watch).</p>
+
+    <h2>8. Data retention and deletion</h2>
+    <p>Your data lives on your device for as long as you keep the app installed. To delete it:</p>
+    <ul>
+      <li>Delete individual items in the app, or</li>
+      <li>Uninstall the app (this removes the on-device database), and</li>
+      <li>Revoke any granted permissions in Android settings / Health Connect.</li>
+    </ul>
+    <p>Because we do not store your personal data on any server, there is no server-side copy for
+    us to delete.</p>
+
+    <h2>9. Children</h2>
+    <p>ChronosFlow is not directed at children and does not knowingly collect data from children.</p>
+
+    <h2>10. Changes to this policy</h2>
+    <p>If this policy changes, the &ldquo;Last updated&rdquo; date above will change and the revised policy
+    will be published at the same location.</p>
+
+    <h2>11. Contact</h2>
+    <p>Questions or requests: <a href="mailto:bharath.vbcr@gmail.com">bharath.vbcr@gmail.com</a></p>
+
+    <footer>
+      ChronosFlow &middot; <code>com.chronosflow</code>
+    </footer>
+  </main>
+</body>
+</html>

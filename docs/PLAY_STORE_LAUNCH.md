@@ -8,8 +8,9 @@ are done in the Play Console or on a device, not in the repo.
 
 - **Build/release config:** READY. `versionCode=1`, `versionName=0.1.0`, `targetSdk=37`,
   `minSdk=26`, release signing wired via `keystore.properties`.
-- **Privacy policy:** DONE — see [`/PRIVACY.md`](../PRIVACY.md). Must be **hosted at a
-  public URL** before submission (e.g. GitHub Pages) and linked in the Console.
+- **Privacy policy:** DONE — see [`/PRIVACY.md`](../PRIVACY.md). Hosted at
+  **https://bharathvbcr.github.io/ChronosFlow/** (GitHub Pages). Gist mirror:
+  https://gist.github.com/bharathvbcr/97888bbc4d024eef147732110f7af725
 - **Code shrinking (R8):** Intentionally **OFF** for the alpha (see §5). Safe; larger APK.
 - **Remaining gates:** hosted privacy URL, Play Console declarations (§3), a clean release
   branch (§6), and an on-device smoke pass on the signed build (§7).
@@ -32,8 +33,11 @@ and use distinct versionCodes so Play multi-APK delivery routes each to the righ
 - Content written: [`/PRIVACY.md`](../PRIVACY.md). Covers Health Connect sleep,
   medication/mood, screen-time (Usage Access), calendar, contacts, biometric, on-device +
   optional cloud AI, backups/export, and Wear sync.
-- **MANUAL:** host it at a stable public URL and paste that URL into
-  **Play Console → App content → Privacy policy** (and into the store listing).
+- **Public URL (Play Console):** https://bharathvbcr.github.io/ChronosFlow/
+- **Gist mirror:** https://gist.github.com/bharathvbcr/97888bbc4d024eef147732110f7af725
+- Source of truth: [`/PRIVACY.md`](../PRIVACY.md). When editing, update `privacy-site/index.html`
+  too, then push to `main` to redeploy Pages.
+- Paste the Pages URL into **Play Console → App content → Privacy policy**.
 
 ## 3. Play Console declarations — **MANUAL**
 
@@ -127,6 +131,6 @@ in release"). Do not enable it in the same release you submit for the first time
 
 ### Go / no-go for closed alpha
 
-**Blocking:** host privacy URL (§2), Console declarations (§3), clean release commit (§6),
+**Blocking:** push + Pages deploy (§2), Console declarations (§3), clean release commit (§6),
 and the signed-build smoke pass (§7) — including the AOD check that is currently
 device-unverified. Build/signing/permissions are otherwise ready.
