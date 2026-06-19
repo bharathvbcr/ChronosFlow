@@ -4,6 +4,7 @@ import com.ChronosFlow.VBCR.core.domain.model.BlockFlexibility
 import com.ChronosFlow.VBCR.core.domain.model.BlockProvenance
 import com.ChronosFlow.VBCR.core.domain.model.EnergyIntensity
 import com.ChronosFlow.VBCR.core.domain.model.ScheduleConflictSeverity
+import com.ChronosFlow.VBCR.core.domain.model.SleepSchedule
 import com.ChronosFlow.VBCR.core.domain.model.TimeBlock
 import com.ChronosFlow.VBCR.core.domain.repository.TimeBlockRepository
 import kotlinx.coroutines.flow.first
@@ -226,6 +227,95 @@ class PlannerService @Inject constructor(
             snappedToMinute = null,
             affectedBlockIds = movedBlocks.map { it.id }
         )
+    }
+
+    /**
+     * Repairs overlapping blocks on [date] by sliding each *movable* block that collides with an
+     * earlier block into the next free slot, leaving immovable blocks (locked / protected / FIXED /
+     * already underway) anchored in place. Greedy by start time — a port of the iOS
+     * `ConflictResolve.swift` algorithm — so the earlier block of a colliding pair stays put and the
+     * later movable one moves. Relocations never land before [fromMinute] (the now-floor for today)
+     * and never inside an active [sleepSchedule]. Each move is persisted and returned so the caller
+     * can offer undo via [setBlockStart].
+     */
+    suspend fun resolveConflicts(
+        date: java.time.LocalDate,
+        fromMinute: Int = 0,
+        sleepSchedule: SleepSchedule? = null
+    ): ConflictResolutionResult {
+        val floor = fromMinute.coerceIn(0, 1440)
+        val blocks = getBlocksForDate(date).sortedBy { it.startMinuteOfDay }
+
+        fun TimeBlock.isUnderway(): Boolean =
+            actualStartMinuteOfDay != null ||
+                (startMinuteOfDay < floor && floor < startMinuteOfDay + durationMinutes)
+
+        fun TimeBlock.isImmovable(): Boolean =
+            isLocked || isProtected || flexibility == BlockFlexibility.FIXED || isUnderway()
+
+        // Spans we won't disturb: anchors plus blocks already accepted/relocated this pass.
+        val occupied = mutableListOf<Pair<Int, Int>>()
+        fun collides(start: Int, end: Int): Boolean =
+            occupied.any { start < it.second && it.first < end }
+
+        // Earliest 5-minute-aligned slot at/after [floorStart] that fits [duration] without colliding
+        // or landing in the sleep window, bounded by end of day.
+        fun firstFreeStart(duration: Int, floorStart: Int): Int? {
+            var candidate = floorStart.coerceIn(0, 1440)
+            while (candidate + duration <= 1440) {
+                val fits = !collides(candidate, candidate + duration) &&
+                    (sleepSchedule?.intersects(candidate, duration) != true)
+                if (fits) return candidate
+                candidate += 5
+            }
+            return null
+        }
+
+        val moves = mutableListOf<ResolvedBlockMove>()
+        var unresolvedConflictCount = 0
+        var hadConflicts = false
+
+        for (block in blocks) {
+            val start = block.startMinuteOfDay
+            val end = start + block.durationMinutes
+            if (!collides(start, end)) {
+                occupied += start to end
+                continue
+            }
+            hadConflicts = true
+            val newStart = if (block.isImmovable()) {
+                null
+            } else {
+                firstFreeStart(block.durationMinutes, maxOf(start, floor))
+            }
+            if (newStart != null && newStart != start) {
+                repository.saveTimeBlock(block.withUpdatedStart(newStart))
+                occupied += newStart to (newStart + block.durationMinutes)
+                moves += ResolvedBlockMove(
+                    blockId = block.id,
+                    blockTitle = block.title,
+                    originalStartMinute = start,
+                    newStartMinute = newStart
+                )
+            } else {
+                occupied += start to end
+                unresolvedConflictCount++
+            }
+        }
+        return ConflictResolutionResult(moves, unresolvedConflictCount, hadConflicts)
+    }
+
+    /**
+     * Forces [blockId] to start at [startMinute] without grid-snapping or conflict validation. Used
+     * to restore a block to its pre-repair position when undoing [resolveConflicts]; the caller owns
+     * collision safety. Returns [PlannerOperationResult.Applied] with the normalized minute.
+     */
+    suspend fun setBlockStart(blockId: String, startMinute: Int): PlannerOperationResult {
+        val target = getLatestBlock(blockId)
+            ?: return PlannerOperationResult.Rejected("Block not found", blockId)
+        val normalized = normalizeMinute(startMinute)
+        repository.saveTimeBlock(target.withUpdatedStart(normalized))
+        return PlannerOperationResult.Applied("Block repositioned", blockId, normalized, listOf(blockId))
     }
 
     suspend fun logActualWindow(blockId: String, actualStartMinute: Int, actualEndMinute: Int): PlannerOperationResult {
