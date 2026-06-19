@@ -152,6 +152,11 @@ class TaskViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
+    /** Imports a batch of shared task titles as plain tasks (used by the bulk-import review sheet). */
+    fun importTasks(titles: List<String>) {
+        titles.forEach { addTask(title = it) }
+    }
+
     fun addTask(
         title: String,
         description: String? = null,

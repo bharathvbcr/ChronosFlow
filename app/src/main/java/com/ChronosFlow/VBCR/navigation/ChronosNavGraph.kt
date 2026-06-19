@@ -125,6 +125,7 @@ fun ChronosNavDisplay(
                         openInitialContextSheet = key.target == "context",
                         openAddSheet = key.target == ChronosRoute.TARGET_ADD,
                         initialAddCapture = key.capture,
+                        initialBulkImport = key.bulkCapture,
                         navTargetGeneration = navState.sectionTargetGeneration
                     )
                 }

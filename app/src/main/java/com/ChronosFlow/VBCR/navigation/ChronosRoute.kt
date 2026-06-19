@@ -78,15 +78,20 @@ sealed interface ChronosRoute : NavKey {
     data class Tasks(
         val taskId: String? = null,
         val target: String? = null,
-        val capture: String? = null
+        val capture: String? = null,
+        val bulkCapture: List<String>? = null
     ) : ChronosRoute {
         override val section: String get() = SECTION_TASKS
 
         companion object {
             const val section: String = SECTION_TASKS
 
-            fun createRoute(taskId: String? = null, target: String? = null, capture: String? = null): Tasks =
-                Tasks(taskId, target, capture)
+            fun createRoute(
+                taskId: String? = null,
+                target: String? = null,
+                capture: String? = null,
+                bulkCapture: List<String>? = null
+            ): Tasks = Tasks(taskId, target, capture, bulkCapture)
         }
     }
 
@@ -315,7 +320,12 @@ sealed interface ChronosRoute : NavKey {
             when (launch.section) {
                 SECTION_MEDICATION -> if (featureFlags.medicationEnabled) Medication() else Day()
                 SECTION_REVIEW -> if (featureFlags.reviewEnabled) Day(Day.TARGET_INSIGHTS) else Day()
-                SECTION_TASKS -> Tasks(taskId = launch.taskId, target = launch.target, capture = launch.capture)
+                SECTION_TASKS -> Tasks(
+                    taskId = launch.taskId,
+                    target = launch.target,
+                    capture = launch.capture,
+                    bulkCapture = launch.bulkCapture
+                )
                 SECTION_HABITS -> if (featureFlags.habitsEnabled) Habits() else Day()
                 SECTION_GOALS -> if (featureFlags.goalsEnabled) Goals() else Day()
                 SECTION_FOCUS -> Day(Day.TARGET_FOCUS_PLANNER)

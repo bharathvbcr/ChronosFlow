@@ -129,6 +129,7 @@ fun TaskScreen(
     openInitialContextSheet: Boolean = false,
     openAddSheet: Boolean = false,
     initialAddCapture: String? = null,
+    initialBulkImport: List<String>? = null,
     navTargetGeneration: Int = 0
 ) {
     val context = LocalContext.current
@@ -147,6 +148,7 @@ fun TaskScreen(
     val assistState by viewModel.assistState.collectAsStateWithLifecycle()
     val rewriteState by viewModel.rewriteState.collectAsStateWithLifecycle()
     var sheetTarget by remember { mutableStateOf<TaskSheetTarget?>(null) }
+    var bulkImportCandidates by remember { mutableStateOf<List<String>?>(null) }
     var addInstanceId by remember { mutableStateOf(0) }
     val taskTemplatesSetting = rememberPersistentUiStringSetting("task.templates", "")
     val taskTemplates = remember(taskTemplatesSetting.value) {
@@ -160,6 +162,9 @@ fun TaskScreen(
         mutableStateOf(false)
     }
     val normalizedInitialAddCapture = initialAddCapture?.trim()?.takeIf(String::isNotBlank)
+    val normalizedBulkImport = initialBulkImport
+        ?.mapNotNull { it.trim().takeIf(String::isNotBlank) }
+        ?.takeIf { it.isNotEmpty() }
     var filter by rememberSaveable { mutableStateOf(TaskFilter.OPEN) }
     val snackbarHostState = remember { SnackbarHostState() }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -215,6 +220,14 @@ fun TaskScreen(
         normalizedInitialAddCapture?.let { capture ->
             viewModel.requestTaskAssist(TaskAssistRequest(title = capture))
         }
+    }
+
+    OneShotNavTrigger(
+        normalizedBulkImport != null,
+        navTargetGeneration,
+        normalizedBulkImport?.joinToString("\n")
+    ) {
+        bulkImportCandidates = normalizedBulkImport
     }
 
     fun openTaskContext(task: Task) {
@@ -411,6 +424,22 @@ fun TaskScreen(
                 }
             }
         }
+    }
+
+    bulkImportCandidates?.let { candidates ->
+        TaskBulkImportSheet(
+            candidates = candidates,
+            onDismiss = { bulkImportCandidates = null },
+            onImport = { selected ->
+                viewModel.importTasks(selected)
+                bulkImportCandidates = null
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(
+                        if (selected.size == 1) "1 task imported" else "${selected.size} tasks imported"
+                    )
+                }
+            }
+        )
     }
 
     TaskFormSheet(

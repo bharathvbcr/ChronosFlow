@@ -186,8 +186,9 @@ private fun ChronosFlowApp(
     reduceMotionEnabled: Boolean,
     onNotificationLaunchHandled: () -> Unit
 ) {
+    val appContentResolver = androidx.compose.ui.platform.LocalContext.current.contentResolver
     val notificationPlan = remember(launchGeneration, launchIntent) {
-        buildNotificationNavigationPlan(launchIntent)
+        buildNotificationNavigationPlan(launchIntent, appContentResolver)
     }
     val navState = rememberChronosNavigationState(
         startDayTarget = initialDayTargetForNotificationLaunch(notificationPlan.notificationLaunch)
@@ -597,10 +598,13 @@ internal data class NotificationNavigationPlan(
     val notificationLaunch: NotificationLaunch?
 )
 
-internal fun buildNotificationNavigationPlan(intent: Intent?): NotificationNavigationPlan {
-    // A notification/deep-link launch wins; otherwise treat an inbound Share / Process-text
-    // intent from another app as a task capture.
-    val launch = parseNotificationLaunch(intent) ?: parseSharedTextLaunch(intent)
+internal fun buildNotificationNavigationPlan(
+    intent: Intent?,
+    contentResolver: android.content.ContentResolver? = null
+): NotificationNavigationPlan {
+    // A notification/deep-link launch wins; otherwise treat an inbound Share / Process-text / file
+    // (single OR bulk via SEND_MULTIPLE / .txt / .ics) intent from another app as a task capture.
+    val launch = parseNotificationLaunch(intent) ?: parseSharedTaskImport(intent, contentResolver)
     // The shell starts on Day; Day-target notifications surface their tab in-place via
     // [initialDayTargetForNotificationLaunch], so no separate start route is needed.
     return NotificationNavigationPlan(
