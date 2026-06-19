@@ -969,6 +969,23 @@ internal fun SidebarPageContent(
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChronosSectionTitle(
+                                title = "App permissions",
+                                subtitle = "System access ChronosFlow can use"
+                            )
+                            PrivacyPermissionsSection(
+                                calendarPermissionStatus = calendarPermissionStatus,
+                                showCalendarPermissionRationale = showCalendarPermissionRationale,
+                                onDismissCalendarPermissionRationale = onDismissCalendarPermissionRationale,
+                                onRequestNotificationPermission = onRequestNotificationPermission,
+                                onRequestCalendarSync = onRequestCalendarSync,
+                                onRequestCalendarExportAccess = onRequestCalendarExportAccess,
+                                onOpenExactAlarmSettings = onOpenExactAlarmSettings
+                            )
+                        }
+                    }
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ChronosSectionTitle(
                                 title = "Sensitive content",
                                 subtitle = "What shows on your watch and in notifications"
                             )
@@ -1005,6 +1022,15 @@ internal fun SidebarPageContent(
                     }
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                         WearLinkStatusCard(backdropMutedText = backdropMutedText, showMessage = showMessage)
+                    }
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ChronosSectionTitle(
+                                title = "Connected apps",
+                                subtitle = "Cross-app task & event sharing with DevTime"
+                            )
+                            CompanionAppStatusCard()
+                        }
                     }
                 }
                 SidebarPage.NOTIFICATIONS -> {

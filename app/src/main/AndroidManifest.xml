@@ -27,6 +27,8 @@
     <queries>
         <!-- Resolve the Health Connect provider so availability checks work on Android &lt; 14. -->
         <package android:name="com.google.android.apps.healthdata" />
+        <!-- DevTime (Meridian) cross-app sharing: detect install + read its interop provider. -->
+        <package android:name="com.Meridian.VBCR" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -69,6 +71,17 @@
                 android:name="androidx.work.WorkManagerInitializer"
                 tools:node="remove" />
         </provider>
+
+        <!--
+            Read-only cross-app sharing provider for DevTime (Meridian). Exported with no platform
+            permission by design: access is authorized in code by PeerVerifier (trusted package +
+            pinned signing-cert SHA-256), since a signature permission would require a shared key.
+        -->
+        <provider
+            android:name=".interop.InteropProvider"
+            android:authorities="${applicationId}.share"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
 
         <activity
             android:name=".MainActivity"
