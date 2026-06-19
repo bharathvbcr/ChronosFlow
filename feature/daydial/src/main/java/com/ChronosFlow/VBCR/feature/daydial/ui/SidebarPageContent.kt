@@ -955,6 +955,26 @@ internal fun SidebarPageContent(
                     }
                 }
                 SidebarPage.PRIVACY_SYNC -> {
+                    // RECONSTRUCTED collapsible Privacy & Sync page. App lock stays always-visible;
+                    // the five sub-sections below are collapsible and persist their expand state in
+                    // the UI-settings DataStore. Default expanded (true) so the page reads the same as
+                    // before — flip any default to false to have that section start collapsed.
+                    var appPermissionsExpanded by rememberPersistentUiBooleanSetting(
+                        "privacy.appPermissions.expanded", true
+                    )
+                    var sensitiveContentExpanded by rememberPersistentUiBooleanSetting(
+                        "privacy.sensitiveContent.expanded", true
+                    )
+                    var cloudSyncExpanded by rememberPersistentUiBooleanSetting(
+                        "privacy.cloudSync.expanded", true
+                    )
+                    var wearLinkExpanded by rememberPersistentUiBooleanSetting(
+                        "privacy.wearLink.expanded", true
+                    )
+                    var companionAppExpanded by rememberPersistentUiBooleanSetting(
+                        "privacy.companionApp.expanded", true
+                    )
+
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                         AppLockSettingsSection(
                             settings = appLockSettings,
@@ -966,71 +986,75 @@ internal fun SidebarPageContent(
                             onRequireAuthDataExportChanged = onRequireAuthDataExportChanged
                         )
                     }
-                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ChronosSectionTitle(
-                                title = "App permissions",
-                                subtitle = "System access ChronosFlow can use"
-                            )
-                            PrivacyPermissionsSection(
-                                calendarPermissionStatus = calendarPermissionStatus,
-                                showCalendarPermissionRationale = showCalendarPermissionRationale,
-                                onDismissCalendarPermissionRationale = onDismissCalendarPermissionRationale,
-                                onRequestNotificationPermission = onRequestNotificationPermission,
-                                onRequestCalendarSync = onRequestCalendarSync,
-                                onRequestCalendarExportAccess = onRequestCalendarExportAccess,
-                                onOpenExactAlarmSettings = onOpenExactAlarmSettings
-                            )
-                        }
+                    ChronosCollapsibleSection(
+                        title = "App permissions",
+                        summary = "System access ChronosFlow can use",
+                        expanded = appPermissionsExpanded,
+                        onExpandedChange = { appPermissionsExpanded = it }
+                    ) {
+                        PrivacyPermissionsSection(
+                            calendarPermissionStatus = calendarPermissionStatus,
+                            showCalendarPermissionRationale = showCalendarPermissionRationale,
+                            onDismissCalendarPermissionRationale = onDismissCalendarPermissionRationale,
+                            onRequestNotificationPermission = onRequestNotificationPermission,
+                            onRequestCalendarSync = onRequestCalendarSync,
+                            onRequestCalendarExportAccess = onRequestCalendarExportAccess,
+                            onOpenExactAlarmSettings = onOpenExactAlarmSettings
+                        )
                     }
-                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ChronosSectionTitle(
-                                title = "Sensitive content",
-                                subtitle = "What shows on your watch and in notifications"
-                            )
-                            val privacyPreferences = rememberPrivacyPreferences()
-                            var hideSensitiveTitles by remember {
-                                mutableStateOf(privacyPreferences.redactSensitiveNotifications())
-                            }
-                            CheckboxSetting("Hide sensitive titles", hideSensitiveTitles) {
-                                hideSensitiveTitles = it
-                                privacyPreferences.setRedactSensitiveNotifications(it)
-                            }
-                            Text(
-                                "When on, task and event titles are replaced with a generic label on the " +
-                                    "paired watch and in focus notifications, and per-item task, habit, and " +
-                                    "medication lists are hidden. Off by default.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = backdropMutedText
-                            )
+                    ChronosCollapsibleSection(
+                        title = "Sensitive content",
+                        summary = "What shows on your watch and in notifications",
+                        expanded = sensitiveContentExpanded,
+                        onExpandedChange = { sensitiveContentExpanded = it }
+                    ) {
+                        val privacyPreferences = rememberPrivacyPreferences()
+                        var hideSensitiveTitles by remember {
+                            mutableStateOf(privacyPreferences.redactSensitiveNotifications())
                         }
-                    }
-                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ChronosSectionTitle(title = "Cloud sync", subtitle = "Encrypted checkpoints")
-                            CheckboxSetting("Sync checkpoints", syncCloud, onSyncCloudChanged)
-                            Text("Last checkpoint: $syncStatus", style = MaterialTheme.typography.bodySmall, color = backdropMutedText)
-                            ActionGrid(
-                                listOf(
-                                    "Sync Now" to {
-                                        if (syncCloud) onSyncNow() else showMessage("Enable sync checkpoints first")
-                                    }
-                                )
-                            )
+                        CheckboxSetting("Hide sensitive titles", hideSensitiveTitles) {
+                            hideSensitiveTitles = it
+                            privacyPreferences.setRedactSensitiveNotifications(it)
                         }
+                        Text(
+                            "When on, task and event titles are replaced with a generic label on the " +
+                                "paired watch and in focus notifications, and per-item task, habit, and " +
+                                "medication lists are hidden. Off by default.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = backdropMutedText
+                        )
                     }
-                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                    ChronosCollapsibleSection(
+                        title = "Cloud sync",
+                        summary = "Encrypted checkpoints",
+                        expanded = cloudSyncExpanded,
+                        onExpandedChange = { cloudSyncExpanded = it }
+                    ) {
+                        CheckboxSetting("Sync checkpoints", syncCloud, onSyncCloudChanged)
+                        Text("Last checkpoint: $syncStatus", style = MaterialTheme.typography.bodySmall, color = backdropMutedText)
+                        ActionGrid(
+                            listOf(
+                                "Sync Now" to {
+                                    if (syncCloud) onSyncNow() else showMessage("Enable sync checkpoints first")
+                                }
+                            )
+                        )
+                    }
+                    ChronosCollapsibleSection(
+                        title = "Watch",
+                        summary = "Wear OS sync",
+                        expanded = wearLinkExpanded,
+                        onExpandedChange = { wearLinkExpanded = it }
+                    ) {
                         WearLinkStatusCard(backdropMutedText = backdropMutedText, showMessage = showMessage)
                     }
-                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ChronosSectionTitle(
-                                title = "Connected apps",
-                                subtitle = "Cross-app task & event sharing with DevTime"
-                            )
-                            CompanionAppStatusCard()
-                        }
+                    ChronosCollapsibleSection(
+                        title = "Connected apps",
+                        summary = "Cross-app task & event sharing with DevTime",
+                        expanded = companionAppExpanded,
+                        onExpandedChange = { companionAppExpanded = it }
+                    ) {
+                        CompanionAppStatusCard()
                     }
                 }
                 SidebarPage.NOTIFICATIONS -> {

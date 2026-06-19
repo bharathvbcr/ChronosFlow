@@ -110,7 +110,9 @@ internal fun InsightsTrendSections(
             }
         }
 
-        if (trends.habitTrend.isNotEmpty()) {
+        // Hide unless there is real habit activity in the window — deriveHabitCompletionTrend emits
+        // one (often all-zero) row per day, so isNotEmpty() alone would always show an empty chart.
+        if (trends.habitTrend.any { it.completedCount > 0 || it.missedCount > 0 }) {
             ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
                     Text(
@@ -138,7 +140,8 @@ internal fun InsightsTrendSections(
             }
         }
 
-        if (trends.medicationTrend.isNotEmpty()) {
+        // Same as habits: the adherence trend has a row per day, so gate on real taken/missed doses.
+        if (trends.medicationTrend.any { it.takenCount > 0 || it.missedCount > 0 }) {
             ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
                     Text(

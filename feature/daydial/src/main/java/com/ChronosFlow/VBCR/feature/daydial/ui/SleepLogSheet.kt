@@ -20,6 +20,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import com.ChronosFlow.VBCR.core.domain.model.SleepTrack
+import com.ChronosFlow.VBCR.feature.daydial.HealthConnectSleepSyncButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosTimePickerField
 import com.ChronosFlow.VBCR.core.ui.components.formatDisplayMinute
@@ -69,6 +70,9 @@ internal fun SleepLogSheetContent(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        // Pull last night's sleep straight from Health Connect instead of filling it in by hand;
+        // the imported values flow back into the fields below.
+        HealthConnectSleepSyncButton()
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,

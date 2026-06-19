@@ -178,6 +178,76 @@ internal fun HealthConnectSleepCard(viewModel: HealthConnectSleepViewModel = hil
     }
 }
 
+/**
+ * Compact one-tap "Sync from Health Connect" control for the Sleep Log sheet. Pulls last night's
+ * sleep on demand — granting read access first if it isn't set up yet — WITHOUT turning on the
+ * periodic background import (the settings card owns that toggle). The imported night flows back
+ * into the open sheet through the reactive sleepTrack stream, so the fields populate themselves.
+ */
+@Composable
+internal fun HealthConnectSleepSyncButton(
+    modifier: Modifier = Modifier,
+    viewModel: HealthConnectSleepViewModel = hiltViewModel()
+) {
+    val status by viewModel.status.collectAsStateWithLifecycle()
+    val isRunning by viewModel.isRunning.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+
+    LaunchedEffect(viewModel) {
+        viewModel.syncOutcomes.collect { outcome ->
+            haptics.performHapticFeedback(
+                if (outcome is HealthConnectSleepSyncOutcome.Failure) {
+                    HapticFeedbackType.Reject
+                } else {
+                    HapticFeedbackType.Confirm
+                }
+            )
+        }
+    }
+
+    // A one-time pull: after the grant we run once but do NOT enable the recurring background import.
+    val permissionLauncher = rememberLauncherForActivityResult(viewModel.permissionContract()) {
+        viewModel.onPermissionResultRunOnce()
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = modifier.fillMaxWidth()) {
+        when (status.availability) {
+            HealthConnectAvailability.AVAILABLE -> {
+                ChronosOutlinedButton(
+                    onClick = {
+                        // Already set up → pull straight away; otherwise request read access first.
+                        if (status.enabled) viewModel.runNow() else permissionLauncher.launch(viewModel.requestPermissions)
+                    },
+                    enabled = !isRunning,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isRunning) "Syncing…" else "Sync from Health Connect")
+                }
+                if (status.lastResult.isNotEmpty()) {
+                    Text(
+                        status.lastResult,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            HealthConnectAvailability.PROVIDER_UPDATE_REQUIRED -> ProviderActionRow(
+                message = "Update Health Connect to import sleep.",
+                buttonLabel = "Update Health Connect",
+                onClick = { context.openHealthConnectInStore() }
+            )
+
+            HealthConnectAvailability.NOT_SUPPORTED -> ProviderActionRow(
+                message = "Health Connect isn't set up on this device.",
+                buttonLabel = "Get Health Connect",
+                onClick = { context.openHealthConnectInStore() }
+            )
+        }
+    }
+}
+
 @Composable
 private fun AvailableControls(
     status: HealthConnectSleepSyncStatus,

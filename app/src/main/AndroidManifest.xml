@@ -15,8 +15,10 @@
     <!-- In-app CameraX capture for attaching photos to journal entries. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
-    <!-- Health Connect: read-only import of sleep sessions, including from a background WorkManager job. -->
+    <!-- Health Connect: read-only import of sleep sessions and exercise workouts, including from a
+         background WorkManager job. -->
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
     <!-- Usage access: read per-app screen time (the data Digital Wellbeing is built on) for the
          focused-vs-distracted Insights. Special access the user grants in system settings. -->
