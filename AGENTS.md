@@ -55,7 +55,7 @@ Adapted from https://github.com/multica-ai/andrej-karpathy-skills/blob/main/CLAU
 ## Android Runtime Safety
 
 - Prefer `.\scripts\install-debug-preserve.ps1 [-Device <serial>]` for ChronosFlow phone-app deploy/run checks. It builds the debug APK, installs with `adb install -r`, and launches `.MainActivity` without uninstalling the existing package.
-- Use `android run` only when explicitly testing Android CLI behavior itself; verify `pm path com.chronosflow` before and after so a failed deploy does not masquerade as an app deletion.
+- Use `android run` only when explicitly testing Android CLI behavior itself; verify `pm path com.ChronosFlow.VBCR` before and after so a failed deploy does not masquerade as an app deletion.
 
 ## Canonical Documentation References
 

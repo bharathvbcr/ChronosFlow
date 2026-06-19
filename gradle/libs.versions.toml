@@ -46,6 +46,7 @@ firebaseBom = "34.14.0"
 appfunctions = "1.0.0-alpha09"
 haze = "1.7.2"
 healthConnect = "1.1.0"
+camerax = "1.4.2"
 
 [libraries]
 androidx-wear-tiles = { module = "androidx.wear.tiles:tiles", version.ref = "wear-tiles" }
@@ -129,6 +130,10 @@ androidx-appfunctions-compiler = { module = "androidx.appfunctions:appfunctions-
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
 haze-materials = { module = "dev.chrisbanes.haze:haze-materials", version.ref = "haze" }
 androidx-health-connect = { module = "androidx.health.connect:connect-client", version.ref = "healthConnect" }
+androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- In-app CameraX capture for attaching photos to journal entries. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <!-- Health Connect: read-only import of sleep sessions, including from a background WorkManager job. -->
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
@@ -125,7 +128,7 @@
             android:theme="@style/Theme.ChronosFlow" />
 
         <service
-            android:name="com.chronosflow.feature.focus.FocusService"
+            android:name="com.ChronosFlow.VBCR.feature.focus.FocusService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse">
@@ -135,42 +138,42 @@
         </service>
 
         <receiver
-            android:name="com.chronosflow.core.notifications.AlarmReceiver"
+            android:name="com.ChronosFlow.VBCR.core.notifications.AlarmReceiver"
             android:enabled="true"
             android:exported="false" />
 
         <receiver
-            android:name="com.chronosflow.core.notifications.MedicationAlarmReceiver"
+            android:name="com.ChronosFlow.VBCR.core.notifications.MedicationAlarmReceiver"
             android:enabled="true"
             android:exported="false" />
 
         <receiver
-            android:name="com.chronosflow.core.notifications.MedicationActionReceiver"
+            android:name="com.ChronosFlow.VBCR.core.notifications.MedicationActionReceiver"
             android:enabled="true"
             android:exported="false" />
 
         <receiver
-            android:name="com.chronosflow.core.notifications.HabitActionReceiver"
+            android:name="com.ChronosFlow.VBCR.core.notifications.HabitActionReceiver"
             android:enabled="true"
             android:exported="false" />
 
         <receiver
-            android:name="com.chronosflow.core.notifications.TaskActionReceiver"
+            android:name="com.ChronosFlow.VBCR.core.notifications.TaskActionReceiver"
             android:enabled="true"
             android:exported="false" />
 
         <receiver
-            android:name="com.chronosflow.core.notifications.ReflowDayActionReceiver"
+            android:name="com.ChronosFlow.VBCR.core.notifications.ReflowDayActionReceiver"
             android:enabled="true"
             android:exported="false" />
 
         <receiver
-            android:name="com.chronosflow.core.notifications.ReminderGroupDeleteReceiver"
+            android:name="com.ChronosFlow.VBCR.core.notifications.ReminderGroupDeleteReceiver"
             android:enabled="true"
             android:exported="false" />
 
         <receiver
-            android:name="com.chronosflow.core.notifications.CurrentBlockBoundaryReceiver"
+            android:name="com.ChronosFlow.VBCR.core.notifications.CurrentBlockBoundaryReceiver"
             android:enabled="true"
             android:exported="false" />
 
@@ -185,7 +188,7 @@
         </provider>
 
         <receiver
-            android:name="com.chronosflow.core.notifications.ReminderBootReceiver"
+            android:name="com.ChronosFlow.VBCR.core.notifications.ReminderBootReceiver"
             android:enabled="false"
             android:exported="false"
             android:directBootAware="true">
@@ -200,7 +203,7 @@
         </receiver>
 
         <receiver
-            android:name="com.chronosflow.widget.ChronosGlanceWidgetReceiver"
+            android:name="com.ChronosFlow.VBCR.widget.ChronosGlanceWidgetReceiver"
             android:label="Focus"
             android:enabled="true"
             android:exported="true">
@@ -213,7 +216,7 @@
         </receiver>
 
         <receiver
-            android:name="com.chronosflow.widget.AgendaWidgetReceiver"
+            android:name="com.ChronosFlow.VBCR.widget.AgendaWidgetReceiver"
             android:label="Today's Schedule"
             android:enabled="true"
             android:exported="true">
@@ -226,7 +229,7 @@
         </receiver>
 
         <receiver
-            android:name="com.chronosflow.widget.TasksWidgetReceiver"
+            android:name="com.ChronosFlow.VBCR.widget.TasksWidgetReceiver"
             android:label="Tasks"
             android:enabled="true"
             android:exported="true">
@@ -239,7 +242,7 @@
         </receiver>
 
         <receiver
-            android:name="com.chronosflow.widget.HabitsWidgetReceiver"
+            android:name="com.ChronosFlow.VBCR.widget.HabitsWidgetReceiver"
             android:label="Habits"
             android:enabled="true"
             android:exported="true">
@@ -252,7 +255,7 @@
         </receiver>
 
         <receiver
-            android:name="com.chronosflow.widget.MedicationWidgetReceiver"
+            android:name="com.ChronosFlow.VBCR.widget.MedicationWidgetReceiver"
             android:label="Medication"
             android:enabled="true"
             android:exported="true">
@@ -267,7 +270,7 @@
         <!-- Receives watch-originated actions (focus controls, habit/task/dose) over the
              Wearable MessageClient and replays them through the widget action use cases. -->
         <service
-            android:name="com.chronosflow.widget.WearActionListenerService"
+            android:name="com.ChronosFlow.VBCR.widget.WearActionListenerService"
             android:exported="true">
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />

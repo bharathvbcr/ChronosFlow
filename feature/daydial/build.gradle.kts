@@ -10,7 +10,7 @@ plugins {
 
 extensions.configure<LibraryExtension> {
     buildTypes { debug { enableUnitTestCoverage = true; enableAndroidTestCoverage = true } }
-    namespace = "com.chronosflow.feature.daydial"
+    namespace = "com.ChronosFlow.VBCR.feature.daydial"
     compileSdk = 37
 
     defaultConfig {
@@ -55,6 +55,11 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.compose.material.icons.extended)
+    // CameraX: in-app photo capture for journal entries (preview + shutter).
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
 

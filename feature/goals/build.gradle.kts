@@ -10,7 +10,7 @@ plugins {
 
 extensions.configure<LibraryExtension> {
     buildTypes { debug { enableUnitTestCoverage = true; enableAndroidTestCoverage = true } }
-    namespace = "com.chronosflow.feature.goals"
+    namespace = "com.ChronosFlow.VBCR.feature.goals"
     compileSdk = 37
 
     defaultConfig {

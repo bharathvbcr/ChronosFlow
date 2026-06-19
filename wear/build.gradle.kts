@@ -32,13 +32,13 @@ extensions.configure<ApplicationExtension> {
             release { signingConfig = signingConfigs.getByName("release") }
         }
     }
-    namespace = "com.chronosflow.wear"
+    namespace = "com.ChronosFlow.VBCR.wear"
     compileSdk = 37
 
     defaultConfig {
         // Must match the phone app's applicationId so Wear OS pairs the two and the
         // Wearable Data Layer can mirror state between them.
-        applicationId = "com.chronosflow"
+        applicationId = "com.ChronosFlow.VBCR"
         minSdk = 26
         targetSdk = 37
         // Wear OS multi-APK delivery requires a versionCode distinct from (and conventionally higher

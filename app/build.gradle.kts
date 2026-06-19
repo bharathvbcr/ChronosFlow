@@ -33,11 +33,11 @@ extensions.configure<ApplicationExtension> {
             }
         }
     }
-    namespace = "com.chronosflow"
+    namespace = "com.ChronosFlow.VBCR"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.chronosflow"
+        applicationId = "com.ChronosFlow.VBCR"
         minSdk = 26
         targetSdk = 37
         versionCode = providers.gradleProperty("chronos.versionCode").map(String::toInt).orElse(1).get()
@@ -90,7 +90,7 @@ extensions.configure<ApplicationExtension> {
         }
     }
 
-    // Reinstall over existing com.chronosflow (adb install -r) instead of uninstall-first deploys.
+    // Reinstall over existing com.ChronosFlow.VBCR (adb install -r) instead of uninstall-first deploys.
     installation {
         installOptions += "-r"
     }
@@ -113,6 +113,8 @@ dependencies {
     implementation(project(":feature:goals"))
     implementation(project(":feature:medication"))
 
+    // InteropProvider accesses ChronosDatabase (extends RoomDatabase) directly for raw SQL queries.
+    implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.activity.compose)

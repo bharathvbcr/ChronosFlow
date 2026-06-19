@@ -1,8 +1,13 @@
 # Play Store Launch Checklist — ChronosFlow
 
 Status snapshot as of 16 June 2026. This is the prep doc for an **alpha/beta (closed
-testing)** release of `com.chronosflow` (+ companion Wear app). Items marked **MANUAL**
+testing)** release of `com.ChronosFlow.VBCR` (+ companion Wear app). Items marked **MANUAL**
 are done in the Play Console or on a device, not in the repo.
+
+> **Package rename (18 June 2026):** applicationId changed from `com.chronosflow` to
+> `com.ChronosFlow.VBCR`. Play Console treats this as a **new app** — a published app's
+> package name cannot be changed, so the existing `com.chronosflow` alpha must be replaced
+> with a fresh Console listing under the new id (and Firebase, if used, re-registered).
 
 ## 0. Readiness verdict
 
@@ -21,7 +26,7 @@ are done in the Play Console or on a device, not in the repo.
 
 | Field | Value | Source |
 |-------|-------|--------|
-| applicationId | `com.chronosflow` | `app/build.gradle.kts:40` |
+| applicationId | `com.ChronosFlow.VBCR` | `app/build.gradle.kts:40` |
 | versionCode (phone) | `1` | `gradle.properties` → `chronos.versionCode` |
 | versionCode (wear) | `100001` (base + 100000 band) | `wear/build.gradle.kts` |
 | versionName | `0.1.0` | `gradle.properties` → `chronos.versionName` |

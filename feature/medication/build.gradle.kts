@@ -10,7 +10,7 @@ plugins {
 
 extensions.configure<LibraryExtension> {
     buildTypes { debug { enableUnitTestCoverage = true; enableAndroidTestCoverage = true } }
-    namespace = "com.chronosflow.feature.medication"
+    namespace = "com.ChronosFlow.VBCR.feature.medication"
     compileSdk = 37
 
     defaultConfig {

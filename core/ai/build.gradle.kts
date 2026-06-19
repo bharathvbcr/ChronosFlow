@@ -9,7 +9,7 @@ plugins {
 
 extensions.configure<LibraryExtension> {
     buildTypes { debug { enableUnitTestCoverage = true; enableAndroidTestCoverage = true } }
-    namespace = "com.chronosflow.core.ai"
+    namespace = "com.ChronosFlow.VBCR.core.ai"
     compileSdk = 37
 
     defaultConfig {
@@ -51,8 +51,8 @@ kover {
     reports {
         filters {
             excludes {
-                classes("com.chronosflow.core.ai.*_Factory")
-                classes("com.chronosflow.core.ai.*_GeneratedInjector")
+                classes("com.ChronosFlow.VBCR.core.ai.*_Factory")
+                classes("com.ChronosFlow.VBCR.core.ai.*_GeneratedInjector")
             }
         }
     }

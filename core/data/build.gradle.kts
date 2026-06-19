@@ -9,7 +9,7 @@ plugins {
 }
 
 extensions.configure<LibraryExtension> {
-    namespace = "com.chronosflow.core.data"
+    namespace = "com.ChronosFlow.VBCR.core.data"
     compileSdk = 37
 
     defaultConfig {
@@ -82,8 +82,8 @@ kover {
     reports {
         filters {
             excludes {
-                classes("com.chronosflow.core.data.dao.*")
-                classes("com.chronosflow.core.data.di.*")
+                classes("com.ChronosFlow.VBCR.core.data.dao.*")
+                classes("com.ChronosFlow.VBCR.core.data.di.*")
             }
         }
     }

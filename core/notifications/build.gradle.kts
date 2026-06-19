@@ -9,7 +9,7 @@ plugins {
 
 extensions.configure<LibraryExtension> {
     buildTypes { debug { enableUnitTestCoverage = true; enableAndroidTestCoverage = true } }
-    namespace = "com.chronosflow.core.notifications"
+    namespace = "com.ChronosFlow.VBCR.core.notifications"
     compileSdk = 37
 
     defaultConfig {

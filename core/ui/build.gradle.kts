@@ -9,7 +9,7 @@ plugins {
 
 extensions.configure<LibraryExtension> {
     buildTypes { debug { enableUnitTestCoverage = true; enableAndroidTestCoverage = true } }
-    namespace = "com.chronosflow.core.ui"
+    namespace = "com.ChronosFlow.VBCR.core.ui"
     compileSdk = 37
 
     defaultConfig {

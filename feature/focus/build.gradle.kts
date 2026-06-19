@@ -9,7 +9,7 @@ plugins {
 
 extensions.configure<LibraryExtension> {
     buildTypes { debug { enableUnitTestCoverage = true; enableAndroidTestCoverage = true } }
-    namespace = "com.chronosflow.feature.focus"
+    namespace = "com.ChronosFlow.VBCR.feature.focus"
     compileSdk = 37
 
     defaultConfig {
@@ -49,10 +49,10 @@ kover {
     reports {
         filters {
             excludes {
-                classes("com.chronosflow.feature.focus.FocusService*")
-                classes("com.chronosflow.feature.focus.FocusViewModel*")
-                classes("com.chronosflow.feature.focus.FocusScreen*")
-                classes("com.chronosflow.feature.focus.ComposableSingletons*")
+                classes("com.ChronosFlow.VBCR.feature.focus.FocusService*")
+                classes("com.ChronosFlow.VBCR.feature.focus.FocusViewModel*")
+                classes("com.ChronosFlow.VBCR.feature.focus.FocusScreen*")
+                classes("com.ChronosFlow.VBCR.feature.focus.ComposableSingletons*")
             }
         }
     }

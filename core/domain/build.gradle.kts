@@ -9,7 +9,7 @@ plugins {
 
 extensions.configure<LibraryExtension> {
     buildTypes { debug { enableUnitTestCoverage = true; enableAndroidTestCoverage = true } }
-    namespace = "com.chronosflow.core.domain"
+    namespace = "com.ChronosFlow.VBCR.core.domain"
     compileSdk = 37
 
     defaultConfig {
@@ -37,8 +37,8 @@ kover {
     reports {
         filters {
             excludes {
-                classes("com.chronosflow.core.domain.*_Factory")
-                classes("com.chronosflow.core.domain.*_GeneratedInjector")
+                classes("com.ChronosFlow.VBCR.core.domain.*_Factory")
+                classes("com.ChronosFlow.VBCR.core.domain.*_GeneratedInjector")
             }
         }
     }

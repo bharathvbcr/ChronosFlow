@@ -5,7 +5,7 @@ plugins {
 }
 
 extensions.configure<TestExtension> {
-    namespace = "com.chronosflow.benchmark"
+    namespace = "com.ChronosFlow.VBCR.benchmark"
     compileSdk = 37
 
     compileOptions {
