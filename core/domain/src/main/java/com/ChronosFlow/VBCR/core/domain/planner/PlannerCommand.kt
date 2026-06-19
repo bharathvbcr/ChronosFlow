@@ -92,3 +92,37 @@ data class DeleteTimeBlockCommand(
     }
 }
 
+/** One block's repositioning within a [ResolveConflictsCommand] batch. */
+data class BlockStartChange(
+    val blockId: String,
+    val originalStartMinute: Int,
+    val newStartMinute: Int
+)
+
+/**
+ * Undoable wrapper for a batch of conflict-repair relocations. The moves are already applied by
+ * [PlannerService.resolveConflicts]; this command exists so the whole repair undoes/redoes as ONE
+ * action. Undo/redo use the forced [PlannerService.setBlockStart] (no placement validation) because
+ * undo deliberately recreates the prior — overlapping — layout.
+ */
+data class ResolveConflictsCommand(
+    override val id: String,
+    private val changes: List<BlockStartChange>
+) : PlannerCommand {
+    override val label: String = "Repair schedule"
+
+    override suspend fun execute(service: PlannerService): PlannerOperationResult {
+        changes.forEach { service.setBlockStart(it.blockId, it.newStartMinute) }
+        return PlannerOperationResult.Applied(
+            "Schedule repaired", changes.firstOrNull()?.blockId.orEmpty(), null, changes.map { it.blockId }
+        )
+    }
+
+    override suspend fun undo(service: PlannerService): PlannerOperationResult {
+        changes.forEach { service.setBlockStart(it.blockId, it.originalStartMinute) }
+        return PlannerOperationResult.Applied(
+            "Repair undone", changes.firstOrNull()?.blockId.orEmpty(), null, changes.map { it.blockId }
+        )
+    }
+}
+

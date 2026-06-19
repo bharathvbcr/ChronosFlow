@@ -5,6 +5,8 @@ import com.ChronosFlow.VBCR.core.domain.model.BlockProvenance
 import com.ChronosFlow.VBCR.core.domain.model.EnergyIntensity
 import com.ChronosFlow.VBCR.core.domain.model.SleepSchedule
 import com.ChronosFlow.VBCR.core.domain.model.TimeBlock
+import com.ChronosFlow.VBCR.core.domain.planner.BlockStartChange
+import com.ChronosFlow.VBCR.core.domain.planner.ConflictResolutionResult
 import com.ChronosFlow.VBCR.core.domain.planner.CreateTimeBlockCommand
 import com.ChronosFlow.VBCR.core.domain.planner.DeleteTimeBlockCommand
 import com.ChronosFlow.VBCR.core.domain.planner.FreeTimeCalculator
@@ -13,6 +15,9 @@ import com.ChronosFlow.VBCR.core.domain.planner.PlannerCommand
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerCommandHistory
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerOperationResult
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerService
+import com.ChronosFlow.VBCR.core.domain.planner.ResolveConflictsCommand
+import com.ChronosFlow.VBCR.core.domain.planner.conflictRepairManualMessage
+import com.ChronosFlow.VBCR.core.domain.planner.conflictRepairSummaryMessage
 import com.ChronosFlow.VBCR.core.domain.repository.CalendarEventRepository
 import com.ChronosFlow.VBCR.core.domain.repository.SleepScheduleRepository
 import com.ChronosFlow.VBCR.core.domain.repository.TimeBlockRepository
@@ -428,6 +433,53 @@ class DayDialBlockDelegate @Inject constructor(
             }
             val result = plannerService.rebalanceDay(date, fromMinute)
             onResult(result, false)
+        }
+    }
+
+    /**
+     * Deterministically repairs overlapping blocks via [PlannerService.resolveConflicts], pushing the
+     * batch of relocations as ONE undoable [ResolveConflictsCommand]. Surfaces a summary (or a
+     * "needs a manual change" message when only immovable blocks overlap) through [onResult], and
+     * hands the full [ConflictResolutionResult] to [onResolution] so callers can decide whether to
+     * fall back to AI for any unresolved leftovers.
+     */
+    fun resolveConflicts(
+        scope: CoroutineScope,
+        date: LocalDate,
+        fromMinute: Int? = null,
+        onResult: (PlannerOperationResult, Boolean) -> Unit,
+        onResolution: (ConflictResolutionResult) -> Unit = {}
+    ) {
+        scope.launch {
+            // Unlike rebalanceDay (which refuses to run while sleep is on), conflict repair AVOIDS the
+            // active sleep window — pass it through so relocations never land inside it.
+            val sleepSchedule = currentSleepSchedule().takeIf { it.isActive }
+            val resolution = plannerService.resolveConflicts(date, fromMinute ?: 0, sleepSchedule)
+            if (resolution.moves.isNotEmpty()) {
+                commandHistory.push(
+                    ResolveConflictsCommand(
+                        id = UUID.randomUUID().toString(),
+                        changes = resolution.moves.map {
+                            BlockStartChange(it.blockId, it.originalStartMinute, it.newStartMinute)
+                        }
+                    )
+                )
+                onResult(
+                    PlannerOperationResult.Applied(
+                        conflictRepairSummaryMessage(resolution),
+                        resolution.moves.first().blockId,
+                        null,
+                        resolution.moves.map { it.blockId }
+                    ),
+                    false
+                )
+            } else if (resolution.hadConflicts) {
+                onResult(
+                    PlannerOperationResult.Rejected(conflictRepairManualMessage(resolution), date.toString()),
+                    false
+                )
+            }
+            onResolution(resolution)
         }
     }
 

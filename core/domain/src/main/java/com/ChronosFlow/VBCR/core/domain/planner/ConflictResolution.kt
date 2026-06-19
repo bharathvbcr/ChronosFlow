@@ -33,3 +33,13 @@ fun conflictRepairSummaryMessage(result: ConflictResolutionResult): String {
         base
     }
 }
+
+/**
+ * Message for when nothing could be auto-resolved (every overlap is between immovable blocks), so
+ * the user has to step in. Used by the "Repair with AI" fallback and the "Fix schedule" no-op case.
+ */
+fun conflictRepairManualMessage(result: ConflictResolutionResult): String {
+    val count = result.unresolvedConflictCount
+    return "Couldn't auto-resolve $count conflict${if (count == 1) "" else "s"} — " +
+        "locked or fixed blocks overlap. Adjust them manually."
+}

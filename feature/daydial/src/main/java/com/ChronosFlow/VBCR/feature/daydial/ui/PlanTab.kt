@@ -133,6 +133,7 @@ internal fun PlanTab(
     onRebalanceDay: () -> Unit,
     onExplainPlan: () -> Unit,
     onRepairConflicts: (String) -> Unit = {},
+    onResolveConflicts: () -> Unit = {},
     onOpenAiSheet: () -> Unit,
     onOpenTasks: () -> Unit,
     onOpenHabits: () -> Unit,
@@ -221,7 +222,8 @@ internal fun PlanTab(
                         null
                     } else {
                         { onRepairConflicts(conflictDescription(overlaps)) }
-                    }
+                    },
+                    onResolveConflicts = if (overlaps.isEmpty()) null else onResolveConflicts
                 )
             }
         }
@@ -839,10 +841,17 @@ private fun PlanScheduleAttentionCard(
     overlapCount: Int,
     onFillGaps: () -> Unit,
     modifier: Modifier = Modifier,
-    onRepairConflicts: (() -> Unit)? = null
+    onRepairConflicts: (() -> Unit)? = null,
+    onResolveConflicts: (() -> Unit)? = null
 ) {
     val actionLabel = planScheduleAttentionActionLabel(largeGapCount, overlapCount)
     val buttonText = planScheduleAttentionButtonText(largeGapCount, overlapCount)
+    // With overlaps present the primary button becomes a deterministic "Fix schedule"; with only
+    // gaps it stays the gap-fill action.
+    val resolveConflicts = onResolveConflicts.takeIf { overlapCount > 0 }
+    val primaryAction = resolveConflicts ?: onFillGaps
+    val primaryLabel = if (resolveConflicts != null) "Fix schedule" else buttonText
+    val primaryDescription = if (resolveConflicts != null) "Fix overlapping blocks" else actionLabel
     val details = buildList {
         if (largeGapCount > 0) add("$largeGapCount large gap${if (largeGapCount == 1) "" else "s"}")
         if (overlapCount > 0) add("$overlapCount overlap${if (overlapCount == 1) "" else "s"}")
@@ -877,12 +886,12 @@ private fun PlanScheduleAttentionCard(
                 }
             }
             ChronosTextButton(
-                onClick = onFillGaps,
+                onClick = primaryAction,
                 modifier = Modifier.semantics {
-                    contentDescription = actionLabel
+                    contentDescription = primaryDescription
                 }
             ) {
-                Text(buttonText)
+                Text(primaryLabel)
             }
         }
     }

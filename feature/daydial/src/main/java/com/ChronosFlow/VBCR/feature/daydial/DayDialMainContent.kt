@@ -493,9 +493,16 @@ internal fun DayDialMainContent(
                         onRejectAiSuggestion = viewModel::rejectAiSuggestion,
                         onRebalanceDay = viewModel::rebalanceDay,
                         onExplainPlan = viewModel::explainCurrentPlan,
+                        onResolveConflicts = { viewModel.resolveScheduleConflicts() },
                         onRepairConflicts = { conflictDescription ->
-                            viewModel.repairConflictingPlan(conflictDescription)
-                            onActiveSheetChanged(SheetTarget.AiPlan)
+                            // Auto-resolve deterministically first; only escalate to AI guidance for
+                            // the leftover immovable (locked/fixed) overlaps it couldn't fix.
+                            viewModel.resolveScheduleConflicts { resolution ->
+                                if (resolution.unresolvedConflictCount > 0 || resolution.moves.isEmpty()) {
+                                    viewModel.repairConflictingPlan(conflictDescription)
+                                    onActiveSheetChanged(SheetTarget.AiPlan)
+                                }
+                            }
                         },
                         onOpenAiSheet = { onActiveSheetChanged(SheetTarget.AiPlan) },
                         onOpenTasks = onOpenTasks,

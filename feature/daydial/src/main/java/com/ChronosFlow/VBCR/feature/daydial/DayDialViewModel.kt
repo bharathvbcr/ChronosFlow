@@ -22,6 +22,7 @@ import com.ChronosFlow.VBCR.core.domain.model.DailyReviewSummary
 import com.ChronosFlow.VBCR.core.domain.model.MedicationDoseEvent
 import com.ChronosFlow.VBCR.core.domain.model.MedicationDoseEventType
 import com.ChronosFlow.VBCR.core.domain.model.TimeBlock
+import com.ChronosFlow.VBCR.core.domain.planner.ConflictResolutionResult
 import com.ChronosFlow.VBCR.core.domain.planner.FreeTimeCalculator
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerOperationResult
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerService
@@ -1266,6 +1267,19 @@ class DayDialViewModel @Inject constructor(
 
     fun repairConflictingPlan(conflictDescription: String) =
         aiDelegate.repairConflictingPlan(viewModelScope, coordinatorState.selectedDateValue, conflictDescription)
+
+    /**
+     * Deterministically repairs overlapping blocks (undoable). [onResolution] receives the outcome so
+     * the caller can decide whether to escalate any unresolved (immovable) overlaps to AI guidance.
+     */
+    fun resolveScheduleConflicts(onResolution: (ConflictResolutionResult) -> Unit = {}) =
+        blockDelegate.resolveConflicts(
+            viewModelScope,
+            coordinatorState.selectedDateValue,
+            fromMinute = if (coordinatorState.isViewingToday) coordinatorState.currentMinuteValue else null,
+            onResult = ::handlePlannerResult,
+            onResolution = onResolution
+        )
 
     fun clearHapticCue() = coordinatorState.clearHapticCue()
 
