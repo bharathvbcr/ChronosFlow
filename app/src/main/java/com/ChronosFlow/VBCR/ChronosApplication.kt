@@ -21,6 +21,7 @@ import com.ChronosFlow.VBCR.core.notifications.FocusNotificationManager
 import com.ChronosFlow.VBCR.core.notifications.ReminderNotificationChannels
 import com.ChronosFlow.VBCR.core.notifications.ReminderReconcileScheduler
 import com.ChronosFlow.VBCR.core.ui.settings.ChronosUiSettingsCache
+import com.ChronosFlow.VBCR.interop.InteropSyncWorker
 import com.ChronosFlow.VBCR.widget.WidgetBackgroundSync
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -93,6 +94,7 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
                 healthConnectSleepSyncManager.get().ensureScheduled()
                 screenTimeSyncManager.get().ensureScheduled()
                 calendarBackgroundSyncManager.get().ensureScheduled()
+                InteropSyncWorker.ensureScheduled(this)
                 proactiveAssistForegroundRefresher.get().register()
                 setupProfiling()
                 monitorProcessExitHealth()
