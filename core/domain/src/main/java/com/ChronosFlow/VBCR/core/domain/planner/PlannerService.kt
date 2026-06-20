@@ -7,7 +7,9 @@ import com.ChronosFlow.VBCR.core.domain.model.ScheduleConflictSeverity
 import com.ChronosFlow.VBCR.core.domain.model.SleepSchedule
 import com.ChronosFlow.VBCR.core.domain.model.TimeBlock
 import com.ChronosFlow.VBCR.core.domain.repository.TimeBlockRepository
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 import java.time.Instant
 import java.util.UUID
 import javax.inject.Inject
@@ -16,8 +18,19 @@ class PlannerService @Inject constructor(
     private val repository: TimeBlockRepository,
     private val conflictDetectionEngine: ConflictDetectionEngine = ConflictDetectionEngine()
 ) {
+    // Drag-session cache: populated on the first validatePlacement() call of a drag and
+    // cleared after any write or date change. This avoids a fresh Room query on every
+    // pointer event (60+ per second during drag).
+    private var dragSessionBlocks: List<TimeBlock>? = null
+    private var dragSessionDate: java.time.LocalDate? = null
+
     suspend fun getBlocksForDate(date: java.time.LocalDate): List<TimeBlock> {
-        return repository.getTimeBlocksByDate(date).first()
+        return try {
+            withTimeout(5_000L) { repository.getTimeBlocksByDate(date).first() }
+        } catch (e: TimeoutCancellationException) {
+            android.util.Log.w("PlannerService", "getBlocksForDate timed out for $date")
+            emptyList()
+        }
     }
 
     suspend fun createBlock(block: TimeBlock): PlannerOperationResult {
@@ -34,6 +47,7 @@ class PlannerService @Inject constructor(
             when (result) {
                 is PlannerOperationResult.Applied -> {
                     repository.saveTimeBlock(block)
+                    invalidateDragCache()
                     result
                 }
                 else -> result
@@ -56,6 +70,7 @@ class PlannerService @Inject constructor(
         )
         if (validation !is PlannerOperationResult.Applied) return validation
         repository.saveTimeBlock(target.withUpdatedStart(snappedMinute))
+        invalidateDragCache()
         return PlannerOperationResult.Applied(
             "Block moved",
             target.id,
@@ -117,6 +132,7 @@ class PlannerService @Inject constructor(
                 updatedAt = Instant.now()
             )
         )
+        invalidateDragCache()
         return PlannerOperationResult.Applied(
             "Block resized",
             blockId,
@@ -221,6 +237,7 @@ class PlannerService @Inject constructor(
         if (movedBlocks.isEmpty()) {
             return PlannerOperationResult.Rejected("Everything already fits — nothing to rebalance", "")
         }
+        invalidateDragCache()
         return PlannerOperationResult.Applied(
             message = rebalanceSummaryMessage(movedBlocks),
             blockId = "",
@@ -302,6 +319,7 @@ class PlannerService @Inject constructor(
                 unresolvedConflictCount++
             }
         }
+        if (moves.isNotEmpty()) invalidateDragCache()
         return ConflictResolutionResult(moves, unresolvedConflictCount, hadConflicts)
     }
 
@@ -315,6 +333,7 @@ class PlannerService @Inject constructor(
             ?: return PlannerOperationResult.Rejected("Block not found", blockId)
         val normalized = normalizeMinute(startMinute)
         repository.saveTimeBlock(target.withUpdatedStart(normalized))
+        invalidateDragCache()
         return PlannerOperationResult.Applied("Block repositioned", blockId, normalized, listOf(blockId))
     }
 
@@ -329,6 +348,7 @@ class PlannerService @Inject constructor(
                 updatedAt = Instant.now()
             )
         )
+        invalidateDragCache()
         return PlannerOperationResult.Applied("Actual execution logged", blockId, normalizedStart, listOf(blockId))
     }
 
@@ -405,7 +425,16 @@ class PlannerService @Inject constructor(
             createdAt = Instant.now(),
             updatedAt = Instant.now()
         )
-        val allBlocks = getBlocksForDate(date).filter { it.id != blockId } + previewTarget
+        // Use the drag-session cache so we don't hit Room on every pointer event.
+        // The cache is keyed by date and cleared on any write or explicit date change.
+        if (dragSessionDate != date) {
+            dragSessionBlocks = null
+            dragSessionDate = date
+        }
+        if (dragSessionBlocks == null) {
+            dragSessionBlocks = getBlocksForDate(date)
+        }
+        val allBlocks = dragSessionBlocks!!.filter { it.id != blockId } + previewTarget
         val conflicts = conflictDetectionEngine.detect(allBlocks)
             .filter { it.primaryBlockId == blockId || it.conflictingBlockId == blockId }
         if (conflicts.isNotEmpty()) {
@@ -422,6 +451,11 @@ class PlannerService @Inject constructor(
             }
         }
         return PlannerOperationResult.Applied("Placement valid", blockId, startMinute, emptyList())
+    }
+
+    /** Invalidates the drag-session block cache after any write so the next preview is fresh. */
+    private fun invalidateDragCache() {
+        dragSessionBlocks = null
     }
 
     private suspend fun getLatestBlock(blockId: String): TimeBlock? {

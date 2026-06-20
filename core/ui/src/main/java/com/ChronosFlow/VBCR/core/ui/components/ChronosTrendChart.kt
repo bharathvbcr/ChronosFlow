@@ -22,6 +22,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 /** One labelled series of values to plot. */
@@ -59,6 +61,11 @@ fun ChronosTrendChart(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(height)
+                .semantics {
+                    contentDescription = buildString {
+                        nonEmpty.forEach { s -> append("${s.label}: ${s.points.joinToString()}. ") }
+                    }
+                }
         ) {
             val w = size.width
             val h = size.height

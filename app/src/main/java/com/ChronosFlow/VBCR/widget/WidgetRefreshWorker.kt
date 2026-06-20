@@ -43,7 +43,7 @@ class WidgetRefreshWorker(
         private val REFRESH_INTERVAL: Duration = Duration.ofMinutes(10)
 
         /** A watch seen within this window keeps the loop alive even with no widgets placed. */
-        private val WATCH_KEEPALIVE_WINDOW: Duration = Duration.ofHours(24)
+        private val WATCH_KEEPALIVE_WINDOW: Duration = Duration.ofMinutes(30)
 
         /** Starts the refresh loop without resetting an already-scheduled tick. */
         fun ensureScheduled(context: Context) = enqueue(context, ExistingWorkPolicy.KEEP)

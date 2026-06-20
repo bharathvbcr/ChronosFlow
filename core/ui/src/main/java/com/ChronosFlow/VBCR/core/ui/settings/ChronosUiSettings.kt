@@ -21,12 +21,12 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import java.io.IOException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.runBlocking
+import androidx.compose.runtime.snapshotFlow
 
 object ChronosUiSettingsKeys {
     const val PREFS_NAME = "daydial_ui_settings"
@@ -300,9 +300,7 @@ object ChronosUiSettingsCache {
 
 fun Context.readChronosUiSettingsSnapshot(): ChronosUiSettingsSnapshot {
     ChronosUiSettingsCache.current()?.let { return it.toChronosUiSettingsSnapshot(this) }
-    return runBlocking(Dispatchers.IO) {
-        readChronosUiSettingsSnapshotFromDataStore()
-    }
+    return defaultChronosUiSettingsSnapshot()
 }
 
 internal fun readChronosUiSettingsSnapshot(prefs: SharedPreferences): ChronosUiSettingsSnapshot {
@@ -344,10 +342,7 @@ fun Context.readChronosUiBooleanSetting(key: String, defaultValue: Boolean): Boo
     ChronosUiSettingsCache.current()?.let {
         return it.readBooleanSetting(legacyChronosUiPreferences(), key, defaultValue)
     }
-    return runBlocking(Dispatchers.IO) {
-        val legacyPreferences = legacyChronosUiPreferences()
-        chronosUiPreferencesFlow().first().readBooleanSetting(legacyPreferences, key, defaultValue)
-    }
+    return legacyChronosUiPreferences().readBooleanSetting(key, defaultValue)
 }
 
 fun Context.readChronosUiStringSetting(key: String, defaultValue: String): String {
@@ -356,11 +351,7 @@ fun Context.readChronosUiStringSetting(key: String, defaultValue: String): Strin
             ?: legacyChronosUiPreferences().getString(key, defaultValue)
             ?: defaultValue
     }
-    return runBlocking(Dispatchers.IO) {
-        chronosUiPreferencesFlow().first()[stringPreferencesKey(key)]
-            ?: legacyChronosUiPreferences().getString(key, defaultValue)
-            ?: defaultValue
-    }
+    return legacyChronosUiPreferences().getString(key, defaultValue) ?: defaultValue
 }
 
 fun Context.readChronosUiIntSetting(key: String, defaultValue: Int): Int {
@@ -368,10 +359,7 @@ fun Context.readChronosUiIntSetting(key: String, defaultValue: Int): Int {
         return it[intPreferencesKey(key)]
             ?: legacyChronosUiPreferences().getInt(key, defaultValue)
     }
-    return runBlocking(Dispatchers.IO) {
-        chronosUiPreferencesFlow().first()[intPreferencesKey(key)]
-            ?: legacyChronosUiPreferences().getInt(key, defaultValue)
-    }
+    return legacyChronosUiPreferences().getInt(key, defaultValue)
 }
 
 suspend fun Context.writeChronosUiBooleanSetting(key: String, value: Boolean) {
@@ -462,8 +450,10 @@ fun rememberPersistentUiBooleanSetting(key: String, defaultValue: Boolean): Muta
             }
         }
     }
-    LaunchedEffect(context, key, state.value) {
-        context.writeChronosUiBooleanSetting(key, state.value)
+    LaunchedEffect(context, key) {
+        snapshotFlow { state.value }
+            .drop(1)
+            .collect { newValue -> context.writeChronosUiBooleanSetting(key, newValue) }
     }
     return state
 }
@@ -481,8 +471,10 @@ fun rememberPersistentUiStringSetting(key: String, defaultValue: String): Mutabl
             }
         }
     }
-    LaunchedEffect(context, key, state.value) {
-        context.writeChronosUiStringSetting(key, state.value)
+    LaunchedEffect(context, key) {
+        snapshotFlow { state.value }
+            .drop(1)
+            .collect { newValue -> context.writeChronosUiStringSetting(key, newValue) }
     }
     return state
 }
@@ -500,8 +492,10 @@ fun rememberPersistentUiIntSetting(key: String, defaultValue: Int): MutableState
             }
         }
     }
-    LaunchedEffect(context, key, state.value) {
-        context.writeChronosUiIntSetting(key, state.value)
+    LaunchedEffect(context, key) {
+        snapshotFlow { state.value }
+            .drop(1)
+            .collect { newValue -> context.writeChronosUiIntSetting(key, newValue) }
     }
     return state
 }

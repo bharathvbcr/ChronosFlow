@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import com.ChronosFlow.VBCR.core.data.model.JournalEntryEntity
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
@@ -27,6 +28,12 @@ interface JournalEntryDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entry: JournalEntryEntity)
+
+    @Transaction
+    suspend fun insertAsPrimary(entry: JournalEntryEntity) {
+        insert(entry)
+        if (entry.isPrimary) clearPrimaryForDate(entry.entryDate, entry.id)
+    }
 
     @Query("DELETE FROM journal_entries WHERE id = :id")
     suspend fun deleteById(id: String)

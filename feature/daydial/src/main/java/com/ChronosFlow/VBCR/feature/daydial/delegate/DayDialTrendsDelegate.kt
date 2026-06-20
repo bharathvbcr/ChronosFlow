@@ -16,8 +16,11 @@ import com.ChronosFlow.VBCR.core.domain.usecase.ObserveRecentJournalEntriesUseCa
 import com.ChronosFlow.VBCR.core.domain.usecase.ObserveSleepTrendUseCase
 import java.time.LocalDate
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 
 data class CompanionTrendSections(
     val moodTrends: MoodEnergyTrends = MoodEnergyTrends(),
@@ -92,5 +95,7 @@ class DayDialTrendsDelegate @Inject constructor(
                 topDistractingApps = topDistracting
             )
         }
+            .distinctUntilChanged()
+            .flowOn(Dispatchers.Default)
     }
 }

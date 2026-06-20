@@ -18,6 +18,9 @@ class ReviewRepositoryImpl @Inject constructor(
     override fun observeActualTimeSegments(date: LocalDate): Flow<List<ActualTimeSegment>> =
         reviewDao.observeActualTimeSegments(date).map { segments -> segments.map { it.toDomain() } }
 
+    override fun observeActualTimeSegmentsByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<ActualTimeSegment>> =
+        reviewDao.observeActualTimeSegmentsByDateRange(startDate, endDate).map { segments -> segments.map { it.toDomain() } }
+
     override fun observeDailyReview(date: LocalDate): Flow<DailyReviewSummary?> =
         combine(
             reviewDao.observeDailyReview(date),
@@ -32,8 +35,10 @@ class ReviewRepositoryImpl @Inject constructor(
         reviewDao.insertActualTimeSegment(segment.toEntity())
 
     override suspend fun saveDailyReview(summary: DailyReviewSummary) {
-        reviewDao.insertDailyReview(summary.toEntity())
-        reviewDao.deleteReviewInsights(summary.date)
-        reviewDao.insertReviewInsights(summary.insights.map { it.toEntity(summary.date) })
+        reviewDao.saveDailyReviewTransactional(
+            review = summary.toEntity(),
+            date = summary.date,
+            insights = summary.insights.map { it.toEntity(summary.date) }
+        )
     }
 }

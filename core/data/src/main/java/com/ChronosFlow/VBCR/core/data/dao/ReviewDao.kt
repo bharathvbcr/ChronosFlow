@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import com.ChronosFlow.VBCR.core.data.model.ActualTimeSegmentEntity
 import com.ChronosFlow.VBCR.core.data.model.DailyReviewEntity
 import com.ChronosFlow.VBCR.core.data.model.ReviewInsightEntity
@@ -14,6 +15,9 @@ import java.time.LocalDate
 interface ReviewDao {
     @Query("SELECT * FROM actual_time_segments WHERE date = :date ORDER BY startInstant ASC")
     fun observeActualTimeSegments(date: LocalDate): Flow<List<ActualTimeSegmentEntity>>
+
+    @Query("SELECT * FROM actual_time_segments WHERE date BETWEEN :startDate AND :endDate ORDER BY date ASC, startInstant ASC")
+    fun observeActualTimeSegmentsByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<ActualTimeSegmentEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertActualTimeSegment(segment: ActualTimeSegmentEntity)
@@ -32,4 +36,15 @@ interface ReviewDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertReviewInsights(insights: List<ReviewInsightEntity>)
+
+    @Transaction
+    suspend fun saveDailyReviewTransactional(
+        review: DailyReviewEntity,
+        date: LocalDate,
+        insights: List<ReviewInsightEntity>
+    ) {
+        insertDailyReview(review)
+        deleteReviewInsights(date)
+        insertReviewInsights(insights)
+    }
 }

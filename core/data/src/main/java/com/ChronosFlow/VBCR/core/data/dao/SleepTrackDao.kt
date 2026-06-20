@@ -13,6 +13,10 @@ interface SleepTrackDao {
     @Query("SELECT * FROM sleep_tracks WHERE date = :date LIMIT 1")
     fun observeForDate(date: LocalDate): Flow<SleepTrackEntity?>
 
+    /** Direct suspend lookup for a single night — use instead of observeForDate().first() in loops. */
+    @Query("SELECT * FROM sleep_tracks WHERE date = :date LIMIT 1")
+    suspend fun getByDate(date: LocalDate): SleepTrackEntity?
+
     @Query("SELECT * FROM sleep_tracks WHERE date BETWEEN :start AND :end ORDER BY date ASC")
     suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<SleepTrackEntity>
 

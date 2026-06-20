@@ -116,7 +116,8 @@ object DataModule {
                 ChronosDatabase.MIGRATION_21_22,
                 ChronosDatabase.MIGRATION_22_23,
                 ChronosDatabase.MIGRATION_23_24,
-                ChronosDatabase.MIGRATION_24_25
+                ChronosDatabase.MIGRATION_24_25,
+                ChronosDatabase.MIGRATION_25_26
             )
         )
             // Guard against opening a database written by a newer (uncommitted) schema:
@@ -241,10 +242,11 @@ object DataModule {
     @Provides
     @Singleton
     fun provideTaskRepository(
+        database: ChronosDatabase,
         taskDao: TaskDao,
         syncMutationNotifier: SyncMutationNotifier
     ): TaskRepository {
-        return TaskRepositoryImpl(taskDao, syncMutationNotifier)
+        return TaskRepositoryImpl(database, taskDao, syncMutationNotifier)
     }
 
     @Provides
@@ -271,22 +273,25 @@ object DataModule {
     @Provides
     @Singleton
     fun provideHabitRepository(
+        db: ChronosDatabase,
         habitDao: HabitDao,
         habitScheduleDao: HabitScheduleDao,
         habitEventDao: HabitEventDao
     ): HabitRepository {
-        return HabitRepositoryImpl(habitDao, habitScheduleDao, habitEventDao)
+        return HabitRepositoryImpl(db, habitDao, habitScheduleDao, habitEventDao)
     }
 
     @Provides
     @Singleton
     fun provideMedicationRepository(
+        db: ChronosDatabase,
         medicationDao: MedicationDao,
         medicationScheduleDao: MedicationScheduleDao,
         medicationSafetyProfileDao: MedicationSafetyProfileDao,
         medicationDoseEventDao: MedicationDoseEventDao
     ): MedicationRepository {
         return MedicationRepositoryImpl(
+            db,
             medicationDao,
             medicationScheduleDao,
             medicationSafetyProfileDao,

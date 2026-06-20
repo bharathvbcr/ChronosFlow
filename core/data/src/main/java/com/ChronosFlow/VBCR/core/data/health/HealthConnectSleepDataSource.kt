@@ -102,6 +102,9 @@ class HealthConnectSleepDataSource @Inject constructor(
     suspend fun hasSleepReadPermission(): Boolean =
         grantedPermissions().containsAll(requiredPermissions)
 
+    suspend fun hasBackgroundReadPermission(): Boolean =
+        grantedPermissions().contains(HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND)
+
     /** Reads every sleep session whose time range overlaps [[start], [end]]. Empty when unavailable. */
     suspend fun readSessions(start: Instant, end: Instant): List<SleepSessionRecord> {
         val client = clientOrNull() ?: return emptyList()

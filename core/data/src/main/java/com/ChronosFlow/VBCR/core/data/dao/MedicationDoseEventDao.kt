@@ -9,8 +9,8 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MedicationDoseEventDao {
-    @Query("SELECT * FROM medication_dose_events ORDER BY recordedAt DESC")
-    fun observeAllEvents(): Flow<List<MedicationDoseEventEntity>>
+    @Query("SELECT * FROM medication_dose_events WHERE recordedAt >= :cutoff ORDER BY recordedAt DESC")
+    fun observeAllEvents(cutoff: Long): Flow<List<MedicationDoseEventEntity>>
 
     @Query("SELECT * FROM medication_dose_events WHERE medicationPlanId = :medicationPlanId ORDER BY recordedAt DESC")
     suspend fun getEventsForPlan(medicationPlanId: String): List<MedicationDoseEventEntity>

@@ -6,6 +6,11 @@ import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.WearableListenerService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * Mirrors the phone's Material You palette into [WearThemeStore] and nudges the tiles to
@@ -14,28 +19,56 @@ import com.google.android.gms.wearable.WearableListenerService
  */
 class ThemeWearListenerService : WearableListenerService() {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    private sealed class ThemeEventSnapshot {
+        object Deleted : ThemeEventSnapshot()
+        data class Changed(val palette: List<Int>?) : ThemeEventSnapshot()
+    }
+
     override fun onDataChanged(dataEvents: DataEventBuffer) {
-        var changed = false
-        for (event in dataEvents) {
-            if (event.dataItem.uri.path != WearThemeContract.THEME_PATH) continue
-            when (event.type) {
-                DataEvent.TYPE_DELETED -> {
-                    WearThemeStore.clear(this)
-                    changed = true
-                }
-                DataEvent.TYPE_CHANGED -> {
-                    val palette = DataMapItem.fromDataItem(event.dataItem).dataMap
-                        .getLongArray(WearThemeContract.KEY_PALETTE)
-                        ?.map { it.toInt() }
-                    if (palette != null && palette.size == WearThemeContract.PALETTE_SIZE) {
-                        WearThemeStore.write(this, palette)
-                        changed = true
+        // Snapshot all DataMap values synchronously before the buffer cursor is invalidated
+        // when onDataChanged() returns. Any DataMap read after that point is undefined behaviour.
+        val snapshots = dataEvents
+            .filter { it.dataItem.uri.path == WearThemeContract.THEME_PATH }
+            .map { event ->
+                when (event.type) {
+                    DataEvent.TYPE_DELETED -> ThemeEventSnapshot.Deleted
+                    else -> {
+                        val palette = DataMapItem.fromDataItem(event.dataItem).dataMap
+                            .getLongArray(WearThemeContract.KEY_PALETTE)
+                            ?.map { it.toInt() }
+                        ThemeEventSnapshot.Changed(palette)
                     }
                 }
             }
-        }
-        if (changed) {
-            requestTileUpdates()
+            .toList()
+
+        scope.launch {
+            var changed = false
+            for (snapshot in snapshots) {
+                when (snapshot) {
+                    is ThemeEventSnapshot.Deleted -> {
+                        WearThemeStore.clear(this@ThemeWearListenerService)
+                        changed = true
+                    }
+                    is ThemeEventSnapshot.Changed -> {
+                        val palette = snapshot.palette
+                        if (palette != null && palette.size == WearThemeContract.PALETTE_SIZE) {
+                            WearThemeStore.write(this@ThemeWearListenerService, palette)
+                            changed = true
+                        }
+                    }
+                }
+            }
+            if (changed) {
+                requestTileUpdates()
+            }
         }
     }
 

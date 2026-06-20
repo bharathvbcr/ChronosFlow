@@ -72,7 +72,7 @@ class ScreenTimeNudgeNotifier @Inject constructor(
         return if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
     }
 
-    private companion object {
+    internal companion object {
         const val CHANNEL_ID = "chronos_screen_time_nudge"
         const val NOTIFICATION_ID = 4301
     }

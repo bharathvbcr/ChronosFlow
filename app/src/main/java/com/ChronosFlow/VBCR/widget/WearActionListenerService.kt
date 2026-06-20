@@ -4,7 +4,11 @@ import com.ChronosFlow.VBCR.core.domain.wear.WearActionContract
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.WearableListenerService
 import dagger.hilt.android.EntryPointAccessors
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 /**
@@ -15,10 +19,18 @@ import java.time.LocalDate
  *
  * After applying the action it refreshes every glanceable surface through [ChronosWidgetHub],
  * which also re-publishes the day-summary mirror — closing the loop so the watch immediately
- * reflects the new state. The Data Layer callback already runs off the main thread, so the
- * suspend use cases are driven with [runBlocking].
+ * reflects the new state. The Data Layer callback runs off the main thread; use cases are driven
+ * on a [CoroutineScope] backed by [Dispatchers.IO] so the Wearable callback thread is never
+ * blocked.
  */
 class WearActionListenerService : WearableListenerService() {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onDestroy() {
+        super.onDestroy()
+        scope.cancel()
+    }
 
     override fun onMessageReceived(event: MessageEvent) {
         if (event.path != WearActionContract.ACTION_PATH) return
@@ -32,7 +44,7 @@ class WearActionListenerService : WearableListenerService() {
         // both apps are closed (the loop is otherwise only scheduled by widgets).
         entryPoint.wearLinkStatusStore().recordWatchActivity()
         WidgetRefreshWorker.ensureScheduled(applicationContext)
-        runBlocking {
+        scope.launch {
             when (type) {
                 WearActionContract.TYPE_SYNC -> {
                     // The watch opened with a missing/stale mirror and asked for a fresh push.
@@ -54,10 +66,10 @@ class WearActionListenerService : WearableListenerService() {
                     entryPoint.recordMedicationWidgetActionUseCase()(arg, true)
                 WearActionContract.TYPE_BLOCK -> {
                     val block = entryPoint.timeBlockRepository().getTimeBlockById(arg)
-                        ?: return@runBlocking
+                        ?: return@launch
                     entryPoint.timeBlockCompletionHandler().complete(block)
                 }
-                else -> return@runBlocking
+                else -> return@launch
             }
             ChronosWidgetHub.refreshAll(applicationContext)
         }

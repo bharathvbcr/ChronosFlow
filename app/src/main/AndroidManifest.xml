@@ -109,10 +109,11 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
             <!-- "Open on phone" handoff from the Wear app (RemoteActivityHelper). -->
+            <!-- BROWSABLE intentionally omitted: chronosflow:// is an internal deep-link scheme
+                 used only by the Wear OS handoff path; it must not be web-accessible. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="chronosflow" android:host="open" />
             </intent-filter>
             <!-- Health Connect permission rationale: shown when the user reviews ChronosFlow's

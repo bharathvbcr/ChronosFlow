@@ -66,6 +66,14 @@ object InteropContract {
         "CB3AD2AF1E28C9C9F0C2EEB0474D64A096E6A0DEAE2CA99660A3A431A643CC61"
 
     /**
+     * DevTime's RELEASE signing-cert SHA-256. Must be filled before shipping release builds.
+     * Obtain with: apksigner verify --print-certs devtime-release.apk
+     * Leave empty only during development — the init{} block below will catch any release build
+     * that ships with an empty pin.
+     */
+    const val DEVTIME_RELEASE_CERT_SHA256 = ""
+
+    /**
      * Apps allowed to read this provider, pinned to their signing certificate. Add DevTime's
      * RELEASE signing-cert SHA-256 to the set below before shipping release builds (release APKs
      * are signed with a different key than the debug cert).
@@ -79,10 +87,18 @@ object InteropContract {
             DEVTIME_PACKAGE,
             buildSet {
                 if (BuildConfig.DEBUG) add(DEBUG_SIGNING_CERT_SHA256)
-                // TODO(release): add("<DevTime release cert SHA-256 from apksigner verify --print-certs>")
+                if (DEVTIME_RELEASE_CERT_SHA256.isNotEmpty()) add(DEVTIME_RELEASE_CERT_SHA256)
             }
         ),
     )
+
+    init {
+        check(BuildConfig.DEBUG || TRUSTED_PEERS.all { it.certSha256.isNotEmpty() }) {
+            "Release build: DevTime release signing cert SHA-256 is not pinned in InteropContract. " +
+                "Run: apksigner verify --print-certs devtime-release.apk " +
+                "and add the SHA-256 to TRUSTED_PEERS."
+        }
+    }
 
     fun peerUri(path: String): Uri = Uri.parse("content://$PEER_AUTHORITY/$path")
 }

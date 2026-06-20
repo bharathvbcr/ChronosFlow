@@ -4,6 +4,7 @@ import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerService
 import dagger.hilt.android.AndroidEntryPoint
 import java.time.LocalDate
@@ -12,8 +13,11 @@ import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private const val TAG = "ReflowDayActionReceiver"
 
 /**
  * Handles the "Reflow day" action on a block reminder notification, reorganizing the remaining part
@@ -31,7 +35,8 @@ class ReflowDayActionReceiver : BroadcastReceiver() {
         val notificationId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, -1)
 
         val pendingResult = goAsync()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        scope.launch {
             try {
                 val now = LocalTime.now()
                 plannerService.rebalanceDay(LocalDate.now(), now.hour * 60 + now.minute)
@@ -43,11 +48,12 @@ class ReflowDayActionReceiver : BroadcastReceiver() {
                     ReminderNotificationGroups.refreshSummary(context)
                 }
             } catch (ex: Exception) {
-                ex.printStackTrace()
+                Log.e(TAG, "Action failed: ${ex.message}", ex)
             } finally {
                 withContext(Dispatchers.Main) {
                     pendingResult.finish()
                 }
+                scope.cancel()
             }
         }
     }

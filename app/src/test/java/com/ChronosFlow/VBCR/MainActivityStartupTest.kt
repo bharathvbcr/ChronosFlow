@@ -26,33 +26,26 @@ class MainActivityStartupTest {
         val badgeDataDelayMillis = Class.forName("com.ChronosFlow.VBCR.MainActivityKt")
             .getDeclaredField("SHELL_BADGE_DATA_DEFER_MILLIS")
             .getLong(null)
-        val notificationChannelDelayMillis = Class.forName("com.ChronosFlow.VBCR.ChronosApplicationKt")
-            .getDeclaredField("NOTIFICATION_CHANNEL_SETUP_DEFER_MILLIS")
-            .getLong(null)
         val applicationDelayMillis = Class.forName("com.ChronosFlow.VBCR.ChronosApplicationKt")
             .getDeclaredField("APPLICATION_STARTUP_WORK_DEFER_MILLIS")
             .getLong(null)
 
-        assertTrue(notificationChannelDelayMillis > shellDelayMillis)
-        assertTrue(notificationChannelDelayMillis >= 2_000L)
         assertTrue(badgeDataDelayMillis > shellDelayMillis)
         assertTrue(badgeDataDelayMillis >= 20_000L)
-        assertTrue(applicationDelayMillis > notificationChannelDelayMillis)
         assertTrue(applicationDelayMillis > shellDelayMillis)
         assertTrue(applicationDelayMillis >= 45_000L)
     }
 
     @Test
-    fun `notification channels are not created before first shell draw`() {
+    fun `notification channels are created synchronously on startup`() {
         val source = listOf(
             File("src/main/java/com/ChronosFlow/VBCR/ChronosApplication.kt"),
             File("app/src/main/java/com/ChronosFlow/VBCR/ChronosApplication.kt")
         ).first(File::exists).readText()
 
-        assertTrue(source.contains("scheduleDeferredNotificationChannelSetup()"))
+        assertTrue(source.contains("ensureNotificationChannels()"))
         assertTrue(source.contains("private fun ensureNotificationChannels()"))
-        assertTrue(source.contains("startupHandler.postDelayed("))
-        assertTrue(source.contains("NOTIFICATION_CHANNEL_SETUP_DEFER_MILLIS"))
+        assertTrue(!source.contains("scheduleDeferredNotificationChannelSetup()"))
     }
 
     @Test

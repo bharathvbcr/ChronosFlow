@@ -159,6 +159,7 @@ fun buildNotificationContentIntent(
 
 fun parseNotificationLaunch(intent: Intent?): NotificationLaunch? {
     if (intent == null) return null
+    if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_PROCESS_TEXT) return null
     val section = intent.getStringExtra(EXTRA_INITIAL_SECTION) ?: return null
     return NotificationLaunch(
         section = section,

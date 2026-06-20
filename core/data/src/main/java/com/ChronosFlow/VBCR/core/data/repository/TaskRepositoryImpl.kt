@@ -1,5 +1,7 @@
 package com.ChronosFlow.VBCR.core.data.repository
 
+import androidx.room.withTransaction
+import com.ChronosFlow.VBCR.core.data.ChronosDatabase
 import com.ChronosFlow.VBCR.core.data.dao.TaskDao
 import com.ChronosFlow.VBCR.core.data.mapper.toDomain
 import com.ChronosFlow.VBCR.core.data.mapper.toEntity
@@ -13,6 +15,7 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
 class TaskRepositoryImpl @Inject constructor(
+    private val database: ChronosDatabase,
     private val taskDao: TaskDao,
     private val syncMutationNotifier: SyncMutationNotifier = NoOpSyncMutationNotifier
 ) : TaskRepository {
@@ -22,24 +25,26 @@ class TaskRepositoryImpl @Inject constructor(
 
     override suspend fun getTaskById(id: String): Task? = taskDao.getTaskWithChecklistById(id)?.toDomain()
     override suspend fun saveTask(task: Task) {
-        taskDao.upsertTask(task.toEntity())
-        taskDao.replaceChecklistItems(
-            task.id,
-            task.checklist.mapIndexed { index, item -> item.toEntity(task.id, index) }
-        )
-        taskDao.replaceTaskContact(
-            task.id,
-            task.linkedContact?.toEntity(task.id),
-            task.linkedContact.orEmptyMethods(task.id)
-        )
-        taskDao.replaceTaskActions(
-            task.id,
-            task.actions.mapIndexed { index, action -> action.toEntity(task.id, index) }
-        )
-        taskDao.replaceTaskAttachments(
-            task.id,
-            task.attachments.mapIndexed { index, attachment -> attachment.toEntity(task.id, index) }
-        )
+        database.withTransaction {
+            taskDao.upsertTask(task.toEntity())
+            taskDao.replaceChecklistItems(
+                task.id,
+                task.checklist.mapIndexed { index, item -> item.toEntity(task.id, index) }
+            )
+            taskDao.replaceTaskContact(
+                task.id,
+                task.linkedContact?.toEntity(task.id),
+                task.linkedContact.orEmptyMethods(task.id)
+            )
+            taskDao.replaceTaskActions(
+                task.id,
+                task.actions.mapIndexed { index, action -> action.toEntity(task.id, index) }
+            )
+            taskDao.replaceTaskAttachments(
+                task.id,
+                task.attachments.mapIndexed { index, attachment -> attachment.toEntity(task.id, index) }
+            )
+        }
         syncMutationNotifier.notifyLocalMutation()
     }
     override suspend fun deleteTask(task: Task) {

@@ -234,7 +234,7 @@ class DayDialViewModel @Inject constructor(
         } else {
             combine(tasks.map { task -> taskScheduleRepository.observeTaskSchedule(task.id) }) { schedules ->
                 tasks.mapIndexed { index, task -> task.id to schedules[index] }.toMap()
-            }
+            }.distinctUntilChanged()
         }
     }
     internal val dayQuickItems = combine(
@@ -251,7 +251,10 @@ class DayDialViewModel @Inject constructor(
             habits = habits,
             medications = medications
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DayQuickItemsUiState())
+    }
+        .debounce(100L)
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DayQuickItemsUiState())
     val missedFromFocusMessage = manualMissedBlockRegistry.missedFromFocusMessage
     val focusExecutionState = focusDelegate.focusExecutionState
     private val _recoverableServiceSessionId = MutableStateFlow<String?>(null)
@@ -342,7 +345,9 @@ class DayDialViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            focusSessionDao.observeRecoverableSession().collect { entity ->
+            focusSessionDao.observeRecoverableSession()
+                .catch { e -> appEventLog.record(AppEventCategory.SESSION, "collector error: $e") }
+                .collect { entity ->
                 val persisted = entity?.toDomain()
                 _recoverableServiceSessionId.value = recoverableServiceSessionId(persisted)
                 when {
@@ -372,13 +377,16 @@ class DayDialViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            alarmCapabilityRefresher.refreshes.collect {
-                refreshReminderScheduleFromStoredPreferences()
-            }
+            alarmCapabilityRefresher.refreshes
+                .catch { e -> appEventLog.record(AppEventCategory.SESSION, "collector error: $e") }
+                .collect {
+                    refreshReminderScheduleFromStoredPreferences()
+                }
         }
         viewModelScope.launch {
             manualMissedBlockRegistry.externalSkipEvents
                 .distinctUntilChanged()
+                .catch { e -> appEventLog.record(AppEventCategory.SESSION, "collector error: $e") }
                 .collect { blockId ->
                     focusDelegate.skipIfActiveBlock(blockId)
                 }
@@ -387,6 +395,7 @@ class DayDialViewModel @Inject constructor(
             focusDelegate.focusExecutionState
                 .map { it.status to it.blockId }
                 .distinctUntilChanged()
+                .catch { e -> appEventLog.record(AppEventCategory.SESSION, "collector error: $e") }
                 .collect { (status, blockId) ->
                     when (status) {
                         FocusExecutionStatus.RUNNING -> refreshFocusSessionAssist(blockId)
@@ -403,6 +412,7 @@ class DayDialViewModel @Inject constructor(
         }
         viewModelScope.launch {
             combine(_insightsPeriod, periodInsights) { period, summary -> period to summary }
+                .catch { e -> appEventLog.record(AppEventCategory.SESSION, "collector error: $e") }
                 .collect { (period, summary) ->
                     _insightsTabState.update { it.copy(period = period, periodSummary = summary) }
                 }
@@ -416,6 +426,7 @@ class DayDialViewModel @Inject constructor(
                 // coalesce bursts instead of recomputing for every intermediate emission — this
                 // keeps the shared DB connection free for the timeline repaint after a delete.
                 .debounce(250L)
+                .catch { e -> appEventLog.record(AppEventCategory.SESSION, "collector error: $e") }
                 .collect { (insights, date, blocks) ->
                 // Heavy compute (DB fan-out + correlation analysis) runs off the main thread so it
                 // never competes with rendering the just-edited timeline.
@@ -815,14 +826,16 @@ class DayDialViewModel @Inject constructor(
     /** Persists a routine (create or update) derived from a [Routine] domain model. */
     fun persistRoutine(routine: Routine) {
         viewModelScope.launch {
-            routineRepository.saveRoutine(routine)
+            runCatching { routineRepository.saveRoutine(routine) }
+                .onFailure { e -> appEventLog.record(AppEventCategory.ERROR, "write failed: $e") }
         }
     }
 
     /** Deletes the routine with [routineId] if it exists. */
     fun deleteRoutineById(routineId: String) {
         viewModelScope.launch {
-            routineRepository.getRoutineById(routineId)?.let { routineRepository.deleteRoutine(it) }
+            runCatching { routineRepository.getRoutineById(routineId)?.let { routineRepository.deleteRoutine(it) } }
+                .onFailure { e -> appEventLog.record(AppEventCategory.ERROR, "write failed: $e") }
         }
     }
 
@@ -889,15 +902,17 @@ class DayDialViewModel @Inject constructor(
         onApplied: (Int) -> Unit = {}
     ) {
         viewModelScope.launch {
-            val created = applyRoutineToDateUseCase(routineId, date, startMinuteOfDay)
-            onApplied(created)
+            runCatching { applyRoutineToDateUseCase(routineId, date, startMinuteOfDay) }
+                .onSuccess { created -> onApplied(created) }
+                .onFailure { e -> appEventLog.record(AppEventCategory.ERROR, "write failed: $e") }
         }
     }
 
     /** Marks the routine completed for [date]. */
     fun completeRoutineForDate(routineId: String, date: LocalDate) {
         viewModelScope.launch {
-            completeRoutineForDateUseCase(routineId, date)
+            runCatching { completeRoutineForDateUseCase(routineId, date) }
+                .onFailure { e -> appEventLog.record(AppEventCategory.ERROR, "write failed: $e") }
         }
     }
 
@@ -939,17 +954,20 @@ class DayDialViewModel @Inject constructor(
 
     fun completeDayQuickTask(taskId: String) {
         viewModelScope.launch {
-            toggleTaskCompletionUseCase(taskId)
+            runCatching { toggleTaskCompletionUseCase(taskId) }
+                .onFailure { e -> appEventLog.record(AppEventCategory.ERROR, "write failed: $e") }
         }
     }
 
     fun completeDayQuickHabit(habitId: String) {
         viewModelScope.launch {
-            val habit = habitRepository.getHabitById(habitId) ?: return@launch
-            completeHabitUseCase(habit, coordinatorState.selectedDate.value)
-            val updated = habitRepository.getHabitById(habitId)
-                ?: habit.copy(lastCompletedDate = coordinatorState.selectedDate.value)
-            habitReminderScheduler.syncUpcomingHabitReminder(updated)
+            runCatching {
+                val habit = habitRepository.getHabitById(habitId) ?: return@launch
+                completeHabitUseCase(habit, coordinatorState.selectedDate.value)
+                val updated = habitRepository.getHabitById(habitId)
+                    ?: habit.copy(lastCompletedDate = coordinatorState.selectedDate.value)
+                habitReminderScheduler.syncUpcomingHabitReminder(updated)
+            }.onFailure { e -> appEventLog.record(AppEventCategory.ERROR, "write failed: $e") }
         }
     }
 
@@ -978,28 +996,30 @@ class DayDialViewModel @Inject constructor(
         reason: String?
     ) {
         viewModelScope.launch {
-            val plan = medicationRepository.getMedicationPlanById(planId) ?: return@launch
-            val scheduledMinute = scheduledMinuteOfDay ?: plan.reminderMinuteOfDay
-            medicationRepository.addMedicationDoseEvent(
-                MedicationDoseEvent(
-                    id = UUID.randomUUID().toString(),
-                    medicationPlanId = plan.id,
-                    type = type,
-                    eventDate = coordinatorState.selectedDate.value,
-                    recordedAt = Instant.now(),
-                    scheduledMinuteOfDay = scheduledMinute,
-                    reason = reason,
-                    doseAmount = if (type == MedicationDoseEventType.TAKEN) plan.dosage else null
+            runCatching {
+                val plan = medicationRepository.getMedicationPlanById(planId) ?: return@launch
+                val scheduledMinute = scheduledMinuteOfDay ?: plan.reminderMinuteOfDay
+                medicationRepository.addMedicationDoseEvent(
+                    MedicationDoseEvent(
+                        id = UUID.randomUUID().toString(),
+                        medicationPlanId = plan.id,
+                        type = type,
+                        eventDate = coordinatorState.selectedDate.value,
+                        recordedAt = Instant.now(),
+                        scheduledMinuteOfDay = scheduledMinute,
+                        reason = reason,
+                        doseAmount = if (type == MedicationDoseEventType.TAKEN) plan.dosage else null
+                    )
                 )
-            )
-            if (type == MedicationDoseEventType.TAKEN) {
-                val remaining = plan.safetyProfile?.supplyRemaining?.let { (it - 1).coerceAtLeast(0) }
-                medicationRepository.saveMedicationPlan(
-                    plan.copy(safetyProfile = plan.safetyProfile?.copy(supplyRemaining = remaining))
-                )
-            } else if (type == MedicationDoseEventType.MISSED) {
-                medicationRepository.saveMedicationPlan(plan.copy(missedCount = plan.missedCount + 1))
-            }
+                if (type == MedicationDoseEventType.TAKEN) {
+                    val remaining = plan.safetyProfile?.supplyRemaining?.let { (it - 1).coerceAtLeast(0) }
+                    medicationRepository.saveMedicationPlan(
+                        plan.copy(safetyProfile = plan.safetyProfile?.copy(supplyRemaining = remaining))
+                    )
+                } else if (type == MedicationDoseEventType.MISSED) {
+                    medicationRepository.saveMedicationPlan(plan.copy(missedCount = plan.missedCount + 1))
+                }
+            }.onFailure { e -> appEventLog.record(AppEventCategory.ERROR, "write failed: $e") }
         }
     }
 

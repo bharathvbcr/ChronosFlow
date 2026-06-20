@@ -10,6 +10,7 @@ class ReminderReconcileWorker(
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
+        if (runAttemptCount > 5) return Result.failure()
         return try {
             val reconciler = EntryPointAccessors.fromApplication(
                 applicationContext,

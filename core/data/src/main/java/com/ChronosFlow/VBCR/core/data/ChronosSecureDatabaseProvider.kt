@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Base64
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.sqlite.db.SupportSQLiteDatabase
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.KeyStore
 import java.security.SecureRandom
@@ -29,6 +30,12 @@ class ChronosSecureDatabaseProvider @Inject constructor(
         // which is why those edits used to take "forever" to appear. The app is single-process
         // (no android:process), so default single-instance invalidation stays correct under WAL.
         builder.setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
+        builder.addCallback(object : RoomDatabase.Callback() {
+            override fun onOpen(db: SupportSQLiteDatabase) {
+                super.onOpen(db)
+                db.execSQL("PRAGMA foreign_keys = ON")
+            }
+        })
         if (!ENCRYPTION_ENABLED) return builder.build()
         System.loadLibrary("sqlcipher")
         val passphrase = obtainPassphraseBytes()

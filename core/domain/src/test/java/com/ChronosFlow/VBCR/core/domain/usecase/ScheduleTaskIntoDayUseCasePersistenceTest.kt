@@ -132,6 +132,7 @@ class ScheduleTaskIntoDayUseCasePersistenceTest {
             override fun observeForDate(date: LocalDate): Flow<SleepTrack?> = flowOf(null)
             override fun observeForDateRange(start: LocalDate, end: LocalDate): Flow<List<SleepTrack>> =
                 flowOf(emptyList())
+            override suspend fun getByDate(date: LocalDate): SleepTrack? = null
             override suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<SleepTrack> =
                 emptyList()
             override suspend fun upsert(track: SleepTrack) = Unit
@@ -193,6 +194,11 @@ private class ObservableTimeBlockRepository(
     override fun getTimeBlocksByDate(date: LocalDate): Flow<List<TimeBlock>> =
         blocks.map { entries ->
             entries.filter { it.date == date }.sortedBy { it.startMinuteOfDay }
+        }
+
+    override fun getTimeBlocksByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<TimeBlock>> =
+        blocks.map { entries ->
+            entries.filter { it.date >= startDate && it.date <= endDate }.sortedBy { it.startMinuteOfDay }
         }
 
     override suspend fun getTimeBlockById(id: String): TimeBlock? =

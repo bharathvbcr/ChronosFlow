@@ -100,7 +100,7 @@ import com.ChronosFlow.VBCR.core.data.util.Converters
         AppUsageDayEntity::class,
         AppUsageOverrideEntity::class
     ],
-    version = 25,
+    version = 26,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -650,7 +650,7 @@ abstract class ChronosDatabase : RoomDatabase() {
                             WHEN notes LIKE '%[[timing:anytime]]%' THEN 'Anytime'
                             ELSE 'Anytime'
                         END,
-                        refillNeededAfterDoses,
+                        NULL,
                         refillNeededAfterDoses,
                         NULL,
                         NULL,
@@ -864,6 +864,7 @@ abstract class ChronosDatabase : RoomDatabase() {
                 // calendar_events is a disposable snapshot of the device calendar
                 // (regenerated on every sync), so recreate it with the composite
                 // primary key instead of migrating rows.
+                // Room wraps migrate() in a transaction; the DROP + CREATE sequence is atomic.
                 db.execSQL("DROP TABLE IF EXISTS `calendar_events`")
                 db.execSQL(
                     """
@@ -971,6 +972,16 @@ abstract class ChronosDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_journal_attachments_journalEntryId` ON `journal_attachments` (`journalEntryId`)"
                 )
+            }
+        }
+
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Room wraps migrate() in a transaction; all CREATE INDEX calls are atomic.
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_recurrence_rules_blockId ON recurrence_rules(blockId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_habit_events_recordedAt ON habit_events(recordedAt)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_medication_dose_events_recordedAt ON medication_dose_events(recordedAt)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_journal_entries_isPrimary ON journal_entries (isPrimary)")
             }
         }
     }

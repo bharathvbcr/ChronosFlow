@@ -9,8 +9,11 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface HabitEventDao {
-    @Query("SELECT * FROM habit_events ORDER BY recordedAt DESC")
-    fun observeAllEvents(): Flow<List<HabitEventEntity>>
+    @Query("SELECT * FROM habit_events WHERE recordedAt >= :cutoff ORDER BY recordedAt DESC")
+    fun observeAllEvents(cutoff: Long): Flow<List<HabitEventEntity>>
+
+    @Query("SELECT * FROM habit_events WHERE habitId = :habitId ORDER BY recordedAt DESC LIMIT :limit")
+    fun getRecentEventsForHabit(habitId: String, limit: Int = 10): Flow<List<HabitEventEntity>>
 
     @Query("SELECT * FROM habit_events WHERE habitId = :habitId ORDER BY recordedAt DESC")
     suspend fun getEventsForHabit(habitId: String): List<HabitEventEntity>

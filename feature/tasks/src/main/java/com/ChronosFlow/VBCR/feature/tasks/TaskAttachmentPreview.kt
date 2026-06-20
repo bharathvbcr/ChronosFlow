@@ -1,6 +1,5 @@
 package com.ChronosFlow.VBCR.feature.tasks
 
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -14,11 +13,11 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.ChronosFlow.VBCR.core.domain.model.TaskAttachment
+import com.ChronosFlow.VBCR.core.ui.decodeThumbnail
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -32,7 +31,7 @@ internal fun TaskAttachmentPreview(
         value = withContext(Dispatchers.IO) {
             val uri = resolveTaskAttachmentUri(context, attachment) ?: return@withContext null
             context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                decodeThumbnail(stream)
             }
         }
     }

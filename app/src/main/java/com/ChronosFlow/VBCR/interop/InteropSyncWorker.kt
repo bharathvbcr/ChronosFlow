@@ -29,6 +29,7 @@ class InteropSyncWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
+        if (runAttemptCount > 5) return Result.failure()
         val manager = EntryPointAccessors.fromApplication(
             applicationContext,
             InteropSyncWorkerEntryPoint::class.java,

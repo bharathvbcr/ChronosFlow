@@ -31,10 +31,7 @@ class JournalRepositoryImpl @Inject constructor(
     override suspend fun getById(id: String): JournalEntry? = journalEntryDao.getById(id)?.toDomain()
 
     override suspend fun save(entry: JournalEntry) {
-        journalEntryDao.insert(entry.toEntity())
-        if (entry.isPrimary) {
-            journalEntryDao.clearPrimaryForDate(entry.entryDate, entry.id)
-        }
+        journalEntryDao.insertAsPrimary(entry.toEntity())
     }
 
     override suspend fun delete(id: String) = journalEntryDao.deleteById(id)
@@ -46,16 +43,18 @@ class JournalRepositoryImpl @Inject constructor(
         journalAttachmentDao.observeForEntry(entryId).map { list -> list.map { it.toDomain() } }
 
     override suspend fun addAttachment(entryId: String, uri: String, mimeType: String?) {
-        val count = journalAttachmentDao.countForEntry(entryId)
-        journalAttachmentDao.insert(
-            JournalAttachmentEntity(
+        // sortOrder is set atomically inside insertAttachmentWithOrder to avoid a race where two
+        // concurrent adds both read the same count and write duplicate sort-order values.
+        journalAttachmentDao.insertAttachmentWithOrder(
+            attachment = JournalAttachmentEntity(
                 id = UUID.randomUUID().toString(),
                 journalEntryId = entryId,
                 uri = uri,
                 mimeType = mimeType,
                 createdAt = Instant.now(),
-                sortOrder = count
-            )
+                sortOrder = 0 // overwritten atomically by insertAttachmentWithOrder
+            ),
+            entryId = entryId
         )
     }
 

@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -74,7 +75,7 @@ fun FocusTimerRing(
             )
         }
 
-        Canvas(modifier = Modifier.size(ringSize)) {
+        Canvas(modifier = Modifier.size(ringSize).clearAndSetSemantics { }) {
             drawArc(
                 color = trackColor.copy(alpha = if (highContrastEnabled) 0.35f else 0.12f),
                 startAngle = -90f,

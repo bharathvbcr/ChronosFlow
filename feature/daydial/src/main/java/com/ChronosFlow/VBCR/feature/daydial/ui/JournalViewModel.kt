@@ -77,6 +77,10 @@ class JournalViewModel @Inject constructor(
     private val _today = MutableStateFlow(LocalDate.now())
     val today: StateFlow<LocalDate> = _today.asStateFlow()
 
+    private val _writeError = MutableStateFlow<String?>(null)
+    val writeError: StateFlow<String?> = _writeError.asStateFlow()
+    fun clearWriteError() { _writeError.value = null }
+
     private val _insight = MutableStateFlow<JournalInsightState>(JournalInsightState.Idle)
     val insight: StateFlow<JournalInsightState> = _insight.asStateFlow()
 
@@ -130,22 +134,27 @@ class JournalViewModel @Inject constructor(
             val now = Instant.now()
             if (entryId != null) {
                 val existing = journalRepository.getById(entryId) ?: return@launch
-                journalRepository.save(
-                    existing.copy(
-                        body = trimmed,
-                        promptType = promptType,
-                        dayRating = rating,
-                        updatedAt = now,
-                        entryMinuteOfDay = minute
+                runCatching {
+                    journalRepository.save(
+                        existing.copy(
+                            body = trimmed,
+                            promptType = promptType,
+                            dayRating = rating,
+                            updatedAt = now,
+                            entryMinuteOfDay = minute
+                        )
                     )
-                )
+                }.onFailure { e -> _writeError.value = e.message }
                 // Photos buffered while editing are flushed once the row is persisted.
                 if (photoUris.isNotEmpty()) addPhotos(entryId, photoUris)
             } else {
                 val created = dates.distinct().map { date ->
                     newEntry(date, now, trimmed, promptType, rating, minute)
                 }
-                created.forEach { journalRepository.save(it) }
+                created.forEach { entry ->
+                    runCatching { journalRepository.save(entry) }
+                        .onFailure { e -> _writeError.value = e.message }
+                }
                 // Photos buffered before the first save attach to the (primary) entry just created.
                 if (photoUris.isNotEmpty()) created.firstOrNull()?.let { addPhotos(it.id, photoUris) }
             }
@@ -161,16 +170,18 @@ class JournalViewModel @Inject constructor(
         val trimmed = body.trim()
         if (trimmed.isBlank()) return
         viewModelScope.launch {
-            journalRepository.save(
-                newEntry(
-                    date = date,
-                    now = Instant.now(),
-                    body = trimmed,
-                    promptType = null,
-                    rating = null,
-                    minute = minuteOfDay?.coerceIn(0, MAX_MINUTE_OF_DAY)
+            runCatching {
+                journalRepository.save(
+                    newEntry(
+                        date = date,
+                        now = Instant.now(),
+                        body = trimmed,
+                        promptType = null,
+                        rating = null,
+                        minute = minuteOfDay?.coerceIn(0, MAX_MINUTE_OF_DAY)
+                    )
                 )
-            )
+            }.onFailure { e -> _writeError.value = e.message }
         }
     }
 
@@ -197,7 +208,10 @@ class JournalViewModel @Inject constructor(
     }
 
     fun delete(id: String) {
-        viewModelScope.launch { journalRepository.delete(id) }
+        viewModelScope.launch {
+            runCatching { journalRepository.delete(id) }
+                .onFailure { e -> _writeError.value = e.message }
+        }
     }
 
     /** Attachments grouped by entry id, so the history list can render thumbnails inline. */

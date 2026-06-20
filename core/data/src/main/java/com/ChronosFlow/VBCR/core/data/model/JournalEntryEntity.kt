@@ -8,7 +8,7 @@ import java.time.LocalDate
 
 @Entity(
     tableName = "journal_entries",
-    indices = [Index("entryDate"), Index("moodCheckInId")]
+    indices = [Index("entryDate"), Index("isPrimary"), Index("moodCheckInId")]
 )
 data class JournalEntryEntity(
     @PrimaryKey val id: String,

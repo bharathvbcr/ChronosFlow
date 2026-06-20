@@ -25,7 +25,6 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 /** Settings + last-run status for the Health Connect sleep importer, shaped for the UI. */
@@ -120,9 +119,9 @@ class HealthConnectSleepSyncManager @Inject constructor(
                 onSuccess = { count -> recordSuccess(count) },
                 onFailure = { error ->
                     // A SecurityException means the read was rejected (e.g. background-read was not
-                    // granted, or access was revoked) — retrying won't help, so skip rather than churn.
+                    // granted, or access was revoked) — retrying won't help, so fail rather than churn.
                     if (error is SecurityException) {
-                        recordSkipped("Health Connect access was denied")
+                        recordFailure("Health Connect access was denied")
                     } else {
                         recordFailure(error.message ?: "Sleep sync failed")
                     }
@@ -153,7 +152,7 @@ class HealthConnectSleepSyncManager @Inject constructor(
         val incoming = dataSource.readSessions(windowStart, now).toSleepTracks(zone)
         var applied = 0
         for (track in incoming) {
-            val existing = sleepTrackRepository.observeForDate(track.date).first()
+            val existing = sleepTrackRepository.getByDate(track.date)
             val merged = mergeImported(track, existing) ?: continue
             // Skip the upsert when nothing measured changed — keeps idle reconciles from churning the
             // DB and re-emitting flows. The use case backfills the planned bed/wake snapshot for a new
@@ -266,15 +265,23 @@ class HealthConnectSleepSyncWorker(
     workerParameters: WorkerParameters
 ) : CoroutineWorker(appContext, workerParameters) {
     override suspend fun doWork(): Result {
-        val manager = EntryPointAccessors.fromApplication(
+        if (runAttemptCount > 5) return Result.failure()
+        val entryPoint = EntryPointAccessors.fromApplication(
             applicationContext,
             HealthConnectSleepSyncEntryPoint::class.java
-        ).healthConnectSleepSyncManager()
+        )
+        val manager = entryPoint.healthConnectSleepSyncManager()
+        val dataSource = entryPoint.healthConnectSleepDataSource()
+
+        if (!dataSource.hasBackgroundReadPermission()) {
+            android.util.Log.w("HealthConnectSleepSync", "Background read permission not granted — skipping sleep sync")
+            return Result.failure()
+        }
 
         return when (manager.runSync()) {
             is HealthConnectSleepSyncOutcome.Success -> Result.success()
             is HealthConnectSleepSyncOutcome.Skipped -> Result.success()
-            is HealthConnectSleepSyncOutcome.Failure -> Result.retry()
+            is HealthConnectSleepSyncOutcome.Failure -> Result.failure()
         }
     }
 }
@@ -283,4 +290,5 @@ class HealthConnectSleepSyncWorker(
 @InstallIn(SingletonComponent::class)
 interface HealthConnectSleepSyncEntryPoint {
     fun healthConnectSleepSyncManager(): HealthConnectSleepSyncManager
+    fun healthConnectSleepDataSource(): HealthConnectSleepDataSource
 }

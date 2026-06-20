@@ -123,9 +123,7 @@ class WearDaySummaryBridge @Inject constructor(
                         )
                     }
                 }
-            // Urgent like the focus mirror: non-urgent items batch for minutes and the watch
-            // looks like it simply isn't syncing.
-            }.asPutDataRequest().setUrgent()
+            }.asPutDataRequest()
             // Stamp on handoff success so Privacy & Sync can show an accurate "Last synced …".
             dataClient.putDataItem(request)
                 .addOnSuccessListener { linkStatusStore.recordPublished() }

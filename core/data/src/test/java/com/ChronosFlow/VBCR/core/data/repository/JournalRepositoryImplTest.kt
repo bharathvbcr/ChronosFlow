@@ -39,13 +39,11 @@ class JournalRepositoryImplTest {
     @Test
     fun `save primary entry demotes other entries for the day`() = runTest {
         val entry = entry("j-1", primary = true)
-        coEvery { dao.insert(any()) } returns Unit
-        coEvery { dao.clearPrimaryForDate(entry.entryDate, entry.id) } returns Unit
+        coEvery { dao.insertAsPrimary(any()) } returns Unit
 
         repository.save(entry)
 
-        coVerify { dao.insert(any()) }
-        coVerify { dao.clearPrimaryForDate(entry.entryDate, "j-1") }
+        coVerify { dao.insertAsPrimary(match { it.id == "j-1" && it.isPrimary }) }
     }
 
     private fun entry(id: String, primary: Boolean = true) = JournalEntry(

@@ -35,6 +35,9 @@ interface TimeBlockDao {
     )
     suspend fun deleteImportedBlocksBetween(startDate: LocalDate, endDate: LocalDate)
 
+    @Query("SELECT * FROM time_blocks WHERE date BETWEEN :startDate AND :endDate ORDER BY date ASC, startMinuteOfDay ASC")
+    fun getTimeBlocksByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<TimeBlockEntity>>
+
     @Query("DELETE FROM time_blocks WHERE date = :date")
     suspend fun clearDay(date: LocalDate)
 }

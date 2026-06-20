@@ -28,6 +28,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Dp
@@ -263,6 +265,7 @@ fun ChronosDial(
             // (dial track, ticks, ring guides) shares the inset coordinate space of
             // the canvas content; otherwise the track renders at a larger radius and
             // reads as a second dark ring offset from the block arcs.
+            .semantics { contentDescription = buildDialContentDescription(blocks, currentMinute, compactMode, compactWindowStart) }
             .aspectRatio(1f)
             .padding(canvasInset)
             .drawWithCache {
@@ -1119,4 +1122,27 @@ private fun isNearMinute(minute: Int, targetMinute: Int, toleranceMinutes: Int =
     val normalizedTarget = ((targetMinute % 1440) + 1440) % 1440
     val distance = kotlin.math.abs(circularMinuteDelta(normalizedTarget, minute))
     return distance <= toleranceMinutes
+}
+
+private fun buildDialContentDescription(
+    blocks: List<TimeBlockUiModel>,
+    currentMinute: Int,
+    compactMode: Boolean,
+    compactWindowStart: Int
+): String = buildString {
+    val hour = currentMinute / 60
+    val min = (currentMinute % 60).toString().padStart(2, '0')
+    append("Day dial. Current time $hour:$min. ")
+    if (blocks.isEmpty()) {
+        append("No blocks scheduled.")
+    } else {
+        append("${blocks.size} block(s): ")
+        blocks.forEachIndexed { index, block ->
+            val startH = block.startMinuteOfDay / 60
+            val startM = (block.startMinuteOfDay % 60).toString().padStart(2, '0')
+            append("${block.title} $startH:$startM")
+            if (index < blocks.size - 1) append(", ")
+        }
+        append(".")
+    }
 }

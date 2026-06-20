@@ -21,6 +21,8 @@ class ProactiveAssistCacheTest {
     fun setup() {
         every { dataSource.putString(any(), any()) } answers { store[firstArg()] = secondArg() }
         every { dataSource.getString(any(), any()) } answers { store[firstArg()] ?: secondArg() }
+        every { dataSource.getAll() } answers { store.toMap() }
+        every { dataSource.remove(any()) } answers { store.remove(firstArg<String>()) ; Unit }
     }
 
     @Test

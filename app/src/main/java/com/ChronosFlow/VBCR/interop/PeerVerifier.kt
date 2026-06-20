@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.content.pm.Signature
 import android.os.Build
 import android.util.Log
+import com.ChronosFlow.VBCR.BuildConfig
 import java.security.MessageDigest
 
 /**
@@ -32,16 +33,17 @@ object PeerVerifier {
         val actual = signingSha256(context, callingPackage)
             ?: throw SecurityException("Interop: cannot read signing certificate for $callingPackage")
 
-        val pinned = peer.certSha256.map(::normalize).toSet()
-        if (pinned.isEmpty()) {
-            Log.w(
-                TAG,
-                "Trusting $callingPackage by package name only (no cert pinned — insecure). " +
-                    "Pin this SHA-256 in InteropContract.TRUSTED_PEERS: $actual",
-            )
-            return
+        if (peer.certSha256.isEmpty()) {
+            if (BuildConfig.DEBUG) {
+                Log.w(TAG, "No cert pinned for $callingPackage (debug only). Observed SHA-256: $actual")
+                return
+            } else {
+                throw SecurityException(
+                    "Interop: no cert pinned for $callingPackage in release build — refusing access"
+                )
+            }
         }
-        if (normalize(actual) !in pinned) {
+        if (peer.certSha256.none { certBytesEqual(actual, it) }) {
             throw SecurityException("Interop: signing certificate not pinned for $callingPackage")
         }
     }
@@ -56,9 +58,15 @@ object PeerVerifier {
         val peer = InteropContract.TRUSTED_PEERS.firstOrNull { it.packageName == packageName }
             ?: return false
         val actual = signingSha256(context, packageName) ?: return false
-        val pinned = peer.certSha256.map(::normalize).toSet()
-        return pinned.isEmpty() || normalize(actual) in pinned
+        if (peer.certSha256.isEmpty()) return false
+        return peer.certSha256.any { certBytesEqual(actual, it) }
     }
+
+    private fun hexToBytes(hex: String): ByteArray =
+        normalize(hex).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+    private fun certBytesEqual(hexA: String, hexB: String): Boolean =
+        MessageDigest.isEqual(hexToBytes(hexA), hexToBytes(hexB))
 
     /** Canonicalize a SHA-256 hash so colons, whitespace and case don't affect comparison. */
     private fun normalize(hash: String): String =
@@ -67,19 +75,25 @@ object PeerVerifier {
     private fun signingSha256(context: Context, pkg: String): String? {
         val pm = context.packageManager
         return try {
-            val signatures: Array<Signature>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val info = pm.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES)
                 val signing = info.signingInfo ?: return null
+                // Reject multi-signer APKs entirely: we cannot safely pin a single cert
+                // when multiple signers are present, and legitimate peers use one key.
+                if (signing.hasMultipleSigners()) return null
                 // apkContentsSigners returns only the CURRENT active signing cert(s).
                 // signingCertificateHistory also returns rotated-away old certs, so an
                 // attacker holding a compromised rotated key would still pass the check.
-                if (signing.hasMultipleSigners()) signing.apkContentsSigners
-                else signing.apkContentsSigners
+                signing.apkContentsSigners.firstOrNull()?.let { sha256Hex(it.toByteArray()) }
             } else {
                 @Suppress("DEPRECATION")
-                pm.getPackageInfo(pkg, PackageManager.GET_SIGNATURES).signatures
+                val sigs = pm.getPackageInfo(pkg, PackageManager.GET_SIGNATURES).signatures
+                // Pre-API-28: the array may contain multiple entries for multi-signer APKs
+                // or jarsigner legacy chains. Reject any APK with more than one signer to
+                // prevent an attacker slipping an unrecognized cert into the array.
+                if (sigs == null || sigs.size != 1) return null
+                sha256Hex(sigs[0].toByteArray())
             }
-            signatures?.firstOrNull()?.let { sha256Hex(it.toByteArray()) }
         } catch (e: PackageManager.NameNotFoundException) {
             null
         }

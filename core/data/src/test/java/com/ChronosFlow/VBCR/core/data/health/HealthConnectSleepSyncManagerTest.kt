@@ -16,7 +16,6 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -68,12 +67,16 @@ class HealthConnectSleepSyncManagerTest {
         coEvery { dataSource.readSessions(any(), any()) } returns listOf(overnight)
         coEvery { dataSource.changesToken() } returns "fresh-token"
         every { preferences.getString(any(), any()) } returns ""
+        // reconcileWindow uses getByDate (direct suspend lookup) not observeForDate
+        coEvery { repository.getByDate(any()) } returns null
+        // sweepDeletedRows scans the window for imported rows to delete
+        coEvery { repository.getForDateRange(any(), any()) } returns emptyList()
     }
 
     @Test
     fun `imports a new night stamped HEALTH_CONNECT when no row exists`() = runTest {
         availableWithSession()
-        coEvery { repository.observeForDate(any()) } returns flowOf(null)
+        // availableWithSession already stubs getByDate(any()) returns null and getForDateRange returns emptyList()
         val saved = slot<SleepTrack>()
         coEvery { recordSleepUseCase(capture(saved)) } just Runs
 
@@ -98,7 +101,8 @@ class HealthConnectSleepSyncManagerTest {
             interruptedCount = 0,
             source = SleepSource.MANUAL
         )
-        coEvery { repository.observeForDate(any()) } returns flowOf(manual)
+        // Override: a manual night exists → mergeImported returns null → no write
+        coEvery { repository.getByDate(any()) } returns manual
 
         val outcome = manager.runSync()
 
@@ -125,7 +129,10 @@ class HealthConnectSleepSyncManagerTest {
 
         val outcome = manager.runSync()
 
-        assert(outcome is HealthConnectSleepSyncOutcome.Skipped)
+        // SecurityException is caught in runCatching and mapped to Failure (non-retryable),
+        // not Skipped — only missing-permission paths return Skipped.
+        assert(outcome is HealthConnectSleepSyncOutcome.Failure)
+        assertEquals("Health Connect access was denied", (outcome as HealthConnectSleepSyncOutcome.Failure).message)
     }
 
     @Test
@@ -186,7 +193,9 @@ class HealthConnectSleepSyncManagerTest {
             SleepChangesResult.Changes(upserted = listOf(overnight), hasDeletions = false, nextToken = "next-token")
         coEvery { dataSource.readSessions(any(), any()) } returns listOf(overnight)
         // The local row already matches what the import folds to, so nothing should be written.
-        coEvery { repository.observeForDate(any()) } returns flowOf(importedNight)
+        // Production uses getByDate (direct suspend lookup), not observeForDate.
+        coEvery { repository.getByDate(any()) } returns importedNight
+        coEvery { repository.getForDateRange(any(), any()) } returns emptyList()
 
         val outcome = manager.runSync()
 
@@ -197,9 +206,10 @@ class HealthConnectSleepSyncManagerTest {
     @Test
     fun `an expired token falls back to a full reconcile and re-arms`() = runTest {
         availableWithSession()
+        // Override: a stale token is stored, changesSince returns Expired → falls back to seedFromWindow
         every { preferences.getString(any(), any()) } returns "stale-token"
         coEvery { dataSource.changesSince("stale-token") } returns SleepChangesResult.Expired
-        coEvery { repository.observeForDate(any()) } returns flowOf(null)
+        // getByDate and getForDateRange already stubbed by availableWithSession() with no-row defaults
 
         val outcome = manager.runSync()
 

@@ -522,6 +522,147 @@ class ChronosDatabaseMigrationTest {
     }
 
     @Test
+    fun testMigrate21To22() {
+        helper.createDatabase(TEST_DB, 21).apply {
+            insert(
+                "tasks",
+                SQLiteDatabase.CONFLICT_NONE,
+                ContentValues().apply {
+                    put("id", "task-origin-1")
+                    put("title", "Shared task")
+                    putNull("description")
+                    put("isCompleted", 0)
+                    put("priority", 1)
+                    putNull("dueDate")
+                    put("createdAt", 1_717_000_000_000L)
+                    put("updatedAt", 1_717_000_000_000L)
+                }
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            22,
+            true,
+            ChronosDatabase.MIGRATION_21_22
+        ).apply {
+            query("SELECT origin, externalId FROM tasks WHERE id = 'task-origin-1'").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertTrue(cursor.isNull(0))
+                org.junit.Assert.assertTrue(cursor.isNull(1))
+            }
+        }
+    }
+
+    @Test
+    fun testMigrate22To23() {
+        helper.createDatabase(TEST_DB, 22).apply {
+            insert(
+                "journal_entries",
+                SQLiteDatabase.CONFLICT_NONE,
+                ContentValues().apply {
+                    put("id", "entry-rating-1")
+                    put("entryDate", "2026-06-20")
+                    put("createdAt", 1_717_000_000_000L)
+                    put("updatedAt", 1_717_000_000_000L)
+                    put("body", "Today was great")
+                    putNull("promptType")
+                    putNull("moodCheckInId")
+                    put("isPrimary", 1)
+                }
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            23,
+            true,
+            ChronosDatabase.MIGRATION_22_23
+        ).apply {
+            query("SELECT dayRating FROM journal_entries WHERE id = 'entry-rating-1'").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertTrue(cursor.isNull(0))
+            }
+        }
+    }
+
+    @Test
+    fun testMigrate23To24() {
+        helper.createDatabase(TEST_DB, 23).close()
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            24,
+            true,
+            ChronosDatabase.MIGRATION_23_24
+        ).apply {
+            query("PRAGMA table_info(`journal_entries`)").use { cursor ->
+                var foundColumn = false
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(1) == "entryMinuteOfDay") {
+                        foundColumn = true
+                        break
+                    }
+                }
+                org.junit.Assert.assertTrue(foundColumn)
+            }
+        }
+    }
+
+    @Test
+    fun testMigrate24To25() {
+        helper.createDatabase(TEST_DB, 24).close()
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            25,
+            true,
+            ChronosDatabase.MIGRATION_24_25
+        ).apply {
+            query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'journal_attachments'"
+            ).use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("journal_attachments", cursor.getString(0))
+            }
+            // Verify schema: id, journalEntryId, uri, mimeType, createdAt, sortOrder
+            query("PRAGMA table_info(`journal_attachments`)").use { cursor ->
+                val columns = mutableSetOf<String>()
+                while (cursor.moveToNext()) {
+                    columns.add(cursor.getString(1))
+                }
+                org.junit.Assert.assertTrue(columns.contains("id"))
+                org.junit.Assert.assertTrue(columns.contains("journalEntryId"))
+                org.junit.Assert.assertTrue(columns.contains("uri"))
+                org.junit.Assert.assertTrue(columns.contains("mimeType"))
+                org.junit.Assert.assertTrue(columns.contains("createdAt"))
+                org.junit.Assert.assertTrue(columns.contains("sortOrder"))
+            }
+        }
+    }
+
+    @Test
+    fun testMigrate25To26() {
+        helper.createDatabase(TEST_DB, 25).close()
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            26,
+            true,
+            ChronosDatabase.MIGRATION_25_26
+        ).apply {
+            query(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_journal_entries_isPrimary'"
+            ).use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("index_journal_entries_isPrimary", cursor.getString(0))
+            }
+        }
+    }
+
+    @Test
     fun migrate17To18RecreatesCalendarEventsWithCompositeKey() {
         helper.createDatabase(TEST_DB, 17).apply {
             insert(
@@ -585,7 +726,12 @@ class ChronosDatabaseMigrationTest {
             ChronosDatabase.MIGRATION_17_18,
             ChronosDatabase.MIGRATION_18_19,
             ChronosDatabase.MIGRATION_19_20,
-            ChronosDatabase.MIGRATION_20_21
+            ChronosDatabase.MIGRATION_20_21,
+            ChronosDatabase.MIGRATION_21_22,
+            ChronosDatabase.MIGRATION_22_23,
+            ChronosDatabase.MIGRATION_23_24,
+            ChronosDatabase.MIGRATION_24_25,
+            ChronosDatabase.MIGRATION_25_26
         )
     }
 }

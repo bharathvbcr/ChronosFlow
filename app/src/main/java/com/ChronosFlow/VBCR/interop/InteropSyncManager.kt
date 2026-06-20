@@ -1,6 +1,8 @@
 package com.ChronosFlow.VBCR.interop
 
 import android.util.Log
+import androidx.room.withTransaction
+import com.ChronosFlow.VBCR.core.data.ChronosDatabase
 import com.ChronosFlow.VBCR.core.data.dao.TaskDao
 import com.ChronosFlow.VBCR.core.data.model.TaskEntity
 import com.ChronosFlow.VBCR.core.notifications.AlarmScheduler
@@ -27,6 +29,7 @@ import javax.inject.Singleton
 @Singleton
 class InteropSyncManager @Inject constructor(
     private val client: InteropClient,
+    private val db: ChronosDatabase,
     private val taskDao: TaskDao,
     private val alarmScheduler: AlarmScheduler,
 ) {
@@ -45,40 +48,53 @@ class InteropSyncManager @Inject constructor(
             // Collapse near-identical upstream rows (same trimmed/lowercased title + due time) so an
             // accidental duplicate in DevTime maps to a single ChronosFlow task. Genuinely distinct
             // tasks (different title or time) are kept.
-            val tasks = client.fetchPeerTasks().distinctBy {
+            val rawTasks = client.fetchPeerTasks()
+            if (rawTasks.size > MAX_INTEROP_TASKS) {
+                Log.w(TAG, "Peer returned ${rawTasks.size} tasks, capping at $MAX_INTEROP_TASKS")
+            }
+            val tasks = rawTasks.take(MAX_INTEROP_TASKS).distinctBy {
                 it.title.trim().lowercase() + "|" + (it.dueAt ?: "none")
             }
             val now = Instant.now()
             val priorImportedIds = taskDao.getImportedTaskIds(origin).toSet()
             val keepIds = mutableListOf<String>()
 
-            for (t in tasks) {
-                val id = "interop:$origin:${t.externalId}"
-                taskDao.upsertTask(
-                    TaskEntity(
-                        id = id,
-                        title = t.title.ifBlank { "(untitled)" },
-                        description = null,
-                        isCompleted = t.isCompleted,
-                        priority = t.priority ?: 0,
-                        dueDate = t.dueAt?.let(Instant::ofEpochMilli),
-                        createdAt = now, // imports are treated as freshly mirrored each sync
-                        updatedAt = now,
-                        origin = origin,
-                        externalId = t.externalId,
-                    ),
-                )
-                keepIds += id
-                scheduleReminder(id, t)
+            // Wrap all upserts + the pruning delete in a single transaction so a process kill
+            // mid-loop can't leave the mirror in a partial state (some rows updated, others stale).
+            db.withTransaction {
+                for (t in tasks) {
+                    val id = "interop:$origin:${t.externalId}"
+                    taskDao.upsertTask(
+                        TaskEntity(
+                            id = id,
+                            title = t.title.ifBlank { "(untitled)" }.take(500),
+                            description = null,
+                            isCompleted = t.isCompleted,
+                            priority = t.priority ?: 0,
+                            dueDate = t.dueAt?.let(Instant::ofEpochMilli),
+                            createdAt = now, // imports are treated as freshly mirrored each sync
+                            updatedAt = now,
+                            origin = origin,
+                            externalId = t.externalId?.take(128),
+                        ),
+                    )
+                    keepIds += id
+                }
+
+                if (keepIds.isEmpty()) {
+                    taskDao.deleteAllImportedTasks(origin)
+                } else {
+                    taskDao.deleteImportedTasksNotIn(origin, keepIds)
+                }
             }
 
-            // Cancel reminders for imports that no longer exist upstream, then prune the rows.
-            (priorImportedIds - keepIds.toSet()).forEach(alarmScheduler::cancelAlarm)
-            if (keepIds.isEmpty()) {
-                taskDao.deleteAllImportedTasks(origin)
-            } else {
-                taskDao.deleteImportedTasksNotIn(origin, keepIds)
+            // Schedule/cancel reminders outside the transaction (alarm ops are not DB writes).
+            for (t in tasks) {
+                val id = "interop:$origin:${t.externalId}"
+                scheduleReminder(id, t)
             }
+            // Cancel reminders for imports that no longer exist upstream.
+            (priorImportedIds - keepIds.toSet()).forEach(alarmScheduler::cancelAlarm)
             Log.i(TAG, "Interop sync from DevTime: ${keepIds.size} task(s) mirrored.")
         } catch (e: Exception) {
             Log.w(TAG, "Interop sync failed (continuing standalone): ${e.message}")
@@ -109,5 +125,6 @@ class InteropSyncManager @Inject constructor(
     private companion object {
         const val TAG = "InteropSyncManager"
         const val REMINDER_LEAD_MILLIS = 10 * 60 * 1000L
+        const val MAX_INTEROP_TASKS = 500
     }
 }

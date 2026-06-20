@@ -653,6 +653,10 @@ class DayDialBlockDelegateTest {
             emit(blocks.values.filter { it.date == date })
         }
 
+        override fun getTimeBlocksByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<TimeBlock>> = flow {
+            emit(blocks.values.filter { it.date >= startDate && it.date <= endDate })
+        }
+
         override suspend fun getTimeBlockById(id: String): TimeBlock? = blocks[id]
 
         override suspend fun saveTimeBlock(timeBlock: TimeBlock) {

@@ -45,7 +45,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -240,7 +240,7 @@ internal fun FocusTab(
             icon = DayDialTab.FOCUS.icon
         )
         if (showBlockReady) {
-            val block = selectedReadyBlock!!
+            val block = selectedReadyBlock ?: return@Column
             val blockColor = rememberFocusTimerAccent(
                 blockCategory = block.category,
                 blockId = block.id,
@@ -273,7 +273,7 @@ internal fun FocusTab(
                     if (linkedBlockManuallyMissed) {
                         FocusMissedBadge()
                     }
-                    var splitOptionIndex by rememberSaveable(block.id) {
+                    var splitOptionIndex by remember(block.id, defaultBreakPresetIndex) {
                         mutableIntStateOf(defaultBreakPresetIndex.coerceIn(FocusSplitOptions.indices))
                     }
                     FocusSplitSelector(
@@ -901,7 +901,7 @@ private fun StatusChipItem(
                     MaterialTheme.colorScheme.surfaceContainerHigh
                 }
             )
-            .chronosHapticClick(onClick = onClick)
+            .chronosHapticClick(onClick = onClick, onClickLabel = "Open focus settings", role = Role.Button)
             .padding(horizontal = ChronosSpacing.Compact, vertical = 8.dp)
     ) {
         Icon(

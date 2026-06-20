@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import com.ChronosFlow.VBCR.core.data.model.JournalAttachmentEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -25,6 +26,18 @@ interface JournalAttachmentDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entry: JournalAttachmentEntity)
+
+    /**
+     * Atomically reads the current attachment count for [entryId] and inserts [attachment] with
+     * [JournalAttachmentEntity.sortOrder] set to that count. Wrapping both reads in a single
+     * [Transaction] prevents two concurrent [addAttachment] calls from observing the same count and
+     * writing duplicate sort-order values.
+     */
+    @Transaction
+    suspend fun insertAttachmentWithOrder(attachment: JournalAttachmentEntity, entryId: String) {
+        val count = countForEntry(entryId)
+        insert(attachment.copy(sortOrder = count))
+    }
 
     @Query("DELETE FROM journal_attachments WHERE id = :id")
     suspend fun deleteById(id: String)

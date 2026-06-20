@@ -58,7 +58,7 @@ class WearThemeBridge @Inject constructor(
                         WearThemeContract.KEY_PALETTE,
                         dynamicDarkColorScheme(context).toWearThemePalette()
                     )
-                }.asPutDataRequest().setUrgent()
+                }.asPutDataRequest()
                 dataClient.putDataItem(request)
             } else {
                 dataClient.deleteDataItems(

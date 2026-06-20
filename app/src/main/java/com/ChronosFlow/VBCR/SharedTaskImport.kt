@@ -35,13 +35,17 @@ fun parseSharedTaskImport(intent: Intent?, contentResolver: ContentResolver?): N
     return sharedTaskLaunchFromLines(lines)
 }
 
-private fun readSharedText(contentResolver: ContentResolver, uri: Uri): String? =
-    runCatching {
+private fun readSharedText(contentResolver: ContentResolver, uri: Uri): String? {
+    // Only accept content:// URIs from the system share machinery. file:// and other
+    // schemes are rejected to prevent path-traversal / file exfiltration attacks.
+    if (uri.scheme != "content") return null
+    return runCatching {
         contentResolver.openInputStream(uri)?.use { stream ->
             // Bounded read: only the prefix we'd ever parse, so a huge/binary file can't OOM us.
             String(stream.readBounded(SHARED_IMPORT_MAX_CHARS), Charsets.UTF_8)
         }
     }.getOrNull()
+}
 
 /** Reads at most [max] bytes from the stream (minSdk-safe; avoids API 33's readNBytes). */
 private fun InputStream.readBounded(max: Int): ByteArray {

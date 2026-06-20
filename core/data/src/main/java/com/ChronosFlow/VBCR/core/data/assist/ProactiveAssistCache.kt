@@ -39,6 +39,13 @@ class ProactiveAssistCache @Inject constructor(
         preferences.putString(KEY_DAILY_COACH_NEXT_STEP, nextStep)
         preferences.putString(KEY_DAILY_COACH_SOURCE, source)
         _dailyCoachWrites.tryEmit(date)
+
+        // Purge any stale date-keyed entries that are not today and not the fixed focus-block key.
+        val today = LocalDate.now().toString()
+        preferences.getAll().keys
+            .filter { it != today && it != KEY_FOCUS_NEXT_BLOCK_ID }
+            .filter { it.matches(Regex("""\d{4}-\d{2}-\d{2}""")) }
+            .forEach { preferences.remove(it) }
     }
 
     fun dailyCoachLine(date: LocalDate): CachedAssistLine? {

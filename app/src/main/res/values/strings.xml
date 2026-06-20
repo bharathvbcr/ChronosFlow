@@ -12,4 +12,6 @@
     <string name="widget_desc_tasks">Most urgent open tasks with one-tap complete.</string>
     <string name="widget_desc_habits">Today\'s habits with streaks and one-tap check-off.</string>
     <string name="widget_desc_medication">Today\'s doses with reminder times and a Taken button.</string>
+    <string name="app_lock_title">ChronosFlow is locked</string>
+    <string name="app_lock_subtitle">Use your fingerprint, face, or device PIN to continue</string>
 </resources>

@@ -113,6 +113,9 @@ private val planDateChipDateFormatter = DateTimeFormatter.ofPattern("MMM d", Loc
 private val planDateChipFullFormatter = DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy", Locale.getDefault())
 private val planCalendarMonthFormatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())
 private val planCalendarWeekdayLabels = listOf("S", "M", "T", "W", "T", "F", "S")
+private val planCalendarWeekdayFullNames = listOf(
+    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
+)
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -563,10 +566,10 @@ private fun PlanMonthCalendar(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
         ) {
-            planCalendarWeekdayLabels.forEach { label ->
+            planCalendarWeekdayLabels.forEachIndexed { index, label ->
                 Text(
                     text = label,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).semantics { contentDescription = planCalendarWeekdayFullNames[index] },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold

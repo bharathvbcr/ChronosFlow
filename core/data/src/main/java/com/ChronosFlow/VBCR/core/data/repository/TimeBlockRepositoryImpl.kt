@@ -16,8 +16,13 @@ class TimeBlockRepositoryImpl @Inject constructor(
     private val timeBlockDao: TimeBlockDao,
     private val syncMutationNotifier: SyncMutationNotifier = NoOpSyncMutationNotifier
 ) : TimeBlockRepository {
-    override fun getTimeBlocksByDate(date: LocalDate): Flow<List<TimeBlock>> = 
+    override fun getTimeBlocksByDate(date: LocalDate): Flow<List<TimeBlock>> =
         timeBlockDao.getTimeBlocksByDate(date).map { entities ->
+            entities.map { it.toDomain() }
+        }
+
+    override fun getTimeBlocksByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<TimeBlock>> =
+        timeBlockDao.getTimeBlocksByDateRange(startDate, endDate).map { entities ->
             entities.map { it.toDomain() }
         }
 

@@ -75,17 +75,27 @@ class WearFocusBridge @Inject constructor(
 ) {
     private val dataClient by lazy { Wearable.getDataClient(context) }
 
-    fun publishRunning(title: String, plannedEndAtMillis: Long, totalSeconds: Int) =
-        publish(runningFocusPayload(title, plannedEndAtMillis, totalSeconds))
+    /**
+     * @param isPhaseChange Pass [true] when the session is starting for the first time (a phase
+     *   change). Pass [false] for periodic mid-session tick refreshes — those produce identical
+     *   Data Layer entries anyway (no per-tick value in the payload) so there is no benefit to
+     *   waking the watch radio urgently.
+     */
+    fun publishRunning(
+        title: String,
+        plannedEndAtMillis: Long,
+        totalSeconds: Int,
+        isPhaseChange: Boolean = true
+    ) = publish(runningFocusPayload(title, plannedEndAtMillis, totalSeconds), urgent = isPhaseChange)
 
     fun publishPaused(title: String, timeLeftSeconds: Int, totalSeconds: Int) =
-        publish(pausedFocusPayload(title, timeLeftSeconds, totalSeconds))
+        publish(pausedFocusPayload(title, timeLeftSeconds, totalSeconds), urgent = true)
 
-    fun clear() = publish(clearedFocusPayload())
+    fun clear() = publish(clearedFocusPayload(), urgent = true)
 
-    private fun publish(payload: WearFocusPayload) {
+    private fun publish(payload: WearFocusPayload, urgent: Boolean) {
         runCatching {
-            val request = PutDataMapRequest.create(WearFocusContract.FOCUS_PATH).apply {
+            val putRequest = PutDataMapRequest.create(WearFocusContract.FOCUS_PATH).apply {
                 payload.toDataEntries().forEach { (key, value) ->
                     when (value) {
                         is Boolean -> dataMap.putBoolean(key, value)
@@ -94,7 +104,8 @@ class WearFocusBridge @Inject constructor(
                         is String -> dataMap.putString(key, value)
                     }
                 }
-            }.asPutDataRequest().setUrgent()
+            }.asPutDataRequest()
+            val request = if (urgent) putRequest.setUrgent() else putRequest
             dataClient.putDataItem(request)
         }
     }

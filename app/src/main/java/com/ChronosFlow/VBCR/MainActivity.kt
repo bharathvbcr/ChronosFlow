@@ -39,6 +39,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import com.ChronosFlow.VBCR.navigation.rememberChronosNavigationState
 import com.ChronosFlow.VBCR.core.ai.genai.GenAiAssistCopy
 import com.ChronosFlow.VBCR.core.ui.components.CommandPaletteDialog
@@ -470,8 +471,8 @@ private fun ChronosFlowApp(
         exit = appLockTransition.exit
     ) {
         AppLockOverlay(
-            title = "ChronosFlow is locked",
-            subtitle = "Use your fingerprint, face, or device PIN to continue",
+            title = stringResource(R.string.app_lock_title),
+            subtitle = stringResource(R.string.app_lock_subtitle),
             canAuthenticate = appLockState.canAuthenticate,
             errorMessage = appLockState.authError,
             onUnlock = { appLockViewModel.unlockApp(activity) }

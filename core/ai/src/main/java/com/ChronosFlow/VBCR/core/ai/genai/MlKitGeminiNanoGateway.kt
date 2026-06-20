@@ -36,14 +36,14 @@ class MlKitGeminiNanoGateway @Inject constructor(
     internal var nowMs: () -> Long = { System.currentTimeMillis() }
 
     /** Epoch ms of the last check that returned [NanoModelStatus.AVAILABLE], or null when not cached. */
-    private var availableCheckedAtMs: Long? = null
+    @Volatile private var availableCheckedAtMs: Long? = null
 
     /**
      * Epoch ms until which a fresh download attempt is suppressed after one failed. A doomed download
      * (offline, no space) can take up to [DOWNLOAD_TIMEOUT_MS]; without this, every request would
      * re-pay that wait instead of failing fast and letting the caller fall back. Null = no cooldown.
      */
-    private var downloadCooldownUntilMs: Long? = null
+    @Volatile private var downloadCooldownUntilMs: Long? = null
 
     /**
      * Replay cache for completed on-device generations, keyed by (profile, prompt). Repeating the

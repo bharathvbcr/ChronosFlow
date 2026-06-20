@@ -40,6 +40,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -505,20 +506,16 @@ class HabitViewModelTest {
                     source = RoutineAssistSource.LOCAL
                 )
             )
-        coEvery { habitReminderScheduler.cancelUpcomingHabitReminders(any()) } returns Unit
-        every { getActiveHabitsUseCase() } returns MutableStateFlow(
-            listOf(
-                habit(
-                    id = "h-repair",
-                    title = "Repair this",
-                    windowEndMinute = 1,
-                    lastCompletedDate = LocalDate.of(2026, 5, 29)
-                )
+
+        val habits = listOf(
+            habit(
+                id = "h-repair",
+                title = "Repair this",
+                windowEndMinute = 1,
+                lastCompletedDate = LocalDate.of(2026, 5, 29)
             )
         )
-
-        viewModel = createViewModel()
-        runCurrent()
+        viewModel.refreshRepairSuggestions(habits)
 
         assertEquals(1, viewModel.repairSuggestions.value.size)
         assertEquals("h-repair", viewModel.repairSuggestions.value.single().habit.id)

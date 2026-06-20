@@ -32,7 +32,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 internal const val APPLICATION_STARTUP_WORK_DEFER_MILLIS = 60_000L
-internal const val NOTIFICATION_CHANNEL_SETUP_DEFER_MILLIS = 5_000L
 
 @HiltAndroidApp
 class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Configuration.Provider {
@@ -45,7 +44,7 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
     @Inject lateinit var calendarBackgroundSyncManager: Provider<CalendarBackgroundSyncManager>
     @Inject lateinit var proactiveAssistForegroundRefresher: Provider<ProactiveAssistForegroundRefresher>
 
-    private val startupHandler = Handler(Looper.getMainLooper())
+    private val startupHandler = Handler(Looper.getMainLooper(), null)
 
     // Long-lived scope for process-wide background work that must outlive any single screen.
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -65,15 +64,8 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
         // Seed the UI-settings cache once so Compose reads never block on DataStore (no startup flash).
         applicationScope.launch { ChronosUiSettingsCache.keepFresh(this@ChronosApplication) }
         WidgetBackgroundSync.register(this)
-        scheduleDeferredNotificationChannelSetup()
+        ensureNotificationChannels()   // synchronous, idempotent
         scheduleDeferredStartupWork()
-    }
-
-    private fun scheduleDeferredNotificationChannelSetup() {
-        startupHandler.postDelayed(
-            ::ensureNotificationChannels,
-            NOTIFICATION_CHANNEL_SETUP_DEFER_MILLIS
-        )
     }
 
     private fun ensureNotificationChannels() {

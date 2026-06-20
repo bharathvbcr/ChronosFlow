@@ -22,6 +22,9 @@ class SleepTrackRepositoryImpl @Inject constructor(
     override suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<SleepTrack> =
         sleepTrackDao.getForDateRange(start, end).map { it.toDomain() }
 
+    override suspend fun getByDate(date: LocalDate): SleepTrack? =
+        sleepTrackDao.getByDate(date)?.toDomain()
+
     override suspend fun upsert(track: SleepTrack) = sleepTrackDao.upsert(track.toEntity())
 
     override suspend fun delete(id: String) = sleepTrackDao.deleteById(id)

@@ -9,10 +9,12 @@ import android.database.MatrixCursor
 import android.net.Uri
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.ChronosFlow.VBCR.core.data.ChronosDatabase
+import com.ChronosFlow.VBCR.core.data.datastore.ChronosPreferencesDataSource
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.runBlocking
 
 /**
  * Read-only provider exposing ChronosFlow's shareable data to DevTime. Authority is
@@ -32,14 +34,20 @@ class InteropProvider : ContentProvider() {
     @InstallIn(SingletonComponent::class)
     interface InteropEntryPoint {
         fun chronosDatabase(): ChronosDatabase
+        fun chronosPreferencesDataSource(): ChronosPreferencesDataSource
     }
 
     private fun database(ctx: Context): ChronosDatabase =
         EntryPointAccessors.fromApplication(ctx.applicationContext, InteropEntryPoint::class.java)
             .chronosDatabase()
 
+    private fun preferencesDataSource(ctx: Context): ChronosPreferencesDataSource =
+        EntryPointAccessors.fromApplication(ctx.applicationContext, InteropEntryPoint::class.java)
+            .chronosPreferencesDataSource()
+
     override fun onCreate(): Boolean {
-        val authority = "${context!!.packageName}.share"
+        val ctx = context ?: return false
+        val authority = "${ctx.packageName}.share"
         matcher.addURI(authority, InteropContract.PATH_TASKS, CODE_TASKS)
         matcher.addURI(authority, InteropContract.PATH_EVENTS, CODE_EVENTS)
         matcher.addURI(authority, InteropContract.PATH_HABITS, CODE_HABITS)
@@ -64,7 +72,7 @@ class InteropProvider : ContentProvider() {
             CODE_TASKS -> tasksCursor(db)
             CODE_EVENTS -> eventsCursor(db)
             CODE_HABITS -> habitsCursor(db)
-            CODE_MEDS -> medicationsCursor(db)
+            CODE_MEDS -> medicationsCursor(db, ctx)
             CODE_GOALS -> goalsCursor(db)
             // Types ChronosFlow does not own — empty cursors keep peers' code uniform.
             CODE_ZONES -> MatrixCursor(InteropContract.ZONE_COLUMNS)
@@ -138,7 +146,11 @@ class InteropProvider : ContentProvider() {
         return out
     }
 
-    private fun medicationsCursor(db: SupportSQLiteDatabase): Cursor {
+    private fun medicationsCursor(db: SupportSQLiteDatabase, ctx: Context): Cursor {
+        // Read preference synchronously (we're already on a background thread in ContentProvider)
+        val sharingEnabled = runBlocking { preferencesDataSource(ctx).isMedicationSharingEnabled() }
+        if (!sharingEnabled) return MatrixCursor(InteropContract.MEDICATION_COLUMNS)
+
         val out = MatrixCursor(InteropContract.MEDICATION_COLUMNS)
         db.query("SELECT id, name, dosage, unit, isActive FROM medication_plans").use { c ->
             while (c.moveToNext()) {

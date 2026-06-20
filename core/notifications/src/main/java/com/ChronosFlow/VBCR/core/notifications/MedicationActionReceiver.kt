@@ -4,6 +4,7 @@ import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.ChronosFlow.VBCR.core.domain.model.AlarmDeliveryState
 import com.ChronosFlow.VBCR.core.domain.model.AlarmReliability
 import com.ChronosFlow.VBCR.core.domain.model.AlarmRequest
@@ -19,8 +20,11 @@ import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private const val TAG = "MedicationActionReceiver"
 
 @AndroidEntryPoint
 class MedicationActionReceiver : BroadcastReceiver() {
@@ -41,7 +45,8 @@ class MedicationActionReceiver : BroadcastReceiver() {
         val notificationId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, -1)
 
         val pendingResult = goAsync()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        scope.launch {
             try {
                 val plan = medicationRepository.getMedicationPlanById(medicationPlanId)
                 if (plan != null) {
@@ -131,11 +136,12 @@ class MedicationActionReceiver : BroadcastReceiver() {
                     alarmScheduler.cancelAlarm(requestId)
                 }
             } catch (ex: Exception) {
-                ex.printStackTrace()
+                Log.e(TAG, "Action failed: ${ex.message}", ex)
             } finally {
                 withContext(Dispatchers.Main) {
                     pendingResult.finish()
                 }
+                scope.cancel()
             }
         }
     }

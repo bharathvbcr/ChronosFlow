@@ -9,7 +9,7 @@ import com.ChronosFlow.VBCR.core.domain.model.ReviewInsight
 import com.ChronosFlow.VBCR.core.domain.model.ReviewInsightSeverity
 import com.ChronosFlow.VBCR.core.domain.model.ReviewInsightType
 import io.mockk.coEvery
-import io.mockk.coVerifyOrder
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
@@ -89,21 +89,21 @@ class ReviewRepositoryImplTest {
                 )
             )
         )
-        coEvery { reviewDao.insertDailyReview(any()) } returns Unit
-        coEvery { reviewDao.deleteReviewInsights(date) } returns Unit
-        coEvery { reviewDao.insertReviewInsights(any()) } returns Unit
+        coEvery { reviewDao.saveDailyReviewTransactional(any(), any(), any()) } returns Unit
 
         repository.saveDailyReview(summary)
 
-        coVerifyOrder {
-            reviewDao.insertDailyReview(match { it.date == date && it.plannedMinutes == 180 })
-            reviewDao.deleteReviewInsights(date)
-            reviewDao.insertReviewInsights(match { rows ->
-                rows.size == 1 &&
-                    rows.first().id == "insight-1" &&
-                    rows.first().type == ReviewInsightType.DRIFT.name &&
-                    rows.first().severity == ReviewInsightSeverity.WARNING.name
-            })
+        coVerify {
+            reviewDao.saveDailyReviewTransactional(
+                review = match { it.date == date && it.plannedMinutes == 180 },
+                date = date,
+                insights = match { rows ->
+                    rows.size == 1 &&
+                        rows.first().id == "insight-1" &&
+                        rows.first().type == ReviewInsightType.DRIFT.name &&
+                        rows.first().severity == ReviewInsightSeverity.WARNING.name
+                }
+            )
         }
     }
 }

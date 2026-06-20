@@ -1,6 +1,8 @@
 package com.ChronosFlow.VBCR.core.data.repository
 
 import app.cash.turbine.test
+import androidx.room.withTransaction
+import com.ChronosFlow.VBCR.core.data.ChronosDatabase
 import com.ChronosFlow.VBCR.core.data.dao.HabitDao
 import com.ChronosFlow.VBCR.core.data.dao.HabitEventDao
 import com.ChronosFlow.VBCR.core.data.dao.HabitScheduleDao
@@ -13,25 +15,44 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.coVerify
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Before
 import org.junit.Test
 import java.time.Instant
 import java.time.LocalDate
 
 class HabitRepositoryImplTest {
+    private val db: ChronosDatabase = mockk()
     private val habitDao: HabitDao = mockk()
     private val habitScheduleDao: HabitScheduleDao = mockk()
     private val habitEventDao: HabitEventDao = mockk()
-    private val repository = HabitRepositoryImpl(habitDao, habitScheduleDao, habitEventDao)
+    private val repository = HabitRepositoryImpl(db, habitDao, habitScheduleDao, habitEventDao)
+
+    @Before
+    fun setUp() {
+        mockkStatic("androidx.room.RoomDatabaseKt")
+        coEvery { db.withTransaction<Unit>(any<suspend () -> Unit>()) } coAnswers {
+            @Suppress("UNCHECKED_CAST")
+            (it.invocation.args[1] as suspend () -> Unit)()
+        }
+    }
+
+    @After
+    fun tearDown() {
+        unmockkStatic("androidx.room.RoomDatabaseKt")
+    }
 
     @Test
     fun `observe habits maps each domain habit with legacy default schedule`() = runTest {
         every { habitDao.observeHabits() } returns flowOf(listOf(habitEntity()))
         every { habitScheduleDao.observeAllSchedules() } returns flowOf(emptyList())
-        every { habitEventDao.observeAllEvents() } returns flowOf(emptyList())
+        every { habitEventDao.getRecentEventsForHabit("habit-1", 10) } returns flowOf(emptyList())
 
         repository.observeHabits().test {
             val habits = awaitItem()

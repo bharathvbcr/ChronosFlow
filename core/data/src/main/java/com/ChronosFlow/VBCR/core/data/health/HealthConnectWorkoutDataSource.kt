@@ -42,7 +42,9 @@ class HealthConnectWorkoutDataSource @Inject constructor(
     val requiredPermissions: Set<String> =
         setOf(HealthPermission.getReadPermission(ExerciseSessionRecord::class))
 
-    /** Read plus background read, so a future periodic import can pull while the app is backgrounded. */
+    // TODO: HealthConnectWorkoutSyncWorker not yet implemented.
+    // PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND is pre-declared here for the planned
+    // background import worker. Remove from requestPermissions until the worker is added.
     val requestPermissions: Set<String> =
         requiredPermissions + HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
 

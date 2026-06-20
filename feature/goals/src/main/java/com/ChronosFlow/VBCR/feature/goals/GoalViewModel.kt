@@ -13,6 +13,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -33,6 +34,10 @@ class GoalViewModel @Inject constructor(
 
     // The goal whose detail sheet is open; null collapses the linked-work stream to empty.
     private val detailGoalId = MutableStateFlow<String?>(null)
+
+    private val _errorState = MutableStateFlow<String?>(null)
+    val errorState: StateFlow<String?> = _errorState.asStateFlow()
+    fun clearError() { _errorState.value = null }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val detailLinkedWork: StateFlow<GoalLinkedWork> = detailGoalId
@@ -58,19 +63,21 @@ class GoalViewModel @Inject constructor(
     ) {
         if (title.isBlank()) return
         viewModelScope.launch {
-            goalRepository.saveGoal(
-                Goal(
-                    id = UUID.randomUUID().toString(),
-                    title = title.trim(),
-                    description = description?.trim()?.ifBlank { null },
-                    category = category.trim().ifBlank { DEFAULT_CATEGORY },
-                    targetValue = targetValue.coerceAtLeast(1),
-                    startDate = LocalDate.now(),
-                    targetDate = targetDate,
-                    progressValue = 0,
-                    isCompleted = false
+            runCatching {
+                goalRepository.saveGoal(
+                    Goal(
+                        id = UUID.randomUUID().toString(),
+                        title = title.trim(),
+                        description = description?.trim()?.ifBlank { null },
+                        category = category.trim().ifBlank { DEFAULT_CATEGORY },
+                        targetValue = targetValue.coerceAtLeast(1),
+                        startDate = LocalDate.now(),
+                        targetDate = targetDate,
+                        progressValue = 0,
+                        isCompleted = false
+                    )
                 )
-            )
+            }.onFailure { e -> _errorState.value = e.message }
         }
     }
 
@@ -84,35 +91,43 @@ class GoalViewModel @Inject constructor(
     ) {
         if (title.isBlank()) return
         viewModelScope.launch {
-            goalRepository.saveGoal(
-                original.copy(
-                    title = title.trim(),
-                    description = description?.trim()?.ifBlank { null },
-                    category = category.trim().ifBlank { DEFAULT_CATEGORY },
-                    targetValue = targetValue.coerceAtLeast(1),
-                    targetDate = targetDate
+            runCatching {
+                goalRepository.saveGoal(
+                    original.copy(
+                        title = title.trim(),
+                        description = description?.trim()?.ifBlank { null },
+                        category = category.trim().ifBlank { DEFAULT_CATEGORY },
+                        targetValue = targetValue.coerceAtLeast(1),
+                        targetDate = targetDate
+                    )
                 )
-            )
+            }.onFailure { e -> _errorState.value = e.message }
         }
     }
 
     /** Bumps the manual progress contribution by [delta], clamped to 0..target. */
     fun adjustProgress(goal: Goal, delta: Int) {
         viewModelScope.launch {
-            val next = (goal.progressValue + delta).coerceIn(0, goal.targetValue)
-            goalRepository.saveGoal(goal.copy(progressValue = next))
+            runCatching {
+                val next = (goal.progressValue + delta).coerceIn(0, goal.targetValue)
+                goalRepository.saveGoal(goal.copy(progressValue = next))
+            }.onFailure { e -> _errorState.value = e.message }
         }
     }
 
     fun toggleComplete(goal: Goal) {
         viewModelScope.launch {
-            goalRepository.saveGoal(goal.copy(isCompleted = !goal.isCompleted))
+            runCatching {
+                goalRepository.saveGoal(goal.copy(isCompleted = !goal.isCompleted))
+            }.onFailure { e -> _errorState.value = e.message }
         }
     }
 
     fun deleteGoal(goal: Goal) {
         viewModelScope.launch {
-            goalRepository.deleteGoal(goal)
+            runCatching {
+                goalRepository.deleteGoal(goal)
+            }.onFailure { e -> _errorState.value = e.message }
         }
     }
 

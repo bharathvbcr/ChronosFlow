@@ -18,7 +18,8 @@ class AppLockManager @Inject constructor(
     private val _appLockState = MutableStateFlow(initialAppLockState())
     val appLockState: StateFlow<AppLockState> = _appLockState.asStateFlow()
 
-    private val unlockedSensitiveAreas = mutableSetOf<SensitiveArea>()
+    private val sensitiveAreaUnlockTimes = mutableMapOf<SensitiveArea, Long>()
+    private val unlockedSensitiveAreas: Set<SensitiveArea> get() = sensitiveAreaUnlockTimes.keys
     private val _sensitiveSession = MutableStateFlow(0)
     val sensitiveSession: StateFlow<Int> = _sensitiveSession.asStateFlow()
 
@@ -28,7 +29,13 @@ class AppLockManager @Inject constructor(
     fun requiresSensitiveAuth(area: SensitiveArea): Boolean {
         if (!preferences.requireAuthFor(area)) return false
         if (_appLockState.value == AppLockState.LOCKED) return true
-        return area !in unlockedSensitiveAreas
+        val unlockedAt = sensitiveAreaUnlockTimes[area] ?: return true
+        if (System.currentTimeMillis() - unlockedAt > SENSITIVE_SESSION_TIMEOUT_MS) {
+            sensitiveAreaUnlockTimes.remove(area)
+            bumpSensitiveSession()
+            return true
+        }
+        return false
     }
 
     fun onAppForegrounded(fromBackground: Boolean) {
@@ -58,12 +65,12 @@ class AppLockManager @Inject constructor(
     }
 
     fun unlockSensitiveArea(area: SensitiveArea) {
-        unlockedSensitiveAreas.add(area)
+        sensitiveAreaUnlockTimes[area] = System.currentTimeMillis()
         bumpSensitiveSession()
     }
 
     fun clearSensitiveUnlocks() {
-        unlockedSensitiveAreas.clear()
+        sensitiveAreaUnlockTimes.clear()
         bumpSensitiveSession()
     }
 
@@ -72,9 +79,14 @@ class AppLockManager @Inject constructor(
     }
 
     private fun unlockAllSensitiveAreas() {
-        SensitiveArea.entries.forEach { unlockedSensitiveAreas.add(it) }
+        val now = System.currentTimeMillis()
+        SensitiveArea.entries.forEach { sensitiveAreaUnlockTimes[it] = now }
     }
 
     private fun initialAppLockState(): AppLockState =
         if (preferences.isAppLockEnabled()) AppLockState.LOCKED else AppLockState.UNLOCKED
+
+    private companion object {
+        const val SENSITIVE_SESSION_TIMEOUT_MS = 5 * 60 * 1000L
+    }
 }

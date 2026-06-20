@@ -12,7 +12,7 @@ class PrivacyPreferences @Inject constructor(
     // box. Users opt into redaction via the Settings → Privacy & Sync toggle (which calls the setter
     // below); once set, the stored choice is honoured.
     fun redactSensitiveNotifications(): Boolean =
-        preferences.getBoolean(KEY_REDACT_NOTIFICATIONS, defaultValue = false)
+        preferences.getBoolean(KEY_REDACT_NOTIFICATIONS, defaultValue = true)
 
     fun setRedactSensitiveNotifications(enabled: Boolean) {
         preferences.putBoolean(KEY_REDACT_NOTIFICATIONS, enabled)
@@ -32,9 +32,21 @@ class PrivacyPreferences @Inject constructor(
         preferences.putBoolean(KEY_REDACT_COMMAND_SEARCH, enabled)
     }
 
+    /**
+     * Whether medication names may be shared with the DevTime companion app via InteropProvider.
+     * Defaults to false (opt-in) — medication data is never shared without explicit user consent.
+     */
+    fun isMedicationSharingEnabled(): Boolean =
+        preferences.getBoolean(KEY_INTEROP_SHARING_MEDICATIONS, defaultValue = false)
+
+    fun setMedicationSharingEnabled(enabled: Boolean) {
+        preferences.putBoolean(KEY_INTEROP_SHARING_MEDICATIONS, enabled)
+    }
+
     companion object {
         const val KEY_REDACT_NOTIFICATIONS = "privacy_redact_notifications"
         const val KEY_REDACT_WIDGET_MEDICATION = "privacy_redact_widget_medication"
         const val KEY_REDACT_COMMAND_SEARCH = "privacy_redact_command_search"
+        const val KEY_INTEROP_SHARING_MEDICATIONS = "interop.sharing.medications.enabled"
     }
 }

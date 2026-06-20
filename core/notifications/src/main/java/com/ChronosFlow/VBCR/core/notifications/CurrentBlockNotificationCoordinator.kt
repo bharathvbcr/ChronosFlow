@@ -15,6 +15,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
@@ -288,10 +289,15 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
             .toInstant()
             .toEpochMilli()
         val pendingIntent = boundaryPendingIntent(PendingIntent.FLAG_UPDATE_CURRENT) ?: return
-        // Inexact on purpose (OS-batched, battery-friendly): a passive status notification tolerates
-        // a delivery window, and progress stays correct because it is time-derived at render. The
-        // periodic mid-block wake is the same inexact alarm rescheduled — not a ticking service.
-        alarmManager?.set(AlarmManager.RTC, triggerAt, pendingIntent)
+        // RTC_WAKEUP is required for block-boundary transitions: under Doze, plain RTC alarms are
+        // deferred to the next maintenance window, leaving the live-now notification showing the
+        // wrong block name. A 2-minute window gives the OS room to batch while still ensuring the
+        // alarm fires promptly enough for the live notification surface to transition correctly.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            alarmManager?.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+        } else {
+            alarmManager?.setWindow(AlarmManager.RTC_WAKEUP, triggerAt, 2 * 60 * 1000L, pendingIntent)
+        }
     }
 
     private fun boundaryPendingIntent(creationFlag: Int): PendingIntent? =
@@ -337,7 +343,7 @@ class CurrentBlockBoundaryReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 coordinator.refresh()
             } catch (ex: Exception) {

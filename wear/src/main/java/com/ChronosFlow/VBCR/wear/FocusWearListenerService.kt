@@ -15,6 +15,11 @@ import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.WearableListenerService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * Mirrors the phone's active focus session onto the watch as an [OngoingActivity] live update.
@@ -26,39 +31,76 @@ import com.google.android.gms.wearable.WearableListenerService
  */
 class FocusWearListenerService : WearableListenerService() {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    private sealed class FocusEventSnapshot {
+        object Deleted : FocusEventSnapshot()
+        data class Changed(
+            val active: Boolean,
+            val paused: Boolean,
+            val title: String,
+            val plannedEndAtMillis: Long,
+            val pausedTimeLeftSeconds: Int,
+            val totalSeconds: Int
+        ) : FocusEventSnapshot()
+    }
+
     override fun onDataChanged(dataEvents: DataEventBuffer) {
-        for (event in dataEvents) {
-            if (event.dataItem.uri.path != WearFocusContract.FOCUS_PATH) continue
-            when (event.type) {
-                DataEvent.TYPE_DELETED -> clearFocusState()
-                DataEvent.TYPE_CHANGED -> {
-                    val map = DataMapItem.fromDataItem(event.dataItem).dataMap
-                    if (!map.getBoolean(WearFocusContract.KEY_ACTIVE, false)) {
-                        clearFocusState()
-                    } else {
-                        val paused = map.getBoolean(WearFocusContract.KEY_PAUSED, false)
-                        val title = map.getString(WearFocusContract.KEY_TITLE)
-                            ?.takeIf { it.isNotBlank() } ?: DEFAULT_TITLE
-                        val plannedEndAtMillis = map.getLong(WearFocusContract.KEY_PLANNED_END_AT_MILLIS, 0L)
-                        val pausedTimeLeftSeconds = map.getInt(WearFocusContract.KEY_PAUSED_TIME_LEFT_SECONDS, 0)
-                        showFocusOngoingActivity(
-                            paused = paused,
-                            title = title,
-                            plannedEndAtMillis = plannedEndAtMillis,
-                            pausedTimeLeftSeconds = pausedTimeLeftSeconds
+        // Snapshot all DataMap values synchronously before the buffer cursor is invalidated
+        // when onDataChanged() returns. Any DataMap read after that point is undefined behaviour.
+        val snapshots = dataEvents
+            .filter { it.dataItem.uri.path == WearFocusContract.FOCUS_PATH }
+            .map { event ->
+                when (event.type) {
+                    DataEvent.TYPE_DELETED -> FocusEventSnapshot.Deleted
+                    else -> {
+                        val map = DataMapItem.fromDataItem(event.dataItem).dataMap
+                        FocusEventSnapshot.Changed(
+                            active = map.getBoolean(WearFocusContract.KEY_ACTIVE, false),
+                            paused = map.getBoolean(WearFocusContract.KEY_PAUSED, false),
+                            title = map.getString(WearFocusContract.KEY_TITLE)
+                                ?.takeIf { it.isNotBlank() } ?: DEFAULT_TITLE,
+                            plannedEndAtMillis = map.getLong(WearFocusContract.KEY_PLANNED_END_AT_MILLIS, 0L),
+                            pausedTimeLeftSeconds = map.getInt(WearFocusContract.KEY_PAUSED_TIME_LEFT_SECONDS, 0),
+                            totalSeconds = map.getInt(WearFocusContract.KEY_TOTAL_SECONDS, 0)
                         )
-                        WearFocusStateStore.write(
-                            this,
-                            WearFocusStateStore.FocusState(
-                                active = true,
-                                paused = paused,
-                                title = title,
-                                plannedEndAtMillis = plannedEndAtMillis,
-                                pausedTimeLeftSeconds = pausedTimeLeftSeconds,
-                                totalSeconds = map.getInt(WearFocusContract.KEY_TOTAL_SECONDS, 0)
+                    }
+                }
+            }
+            .toList()
+
+        scope.launch {
+            for (snapshot in snapshots) {
+                when (snapshot) {
+                    is FocusEventSnapshot.Deleted -> clearFocusState()
+                    is FocusEventSnapshot.Changed -> {
+                        if (!snapshot.active) {
+                            clearFocusState()
+                        } else {
+                            showFocusOngoingActivity(
+                                paused = snapshot.paused,
+                                title = snapshot.title,
+                                plannedEndAtMillis = snapshot.plannedEndAtMillis,
+                                pausedTimeLeftSeconds = snapshot.pausedTimeLeftSeconds
                             )
-                        )
-                        requestFocusTileUpdate()
+                            WearFocusStateStore.write(
+                                this@FocusWearListenerService,
+                                WearFocusStateStore.FocusState(
+                                    active = true,
+                                    paused = snapshot.paused,
+                                    title = snapshot.title,
+                                    plannedEndAtMillis = snapshot.plannedEndAtMillis,
+                                    pausedTimeLeftSeconds = snapshot.pausedTimeLeftSeconds,
+                                    totalSeconds = snapshot.totalSeconds
+                                )
+                            )
+                            requestFocusTileUpdate()
+                        }
                     }
                 }
             }

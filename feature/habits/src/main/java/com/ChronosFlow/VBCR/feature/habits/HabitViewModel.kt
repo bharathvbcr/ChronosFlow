@@ -32,8 +32,10 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.util.UUID
 import javax.inject.Inject
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -78,13 +80,6 @@ class HabitViewModel @Inject constructor(
     val activeHabits = getActiveHabitsUseCase()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val streaks = observeHabitStreaksUseCase()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    /** Per-day completed/missed counts over the trailing 14 days, oldest first. */
-    val completionTrend = observeHabitCompletionTrendUseCase(windowDays = 14)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
     private val _repairSuggestions = MutableStateFlow<List<HabitRepairSuggestion>>(emptyList())
     val repairSuggestions = _repairSuggestions.asStateFlow()
 
@@ -98,6 +93,21 @@ class HabitViewModel @Inject constructor(
             }
         }
     }
+
+    /** Emits the current date and refreshes every minute so midnight rollovers are picked up. */
+    val today: StateFlow<LocalDate> = flow {
+        while (true) {
+            emit(LocalDate.now())
+            delay(60_000L)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LocalDate.now())
+
+    val streaks = observeHabitStreaksUseCase()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Per-day completed/missed counts over the trailing 14 days, oldest first. */
+    val completionTrend = observeHabitCompletionTrendUseCase(windowDays = 14)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _recentHistoryTemplateIds = MutableStateFlow(plannerPreferencesRepository.getRecentHabitTemplateIds())
     val recentHistoryTemplateIds = _recentHistoryTemplateIds.asStateFlow()
@@ -394,7 +404,7 @@ class HabitViewModel @Inject constructor(
         _assistState.value = HabitAssistUiState()
     }
 
-    private suspend fun refreshRepairSuggestions(habits: List<Habit>) {
+    internal suspend fun refreshRepairSuggestions(habits: List<Habit>) {
         _repairAssistSnapshot.value = runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }.getOrNull()
         val today = LocalDate.now()
         val results = habitRepairAssistPlanner.suggestRepairs(habits, today, currentMinuteOfDay())

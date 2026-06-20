@@ -1,5 +1,7 @@
 package com.ChronosFlow.VBCR.core.data.repository
 
+import androidx.room.withTransaction
+import com.ChronosFlow.VBCR.core.data.ChronosDatabase
 import com.ChronosFlow.VBCR.core.data.dao.HabitEventDao
 import com.ChronosFlow.VBCR.core.data.dao.HabitDao
 import com.ChronosFlow.VBCR.core.data.dao.HabitScheduleDao
@@ -14,43 +16,53 @@ import com.ChronosFlow.VBCR.core.domain.model.deriveHabitAnalytics
 import com.ChronosFlow.VBCR.core.domain.repository.HabitRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import java.time.Instant
 import javax.inject.Inject
 
 class HabitRepositoryImpl @Inject constructor(
+    private val db: ChronosDatabase,
     private val habitDao: HabitDao,
     private val habitScheduleDao: HabitScheduleDao,
     private val habitEventDao: HabitEventDao
 ) : HabitRepository {
     override fun observeHabits(): Flow<List<Habit>> = combine(
         habitDao.observeHabits(),
-        habitScheduleDao.observeAllSchedules(),
-        habitEventDao.observeAllEvents()
-    ) { habits, schedules, events ->
-        val schedulesByHabit = schedules.associateBy { it.habitId }
-        val eventsByHabit = events.groupBy { it.habitId }
-        habits.map { habitEntity ->
-            val base = habitEntity.toDomain()
-            val habitEvents = eventsByHabit[habitEntity.id].orEmpty().map { it.toDomain() }
-            val analytics = if (habitEvents.isEmpty()) {
-                HabitAnalytics(currentStreak = base.streakCount)
-            } else {
-                deriveHabitAnalytics(habitEvents)
+        habitScheduleDao.observeAllSchedules()
+    ) { habits, schedules -> habits to schedules }
+        .flatMapLatest { (habits, schedules) ->
+            if (habits.isEmpty()) return@flatMapLatest flowOf(emptyList())
+            val schedulesByHabit = schedules.associateBy { it.habitId }
+            // Build one limited-event Flow per habit (10 rows max) and combine them all.
+            val perHabitEventFlows = habits.map { habitEntity ->
+                habitEventDao.getRecentEventsForHabit(habitId = habitEntity.id, limit = 10)
             }
-            base.copy(
-                schedule = schedulesByHabit[habitEntity.id]?.toDomain() ?: buildLegacyHabitSchedule(
-                    habitId = habitEntity.id,
-                    cadence = habitEntity.cadence,
-                    windowStartMinute = habitEntity.windowStartMinute,
-                    windowEndMinute = habitEntity.windowEndMinute,
-                    plannerVisible = habitEntity.isBundled
-                ),
-                recentEvents = habitEvents.sortedByDescending(HabitEvent::recordedAt).take(10),
-                analytics = analytics
-            )
+            combine(perHabitEventFlows) { eventsArrays ->
+                habits.mapIndexed { index, habitEntity ->
+                    val base = habitEntity.toDomain()
+                    val habitEvents = eventsArrays[index].map { it.toDomain() }
+                    val analytics = if (habitEvents.isEmpty()) {
+                        HabitAnalytics(currentStreak = base.streakCount)
+                    } else {
+                        deriveHabitAnalytics(habitEvents)
+                    }
+                    base.copy(
+                        schedule = schedulesByHabit[habitEntity.id]?.toDomain()
+                            ?: buildLegacyHabitSchedule(
+                                habitId = habitEntity.id,
+                                cadence = habitEntity.cadence,
+                                windowStartMinute = habitEntity.windowStartMinute,
+                                windowEndMinute = habitEntity.windowEndMinute,
+                                plannerVisible = habitEntity.isBundled
+                            ),
+                        recentEvents = habitEvents,
+                        analytics = analytics
+                    )
+                }
+            }
         }
-    }
 
     override suspend fun getHabitById(id: String): Habit? {
         val habit = habitDao.getHabitById(id)?.toDomain() ?: return null
@@ -74,16 +86,18 @@ class HabitRepositoryImpl @Inject constructor(
     }
 
     override suspend fun saveHabit(habit: Habit) {
-        habitDao.insertHabit(habit.toEntity())
-        saveHabitSchedule(
-            habit.schedule ?: buildLegacyHabitSchedule(
-                habitId = habit.id,
-                cadence = habit.cadence,
-                windowStartMinute = habit.windowStartMinute,
-                windowEndMinute = habit.windowEndMinute,
-                plannerVisible = habit.isBundled
+        db.withTransaction {
+            habitDao.insertHabit(habit.toEntity())
+            saveHabitSchedule(
+                habit.schedule ?: buildLegacyHabitSchedule(
+                    habitId = habit.id,
+                    cadence = habit.cadence,
+                    windowStartMinute = habit.windowStartMinute,
+                    windowEndMinute = habit.windowEndMinute,
+                    plannerVisible = habit.isBundled
+                )
             )
-        )
+        }
     }
 
     override suspend fun saveHabitSchedule(schedule: HabitSchedule) {

@@ -507,6 +507,10 @@ class DayDialReminderDelegateTest {
             blocks.filter { it.date == date }
         )
 
+        override fun getTimeBlocksByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<TimeBlock>> = flowOf(
+            blocks.filter { !it.date.isBefore(startDate) && !it.date.isAfter(endDate) }
+        )
+
         override suspend fun getTimeBlockById(id: String): TimeBlock? = blocks.firstOrNull { it.id == id }
 
         override suspend fun saveTimeBlock(timeBlock: TimeBlock) = Unit

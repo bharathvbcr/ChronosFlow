@@ -113,7 +113,7 @@ fun HabitScreen(
             value = with(LocalTime.now()) { hour * 60 + minute }
         }
     }
-    val today = remember { LocalDate.now() }
+    val today by viewModel.today.collectAsStateWithLifecycle()
     val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
     val shellBottomInset = LocalChronosShellBottomInset.current
 
@@ -156,7 +156,7 @@ fun HabitScreen(
                 )
             }
             item {
-                val doneToday = activeHabits.count { it.lastCompletedDate == LocalDate.now() }
+                val doneToday = activeHabits.count { it.lastCompletedDate == today }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -292,6 +292,7 @@ fun HabitScreen(
     habitContextTarget?.let { habit ->
         HabitContextActionSheet(
             habit = habit,
+            today = today,
             onDismiss = { habitContextTarget = null },
             onComplete = {
                 viewModel.completeHabit(habit)
@@ -523,7 +524,7 @@ private fun HabitRow(
                     onClick = onComplete,
                     modifier = Modifier
                         .weight(1f)
-                        .semantics { contentDescription = habitCompleteActionLabel(habit) },
+                        .semantics { contentDescription = habitCompleteActionLabel(habit, today) },
                     enabled = !isDone && !isPaused && !skippedToday
                 ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -567,6 +568,7 @@ private fun HabitRow(
 @Composable
 private fun HabitContextActionSheet(
     habit: Habit,
+    today: LocalDate,
     onDismiss: () -> Unit,
     onComplete: () -> Unit,
     onPause: () -> Unit,
@@ -576,9 +578,9 @@ private fun HabitContextActionSheet(
     onEdit: () -> Unit,
     onArchive: () -> Unit
 ) {
-    val isDone = habit.lastCompletedDate == LocalDate.now()
-    val isPaused = habit.schedule?.pausedUntil?.let { !it.isBefore(LocalDate.now()) } == true
-    val skippedToday = habit.schedule?.skipDate == LocalDate.now()
+    val isDone = habit.lastCompletedDate == today
+    val isPaused = habit.schedule?.pausedUntil?.let { !it.isBefore(today) } == true
+    val skippedToday = habit.schedule?.skipDate == today
     ChronosModalBottomSheet(
         onDismissRequest = onDismiss,
         chromeTag = "habit-context-sheet"
@@ -605,10 +607,10 @@ private fun HabitContextActionSheet(
                 enabled = !isDone && !isPaused && !skippedToday,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .semantics { contentDescription = habitCompleteActionLabel(habit) }
+                    .semantics { contentDescription = habitCompleteActionLabel(habit, today) }
             ) {
                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text(habitCompleteActionLabel(habit))
+                Text(habitCompleteActionLabel(habit, today))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 ChronosFilledTonalButton(
@@ -690,8 +692,8 @@ internal fun habitEditActionLabel(habit: Habit): String = "Edit ${habit.title}"
 
 internal fun habitArchiveActionLabel(habit: Habit): String = "Archive ${habit.title}"
 
-internal fun habitCompleteActionLabel(habit: Habit): String {
-    return if (habit.lastCompletedDate == LocalDate.now()) {
+internal fun habitCompleteActionLabel(habit: Habit, today: LocalDate = LocalDate.now()): String {
+    return if (habit.lastCompletedDate == today) {
         "${habit.title} completed today"
     } else {
         "Complete ${habit.title}"

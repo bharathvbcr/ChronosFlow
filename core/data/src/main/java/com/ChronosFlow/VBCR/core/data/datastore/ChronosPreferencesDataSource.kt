@@ -46,6 +46,15 @@ class ChronosPreferencesDataSource @Inject constructor(
         preferences.edit().remove(key).apply()
     }
 
+    fun getAll(): Map<String, *> = preferences.all
+
+    /**
+     * Whether medication names may be shared with the DevTime companion app via [InteropProvider].
+     * Defaults to false (opt-in) so medication data is never shared without explicit user consent.
+     */
+    suspend fun isMedicationSharingEnabled(): Boolean =
+        preferences.getBoolean(KEY_INTEROP_SHARING_MEDICATIONS, false)
+
     /** Emits the current value of [key] and re-emits whenever it changes. */
     fun observeLong(key: String, defaultValue: Long = 0L): Flow<Long> = callbackFlow {
         trySend(preferences.getLong(key, defaultValue))
@@ -58,5 +67,6 @@ class ChronosPreferencesDataSource @Inject constructor(
 
     private companion object {
         const val PREFERENCES_NAME = "chronos_preferences"
+        const val KEY_INTEROP_SHARING_MEDICATIONS = "interop.sharing.medications.enabled"
     }
 }

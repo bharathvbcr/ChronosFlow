@@ -1,6 +1,8 @@
 package com.ChronosFlow.VBCR.core.data.repository
 
+import androidx.room.withTransaction
 import app.cash.turbine.test
+import com.ChronosFlow.VBCR.core.data.ChronosDatabase
 import com.ChronosFlow.VBCR.core.data.dao.TaskDao
 import com.ChronosFlow.VBCR.core.data.model.TaskActionEntity
 import com.ChronosFlow.VBCR.core.data.model.TaskAttachmentEntity
@@ -25,6 +27,8 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkStatic
+import io.mockk.slot
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -35,6 +39,7 @@ import java.time.LocalDate
 
 class TaskRepositoryImplTest {
 
+    private val database: ChronosDatabase = mockk()
     private val taskDao: TaskDao = mockk()
     private val syncMutationNotifier = RecordingSyncMutationNotifier()
     private lateinit var repository: TaskRepositoryImpl
@@ -42,7 +47,12 @@ class TaskRepositoryImplTest {
     @Before
     fun setup() {
         syncMutationNotifier.reset()
-        repository = TaskRepositoryImpl(taskDao, syncMutationNotifier)
+        mockkStatic("androidx.room.RoomDatabaseKt")
+        val transactionLambdaSlot = slot<suspend () -> Unit>()
+        coEvery { database.withTransaction(capture(transactionLambdaSlot)) } coAnswers {
+            transactionLambdaSlot.captured.invoke()
+        }
+        repository = TaskRepositoryImpl(database, taskDao, syncMutationNotifier)
     }
 
     @Test

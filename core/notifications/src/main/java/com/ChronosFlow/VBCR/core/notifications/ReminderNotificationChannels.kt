@@ -50,6 +50,16 @@ object ReminderNotificationChannels {
         manager.createNotificationChannel(defaultChannel)
         manager.createNotificationChannel(criticalChannel)
         manager.createNotificationChannel(currentBlockChannel)
+        manager.createNotificationChannel(
+            NotificationChannel(
+                ScreenTimeNudgeNotifier.CHANNEL_ID,
+                "Screen time nudges",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                group = NotificationChannelGroups.REMINDERS
+                description = "Productivity nudges based on screen time usage"
+            }
+        )
         // Remove the retired silent current-block channel so it stops cluttering settings.
         manager.deleteNotificationChannel(LEGACY_CURRENT_BLOCK_CHANNEL_ID)
     }

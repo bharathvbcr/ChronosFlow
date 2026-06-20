@@ -18,6 +18,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ChronosFlow.VBCR.core.ui.motion.ChronosValueAnimationFactory
@@ -56,6 +58,7 @@ fun ChronosCollapsibleSection(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .semantics { contentDescription = if (expanded) "Collapse $title" else "Expand $title" }
                     .chronosHapticClick(
                         onClick = { onExpandedChange(!expanded) },
                         onClickLabel = if (expanded) "Collapse $title" else "Expand $title"
@@ -83,7 +86,7 @@ fun ChronosCollapsibleSection(
                 }
                 Icon(
                     imageVector = Icons.Filled.ExpandMore,
-                    contentDescription = if (expanded) "Collapse $title" else "Expand $title",
+                    contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.graphicsLayer { rotationZ = chevronRotation }
                 )

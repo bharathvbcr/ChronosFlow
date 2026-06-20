@@ -4,6 +4,7 @@ import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.ChronosFlow.VBCR.core.domain.usecase.CompleteHabitByIdUseCase
 import dagger.hilt.android.AndroidEntryPoint
 import java.time.LocalDate
@@ -11,8 +12,11 @@ import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private const val TAG = "HabitActionReceiver"
 
 @AndroidEntryPoint
 class HabitActionReceiver : BroadcastReceiver() {
@@ -27,7 +31,8 @@ class HabitActionReceiver : BroadcastReceiver() {
 
         if (action == ACTION_COMPLETE) {
             val pendingResult = goAsync()
-            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            scope.launch {
                 try {
                     completeHabitByIdUseCase(habitId, LocalDate.now())
 
@@ -38,11 +43,12 @@ class HabitActionReceiver : BroadcastReceiver() {
                         ReminderNotificationGroups.refreshSummary(context)
                     }
                 } catch (ex: Exception) {
-                    ex.printStackTrace()
+                    Log.e(TAG, "Action failed: ${ex.message}", ex)
                 } finally {
                     withContext(Dispatchers.Main) {
                         pendingResult.finish()
                     }
+                    scope.cancel()
                 }
             }
         }

@@ -8,6 +8,10 @@ interface SleepTrackRepository {
     fun observeForDate(date: LocalDate): Flow<SleepTrack?>
     fun observeForDateRange(start: LocalDate, end: LocalDate): Flow<List<SleepTrack>>
     suspend fun getForDateRange(start: LocalDate, end: LocalDate): List<SleepTrack>
+
+    /** Direct suspend lookup for a single night — avoids a Flow subscription in loops. */
+    suspend fun getByDate(date: LocalDate): SleepTrack?
+
     suspend fun upsert(track: SleepTrack)
     suspend fun delete(id: String)
 }

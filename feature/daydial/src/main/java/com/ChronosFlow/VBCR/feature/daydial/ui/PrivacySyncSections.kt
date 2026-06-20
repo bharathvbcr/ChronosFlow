@@ -94,6 +94,10 @@ internal fun CompanionAppStatusCard(onStatusChanged: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var installed by remember { mutableStateOf(isCompanionAppInstalled(context)) }
+    val privacyPreferences = rememberPrivacyPreferences()
+    var medicationSharingEnabled by remember {
+        mutableStateOf(privacyPreferences.isMedicationSharingEnabled())
+    }
 
     LaunchedEffect(Unit) { onStatusChanged(installed) }
     DisposableEffect(lifecycleOwner) {
@@ -108,16 +112,34 @@ internal fun CompanionAppStatusCard(onStatusChanged: (Boolean) -> Unit = {}) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Text(
-        text = if (installed) {
-            "DevTime is installed. Tasks and events are shared securely between the two apps."
-        } else {
-            "DevTime isn't installed. ChronosFlow runs on its own — install DevTime to share tasks " +
-                "and events between the apps."
-        },
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = if (installed) {
+                "DevTime is installed. Tasks and events are shared securely between the two apps."
+            } else {
+                "DevTime isn't installed. ChronosFlow runs on its own — install DevTime to share tasks " +
+                    "and events between the apps."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        ChronosSettingsRow(
+            title = "Share medication names with companion app",
+            subtitle = if (medicationSharingEnabled) {
+                "Medication names are visible to DevTime"
+            } else {
+                "Medication data is not shared (default)"
+            },
+            checked = medicationSharingEnabled,
+            onCheckedChange = { enabled ->
+                medicationSharingEnabled = enabled
+                privacyPreferences.setMedicationSharingEnabled(enabled)
+            }
+        )
+    }
 }
 
 internal data class PrivacyPermissionStates(

@@ -64,7 +64,7 @@ internal fun Routine.toTemplateBlueprint(): TemplateBlueprint =
 internal fun deriveRoutineCompletions(blocks: List<TimeBlockUiModel>): Map<String, RoutineCompletionSummary> =
     blocks
         .filter { it.routineId != null }
-        .groupBy { it.routineId!! }
+        .groupBy { it.routineId ?: error("routineId null after filter") }
         .mapValues { (_, routineBlocks) ->
             RoutineCompletionSummary(
                 doneCount = routineBlocks.count { it.actualEndMinuteOfDay != null },

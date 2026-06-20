@@ -15,6 +15,8 @@ import com.ChronosFlow.VBCR.core.domain.repository.FocusSessionRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -35,7 +37,8 @@ class ReminderBootReceiver : BroadcastReceiver() {
 
         Log.i("ReminderBootReceiver", "$action received; rehydrating persisted reminders.")
         val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        scope.launch {
             try {
                 try {
                     val recoverableState = focusSessionRepository.observeRecoverableSession().first()
@@ -46,7 +49,9 @@ class ReminderBootReceiver : BroadcastReceiver() {
                             is FocusSessionState.ServiceKilledRecoverable -> recoverableState.sessionId to null
                             else -> null to null
                         }
-                        if (sessionId != null) {
+                        if (sessionId != null &&
+                            (action == ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED)
+                        ) {
                             val serviceIntent = Intent().apply {
                                 component = ComponentName(context, "com.ChronosFlow.VBCR.feature.focus.FocusService")
                                 setAction("com.ChronosFlow.VBCR.feature.focus.SYNC")
@@ -77,6 +82,7 @@ class ReminderBootReceiver : BroadcastReceiver() {
                 Log.w("ReminderBootReceiver", "Failed to restore reminders after boot: ${ex.message}", ex)
             } finally {
                 pendingResult.finish()
+                scope.cancel()
             }
         }
     }

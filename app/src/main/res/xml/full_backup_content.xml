@@ -5,4 +5,5 @@
     <include domain="file" path="android_transfer/chronosflow_portable_backup.json" />
     <exclude domain="sharedpref" path="chronos_secure_database.xml" />
     <exclude domain="sharedpref" path="chronos_db_migration.xml" />
+    <exclude domain="sharedpref" path="chronos_preferences.xml" />
 </full-backup-content>

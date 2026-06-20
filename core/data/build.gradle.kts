@@ -65,6 +65,7 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
+    testImplementation(libs.androidx.room.ktx)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.org.json)
     testImplementation(libs.kotlinx.coroutines.test)

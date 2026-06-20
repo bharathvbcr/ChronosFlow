@@ -21,6 +21,7 @@ class ChronosPortableBackupWorker(
     workerParameters: WorkerParameters
 ) : CoroutineWorker(appContext, workerParameters) {
     override suspend fun doWork(): Result {
+        if (runAttemptCount > 5) return Result.failure()
         val entryPoint = EntryPointAccessors.fromApplication(
             applicationContext,
             ChronosPortableBackupWorkerEntryPoint::class.java

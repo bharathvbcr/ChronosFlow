@@ -32,7 +32,8 @@
         <!-- Receives mirrored focus-session state from the phone via the Data Layer. -->
         <service
             android:name=".FocusWearListenerService"
-            android:exported="true">
+            android:exported="true"
+            android:permission="com.google.android.permission.BIND_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
                 <data
@@ -45,7 +46,8 @@
         <!-- Receives the mirrored day summary (schedule, tasks, habits) for the tiles. -->
         <service
             android:name=".DaySummaryWearListenerService"
-            android:exported="true">
+            android:exported="true"
+            android:permission="com.google.android.permission.BIND_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
                 <data
@@ -58,7 +60,8 @@
         <!-- Receives the phone's mirrored Material You palette for the app theme and tiles. -->
         <service
             android:name=".ThemeWearListenerService"
-            android:exported="true">
+            android:exported="true"
+            android:permission="com.google.android.permission.BIND_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
                 <data

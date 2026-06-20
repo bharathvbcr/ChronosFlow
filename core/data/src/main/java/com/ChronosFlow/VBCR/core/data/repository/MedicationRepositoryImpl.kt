@@ -1,5 +1,7 @@
 package com.ChronosFlow.VBCR.core.data.repository
 
+import androidx.room.withTransaction
+import com.ChronosFlow.VBCR.core.data.ChronosDatabase
 import com.ChronosFlow.VBCR.core.data.dao.MedicationDoseEventDao
 import com.ChronosFlow.VBCR.core.data.dao.MedicationDao
 import com.ChronosFlow.VBCR.core.data.dao.MedicationSafetyProfileDao
@@ -21,6 +23,7 @@ import java.time.Instant
 import javax.inject.Inject
 
 class MedicationRepositoryImpl @Inject constructor(
+    private val database: ChronosDatabase,
     private val medicationDao: MedicationDao,
     private val medicationScheduleDao: MedicationScheduleDao,
     private val medicationSafetyProfileDao: MedicationSafetyProfileDao,
@@ -31,7 +34,7 @@ class MedicationRepositoryImpl @Inject constructor(
             medicationDao.observeMedicationPlans(),
             medicationScheduleDao.observeAllSchedules(),
             medicationSafetyProfileDao.observeAllProfiles(),
-            medicationDoseEventDao.observeAllEvents()
+            medicationDoseEventDao.observeAllEvents(System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000)
         ) { plans, schedules, profiles, events ->
             val schedulesByPlan = schedules.associateBy { it.medicationPlanId }
             val profilesByPlan = profiles.associateBy { it.medicationPlanId }
@@ -119,25 +122,27 @@ class MedicationRepositoryImpl @Inject constructor(
         }
 
     override suspend fun saveMedicationPlan(plan: MedicationPlan) {
-        medicationDao.insertMedicationPlan(plan.copy(notes = stripLegacyMedicationMetadata(plan.notes)).toEntity())
-        saveMedicationSchedule(
-            plan.schedule ?: buildLegacyMedicationSchedule(
-                medicationPlanId = plan.id,
-                primaryReminderMinute = plan.reminderMinuteOfDay,
-                secondaryReminderMinute = null,
-                plannerVisible = plan.isActive
+        database.withTransaction {
+            medicationDao.insertMedicationPlan(plan.copy(notes = stripLegacyMedicationMetadata(plan.notes)).toEntity())
+            saveMedicationSchedule(
+                plan.schedule ?: buildLegacyMedicationSchedule(
+                    medicationPlanId = plan.id,
+                    primaryReminderMinute = plan.reminderMinuteOfDay,
+                    secondaryReminderMinute = null,
+                    plannerVisible = plan.isActive
+                )
             )
-        )
-        saveMedicationSafetyProfile(
-            plan.safetyProfile ?: legacySafetyProfile(
-                planId = plan.id,
-                unit = plan.unit,
-                notes = stripLegacyMedicationMetadata(plan.notes),
-                takeWithFood = plan.takeWithFood,
-                refillNeededAfterDoses = plan.refillNeededAfterDoses,
-                legacyTiming = null
+            saveMedicationSafetyProfile(
+                plan.safetyProfile ?: legacySafetyProfile(
+                    planId = plan.id,
+                    unit = plan.unit,
+                    notes = stripLegacyMedicationMetadata(plan.notes),
+                    takeWithFood = plan.takeWithFood,
+                    refillNeededAfterDoses = plan.refillNeededAfterDoses,
+                    legacyTiming = null
+                )
             )
-        )
+        }
     }
 
     override suspend fun saveMedicationSchedule(schedule: MedicationSchedule) {

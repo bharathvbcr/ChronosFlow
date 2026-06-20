@@ -73,7 +73,7 @@ fun TaskBulkImportSheet(
                     .heightIn(max = 360.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                itemsIndexed(candidates) { index, title ->
+                itemsIndexed(candidates, key = { index, title -> "$index:$title".hashCode().toLong() xor index.toLong() }) { index, title ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

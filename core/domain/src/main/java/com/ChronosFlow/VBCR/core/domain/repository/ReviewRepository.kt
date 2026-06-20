@@ -7,6 +7,7 @@ import java.time.LocalDate
 
 interface ReviewRepository {
     fun observeActualTimeSegments(date: LocalDate): Flow<List<ActualTimeSegment>>
+    fun observeActualTimeSegmentsByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<ActualTimeSegment>>
     fun observeDailyReview(date: LocalDate): Flow<DailyReviewSummary?>
     suspend fun saveActualTimeSegment(segment: ActualTimeSegment)
     suspend fun saveDailyReview(summary: DailyReviewSummary)

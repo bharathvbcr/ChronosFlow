@@ -59,6 +59,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -142,14 +144,16 @@ class DayDialReviewDelegate @Inject constructor(
                 completedBlocks = summary.completedBlockCount
             )
         }
-    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), DailyReview(0, 0, 0, 0))
+    }.distinctUntilChanged()
+        .stateIn(scope, SharingStarted.WhileSubscribed(5000), DailyReview(0, 0, 0, 0))
 
     fun reviewInsights(
         scope: CoroutineScope,
         selectedDate: StateFlow<LocalDate>
     ): StateFlow<List<ReviewInsight>> = selectedDate.flatMapLatest { date ->
         reviewRepository.observeDailyReview(date).map { review -> review?.insights.orEmpty() }
-    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.distinctUntilChanged()
+        .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     suspend fun refreshInsightsTab(date: LocalDate): InsightsTabRefreshResult {
         persistRefreshedInsights(date)
@@ -211,24 +215,30 @@ class DayDialReviewDelegate @Inject constructor(
         date: LocalDate,
         period: InsightsPeriod
     ): Flow<InsightsPeriodSummary> {
-        val dayFlows = period.dateRange(date).map { day ->
-            combine(
-                repository.getTimeBlocksByDate(day),
-                reviewRepository.observeActualTimeSegments(day)
-            ) { blocks, segments ->
-                val effectiveSegments = segments
-                    .ifEmpty { blocks.mapNotNull { toLegacyActualSegmentOrNull(it) } }
+        val dateRange = period.dateRange(date)
+        val startDate = dateRange.first()
+        val endDate = dateRange.last()
+        return combine(
+            repository.getTimeBlocksByDateRange(startDate, endDate),
+            reviewRepository.observeActualTimeSegmentsByDateRange(startDate, endDate)
+        ) { blocks, segments ->
+            val blocksByDate = blocks.groupBy { it.date }
+            val segmentsByDate = segments.groupBy { it.date }
+            val days = dateRange.map { day ->
+                val dayBlocks = blocksByDate[day] ?: emptyList()
+                val effectiveSegments = (segmentsByDate[day] ?: emptyList())
+                    .ifEmpty { dayBlocks.mapNotNull { toLegacyActualSegmentOrNull(it) } }
                 PeriodDayAggregate(
                     summary = dailyReviewCalculator.calculate(
                         date = day,
-                        plannedBlocks = blocks,
+                        plannedBlocks = dayBlocks,
                         actualSegments = effectiveSegments
                     ),
-                    blocks = blocks
+                    blocks = dayBlocks
                 )
             }
-        }
-        return combine(dayFlows) { days -> aggregatePeriod(days.toList()) }
+            aggregatePeriod(days)
+        }.debounce(300L).distinctUntilChanged()
             .onStart { emit(InsightsPeriodSummary.Loading) }
     }
 

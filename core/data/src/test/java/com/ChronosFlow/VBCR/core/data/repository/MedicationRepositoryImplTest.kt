@@ -1,6 +1,8 @@
 package com.ChronosFlow.VBCR.core.data.repository
 
 import app.cash.turbine.test
+import androidx.room.withTransaction
+import com.ChronosFlow.VBCR.core.data.ChronosDatabase
 import com.ChronosFlow.VBCR.core.data.dao.MedicationDao
 import com.ChronosFlow.VBCR.core.data.dao.MedicationDoseEventDao
 import com.ChronosFlow.VBCR.core.data.dao.MedicationSafetyProfileDao
@@ -18,32 +20,52 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.coVerify
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 
 class MedicationRepositoryImplTest {
+    private val database: ChronosDatabase = mockk()
     private val medicationDao: MedicationDao = mockk()
     private val medicationScheduleDao: MedicationScheduleDao = mockk()
     private val medicationSafetyProfileDao: MedicationSafetyProfileDao = mockk()
     private val medicationDoseEventDao: MedicationDoseEventDao = mockk()
     private val repository = MedicationRepositoryImpl(
+        database,
         medicationDao,
         medicationScheduleDao,
         medicationSafetyProfileDao,
         medicationDoseEventDao
     )
 
+    @Before
+    fun setUp() {
+        mockkStatic("androidx.room.RoomDatabaseKt")
+        coEvery { database.withTransaction<Unit>(any<suspend () -> Unit>()) } coAnswers {
+            @Suppress("UNCHECKED_CAST")
+            (it.invocation.args[1] as suspend () -> Unit)()
+        }
+    }
+
+    @After
+    fun tearDown() {
+        unmockkStatic("androidx.room.RoomDatabaseKt")
+    }
+
     @Test
     fun `observe medication plans maps default schedule and profile`() = runTest {
         every { medicationDao.observeMedicationPlans() } returns flowOf(listOf(planEntity()))
         every { medicationScheduleDao.observeAllSchedules() } returns flowOf(emptyList())
         every { medicationSafetyProfileDao.observeAllProfiles() } returns flowOf(emptyList())
-        every { medicationDoseEventDao.observeAllEvents() } returns flowOf(emptyList())
+        every { medicationDoseEventDao.observeAllEvents(any()) } returns flowOf(emptyList())
 
         repository.observeMedicationPlans().test {
             val plans = awaitItem()
