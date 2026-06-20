@@ -397,7 +397,9 @@ suspend fun Context.clearChronosUiSettingsStore() {
     chronosUiSettingsDataStore.edit { preferences ->
         preferences.clear()
     }
-    legacyChronosUiPreferences().edit().clear().commit()
+    // Use apply() (async) instead of commit() (synchronous) to avoid blocking the calling
+    // coroutine on a disk write (STARTUP-006).
+    legacyChronosUiPreferences().edit().clear().apply()
 }
 
 fun Context.chronosUiBooleanSettingFlow(key: String, defaultValue: Boolean): Flow<Boolean> {

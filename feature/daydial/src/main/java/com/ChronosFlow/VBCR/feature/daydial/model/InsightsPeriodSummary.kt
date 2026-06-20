@@ -1,11 +1,13 @@
 package com.ChronosFlow.VBCR.feature.daydial.model
 
+import androidx.compose.runtime.Immutable
 import com.ChronosFlow.VBCR.feature.daydial.DailyReview
 
 /**
  * Aggregated execution metrics for a multi-day [InsightsPeriod]. Null on the Insights
  * tab means the selected-day live data is used instead (the DAY period).
  */
+@Immutable
 data class InsightsPeriodSummary(
     val review: DailyReview,
     val missedCount: Int,

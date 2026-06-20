@@ -11,7 +11,8 @@ import java.time.LocalDate
     indices = [
         Index("habitId"),
         Index("eventDate"),
-        Index(value = ["habitId", "eventDate"])
+        Index(value = ["habitId", "eventDate"]),
+        Index(value = ["habitId", "recordedAt"])
     ]
 )
 data class HabitEventEntity(

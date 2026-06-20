@@ -215,20 +215,28 @@ fun HabitScreen(
                 }
             } else {
                 items(activeHabits, key = { it.id }) { habit ->
+                    val onComplete = remember(habit.id) { { viewModel.completeHabit(habit) } }
+                    val onPause = remember(habit.id) { { viewModel.pauseHabit(habit, days = 1) } }
+                    val onResume = remember(habit.id) { { viewModel.resumeHabit(habit) } }
+                    val onSkip = remember(habit.id) { { viewModel.skipHabitToday(habit) } }
+                    val onDefer = remember(habit.id) { { viewModel.deferHabit(habit, minutes = 60) } }
+                    val onEdit = remember(habit.id) { { sheetTarget = HabitSheetTarget.Edit(habit) } }
+                    val onArchive = remember(habit.id) { { habitToArchive = habit } }
+                    val onOpenContext = remember(habit.id) { { habitContextTarget = habit } }
                     HabitRow(
                         modifier = Modifier.animateItem(),
                         habit = habit,
                         today = today,
                         nowMinute = nowMinute,
                         reduceMotion = reduceMotion,
-                        onComplete = { viewModel.completeHabit(habit) },
-                        onPause = { viewModel.pauseHabit(habit, days = 1) },
-                        onResume = { viewModel.resumeHabit(habit) },
-                        onSkip = { viewModel.skipHabitToday(habit) },
-                        onDefer = { viewModel.deferHabit(habit, minutes = 60) },
-                        onEdit = { sheetTarget = HabitSheetTarget.Edit(habit) },
-                        onArchive = { habitToArchive = habit },
-                        onOpenContext = { habitContextTarget = habit }
+                        onComplete = onComplete,
+                        onPause = onPause,
+                        onResume = onResume,
+                        onSkip = onSkip,
+                        onDefer = onDefer,
+                        onEdit = onEdit,
+                        onArchive = onArchive,
+                        onOpenContext = onOpenContext
                     )
                 }
             }

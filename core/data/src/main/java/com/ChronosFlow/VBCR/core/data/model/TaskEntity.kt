@@ -12,6 +12,8 @@ import java.time.LocalDate
     indices = [
         Index("isCompleted"),
         Index("dueDate"),
+        Index("targetDate"),
+        Index(value = ["targetDate", "isCompleted"]),
         Index("goalId")
     ]
 )

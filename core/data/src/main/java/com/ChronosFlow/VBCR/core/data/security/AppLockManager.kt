@@ -3,6 +3,7 @@ package com.ChronosFlow.VBCR.core.data.security
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -84,7 +85,9 @@ class AppLockManager @Inject constructor(
     }
 
     private fun bumpSensitiveSession() {
-        _sensitiveSession.value = _sensitiveSession.value + 1
+        // Use update{} for atomic CAS so concurrent calls (e.g. biometric callback on one thread
+        // while clearSensitiveUnlocks runs on another) never lose an increment (TS-002).
+        _sensitiveSession.update { it + 1 }
     }
 
     private fun unlockAllSensitiveAreas() {

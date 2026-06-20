@@ -17,6 +17,14 @@ internal data class FocusSessionSnapshot(
     val isPaused: Boolean
 )
 
+/**
+ * Mutable session state for an in-progress focus timer.
+ *
+ * THREAD-SAFETY CONTRACT: [state] and [totalSeconds] are plain `var` fields with no internal
+ * synchronisation. Every caller MUST hold [FocusService.commandMutex] before invoking any public
+ * method (TS-012). The only exception is [snapshot], which is also called from the ticker coroutine
+ * while inside the same mutex.
+ */
 internal class FocusSessionRuntime(
     private val reducer: FocusSessionReducer,
     private val now: () -> Instant = Instant::now

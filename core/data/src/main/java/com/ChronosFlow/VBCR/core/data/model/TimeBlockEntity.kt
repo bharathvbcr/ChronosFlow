@@ -10,6 +10,7 @@ import java.time.LocalDate
     tableName = "time_blocks",
     indices = [
         Index("date"),
+        Index(value = ["date", "category"]),
         Index("taskId"),
         Index("taskOccurrenceDate"),
         Index("calendarEventId"),

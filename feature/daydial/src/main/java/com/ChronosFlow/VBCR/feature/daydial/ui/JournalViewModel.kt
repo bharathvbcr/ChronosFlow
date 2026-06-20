@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.ChronosFlow.VBCR.core.ai.PrivacyMode
@@ -80,6 +81,10 @@ class JournalViewModel @Inject constructor(
     private val _writeError = MutableStateFlow<String?>(null)
     val writeError: StateFlow<String?> = _writeError.asStateFlow()
     fun clearWriteError() { _writeError.value = null }
+
+    private val _attachmentError = MutableStateFlow<String?>(null)
+    val attachmentError: StateFlow<String?> = _attachmentError.asStateFlow()
+    fun clearAttachmentError() { _attachmentError.value = null }
 
     private val _insight = MutableStateFlow<JournalInsightState>(JournalInsightState.Idle)
     val insight: StateFlow<JournalInsightState> = _insight.asStateFlow()
@@ -235,13 +240,17 @@ class JournalViewModel @Inject constructor(
             withContext(Dispatchers.IO) {
                 val dir = File(appContext.filesDir, JOURNAL_IMAGE_DIR).apply { mkdirs() }
                 uris.forEach { uri ->
-                    runCatching {
+                    try {
                         val mime = appContext.contentResolver.getType(uri)
                         val file = File(dir, "${UUID.randomUUID()}${extensionForMime(mime)}")
                         appContext.contentResolver.openInputStream(uri)?.use { input ->
                             file.outputStream().use { output -> input.copyTo(output) }
-                        } ?: return@runCatching
+                        } ?: return@forEach
                         journalRepository.addAttachment(entryId, Uri.fromFile(file).toString(), mime)
+                    } catch (e: IOException) {
+                        _attachmentError.value = "Could not save photo. Check storage space."
+                    } catch (e: SecurityException) {
+                        _attachmentError.value = "Could not save photo. Permission was revoked."
                     }
                 }
             }

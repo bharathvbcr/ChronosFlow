@@ -204,15 +204,19 @@ internal fun JournalPageContent(
     onMessage: (String) -> Unit = {}
 ) {
     // Editor target: a specific entry to edit, or null + a date to compose a brand-new entry.
-    var composing by remember { mutableStateOf(false) }
-    var editingEntry by remember { mutableStateOf<JournalEntry?>(null) }
+    // composing and editingEntryId use rememberSaveable so the open editor survives rotation.
+    var composing by rememberSaveable { mutableStateOf(false) }
+    var editingEntryId by rememberSaveable { mutableStateOf<String?>(null) }
+    val editingEntry: JournalEntry? = remember(entries, editingEntryId) {
+        editingEntryId?.let { id -> entries.find { it.id == id } }
+    }
     var composeDate by remember { mutableStateOf(today) }
     var query by rememberSaveable { mutableStateOf("") }
     // Tapped thumbnail to view full-size in a lightbox dialog.
     var previewUri by remember { mutableStateOf<String?>(null) }
 
-    val openNew: (LocalDate) -> Unit = { date -> editingEntry = null; composeDate = date; composing = true }
-    val openEdit: (JournalEntry) -> Unit = { entry -> editingEntry = entry; composing = true }
+    val openNew: (LocalDate) -> Unit = { date -> editingEntryId = null; composeDate = date; composing = true }
+    val openEdit: (JournalEntry) -> Unit = { entry -> editingEntryId = entry.id; composing = true }
 
     val streak = remember(entries, today) { journalStreak(entries, today) }
     val filtered = remember(entries, query) {

@@ -3,6 +3,7 @@ package com.ChronosFlow.VBCR.core.domain.diagnostics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,15 +31,15 @@ class AppEventLog @Inject constructor() {
     private val _entries = MutableStateFlow<List<AppEventLogEntry>>(emptyList())
     val entries: StateFlow<List<AppEventLogEntry>> = _entries.asStateFlow()
 
-    @Synchronized
     fun record(category: AppEventCategory, message: String) {
+        // StateFlow.update uses CAS internally — atomically retrying on contention — so
+        // @Synchronized is unnecessary and the read-modify-write is race-free (TS-004).
         val entry = AppEventLogEntry(clock(), category, message)
-        _entries.value = (listOf(entry) + _entries.value).take(CAPACITY)
+        _entries.update { current -> (listOf(entry) + current).take(CAPACITY) }
     }
 
-    @Synchronized
     fun clear() {
-        _entries.value = emptyList()
+        _entries.update { emptyList() }
     }
 
     private companion object {

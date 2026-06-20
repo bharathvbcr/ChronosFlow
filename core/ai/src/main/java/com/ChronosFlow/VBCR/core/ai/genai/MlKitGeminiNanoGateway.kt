@@ -61,14 +61,26 @@ class MlKitGeminiNanoGateway @Inject constructor(
     private val inFlight = HashMap<String, CompletableDeferred<Result<String>>>()
     private val inFlightMutex = Mutex()
 
+    /**
+     * Guards the check-then-act sequences on [availableCheckedAtMs] and [downloadCooldownUntilMs].
+     * @Volatile alone ensures visibility but not atomicity of compound operations (TS-009).
+     */
+    private val statusMutex = Mutex()
+
     override suspend fun refreshStatus(): NanoModelStatus {
         // Steady-state AVAILABLE rarely flips mid-session, so a short TTL collapses the redundant
         // round-trips a single generation otherwise makes (coordinator pre-check + readiness check).
-        availableCheckedAtMs?.let { checkedAt ->
-            if (nowMs() - checkedAt <= STATUS_CACHE_TTL_MS) return NanoModelStatus.AVAILABLE
+        // statusMutex serialises the check-then-act so two coroutines cannot both pass the null
+        // check and each fire a redundant checkStatus() call (TS-009).
+        statusMutex.withLock {
+            availableCheckedAtMs?.let { checkedAt ->
+                if (nowMs() - checkedAt <= STATUS_CACHE_TTL_MS) return NanoModelStatus.AVAILABLE
+            }
         }
         val mapped = client.checkStatus()
-        availableCheckedAtMs = if (mapped == NanoModelStatus.AVAILABLE) nowMs() else null
+        statusMutex.withLock {
+            availableCheckedAtMs = if (mapped == NanoModelStatus.AVAILABLE) nowMs() else null
+        }
         val selection = client.selectionState()
         _runtimeStatus.update {
             it.copy(
@@ -88,8 +100,12 @@ class MlKitGeminiNanoGateway @Inject constructor(
         if (status == NanoModelStatus.DOWNLOADABLE) {
             // After a failed download, suppress re-attempts for a cooldown so a flaky/offline device
             // fails fast and falls back instead of blocking every request on a doomed 120s retry.
-            downloadCooldownUntilMs?.let { until ->
-                if (nowMs() < until) return status
+            // statusMutex makes the read-compare-return atomic so two coroutines cannot race past
+            // the cooldown guard simultaneously (TS-009).
+            statusMutex.withLock {
+                downloadCooldownUntilMs?.let { until ->
+                    if (nowMs() < until) return status
+                }
             }
             runCatching {
                 withTimeout(DOWNLOAD_TIMEOUT_MS) {
@@ -117,12 +133,12 @@ class MlKitGeminiNanoGateway @Inject constructor(
                     }
                 }
             }.onFailure { error ->
-                downloadCooldownUntilMs = nowMs() + DOWNLOAD_COOLDOWN_MS
+                statusMutex.withLock { downloadCooldownUntilMs = nowMs() + DOWNLOAD_COOLDOWN_MS }
                 runCatching {
                     Log.w(TAG, "Gemini Nano download failed: ${error.message}")
                 }
             }.onSuccess {
-                downloadCooldownUntilMs = null
+                statusMutex.withLock { downloadCooldownUntilMs = null }
             }
             status = refreshStatus()
         }

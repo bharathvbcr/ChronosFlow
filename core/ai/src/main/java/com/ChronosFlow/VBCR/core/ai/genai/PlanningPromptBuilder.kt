@@ -4,8 +4,6 @@ import com.ChronosFlow.VBCR.core.domain.model.DailyReviewSummary
 import com.ChronosFlow.VBCR.core.domain.model.Task
 import com.ChronosFlow.VBCR.core.domain.model.TimeBlock
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 object PlanningPromptBuilder {
 
@@ -47,7 +45,7 @@ object PlanningPromptBuilder {
         pendingTasks: List<Task> = emptyList(),
         dueHabitTitles: List<String> = emptyList()
     ): Pair<String, String> {
-        val dateLabel = date.format(DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault()))
+        val dateLabel = date.format(PlannerDateFormatters.fullWeekdayDate)
         val blockSummary = existingBlocks.take(12).joinToString("\n") { block ->
             "- ${block.title} (${block.category}, ${block.provenance.name}) ${block.startMinuteOfDay}-${block.startMinuteOfDay + block.durationMinutes}m"
         }.ifBlank { "- none" }

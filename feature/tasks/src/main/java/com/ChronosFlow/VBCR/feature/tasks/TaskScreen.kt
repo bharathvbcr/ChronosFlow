@@ -150,7 +150,7 @@ fun TaskScreen(
     val assistState by viewModel.assistState.collectAsStateWithLifecycle()
     val rewriteState by viewModel.rewriteState.collectAsStateWithLifecycle()
     var sheetTarget by remember { mutableStateOf<TaskSheetTarget?>(null) }
-    var bulkImportCandidates by remember { mutableStateOf<List<String>?>(null) }
+    var bulkImportCandidates by rememberSaveable { mutableStateOf<List<String>?>(null) }
     var addInstanceId by remember { mutableStateOf(0) }
     val taskTemplatesSetting = rememberPersistentUiStringSetting("task.templates", "")
     val taskTemplates = remember(taskTemplatesSetting.value) {
@@ -411,17 +411,23 @@ fun TaskScreen(
                 }
             } else {
                 items(visibleTasks, key = { it.id }) { task ->
+                    val onToggle = remember(task.id) { { viewModel.toggleTask(task.id) } }
+                    val onEdit = remember(task.id) { { sheetTarget = TaskSheetTarget.Edit(task, taskSchedulesByTaskId[task.id]) } }
+                    val onDelete = remember(task.id) { { viewModel.deleteTask(task) } }
+                    val onSchedule = remember(task.id) { { viewModel.scheduleTaskToday(task.id) } }
+                    val onDuplicate = remember(task.id) { { viewModel.duplicateTask(task) } }
+                    val onOpenContext = remember(task.id) { { openTaskContext(task) } }
                     TaskItem(
                         modifier = Modifier.animateItem(),
                         task = task,
                         schedule = taskSchedulesByTaskId[task.id],
                         alarmState = alarmStates[task.id],
-                        onToggle = { viewModel.toggleTask(task.id) },
-                        onEdit = { sheetTarget = TaskSheetTarget.Edit(task, taskSchedulesByTaskId[task.id]) },
-                        onDelete = { viewModel.deleteTask(task) },
-                        onSchedule = { viewModel.scheduleTaskToday(task.id) },
-                        onDuplicate = { viewModel.duplicateTask(task) },
-                        onOpenContext = { openTaskContext(task) }
+                        onToggle = onToggle,
+                        onEdit = onEdit,
+                        onDelete = onDelete,
+                        onSchedule = onSchedule,
+                        onDuplicate = onDuplicate,
+                        onOpenContext = onOpenContext
                     )
                 }
             }

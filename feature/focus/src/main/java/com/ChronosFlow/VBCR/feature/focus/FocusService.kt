@@ -74,7 +74,9 @@ class FocusService : Service() {
 
     private var currentSessionId: String? = null
     private var currentBlockId: String? = null
-    private var currentBlockTitle: String? = null
+    // @Volatile so the write from refreshBlockTitle's IO coroutine (outside the mutex) is
+    // immediately visible to the ticker loop which reads it via updateForegroundNotification (TS-003).
+    @Volatile private var currentBlockTitle: String? = null
     private var currentTotalSeconds: Int = DEFAULT_FOCUS_SECONDS
     // False while mirroring an intermediate phase of a split session: reaching
     // zero must not log actual time or fire the "session complete" notification.

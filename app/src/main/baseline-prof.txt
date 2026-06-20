@@ -1,0 +1,2 @@
+# Generated baseline profile — run BaselineProfileGenerator to populate
+# See: https://developer.android.com/topic/performance/baselineprofiles

@@ -1,6 +1,6 @@
 package com.ChronosFlow.VBCR.feature.medication
 
-import androidx.compose.runtime.Stable
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ChronosFlow.VBCR.core.ai.MedicationAdherenceAssistPlanner
@@ -50,7 +50,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-@Stable
+@Immutable
 data class MedicationAssistUiState(
     val isLoading: Boolean = false,
     val suggestions: List<MedicationAssistSuggestion> = emptyList(),

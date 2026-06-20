@@ -1,6 +1,6 @@
 package com.ChronosFlow.VBCR.feature.daydial.model
 
-import androidx.compose.runtime.Stable
+import androidx.compose.runtime.Immutable
 import com.ChronosFlow.VBCR.core.domain.model.Habit
 import com.ChronosFlow.VBCR.core.domain.model.HabitEventType
 import com.ChronosFlow.VBCR.core.domain.model.HabitRecurrenceRule
@@ -48,7 +48,7 @@ internal data class DayQuickContextActionUiModel(
     val appLaunchTarget: AppLaunchTarget? = null
 )
 
-@Stable
+@Immutable
 internal data class DayQuickItemsUiState(
     val tasks: List<DayQuickItemUiModel> = emptyList(),
     val habits: List<DayQuickItemUiModel> = emptyList(),

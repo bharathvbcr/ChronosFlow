@@ -22,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -82,7 +83,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-internal const val STARTUP_SHELL_DEFER_MILLIS = 350L
+// STARTUP_SHELL_DEFER_MILLIS removed: shell gate is now frame-based (isSeeded + withFrameNanos).
 internal const val LOCKED_APP_AUTH_DEFER_MILLIS = 700L
 internal const val SHELL_BADGE_DATA_DEFER_MILLIS = 30_000L
 
@@ -93,10 +94,19 @@ class MainActivity : FragmentActivity() {
 
     private val launchIntentState = mutableStateOf<Intent?>(null)
     private val launchGeneration = mutableIntStateOf(0)
+    // Tracks whether the navigation shell is ready. Exposed so the splash keepOnScreenCondition
+    // can gate on it without holding a Compose reference (STARTUP-005).
+    internal val showFullShellState = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Branded cold-start splash (androidx SplashScreen API); hands off to Theme.ChronosFlow.
-        installSplashScreen()
+        // Keep splash visible until the first meaningful frame (showFullShell=true AND the
+        // UI-settings cache is seeded) so the user never sees a blank Surface between splash exit
+        // and navigation shell appearance (STARTUP-005).
+        val splash = installSplashScreen()
+        splash.setKeepOnScreenCondition {
+            !showFullShellState.value || !com.ChronosFlow.VBCR.core.ui.settings.ChronosUiSettingsCache.isSeeded
+        }
         super.onCreate(savedInstanceState)
         launchIntentState.value = intent
         appLockLifecycleObserver.register()
@@ -112,9 +122,17 @@ class MainActivity : FragmentActivity() {
         insetsController.isAppearanceLightNavigationBars = !isDarkTheme
         insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         setContent {
-            var showFullShell by remember { mutableStateOf(false) }
+            // Gate on the activity-level state so the splash keepOnScreenCondition and Compose
+            // stay in sync with one source of truth (STARTUP-004, STARTUP-005).
+            var showFullShell by showFullShellState
             LaunchedEffect(Unit) {
-                delay(STARTUP_SHELL_DEFER_MILLIS)
+                // Wait for the UI-settings cache to be seeded (tiny window, typically <50ms after
+                // Application.onCreate()), then wait one rendered frame so the IME and focus
+                // windows have settled — much better than a fixed 350ms worst-case delay.
+                while (!com.ChronosFlow.VBCR.core.ui.settings.ChronosUiSettingsCache.isSeeded) {
+                    withFrameNanos { }
+                }
+                withFrameNanos { }
                 showFullShell = true
             }
             val appContext = applicationContext
@@ -189,16 +207,21 @@ private fun ChronosFlowApp(
 ) {
     val appContext = LocalContext.current
     val appContentResolver = appContext.contentResolver
-    val notificationPlan = remember(launchGeneration, launchIntent) {
-        val basePlan = buildNotificationNavigationPlan(launchIntent, appContentResolver)
-        // Attach the calling app's human-readable label when the launch originates from a share
-        // (ACTION_SEND / ACTION_PROCESS_TEXT). The referrer URI has the form
-        // android-app://com.example.app; we extract the host as the package name and resolve the
-        // label via PackageManager. This is API 22+ (minSdk is already above that).
-        val sourceAppLabel: String? = if (
-            launchIntent?.action == android.content.Intent.ACTION_SEND ||
-            launchIntent?.action == android.content.Intent.ACTION_PROCESS_TEXT
-        ) {
+    // Build the base plan synchronously (no I/O); the source-app label that requires a
+    // PackageManager IPC is resolved asynchronously on IO so it never blocks the first frame
+    // (STARTUP-007).
+    val basePlan = remember(launchGeneration, launchIntent) {
+        buildNotificationNavigationPlan(launchIntent, appContentResolver)
+    }
+    val isShareIntent = launchIntent?.action == android.content.Intent.ACTION_SEND ||
+        launchIntent?.action == android.content.Intent.ACTION_PROCESS_TEXT
+    val sourceAppLabel: String? by produceState<String?>(
+        initialValue = null,
+        key1 = launchGeneration,
+        key2 = isShareIntent
+    ) {
+        if (!isShareIntent) { value = null; return@produceState }
+        value = withContext(Dispatchers.IO) {
             val activity = appContext as? android.app.Activity
             val pkg = activity?.referrer?.host
             pkg?.let { packageName ->
@@ -207,7 +230,9 @@ private fun ChronosFlowApp(
                     pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
                 }.getOrNull()
             }
-        } else null
+        }
+    }
+    val notificationPlan = remember(basePlan, sourceAppLabel) {
         if (sourceAppLabel != null && basePlan.notificationLaunch != null) {
             basePlan.copy(
                 notificationLaunch = basePlan.notificationLaunch.copy(sourceAppLabel = sourceAppLabel)

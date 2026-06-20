@@ -16,7 +16,11 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object WearThemeStore {
 
-    private var flow: MutableStateFlow<List<Int>?>? = null
+    // @Volatile ensures the write from one thread (e.g. ThemeWearListenerService on Dispatchers.IO)
+    // is immediately visible to another (e.g. tile renderer). The synchronized block inside
+    // ensureFlow() prevents two threads from each constructing a new MutableStateFlow and one
+    // silently discarding the other's writes (TS-001).
+    @Volatile private var flow: MutableStateFlow<List<Int>?>? = null
 
     fun state(context: Context): StateFlow<List<Int>?> = ensureFlow(context).asStateFlow()
 
@@ -36,7 +40,9 @@ object WearThemeStore {
     }
 
     private fun ensureFlow(context: Context): MutableStateFlow<List<Int>?> =
-        flow ?: MutableStateFlow(load(context)).also { flow = it }
+        flow ?: synchronized(this) {
+            flow ?: MutableStateFlow(load(context)).also { flow = it }
+        }
 
     private fun load(context: Context): List<Int>? =
         prefs(context).getString(KEY_PALETTE, null)

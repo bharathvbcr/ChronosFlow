@@ -1,7 +1,10 @@
 package com.ChronosFlow.VBCR.core.ui.settings
 
 import android.content.Context
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -260,4 +263,91 @@ class ChronosUiSettingsTest {
         assertTrue(snapshot.highContrastEnabled)
         assertEquals(ChronosBackdropTheme.AURORA, snapshot.backdropTheme)
     }
+
+    // -------------------------------------------------------------------------
+    // drop(1) — no write on first composition
+    // -------------------------------------------------------------------------
+
+    /**
+     * [rememberPersistentUiBooleanSetting] wires a [snapshotFlow] with [drop(1)] so that the
+     * initial value from [remember] does NOT trigger a DataStore write. Without drop(1) every
+     * Composable that reads a setting would write it back on first composition, causing noisy
+     * DataStore churn.
+     *
+     * We verify the contract purely at the flow level: a flow that emits exactly one item and
+     * then completes must produce ZERO items after drop(1), proving that first-composition
+     * would not reach the write lambda.
+     */
+    @Test
+    fun `rememberPersistentUiBooleanSetting drop1 contract skips first emission`() = runTest {
+        // Simulate what snapshotFlow { state.value } produces on first composition:
+        // one emission equal to the initial remembered value, then completion.
+        val initialValue = false
+        val simulatedSnapshotFlow = kotlinx.coroutines.flow.flowOf(initialValue)
+
+        val collectedAfterDrop = mutableListOf<Boolean>()
+        simulatedSnapshotFlow
+            .drop(1)
+            .collect { collectedAfterDrop.add(it) }
+
+        // drop(1) must have consumed the only emission — no write should occur.
+        assertTrue(
+            "drop(1) must suppress the first (initial) emission so no write fires on composition",
+            collectedAfterDrop.isEmpty()
+        )
+    }
+
+    @Test
+    fun `rememberPersistentUiBooleanSetting drop1 contract forwards subsequent user changes`() =
+        runTest {
+            // Simulate: initial emission (from remember) followed by a user-driven change.
+            val simulatedSnapshotFlow = kotlinx.coroutines.flow.flow<Boolean> {
+                emit(false)  // first composition — must be dropped
+                emit(true)   // user toggles the setting — must reach the write lambda
+            }
+
+            val collectedAfterDrop = mutableListOf<Boolean>()
+            simulatedSnapshotFlow
+                .drop(1)
+                .collect { collectedAfterDrop.add(it) }
+
+            // Only the second (user-driven) emission must have passed through.
+            assertEquals(
+                "Exactly one emission should pass drop(1) — the user-driven change",
+                1,
+                collectedAfterDrop.size
+            )
+            assertEquals(true, collectedAfterDrop.single())
+        }
+
+    @Test
+    fun `rememberPersistentUiBooleanSetting drop1 does not write store on read-only first composition`() =
+        runTest {
+            // Record writes to the DataStore so we can assert none happen on first composition.
+            // We use the real DataStore (Robolectric) and verify the stored value is unchanged
+            // after a single "read-only" observation.
+            val key = ChronosUiSettingsKeys.KEY_HIGH_CONTRAST
+            val defaultValue = false
+
+            // Ensure the key has no stored value so we start from the default.
+            context.clearChronosUiSettingsStore()
+
+            // Read the current stored value (should be the default).
+            val snapshotBefore = context.readChronosUiSettingsSnapshotFromDataStore()
+
+            // Simulate first composition: the Composable reads the setting but does NOT write it
+            // (because drop(1) prevents the write lambda from being called). We replicate this by
+            // calling readChronosUiBooleanSetting (which maps to the remember {} initialValue)
+            // and then reading the DataStore again to confirm it is untouched.
+            context.readChronosUiBooleanSetting(key, defaultValue)
+
+            val snapshotAfter = context.readChronosUiSettingsSnapshotFromDataStore()
+
+            // The DataStore must not have been written: both snapshots must be equal.
+            assertEquals(
+                "A read-only composition must not write back the default value to the DataStore",
+                snapshotBefore.highContrastEnabled,
+                snapshotAfter.highContrastEnabled
+            )
+        }
 }

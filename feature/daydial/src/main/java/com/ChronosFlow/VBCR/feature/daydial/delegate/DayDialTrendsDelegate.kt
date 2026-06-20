@@ -1,5 +1,6 @@
 package com.ChronosFlow.VBCR.feature.daydial.delegate
 
+import androidx.compose.runtime.Immutable
 import com.ChronosFlow.VBCR.core.data.usage.ScreenTimeSyncManager
 import com.ChronosFlow.VBCR.core.domain.model.AppUsageDay
 import com.ChronosFlow.VBCR.core.domain.model.AppUsageSample
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 
+@Immutable
 data class CompanionTrendSections(
     val moodTrends: MoodEnergyTrends = MoodEnergyTrends(),
     val habitTrend: List<HabitDailyCompletion> = emptyList(),

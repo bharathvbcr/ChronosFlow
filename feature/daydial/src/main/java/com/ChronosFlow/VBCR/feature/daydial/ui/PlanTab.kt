@@ -325,7 +325,8 @@ internal fun PlanTab(
                             )
                         }
                 ) {
-                    TimelineBlockItem(block, onClick = { onBlockSelected(block.id) }, showTimeColumn = true)
+                    val onClickBlock = remember(block.id) { { onBlockSelected(block.id) } }
+                    TimelineBlockItem(block, onClick = onClickBlock, showTimeColumn = true)
                 }
             }
         }

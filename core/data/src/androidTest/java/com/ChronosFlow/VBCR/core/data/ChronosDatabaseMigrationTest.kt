@@ -663,6 +663,37 @@ class ChronosDatabaseMigrationTest {
     }
 
     @Test
+    fun testMigrate26To27() {
+        helper.createDatabase(TEST_DB, 26).close()
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            27,
+            true,
+            ChronosDatabase.MIGRATION_26_27
+        ).apply {
+            query(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_time_blocks_date_category'"
+            ).use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("index_time_blocks_date_category", cursor.getString(0))
+            }
+            query(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_tasks_targetDate_isCompleted'"
+            ).use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("index_tasks_targetDate_isCompleted", cursor.getString(0))
+            }
+            query(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_habit_events_habitId_recordedAt'"
+            ).use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("index_habit_events_habitId_recordedAt", cursor.getString(0))
+            }
+        }
+    }
+
+    @Test
     fun migrate17To18RecreatesCalendarEventsWithCompositeKey() {
         helper.createDatabase(TEST_DB, 17).apply {
             insert(
@@ -731,7 +762,8 @@ class ChronosDatabaseMigrationTest {
             ChronosDatabase.MIGRATION_22_23,
             ChronosDatabase.MIGRATION_23_24,
             ChronosDatabase.MIGRATION_24_25,
-            ChronosDatabase.MIGRATION_25_26
+            ChronosDatabase.MIGRATION_25_26,
+            ChronosDatabase.MIGRATION_26_27
         )
     }
 }

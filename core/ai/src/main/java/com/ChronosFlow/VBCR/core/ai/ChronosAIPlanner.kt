@@ -16,9 +16,8 @@ import com.ChronosFlow.VBCR.core.domain.model.DailyReviewSummary
 import com.ChronosFlow.VBCR.core.domain.model.Task
 import com.ChronosFlow.VBCR.core.domain.model.TimeBlock
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.ChronosFlow.VBCR.core.ai.genai.PlannerDateFormatters
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.StateFlow
@@ -70,7 +69,7 @@ class ChronosAIPlanner @Inject constructor(
         currentTimeZone: String,
         privacyMode: PrivacyMode
     ): StructuredDayPlanSuggestion {
-        val todayLabel = date.format(DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault()))
+        val todayLabel = date.format(PlannerDateFormatters.fullWeekdayDate)
         if (privacyMode == PrivacyMode.DISABLED) {
             return disabledSuggestion(todayLabel)
         }
@@ -309,7 +308,7 @@ class ChronosAIPlanner @Inject constructor(
             AssistGenAiSource.LOCAL -> heuristic.explanation
         }
         val resolvedSource = if (generation.text == null) AssistGenAiSource.LOCAL else generation.source
-        return if (review != null) {
+        val result = if (review != null) {
             LocalPlanningHeuristics.generateReviewBackedDayPlan(
                 packageName = context.packageName,
                 userPreferences = userPreferences,
@@ -320,6 +319,13 @@ class ChronosAIPlanner @Inject constructor(
             ).copy(explanationSource = resolvedSource)
         } else {
             heuristic.copy(explanation = fallbackExplanation, explanationSource = resolvedSource)
+        }
+        // Safety net: a plan with zero proposed blocks is never useful when the user explicitly
+        // requested planning. Fall back to the bare heuristic to guarantee at least a skeleton day.
+        return if (result.proposedBlocks.isEmpty() && heuristic.proposedBlocks.isNotEmpty()) {
+            heuristic.copy(explanation = fallbackExplanation, explanationSource = resolvedSource)
+        } else {
+            result
         }
     }
 
@@ -348,7 +354,7 @@ class ChronosAIPlanner @Inject constructor(
     }
 
     private fun dayPlanReason(date: LocalDate, source: AssistGenAiSource): String {
-        val label = date.format(DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault()))
+        val label = date.format(PlannerDateFormatters.fullWeekdayDate)
         return when (source) {
             AssistGenAiSource.CLOUD_GEMINI -> "Cloud Gemini day plan for $label."
             AssistGenAiSource.GEMINI_NANO -> "Gemini Nano day plan for $label."

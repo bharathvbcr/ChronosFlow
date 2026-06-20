@@ -26,6 +26,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    // @Immutable/@Stable annotations only — no Compose runtime code in domain layer.
+    compileOnly(platform(libs.androidx.compose.bom))
+    compileOnly(libs.androidx.compose.runtime)
 
     testImplementation(libs.junit)
     testImplementation(libs.mockk)

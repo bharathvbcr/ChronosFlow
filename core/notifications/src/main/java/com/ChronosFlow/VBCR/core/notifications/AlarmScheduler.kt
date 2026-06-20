@@ -24,6 +24,10 @@ import javax.inject.Singleton
 private const val PREFERENCES_NAME = "chronos_alarm_scheduler"
 private const val KEY_PENDING_IDS = "pending_alarm_ids"
 private const val KEY_ALARM_PREFIX = "alarm_"
+// Monotonically-increasing counter used to allocate collision-free PendingIntent request codes.
+private const val KEY_REQUEST_CODE_COUNTER = "rc_counter"
+// Prefix for persisted id→requestCode mappings so the same alarm always reuses the same code.
+private const val KEY_RC_PREFIX = "rc_"
 private const val DEGRADED_WINDOW_MILLIS = 10 * 60 * 1000L
 
 /** Android 12+ allows 500 concurrent alarms; stay below that for headroom. */
@@ -328,10 +332,11 @@ class AlarmScheduler @Inject constructor(
     internal fun hasPersistedReminders(): Boolean = getPersistedIds().isNotEmpty()
 
     fun cancelAlarm(id: String) {
+        val rc = requestCodeFor(id)
         val intent = Intent(context, AlarmReceiver::class.java)
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            id.hashCode(),
+            rc,
             intent,
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
         )
@@ -339,11 +344,12 @@ class AlarmScheduler @Inject constructor(
         val medicationIntent = Intent(context, MedicationAlarmReceiver::class.java)
         PendingIntent.getBroadcast(
             context,
-            id.hashCode(),
+            rc,
             medicationIntent,
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
         )?.let { alarmManager.cancel(it) }
         clearReminder(id)
+        releaseRequestCode(id)
         pending.remove(id)
         setBootReceiverEnabled(hasPersistedReminders())
     }
@@ -354,7 +360,8 @@ class AlarmScheduler @Inject constructor(
      */
     fun cancelAllAlarms() {
         getPersistedIds().toSet().forEach { id -> cancelAlarm(id) }
-        // Also clear the entire alarm SharedPreferences file so no stale IDs survive.
+        // Also clear the entire alarm SharedPreferences file so no stale IDs or request-code
+        // mappings survive.
         preferences.edit().clear().apply()
         pending.clear()
         setBootReceiverEnabled(false)
@@ -437,12 +444,46 @@ class AlarmScheduler @Inject constructor(
         }
         return PendingIntent.getBroadcast(
             context,
-            id.hashCode(),
+            requestCodeFor(id),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
 
+    /**
+     * Returns the stable PendingIntent request code for [id]. If the id has no code yet, allocates
+     * a new one from a persisted monotonic counter so codes are unique and survive process restarts.
+     * Using String.hashCode() is avoided because its 32-bit range causes birthday-paradox collisions
+     * among the up to [MAX_PERSISTED_ALARMS] concurrent alarms (TS-010).
+     */
+    @Synchronized
+    private fun requestCodeFor(id: String): Int {
+        val rcKey = KEY_RC_PREFIX + id
+        val existing = preferences.getInt(rcKey, -1)
+        if (existing != -1) return existing
+        val next = preferences.getInt(KEY_REQUEST_CODE_COUNTER, 1)
+        preferences.edit()
+            .putInt(rcKey, next)
+            .putInt(KEY_REQUEST_CODE_COUNTER, next + 1)
+            .apply()
+        return next
+    }
+
+    /**
+     * Frees the persisted request-code mapping for [id] after the alarm is cancelled, reclaiming
+     * the slot in the counter registry so it is not allocated again.
+     */
+    @Synchronized
+    private fun releaseRequestCode(id: String) {
+        preferences.edit().remove(KEY_RC_PREFIX + id).apply()
+    }
+
+    // Serialises all read-modify-write operations on the persisted ID set so two concurrent
+    // callers (e.g. AlarmDeliveryCoordinator on one WorkManager thread and
+    // SyncRecurringTaskAlarmsUseCase on another) cannot each read the same base set and silently
+    // overwrite each other's addition (TS-005). Uses the same JVM monitor as requestCodeFor so
+    // the two operations on preferences are coherently ordered.
+    @Synchronized
     private fun persistReminder(reminder: PersistedReminder) {
         val ids = getPersistedIds().toMutableSet()
         ids.add(reminder.id)
@@ -460,6 +501,7 @@ class AlarmScheduler @Inject constructor(
             .apply()
     }
 
+    @Synchronized
     private fun clearReminder(id: String) {
         val ids = getPersistedIds().toMutableSet()
         ids.remove(id)

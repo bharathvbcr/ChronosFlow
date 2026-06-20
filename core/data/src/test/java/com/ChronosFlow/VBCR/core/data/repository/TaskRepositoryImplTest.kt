@@ -339,6 +339,90 @@ class TaskRepositoryImplTest {
         assertEquals(1, syncMutationNotifier.callCount)
     }
 
+    // -------------------------------------------------------------------------
+    // Transaction atomicity — rollback tests
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `saveTask when replaceChecklistItems throws propagates exception without notifying sync`() =
+        runTest {
+            val now = Instant.now()
+            val task = Task(
+                id = "rollback-task",
+                title = "Atomicity test",
+                description = null,
+                isCompleted = false,
+                priority = 0,
+                dueDate = null,
+                createdAt = now,
+                updatedAt = now,
+                checklist = listOf(
+                    TaskChecklistItem(id = "ci-1", label = "Step 1", isCompleted = false)
+                )
+            )
+            syncMutationNotifier.reset()
+            // upsertTask succeeds but replaceChecklistItems fails.
+            coEvery { taskDao.upsertTask(any()) } returns Unit
+            coEvery { taskDao.replaceChecklistItems(any(), any()) } throws
+                RuntimeException("Simulated DB write failure in checklist replace")
+            coEvery { taskDao.replaceTaskContact(any(), any(), any()) } returns Unit
+            coEvery { taskDao.replaceTaskActions(any(), any()) } returns Unit
+            coEvery { taskDao.replaceTaskAttachments(any(), any()) } returns Unit
+
+            // withTransaction mock: runs the lambda and rethrows any exception (mimics rollback).
+            // The @Before already set this up to just invoke the lambda, so the thrown exception
+            // will propagate out of saveTask.
+            var caughtException: Exception? = null
+            try {
+                repository.saveTask(task)
+            } catch (e: RuntimeException) {
+                caughtException = e
+            }
+
+            // The exception must propagate to the caller — not swallowed.
+            assert(caughtException != null) {
+                "saveTask must propagate the exception from a failed checklist write"
+            }
+            // Sync notification must NOT fire when the transaction failed.
+            assertEquals(
+                "Sync mutation must NOT be notified when the transaction fails",
+                0,
+                syncMutationNotifier.callCount
+            )
+        }
+
+    @Test
+    fun `saveTask when upsertTask throws does not attempt checklist write or notify sync`() =
+        runTest {
+            val now = Instant.now()
+            val task = Task(
+                id = "rollback-task-2",
+                title = "Atomicity test 2",
+                description = null,
+                isCompleted = false,
+                priority = 0,
+                dueDate = null,
+                createdAt = now,
+                updatedAt = now
+            )
+            syncMutationNotifier.reset()
+            // The very first DAO call fails — checklist replace must never be reached.
+            coEvery { taskDao.upsertTask(any()) } throws
+                RuntimeException("Simulated DB write failure in upsertTask")
+
+            try {
+                repository.saveTask(task)
+            } catch (_: RuntimeException) { /* expected */ }
+
+            // replaceChecklistItems must not have been called at all.
+            coVerify(exactly = 0) { taskDao.replaceChecklistItems(any(), any()) }
+            assertEquals(
+                "Sync mutation must NOT fire when upsertTask fails",
+                0,
+                syncMutationNotifier.callCount
+            )
+        }
+
     private class RecordingSyncMutationNotifier : SyncMutationNotifier {
         var callCount = 0
             private set

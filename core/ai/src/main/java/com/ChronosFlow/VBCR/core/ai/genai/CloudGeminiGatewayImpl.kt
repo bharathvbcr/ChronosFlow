@@ -7,7 +7,9 @@ import com.google.firebase.ai.type.generationConfig
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 @Singleton
 class CloudGeminiGatewayImpl @Inject constructor(
@@ -42,19 +44,26 @@ class CloudGeminiGatewayImpl @Inject constructor(
                     IllegalStateException("Cloud Gemini requests require ChronosFlow to be in the foreground.")
                 )
             }
-            runCatching {
-                val model = Firebase.ai(backend = GenerativeBackend.googleAI()).generativeModel(
-                    modelName = CloudGeminiModels.CLOUD_MODEL,
-                    generationConfig = generationConfig {
-                        temperature = 0.4f
-                        topK = 24
-                        maxOutputTokens = 2_048
+            try {
+                val text = withTimeout(CLOUD_TIMEOUT_MS) {
+                    val model = Firebase.ai(backend = GenerativeBackend.googleAI()).generativeModel(
+                        modelName = CloudGeminiModels.CLOUD_MODEL,
+                        generationConfig = generationConfig {
+                            temperature = 0.4f
+                            topK = 24
+                            maxOutputTokens = 2_048
+                        }
+                    )
+                    val response = model.generateContent(prompt)
+                    response.text?.trim().orEmpty().ifBlank {
+                        error("Cloud Gemini returned an empty response.")
                     }
-                )
-                val response = model.generateContent(prompt)
-                response.text?.trim().orEmpty().ifBlank {
-                    error("Cloud Gemini returned an empty response.")
                 }
+                Result.success(text)
+            } catch (e: TimeoutCancellationException) {
+                Result.failure(e)
+            } catch (e: Exception) {
+                Result.failure(e)
             }
         }
         result.getOrNull()?.let { responseCache.put(prompt, it, nowMs()) }
@@ -64,6 +73,7 @@ class CloudGeminiGatewayImpl @Inject constructor(
     private companion object {
         const val CACHE_MAX_ENTRIES = 16
         const val CACHE_TTL_MS = 10L * 60 * 1000
+        const val CLOUD_TIMEOUT_MS = 10_000L
     }
 }
 

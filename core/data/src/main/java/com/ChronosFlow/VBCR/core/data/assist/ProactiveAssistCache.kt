@@ -34,10 +34,14 @@ class ProactiveAssistCache @Inject constructor(
     val dailyCoachWrites: SharedFlow<LocalDate> = _dailyCoachWrites.asSharedFlow()
 
     fun putDailyCoachLine(date: LocalDate, headline: String, nextStep: String, source: String) {
-        preferences.putString(KEY_DAILY_COACH_DATE, date.toString())
-        preferences.putString(KEY_DAILY_COACH_HEADLINE, headline)
-        preferences.putString(KEY_DAILY_COACH_NEXT_STEP, nextStep)
-        preferences.putString(KEY_DAILY_COACH_SOURCE, source)
+        // Batch all four keys into one editor.apply() so a concurrent reader never sees a
+        // partially-written state (e.g. new date but stale headline) (TS-006).
+        preferences.edit {
+            putString(KEY_DAILY_COACH_DATE, date.toString())
+            putString(KEY_DAILY_COACH_HEADLINE, headline)
+            putString(KEY_DAILY_COACH_NEXT_STEP, nextStep)
+            putString(KEY_DAILY_COACH_SOURCE, source)
+        }
         _dailyCoachWrites.tryEmit(date)
 
         // Purge any stale date-keyed entries that are not today and not the fixed focus-block key.
@@ -60,9 +64,11 @@ class ProactiveAssistCache @Inject constructor(
     }
 
     fun putFocusNextBlockLine(date: LocalDate, blockId: String, line: String) {
-        preferences.putString(KEY_FOCUS_NEXT_DATE, date.toString())
-        preferences.putString(KEY_FOCUS_NEXT_BLOCK_ID, blockId)
-        preferences.putString(KEY_FOCUS_NEXT_LINE, line)
+        preferences.edit {
+            putString(KEY_FOCUS_NEXT_DATE, date.toString())
+            putString(KEY_FOCUS_NEXT_BLOCK_ID, blockId)
+            putString(KEY_FOCUS_NEXT_LINE, line)
+        }
     }
 
     /** Returns the cached line only when it was generated today for [blockId]. */

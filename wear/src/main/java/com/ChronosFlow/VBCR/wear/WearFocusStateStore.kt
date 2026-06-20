@@ -24,7 +24,10 @@ object WearFocusStateStore {
         val totalSeconds: Int = 0
     )
 
-    private var flow: MutableStateFlow<FocusState>? = null
+    // @Volatile + synchronized double-checked locking prevents two threads from each constructing
+    // a separate MutableStateFlow and one silently losing writes to the other's discarded instance
+    // (TS-001).
+    @Volatile private var flow: MutableStateFlow<FocusState>? = null
 
     fun state(context: Context): StateFlow<FocusState> = ensureFlow(context).asStateFlow()
 
@@ -48,7 +51,9 @@ object WearFocusStateStore {
     }
 
     private fun ensureFlow(context: Context): MutableStateFlow<FocusState> =
-        flow ?: MutableStateFlow(load(context)).also { flow = it }
+        flow ?: synchronized(this) {
+            flow ?: MutableStateFlow(load(context)).also { flow = it }
+        }
 
     private fun load(context: Context): FocusState {
         val prefs = prefs(context)

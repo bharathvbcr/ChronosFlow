@@ -25,6 +25,8 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /** Settings + last-run status for the Health Connect sleep importer, shaped for the UI. */
@@ -60,6 +62,12 @@ class HealthConnectSleepSyncManager @Inject constructor(
     private val recordSleepUseCase: RecordSleepUseCase,
     private val preferences: ChronosPreferencesDataSource
 ) {
+    /**
+     * Guards [runSync] so the background [HealthConnectSleepSyncWorker] and the manual one-time pull
+     * button cannot run concurrently and corrupt the changes token.
+     */
+    private val syncMutex = Mutex()
+
     /** Permission strings the settings screen requests via [permissionRequestContract]. */
     val requestPermissions: Set<String> get() = dataSource.requestPermissions
 
@@ -86,7 +94,11 @@ class HealthConnectSleepSyncManager @Inject constructor(
         if (preferences.getBoolean(KEY_ENABLED, false)) schedule()
     }
 
-    suspend fun runSync(): HealthConnectSleepSyncOutcome {
+    suspend fun runSync(): HealthConnectSleepSyncOutcome = syncMutex.withLock {
+        runSyncLocked()
+    }
+
+    private suspend fun runSyncLocked(): HealthConnectSleepSyncOutcome {
         if (!dataSource.isAvailable()) return recordSkipped("Health Connect is not available")
         if (!dataSource.hasSleepReadPermission()) return recordSkipped("Sleep access not granted yet")
         if (!dataSource.hasBackgroundReadPermission()) return recordSkipped("Background read permission not granted")

@@ -20,12 +20,17 @@ class AppLockLifecycleObserver @Inject constructor(
     // followed by relaunch is still treated as a background-resume for lock evaluation.
     private var startedCount = 0
 
+    // Cache the SharedPreferences instance at construction time so getSharedPreferences() (which
+    // parses the XML file on first access) is not called on the main thread during onStart/onStop
+    // (STARTUP-012). Hilt constructs this singleton during Application.onCreate() which is
+    // already off the critical-path for the first Compose frame.
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
     fun register() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
     }
 
     override fun onStart(owner: LifecycleOwner) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val lastBackgroundedAt = prefs.getLong(KEY_LAST_BACKGROUNDED, -1L)
         val fromBackground = when {
             startedCount > 0 -> true                // within same process: definitely from background
@@ -37,8 +42,7 @@ class AppLockLifecycleObserver @Inject constructor(
     }
 
     override fun onStop(owner: LifecycleOwner) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
+        prefs.edit()
             .putLong(KEY_LAST_BACKGROUNDED, System.currentTimeMillis())
             .apply()
         appLockSessionController.onAppBackgrounded()

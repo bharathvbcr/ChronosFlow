@@ -4,8 +4,6 @@ import android.app.ActivityManager
 import android.app.Application
 import android.app.NotificationManager
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import androidx.appfunctions.service.AppFunctionConfiguration
 import androidx.work.Configuration
@@ -35,7 +33,7 @@ internal const val APPLICATION_STARTUP_WORK_DEFER_MILLIS = 60_000L
 
 @HiltAndroidApp
 class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Configuration.Provider {
-    @Inject lateinit var alarmCapabilityRefresher: AlarmCapabilityRefresher
+    @Inject lateinit var alarmCapabilityRefresher: Provider<AlarmCapabilityRefresher>
     @Inject lateinit var chronosAppFunctions: Provider<ChronosAppFunctions>
     @Inject lateinit var portableBackupInitializer: Provider<ChronosPortableBackupInitializer>
     @Inject lateinit var autoBackupManager: Provider<ChronosAutoBackupManager>
@@ -43,8 +41,6 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
     @Inject lateinit var screenTimeSyncManager: Provider<ScreenTimeSyncManager>
     @Inject lateinit var calendarBackgroundSyncManager: Provider<CalendarBackgroundSyncManager>
     @Inject lateinit var proactiveAssistForegroundRefresher: Provider<ProactiveAssistForegroundRefresher>
-
-    private val startupHandler = Handler(Looper.getMainLooper(), null)
 
     // Long-lived scope for process-wide background work that must outlive any single screen.
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -64,7 +60,8 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
         // Seed the UI-settings cache once so Compose reads never block on DataStore (no startup flash).
         applicationScope.launch { ChronosUiSettingsCache.keepFresh(this@ChronosApplication) }
         WidgetBackgroundSync.register(this)
-        ensureNotificationChannels()   // synchronous, idempotent
+        // Move notification-channel creation off the main thread (Binder IPC + possible disk writes).
+        applicationScope.launch(Dispatchers.IO) { ensureNotificationChannels() }
         scheduleDeferredStartupWork()
     }
 
@@ -77,22 +74,22 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
     }
 
     private fun scheduleDeferredStartupWork() {
-        startupHandler.postDelayed(
-            {
-                alarmCapabilityRefresher.register()
-                ReminderReconcileScheduler.enqueue(this)
-                portableBackupInitializer.get().start()
-                autoBackupManager.get().ensureScheduled()
-                healthConnectSleepSyncManager.get().ensureScheduled()
-                screenTimeSyncManager.get().ensureScheduled()
-                calendarBackgroundSyncManager.get().ensureScheduled()
-                InteropSyncWorker.ensureScheduled(this)
-                proactiveAssistForegroundRefresher.get().register()
-                setupProfiling()
-                monitorProcessExitHealth()
-            },
-            APPLICATION_STARTUP_WORK_DEFER_MILLIS
-        )
+        // Use a background coroutine instead of a main-thread Handler so WorkManager.enqueue() and
+        // other potentially blocking calls never run on the main Looper (STARTUP-008).
+        applicationScope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(APPLICATION_STARTUP_WORK_DEFER_MILLIS)
+            alarmCapabilityRefresher.get().register()
+            ReminderReconcileScheduler.enqueue(this@ChronosApplication)
+            portableBackupInitializer.get().start()
+            autoBackupManager.get().ensureScheduled()
+            healthConnectSleepSyncManager.get().ensureScheduled()
+            screenTimeSyncManager.get().ensureScheduled()
+            calendarBackgroundSyncManager.get().ensureScheduled()
+            InteropSyncWorker.ensureScheduled(this@ChronosApplication)
+            proactiveAssistForegroundRefresher.get().register()
+            setupProfiling()
+            monitorProcessExitHealth()
+        }
     }
 
     private fun setupProfiling() {

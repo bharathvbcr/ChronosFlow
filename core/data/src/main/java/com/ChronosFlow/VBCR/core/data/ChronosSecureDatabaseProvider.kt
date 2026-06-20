@@ -1,7 +1,9 @@
 package com.ChronosFlow.VBCR.core.data
 
 import android.content.Context
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.util.Base64
+import android.util.Log
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -69,10 +71,25 @@ class ChronosSecureDatabaseProvider @Inject constructor(
         val encrypted = prefs.getString(PREF_KEY_ENCRYPTED_PASSPHRASE, null)
         val iv = prefs.getString(PREF_KEY_IV, null)
         if (encrypted != null && iv != null) {
-            return decryptPassphrase(
-                cipherText = Base64.decode(encrypted, Base64.NO_WRAP),
-                iv = Base64.decode(iv, Base64.NO_WRAP)
-            )
+            try {
+                return decryptPassphrase(
+                    cipherText = Base64.decode(encrypted, Base64.NO_WRAP),
+                    iv = Base64.decode(iv, Base64.NO_WRAP)
+                )
+            } catch (e: KeyPermanentlyInvalidatedException) {
+                // The Keystore key was invalidated — most commonly because the device's enrolled
+                // biometrics or screen-lock credential changed. The stored passphrase is now
+                // unrecoverable; we must discard it and generate a fresh key + passphrase.
+                // This means the encrypted database cannot be opened with the old passphrase;
+                // the caller (Room builder) will see a SQLCipher "file is not a database" error
+                // and the app should guide the user to reset their data.
+                Log.w(TAG, "Keystore key permanently invalidated — regenerating DB passphrase.", e)
+                prefs.edit()
+                    .remove(PREF_KEY_ENCRYPTED_PASSPHRASE)
+                    .remove(PREF_KEY_IV)
+                    .apply()
+                // Fall through to generate a fresh passphrase below.
+            }
         }
 
         val passphrase = ByteArray(PASSPHRASE_BYTES)
@@ -137,6 +154,7 @@ class ChronosSecureDatabaseProvider @Inject constructor(
     )
 
     companion object {
+        private const val TAG = "ChronosSecureDatabaseProvider"
         const val DATABASE_NAME = "chronos_db"
         const val ENCRYPTION_ENABLED = true
 

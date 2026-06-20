@@ -100,7 +100,7 @@ import com.ChronosFlow.VBCR.core.data.util.Converters
         AppUsageDayEntity::class,
         AppUsageOverrideEntity::class
     ],
-    version = 26,
+    version = 27,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -982,6 +982,26 @@ abstract class ChronosDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_habit_events_recordedAt ON habit_events(recordedAt)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_medication_dose_events_recordedAt ON medication_dose_events(recordedAt)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_journal_entries_isPrimary ON journal_entries (isPrimary)")
+            }
+        }
+
+        val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Composite index on time_blocks for filtered day-view queries (date + category).
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_time_blocks_date_category ON time_blocks(date, category)"
+                )
+                // Composite indexes on tasks for date-filtered incomplete-task queries.
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_tasks_targetDate ON tasks(targetDate)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_tasks_targetDate_isCompleted ON tasks(targetDate, isCompleted)"
+                )
+                // Composite index on habit_events for per-habit chronological queries.
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_habit_events_habitId_recordedAt ON habit_events(habitId, recordedAt)"
+                )
             }
         }
     }

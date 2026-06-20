@@ -16,6 +16,13 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+/** Shared formatters for the local-planning heuristics layer (avoids repeated pattern compilation). */
+internal object PlannerDateFormatters {
+    /** "Monday, Jun 3" format used for day-plan reason/explanation strings. */
+    val fullWeekdayDate: DateTimeFormatter =
+        DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault())
+}
 import java.util.UUID
 
 internal object LocalPlanningHeuristics {
@@ -26,7 +33,7 @@ internal object LocalPlanningHeuristics {
         currentTimeZone: String,
         pendingTasks: List<Task> = emptyList()
     ): StructuredDayPlanSuggestion {
-        val todayLabel = date.format(DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault()))
+        val todayLabel = date.format(PlannerDateFormatters.fullWeekdayDate)
         val normalizedPreferences = userPreferences.lowercase(Locale.getDefault())
         val wantsRecovery = listOf("recovery", "break", "low energy", "tired").any { it in normalizedPreferences }
         val wantsStudy = listOf("study", "read", "exam", "learn").any { it in normalizedPreferences }

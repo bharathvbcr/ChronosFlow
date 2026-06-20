@@ -137,7 +137,13 @@ class HealthConnectSleepDataSource @Inject constructor(
         var hasDeletions = false
         var cursor = token
         while (true) {
-            val response = client.getChanges(cursor)
+            val response = try {
+                client.getChanges(cursor)
+            } catch (e: SecurityException) {
+                return SleepChangesResult.Expired
+            } catch (e: IllegalStateException) {
+                return SleepChangesResult.Expired
+            }
             if (response.changesTokenExpired) return SleepChangesResult.Expired
             for (change in response.changes) {
                 when (change) {

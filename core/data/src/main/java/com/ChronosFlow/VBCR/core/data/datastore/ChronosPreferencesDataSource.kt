@@ -46,6 +46,15 @@ class ChronosPreferencesDataSource @Inject constructor(
         preferences.edit().remove(key).apply()
     }
 
+    /**
+     * Applies multiple key/value writes in a single [SharedPreferences.Editor] commit so readers
+     * can never observe a partially-written state (TS-006). The [block] lambda receives the editor;
+     * [apply] is called after the lambda returns.
+     */
+    fun edit(block: android.content.SharedPreferences.Editor.() -> Unit) {
+        preferences.edit().apply(block).apply()
+    }
+
     fun getAll(): Map<String, *> = preferences.all
 
     /**

@@ -63,6 +63,9 @@ class ManualMissedBlockRegistry @Inject constructor(
             parseEntry(raw)?.takeIf { (entryDate, _) -> entryDate == date }?.second
         }.toSet()
 
+    // @Synchronized serialises concurrent callers on this Singleton's intrinsic lock so the
+    // debounce check-then-act on lastSkipEmitBlockId / lastSkipEmitAtMs is race-free (TS-007).
+    @Synchronized
     private fun emitSkipIfNotDuplicate(blockId: String) {
         val now = System.currentTimeMillis()
         if (lastSkipEmitBlockId == blockId && now - lastSkipEmitAtMs < SKIP_EMIT_DEBOUNCE_MS) {

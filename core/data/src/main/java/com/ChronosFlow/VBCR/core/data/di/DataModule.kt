@@ -117,7 +117,8 @@ object DataModule {
                 ChronosDatabase.MIGRATION_22_23,
                 ChronosDatabase.MIGRATION_23_24,
                 ChronosDatabase.MIGRATION_24_25,
-                ChronosDatabase.MIGRATION_25_26
+                ChronosDatabase.MIGRATION_25_26,
+                ChronosDatabase.MIGRATION_26_27
             )
         )
             // Guard against opening a database written by a newer (uncommitted) schema:

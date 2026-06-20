@@ -1,5 +1,6 @@
 package com.ChronosFlow.VBCR.core.domain.model
 
+import androidx.compose.runtime.Immutable
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -52,6 +53,7 @@ data class HabitEvent(
     val endMinuteOfDay: Int?
 )
 
+@Immutable
 data class HabitAnalytics(
     val adherenceRate: Float = 0f,
     val completedCountLast7Days: Int = 0,

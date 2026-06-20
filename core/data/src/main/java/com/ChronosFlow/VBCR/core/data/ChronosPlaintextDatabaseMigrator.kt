@@ -62,7 +62,8 @@ class ChronosPlaintextDatabaseMigrator @Inject constructor(
                 ChronosDatabase.MIGRATION_22_23,
                 ChronosDatabase.MIGRATION_23_24,
                 ChronosDatabase.MIGRATION_24_25,
-                ChronosDatabase.MIGRATION_25_26
+                ChronosDatabase.MIGRATION_25_26,
+                ChronosDatabase.MIGRATION_26_27
             )
             .build()
 
@@ -91,7 +92,8 @@ class ChronosPlaintextDatabaseMigrator @Inject constructor(
                 ChronosDatabase.MIGRATION_22_23,
                 ChronosDatabase.MIGRATION_23_24,
                 ChronosDatabase.MIGRATION_24_25,
-                ChronosDatabase.MIGRATION_25_26
+                ChronosDatabase.MIGRATION_25_26,
+                ChronosDatabase.MIGRATION_26_27
             )
         )
         val encryptedDb = secureProvider.create(encryptedBuilder)

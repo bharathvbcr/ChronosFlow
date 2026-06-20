@@ -10,19 +10,21 @@ import javax.inject.Provider
 
 class MainActivityStartupTest {
     @Test
-    fun `full shell waits for the first focus window to settle`() {
-        val delayMillis = Class.forName("com.ChronosFlow.VBCR.MainActivityKt")
-            .getDeclaredField("STARTUP_SHELL_DEFER_MILLIS")
-            .getLong(null)
+    fun `full shell waits for the UI settings cache to be seeded (frame-based gate)`() {
+        // The gate is now frame-based (withFrameNanos + isSeeded check) rather than a fixed delay.
+        // Verify the source still uses isSeeded and withFrameNanos so the mechanism is present.
+        val source = listOf(
+            File("src/main/java/com/ChronosFlow/VBCR/MainActivity.kt"),
+            File("app/src/main/java/com/ChronosFlow/VBCR/MainActivity.kt")
+        ).first(File::exists).readText()
 
-        assertTrue(delayMillis >= 300L)
+        assertTrue(source.contains("isSeeded"))
+        assertTrue(source.contains("withFrameNanos"))
+        assertTrue(source.contains("showFullShell = true"))
     }
 
     @Test
-    fun `application startup work waits until the first shell can draw`() {
-        val shellDelayMillis = Class.forName("com.ChronosFlow.VBCR.MainActivityKt")
-            .getDeclaredField("STARTUP_SHELL_DEFER_MILLIS")
-            .getLong(null)
+    fun `application startup work waits until after shell and badge data deferral`() {
         val badgeDataDelayMillis = Class.forName("com.ChronosFlow.VBCR.MainActivityKt")
             .getDeclaredField("SHELL_BADGE_DATA_DEFER_MILLIS")
             .getLong(null)
@@ -30,14 +32,14 @@ class MainActivityStartupTest {
             .getDeclaredField("APPLICATION_STARTUP_WORK_DEFER_MILLIS")
             .getLong(null)
 
-        assertTrue(badgeDataDelayMillis > shellDelayMillis)
         assertTrue(badgeDataDelayMillis >= 20_000L)
-        assertTrue(applicationDelayMillis > shellDelayMillis)
         assertTrue(applicationDelayMillis >= 45_000L)
     }
 
     @Test
-    fun `notification channels are created synchronously on startup`() {
+    fun `notification channels are created on a background coroutine during startup`() {
+        // Channels are created asynchronously (Binder IPC, possible disk writes) so they must not
+        // run on the main thread. Verify the helper exists and is launched via applicationScope.
         val source = listOf(
             File("src/main/java/com/ChronosFlow/VBCR/ChronosApplication.kt"),
             File("app/src/main/java/com/ChronosFlow/VBCR/ChronosApplication.kt")
@@ -45,7 +47,8 @@ class MainActivityStartupTest {
 
         assertTrue(source.contains("ensureNotificationChannels()"))
         assertTrue(source.contains("private fun ensureNotificationChannels()"))
-        assertTrue(!source.contains("scheduleDeferredNotificationChannelSetup()"))
+        // Must be launched via applicationScope on IO, not called directly on main thread.
+        assertTrue(source.contains("applicationScope.launch(Dispatchers.IO) { ensureNotificationChannels() }"))
     }
 
     @Test

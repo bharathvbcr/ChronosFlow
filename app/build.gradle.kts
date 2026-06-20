@@ -105,6 +105,11 @@ extensions.configure<ApplicationExtension> {
     }
 }
 
+composeCompiler {
+    metricsDestination = layout.buildDirectory.dir("compose_compiler")
+    reportsDestination = layout.buildDirectory.dir("compose_compiler")
+}
+
 ksp {
     arg("appfunctions:aggregateAppFunctions", "true")
 }
