@@ -62,6 +62,10 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    // DeleteAllDataUseCase calls WorkManager.cancelAllWork() and database.clearAllTables().
+    // These are implementation deps in core:data (not api), so feature:daydial needs them directly.
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.room.runtime)
 
     testImplementation(libs.junit)
     testImplementation(libs.mockk)

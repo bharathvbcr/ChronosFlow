@@ -32,6 +32,7 @@ class GenAiAssistCoordinatorTest {
     fun `cloud allowed uses cloud before nano`() = runTest {
         val preferences = mockk<AssistantPreferences>()
         every { preferences.assistantPrivacyModeValue() } returns PrivacyMode.CLOUD_ALLOWED.name
+        every { preferences.isCloudAiEnabled() } returns true
         val coordinator = GenAiAssistCoordinator(
             preferences,
             FakeAssistGateway(NanoModelStatus.AVAILABLE, "nano-response"),

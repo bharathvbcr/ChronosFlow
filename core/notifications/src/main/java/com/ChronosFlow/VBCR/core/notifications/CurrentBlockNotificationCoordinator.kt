@@ -291,12 +291,15 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
         val pendingIntent = boundaryPendingIntent(PendingIntent.FLAG_UPDATE_CURRENT) ?: return
         // RTC_WAKEUP is required for block-boundary transitions: under Doze, plain RTC alarms are
         // deferred to the next maintenance window, leaving the live-now notification showing the
-        // wrong block name. A 2-minute window gives the OS room to batch while still ensuring the
-        // alarm fires promptly enough for the live notification surface to transition correctly.
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-            alarmManager?.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+        // wrong block name. On API 31+, SCHEDULE_EXACT_ALARM may be revoked; fall back to a 2-minute
+        // inexact window (still RTC_WAKEUP). minSdk=26 > M=23, so the else/setWindow branch was dead.
+        val am = alarmManager
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+            am?.canScheduleExactAlarms() == false
+        ) {
+            am.setWindow(AlarmManager.RTC_WAKEUP, triggerAt, 2 * 60 * 1000L, pendingIntent)
         } else {
-            alarmManager?.setWindow(AlarmManager.RTC_WAKEUP, triggerAt, 2 * 60 * 1000L, pendingIntent)
+            am?.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
         }
     }
 

@@ -3,6 +3,7 @@ package com.ChronosFlow.VBCR.core.data.security
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -18,7 +19,7 @@ class AppLockManager @Inject constructor(
     private val _appLockState = MutableStateFlow(initialAppLockState())
     val appLockState: StateFlow<AppLockState> = _appLockState.asStateFlow()
 
-    private val sensitiveAreaUnlockTimes = mutableMapOf<SensitiveArea, Long>()
+    private val sensitiveAreaUnlockTimes = ConcurrentHashMap<SensitiveArea, Long>()
     private val unlockedSensitiveAreas: Set<SensitiveArea> get() = sensitiveAreaUnlockTimes.keys
     private val _sensitiveSession = MutableStateFlow(0)
     val sensitiveSession: StateFlow<Int> = _sensitiveSession.asStateFlow()

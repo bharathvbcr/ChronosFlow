@@ -265,7 +265,6 @@ class HealthConnectSleepSyncWorker(
     workerParameters: WorkerParameters
 ) : CoroutineWorker(appContext, workerParameters) {
     override suspend fun doWork(): Result {
-        if (runAttemptCount > 5) return Result.failure()
         val entryPoint = EntryPointAccessors.fromApplication(
             applicationContext,
             HealthConnectSleepSyncEntryPoint::class.java
@@ -274,8 +273,12 @@ class HealthConnectSleepSyncWorker(
         val dataSource = entryPoint.healthConnectSleepDataSource()
 
         if (!dataSource.hasBackgroundReadPermission()) {
-            android.util.Log.w("HealthConnectSleepSync", "Background read permission not granted — skipping sleep sync")
-            return Result.failure()
+            // Permission not yet granted — return success so the periodic work stays alive and
+            // retries at the next scheduled interval. Result.failure() would mark this period
+            // as permanently failed, but runAttemptCount is always 0 for periodic workers
+            // (it only increments on Result.retry()), so the >5 guard was dead code here.
+            android.util.Log.w("HealthConnectSleepSync", "Background read permission not granted — deferring sleep sync")
+            return Result.success()
         }
 
         return when (manager.runSync()) {

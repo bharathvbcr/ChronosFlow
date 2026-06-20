@@ -52,8 +52,26 @@ class ChronosPreferencesDataSource @Inject constructor(
      * Whether medication names may be shared with the DevTime companion app via [InteropProvider].
      * Defaults to false (opt-in) so medication data is never shared without explicit user consent.
      */
-    suspend fun isMedicationSharingEnabled(): Boolean =
+    fun isMedicationSharingEnabled(): Boolean =
         preferences.getBoolean(KEY_INTEROP_SHARING_MEDICATIONS, false)
+
+    /**
+     * Whether the user has opted in to sending schedule data to Google cloud AI (Gemini).
+     * Defaults to false so no user data is ever sent to a remote model without explicit consent.
+     */
+    suspend fun isCloudAiEnabled(): Boolean =
+        preferences.getBoolean(KEY_CLOUD_AI_ENABLED, false)
+
+    /**
+     * Non-suspend variant used by synchronous call sites (e.g. preference accessors that cannot be
+     * called from a coroutine). Reads the same key as [isCloudAiEnabled].
+     */
+    fun isCloudAiEnabledSync(): Boolean =
+        preferences.getBoolean(KEY_CLOUD_AI_ENABLED, false)
+
+    fun setCloudAiEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_CLOUD_AI_ENABLED, enabled).apply()
+    }
 
     /** Emits the current value of [key] and re-emits whenever it changes. */
     fun observeLong(key: String, defaultValue: Long = 0L): Flow<Long> = callbackFlow {
@@ -68,5 +86,6 @@ class ChronosPreferencesDataSource @Inject constructor(
     private companion object {
         const val PREFERENCES_NAME = "chronos_preferences"
         const val KEY_INTEROP_SHARING_MEDICATIONS = "interop.sharing.medications.enabled"
+        const val KEY_CLOUD_AI_ENABLED = "ai.cloud.enabled"
     }
 }

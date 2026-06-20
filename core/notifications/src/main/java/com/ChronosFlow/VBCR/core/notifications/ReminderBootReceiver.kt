@@ -66,6 +66,12 @@ class ReminderBootReceiver : BroadcastReceiver() {
                     Log.w("ReminderBootReceiver", "Failed to restore focus session on boot: ${ex.message}", ex)
                 }
 
+                // LOCKED_BOOT_COMPLETED fires before the user unlocks the device. Room and
+                // SQLCipher live in Credential Encrypted (CE) storage which is unavailable until
+                // the first unlock, so skip the DB-backed restore here — it runs again on the
+                // subsequent ACTION_BOOT_COMPLETED once CE storage is unlocked.
+                if (action == ACTION_LOCKED_BOOT_COMPLETED) return@launch
+
                 val results = restoreDatabaseBackedAlarms()
                 val legacyResults = alarmScheduler.restoreScheduledAlarmsAfterReboot(skipIds = results.keys)
                 ReminderReconcileScheduler.enqueue(context.applicationContext)

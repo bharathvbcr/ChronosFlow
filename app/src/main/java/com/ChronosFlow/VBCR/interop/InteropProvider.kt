@@ -14,7 +14,6 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.runBlocking
 
 /**
  * Read-only provider exposing ChronosFlow's shareable data to DevTime. Authority is
@@ -147,8 +146,7 @@ class InteropProvider : ContentProvider() {
     }
 
     private fun medicationsCursor(db: SupportSQLiteDatabase, ctx: Context): Cursor {
-        // Read preference synchronously (we're already on a background thread in ContentProvider)
-        val sharingEnabled = runBlocking { preferencesDataSource(ctx).isMedicationSharingEnabled() }
+        val sharingEnabled = preferencesDataSource(ctx).isMedicationSharingEnabled()
         if (!sharingEnabled) return MatrixCursor(InteropContract.MEDICATION_COLUMNS)
 
         val out = MatrixCursor(InteropContract.MEDICATION_COLUMNS)

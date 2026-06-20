@@ -52,7 +52,7 @@ class HabitRepositoryImplTest {
     fun `observe habits maps each domain habit with legacy default schedule`() = runTest {
         every { habitDao.observeHabits() } returns flowOf(listOf(habitEntity()))
         every { habitScheduleDao.observeAllSchedules() } returns flowOf(emptyList())
-        every { habitEventDao.getRecentEventsForHabit("habit-1", 10) } returns flowOf(emptyList())
+        every { habitEventDao.getRecentEventsForHabit("habit-1", 30) } returns flowOf(emptyList())
 
         repository.observeHabits().test {
             val habits = awaitItem()

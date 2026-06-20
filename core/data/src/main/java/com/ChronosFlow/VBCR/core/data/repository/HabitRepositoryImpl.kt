@@ -35,9 +35,11 @@ class HabitRepositoryImpl @Inject constructor(
         .flatMapLatest { (habits, schedules) ->
             if (habits.isEmpty()) return@flatMapLatest flowOf(emptyList())
             val schedulesByHabit = schedules.associateBy { it.habitId }
-            // Build one limited-event Flow per habit (10 rows max) and combine them all.
+            // Fetch enough events per habit to cover the 14-day analytics window. 30 events
+            // gives a safe margin for habits with multiple events per day, while keeping the
+            // per-habit query bounded. recentEvents on the domain model is trimmed to 10 for UI.
             val perHabitEventFlows = habits.map { habitEntity ->
-                habitEventDao.getRecentEventsForHabit(habitId = habitEntity.id, limit = 10)
+                habitEventDao.getRecentEventsForHabit(habitId = habitEntity.id, limit = 30)
             }
             combine(perHabitEventFlows) { eventsArrays ->
                 habits.mapIndexed { index, habitEntity ->
@@ -57,7 +59,7 @@ class HabitRepositoryImpl @Inject constructor(
                                 windowEndMinute = habitEntity.windowEndMinute,
                                 plannerVisible = habitEntity.isBundled
                             ),
-                        recentEvents = habitEvents,
+                        recentEvents = habitEvents.take(10),
                         analytics = analytics
                     )
                 }

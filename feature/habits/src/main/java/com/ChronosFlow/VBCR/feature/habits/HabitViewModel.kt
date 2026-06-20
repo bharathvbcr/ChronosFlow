@@ -298,7 +298,7 @@ class HabitViewModel @Inject constructor(
 
     fun deferHabit(habit: Habit, minutes: Int, reason: String? = null) {
         viewModelScope.launch {
-            val nowMinute = LocalTime.now().hour * 60 + LocalTime.now().minute
+            val nowMinute = currentMinuteOfDay()
             val schedule = (habit.schedule ?: buildLegacyHabitSchedule(
                 habitId = habit.id,
                 cadence = habit.cadence,
