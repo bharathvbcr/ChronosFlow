@@ -1,7 +1,9 @@
 package com.ChronosFlow.VBCR.feature.daydial.model
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
+@Immutable
 data class TimeBlockUiModel(
     val id: String,
     val title: String,

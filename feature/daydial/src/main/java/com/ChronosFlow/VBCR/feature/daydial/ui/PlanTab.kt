@@ -512,6 +512,23 @@ private fun PlanMonthCalendar(
     onSelectDate: (LocalDate) -> Unit
 ) {
     val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
+    // Pre-compute the three possible chip color configurations once at PlanMonthCalendar scope
+    // so FilterChipDefaults.filterChipColors() is called 3 times per recomposition instead of
+    // 35–42 times (once per calendar day cell) inside the AnimatedContent lambda.
+    // FilterChipDefaults.filterChipColors() is @Composable and internally memoizes based on its
+    // color inputs, so calling it here is both correct and efficient.
+    val selectedChipColors = FilterChipDefaults.filterChipColors(
+        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+    )
+    val inMonthChipColors = FilterChipDefaults.filterChipColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        labelColor = MaterialTheme.colorScheme.onSurface
+    )
+    val outOfMonthChipColors = FilterChipDefaults.filterChipColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    )
     Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -603,20 +620,11 @@ private fun PlanMonthCalendar(
                                     )
                                 },
                                 shape = MaterialTheme.shapes.small,
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    containerColor = if (inSelectedMonth) {
-                                        MaterialTheme.colorScheme.surfaceContainerHigh
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceContainer
-                                    },
-                                    labelColor = if (inSelectedMonth) {
-                                        MaterialTheme.colorScheme.onSurface
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                )
+                                colors = when {
+                                    isSelected -> selectedChipColors
+                                    inSelectedMonth -> inMonthChipColors
+                                    else -> outOfMonthChipColors
+                                }
                             )
                         }
                     }
@@ -987,6 +995,9 @@ private fun PlanAiSuggestionsCard(
 @Composable
 private fun TimelineBlockItem(block: TimeBlockUiModel, onClick: () -> Unit, showTimeColumn: Boolean = false) {
     val rowHeight = (44.dp + (block.durationMinutes / 6).coerceAtLeast(1).dp).coerceAtMost(88.dp)
+    val timelineLineBrush = remember(block.color) {
+        Brush.verticalGradient(colors = listOf(block.color, block.color.copy(alpha = 0.35f)))
+    }
 
     Row(
         modifier = Modifier
@@ -1014,11 +1025,7 @@ private fun TimelineBlockItem(block: TimeBlockUiModel, onClick: () -> Unit, show
                     modifier = Modifier
                         .fillMaxHeight()
                         .width(2.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(block.color, block.color.copy(alpha = 0.35f))
-                            )
-                        )
+                        .background(timelineLineBrush)
                 )
                 Box(
                     modifier = Modifier

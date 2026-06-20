@@ -3,7 +3,7 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" tools:targetApi="37" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
@@ -283,10 +283,14 @@
         </receiver>
 
         <!-- Receives watch-originated actions (focus controls, habit/task/dose) over the
-             Wearable MessageClient and replays them through the widget action use cases. -->
+             Wearable MessageClient and replays them through the widget action use cases.
+             BIND_LISTENER restricts message delivery to the trusted Wear OS layer, preventing
+             arbitrary on-device apps from injecting fake Wear actions (complete habits, record
+             doses, start focus) without user interaction. -->
         <service
             android:name="com.ChronosFlow.VBCR.widget.WearActionListenerService"
-            android:exported="true">
+            android:exported="true"
+            android:permission="com.google.android.wearable.permission.BIND_LISTENER">
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
                 <data

@@ -67,14 +67,23 @@ extensions.configure<ApplicationExtension> {
             enableUnitTestCoverage = enableDebugCoverage.get()
             enableAndroidTestCoverage = enableDebugCoverage.get()
         }
-        if (keystorePropsFile.exists()) {
-            release { signingConfig = signingConfigs.getByName("release") }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         create("benchmark") {
             initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")
             isDebuggable = false
             isMinifyEnabled = false
+            isShrinkResources = false
             matchingFallbacks += listOf("release")
         }
     }

@@ -33,7 +33,11 @@ class AndroidBackupPolicyTest {
         assertIncludes(cloudBackup, "file", PORTABLE_BACKUP_PATH)
         assertIncludes(deviceTransfer, "sharedpref", ".")
         assertIncludes(deviceTransfer, "file", "datastore/daydial_ui_settings.preferences_pb")
-        assertIncludes(deviceTransfer, "file", PORTABLE_BACKUP_PATH)
+        // Portable backup JSON is plain-text; device-transfer (ADB/cable) has no OS-level
+        // encryption, so it is excluded here to prevent plaintext exfiltration.
+        // Cloud backup retains the include because Android 12+ enforces E2E encryption there.
+        assertNoIncludes(deviceTransfer, "file", PORTABLE_BACKUP_PATH)
+        assertExcludes(deviceTransfer, "file", PORTABLE_BACKUP_PATH)
 
         listOf(cloudBackup, deviceTransfer).forEach { section ->
             assertNoIncludes(section, "database")

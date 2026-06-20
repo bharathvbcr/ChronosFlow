@@ -31,9 +31,16 @@ class ChronosSecureDatabaseProvider @Inject constructor(
         builder.setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
         if (!ENCRYPTION_ENABLED) return builder.build()
         System.loadLibrary("sqlcipher")
-        return builder
-            .openHelperFactory(SupportOpenHelperFactory(obtainPassphraseBytes()))
-            .build()
+        val passphrase = obtainPassphraseBytes()
+        return try {
+            builder
+                .openHelperFactory(SupportOpenHelperFactory(passphrase))
+                .build()
+        } finally {
+            // Zero the passphrase immediately after handing it to the factory so it
+            // does not linger on the heap where a heap dump (rooted device) could recover it.
+            passphrase.fill(0)
+        }
     }
 
     internal fun obtainPassphraseBytes(): ByteArray = databasePassphrase()
@@ -103,6 +110,15 @@ class ChronosSecureDatabaseProvider @Inject constructor(
             .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
             .setRandomizedEncryptionRequired(true)
+            // Require the user to have authenticated within the last 5 minutes before
+            // the key can be used to decrypt the database passphrase. Background workers
+            // (HealthConnect sync, widgets, InteropSyncWorker) satisfy this as long as
+            // the user has recently opened the app. Without this flag any code running
+            // as this app's UID — including the exported InteropProvider and Wear handlers
+            // — could decrypt the DB while the device screen is locked, bypassing AppLock.
+            .setUserAuthenticationRequired(true)
+            .setUserAuthenticationValidityDurationSeconds(300)
+            .setInvalidatedByBiometricEnrollment(true)
             .build()
         generator.init(spec)
         return generator.generateKey()

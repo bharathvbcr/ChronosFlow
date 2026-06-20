@@ -46,7 +46,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -101,7 +103,18 @@ fun HabitScreen(
     val normalizedInitialAddCapture = initialAddCapture?.trim()?.takeIf(String::isNotBlank)
     var habitToArchive by remember { mutableStateOf<Habit?>(null) }
     var habitContextTarget by remember { mutableStateOf<Habit?>(null) }
-    val nowMinute = remember { LocalTime.now().hour * 60 + LocalTime.now().minute }
+    // Align updates to the top of the next minute (60_000 - now%60_000) so habit due-status
+    // stays current without per-second recompositions. Using produceState also avoids the
+    // original bug where two LocalTime.now() calls straddle a minute boundary.
+    val nowMinute by produceState(initialValue = with(LocalTime.now()) { hour * 60 + minute }) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            delay(60_000L - (now % 60_000L))
+            value = with(LocalTime.now()) { hour * 60 + minute }
+        }
+    }
+    val today = remember { LocalDate.now() }
+    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
     val shellBottomInset = LocalChronosShellBottomInset.current
 
     OneShotNavTrigger(openAddSheet, navTargetGeneration, normalizedInitialAddCapture) {
@@ -205,7 +218,9 @@ fun HabitScreen(
                     HabitRow(
                         modifier = Modifier.animateItem(),
                         habit = habit,
+                        today = today,
                         nowMinute = nowMinute,
+                        reduceMotion = reduceMotion,
                         onComplete = { viewModel.completeHabit(habit) },
                         onPause = { viewModel.pauseHabit(habit, days = 1) },
                         onResume = { viewModel.resumeHabit(habit) },
@@ -397,7 +412,9 @@ private fun HabitRepairPanel(
 private fun HabitRow(
     modifier: Modifier = Modifier,
     habit: Habit,
+    today: LocalDate,
     nowMinute: Int,
+    reduceMotion: Boolean,
     onComplete: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
@@ -407,13 +424,12 @@ private fun HabitRow(
     onArchive: () -> Unit,
     onOpenContext: () -> Unit
 ) {
-    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
     val status = habit.statusLabel(nowMinute)
     val isDue = status == "Due now"
-    val isDone = habit.lastCompletedDate == LocalDate.now()
+    val isDone = habit.lastCompletedDate == today
     val schedule = habit.schedule
-    val isPaused = schedule?.pausedUntil?.let { !it.isBefore(LocalDate.now()) } == true
-    val skippedToday = schedule?.skipDate == LocalDate.now()
+    val isPaused = schedule?.pausedUntil?.let { !it.isBefore(today) } == true
+    val skippedToday = schedule?.skipDate == today
     val deferredMinute = schedule?.deferUntilMinuteOfDay
     val adherence = (habit.analytics.adherenceRate * 100).toInt()
     val recentEventSummary = habit.recentEvents.firstOrNull()?.let { event ->
@@ -454,31 +470,32 @@ private fun HabitRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                status?.let { HabitStatusPill(label = it, emphasized = isDue, success = isDone) }
+                status?.let { HabitStatusPill(label = it, emphasized = isDue, success = isDone, reduceMotion = reduceMotion) }
                 if (habit.isBundled) {
-                    HabitStatusPill(label = "On day plan", emphasized = false, success = false)
+                    HabitStatusPill(label = "On day plan", emphasized = false, success = false, reduceMotion = reduceMotion)
                 }
-                HabitStatusPill(label = habit.cadence, emphasized = false, success = false)
+                HabitStatusPill(label = habit.cadence, emphasized = false, success = false, reduceMotion = reduceMotion)
                 val currentStreak = habit.analytics.currentStreak.takeIf { it > 0 } ?: habit.streakCount
                 val milestone = habitStreakMilestoneLabel(currentStreak)
                 if (milestone != null) {
-                    HabitStatusPill(label = milestone, emphasized = true, success = true)
+                    HabitStatusPill(label = milestone, emphasized = true, success = true, reduceMotion = reduceMotion)
                 } else {
                     HabitStatusPill(
                         label = "Streak $currentStreak",
                         emphasized = currentStreak > 0,
-                        success = currentStreak > 0
+                        success = currentStreak > 0,
+                        reduceMotion = reduceMotion
                     )
                 }
-                HabitStatusPill(label = "Adherence $adherence%", emphasized = adherence >= 80, success = adherence >= 80)
+                HabitStatusPill(label = "Adherence $adherence%", emphasized = adherence >= 80, success = adherence >= 80, reduceMotion = reduceMotion)
                 habit.analytics.bestCompletionMinuteOfDay?.let { minute ->
-                    HabitStatusPill(label = "Best ${formatDisplayMinute(minute)}", emphasized = false, success = false)
+                    HabitStatusPill(label = "Best ${formatDisplayMinute(minute)}", emphasized = false, success = false, reduceMotion = reduceMotion)
                 }
                 if (isPaused) {
-                    HabitStatusPill(label = "Paused", emphasized = false, success = false)
+                    HabitStatusPill(label = "Paused", emphasized = false, success = false, reduceMotion = reduceMotion)
                 }
                 if (skippedToday) {
-                    HabitStatusPill(label = "Skipped today", emphasized = false, success = false)
+                    HabitStatusPill(label = "Skipped today", emphasized = false, success = false, reduceMotion = reduceMotion)
                 }
             }
             Text(
@@ -697,9 +714,9 @@ internal fun habitResumeActionLabel(habit: Habit): String = "Resume ${habit.titl
 private fun HabitStatusPill(
     label: String,
     emphasized: Boolean,
-    success: Boolean
+    success: Boolean,
+    reduceMotion: Boolean
 ) {
-    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
     val targetContainer = when {
         success -> MaterialTheme.colorScheme.tertiaryContainer
         emphasized -> MaterialTheme.colorScheme.primaryContainer

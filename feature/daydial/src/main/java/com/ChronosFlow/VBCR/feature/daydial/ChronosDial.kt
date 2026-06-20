@@ -186,10 +186,9 @@ fun ChronosDial(
             textAlign = android.graphics.Paint.Align.CENTER
             isAntiAlias = true
             isFakeBoldText = true
+            color = hourLabelColor
+            textSize = hourLabelTextSize
         }
-    }.apply {
-        color = hourLabelColor
-        textSize = hourLabelTextSize
     }
     val minorHourLabelColor = colorScheme.onSurfaceVariant.copy(alpha = 0.58f).toArgb()
     val minorHourLabelTextSize = with(density) { 9.sp.toPx() }
@@ -197,10 +196,17 @@ fun ChronosDial(
         android.graphics.Paint().apply {
             textAlign = android.graphics.Paint.Align.CENTER
             isAntiAlias = true
+            color = minorHourLabelColor
+            textSize = minorHourLabelTextSize
         }
-    }.apply {
-        color = minorHourLabelColor
-        textSize = minorHourLabelTextSize
+    }
+    // PathEffect is a native-backed object — cache it keyed on density so it is not
+    // reallocated on every animation frame (the now-hand animates at ~1-second intervals).
+    val freeTimeDash = remember(density) {
+        with(density) { PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 7.dp.toPx()), 0f) }
+    }
+    val conflictDash = remember(density) {
+        with(density) { PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 5.dp.toPx()), 0f) }
     }
 
     val liveHandMinute by produceState(initialValue = currentMinute.toFloat(), currentMinute, showNowHand) {
@@ -564,9 +570,7 @@ fun ChronosDial(
         }
 
         // Dashed stroke reads as "open space" at a glance, distinct from solid blocks.
-        val freeTimeDash = PathEffect.dashPathEffect(
-            floatArrayOf(4.dp.toPx(), 7.dp.toPx())
-        )
+        // freeTimeDash is cached at composable level above — no per-frame allocation needed.
         renderModel.freeTimeArcs.forEach { free ->
             if (!free.startAngle.isNaN() && free.sweepAngle > 0.1f) {
                 drawArc(
@@ -700,9 +704,7 @@ fun ChronosDial(
         // Conflict overlays: dashed error arc over each clashing block so double-booked
         // time is visible at a glance without opening the block.
         if (renderModel.conflictOverlays.isNotEmpty()) {
-            val conflictDash = PathEffect.dashPathEffect(
-                floatArrayOf(5.dp.toPx(), 5.dp.toPx())
-            )
+            // conflictDash is cached at composable level above — no per-frame allocation needed.
             val conflictStroke = if (enableThreeRingMode) ringStroke * 0.42f else ringStroke
             renderModel.conflictOverlays.forEach { overlay ->
                 if (overlay.startAngle.isNaN()) return@forEach

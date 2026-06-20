@@ -1,6 +1,7 @@
 package com.ChronosFlow.VBCR.interop
 
 import android.net.Uri
+import com.ChronosFlow.VBCR.BuildConfig
 
 /**
  * Cross-app sharing contract between ChronosFlow and DevTime (Meridian).
@@ -68,14 +69,18 @@ object InteropContract {
      * Apps allowed to read this provider, pinned to their signing certificate. Add DevTime's
      * RELEASE signing-cert SHA-256 to the set below before shipping release builds (release APKs
      * are signed with a different key than the debug cert).
+     *
+     * The debug keystore cert is included ONLY in debug builds: the shared Android debug keystore
+     * (~/.android/debug.keystore) is the same across all developer workstations and emulators, so
+     * any app claiming to be DEVTIME_PACKAGE and signed with it would pass in a release build.
      */
     val TRUSTED_PEERS = listOf(
         TrustedPeer(
             DEVTIME_PACKAGE,
-            setOf(
-                DEBUG_SIGNING_CERT_SHA256,
-                // TODO(release): "<DevTime release cert SHA-256>",
-            ),
+            buildSet {
+                if (BuildConfig.DEBUG) add(DEBUG_SIGNING_CERT_SHA256)
+                // TODO(release): add("<DevTime release cert SHA-256 from apksigner verify --print-certs>")
+            }
         ),
     )
 

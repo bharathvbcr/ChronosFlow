@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.ChronosFlow.VBCR.core.ai.findNextFocusBlock
 import com.ChronosFlow.VBCR.core.data.assist.ProactiveAssistCache
@@ -97,6 +98,25 @@ class FocusService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Synchronously promote to foreground BEFORE any I/O in the coroutine.
+        // ForegroundServiceDidNotStartInTimeException (API 26+) fires at the OS level if
+        // startForeground() is delayed past ~5 seconds — the broad catch below cannot catch it.
+        // The coroutine calls updateForegroundNotification() to replace this placeholder.
+        val placeholder = NotificationCompat.Builder(
+            this, com.ChronosFlow.VBCR.core.notifications.FocusNotificationManager.FOCUS_CHANNEL_ID
+        )
+            .setSmallIcon(com.ChronosFlow.VBCR.core.notifications.R.drawable.ic_chronosflow_notification)
+            .setContentTitle(getString(com.ChronosFlow.VBCR.core.notifications.R.string.focus_notification_default_title))
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+        ServiceCompat.startForeground(
+            this,
+            com.ChronosFlow.VBCR.core.notifications.FocusNotificationManager.FOCUS_NOTIFICATION_ID,
+            placeholder,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+        )
         serviceScope.launch {
             commandMutex.withLock {
                 try {

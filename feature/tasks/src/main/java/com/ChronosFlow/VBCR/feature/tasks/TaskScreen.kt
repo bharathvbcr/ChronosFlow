@@ -187,9 +187,9 @@ fun TaskScreen(
             TaskFilter.DONE -> tasks.filter { it.isCompleted }
         }.sortedWith(compareByDescending<Task> { it.priority }.thenBy { it.createdAt })
     }
-    val openCount = tasks.count { !it.isCompleted }
-    val doneCount = tasks.size - openCount
-    val urgentCount = tasks.count { !it.isCompleted && it.priority >= 2 }
+    val openCount = remember(tasks) { tasks.count { !it.isCompleted } }
+    val doneCount = remember(tasks) { tasks.size - openCount }
+    val urgentCount = remember(tasks) { tasks.count { !it.isCompleted && it.priority >= 2 } }
     val assistantSummary = remember(tasks, taskSchedulesByTaskId) {
         buildTaskAssistantSummary(tasks, taskSchedulesByTaskId)
     }
@@ -505,7 +505,7 @@ fun TaskScreen(
         rewriteState = rewriteState,
         onRequestRewrite = viewModel::rewriteTaskDescription,
         onClearRewrite = viewModel::clearTaskRewrite,
-        existingTaskTitles = tasks.map { it.title },
+        existingTaskTitles = remember(tasks) { tasks.map { it.title } },
         taskTemplates = taskTemplates,
         onSaveTemplate = { template ->
             taskTemplatesSetting.value = encodeTaskTemplates(upsertTaskTemplate(taskTemplates, template))

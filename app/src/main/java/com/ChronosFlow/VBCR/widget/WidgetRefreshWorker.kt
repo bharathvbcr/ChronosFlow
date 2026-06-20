@@ -1,6 +1,7 @@
 package com.ChronosFlow.VBCR.widget
 
 import android.content.Context
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -69,6 +70,7 @@ class WidgetRefreshWorker(
         private fun enqueue(context: Context, policy: ExistingWorkPolicy) {
             val request = OneTimeWorkRequestBuilder<WidgetRefreshWorker>()
                 .setInitialDelay(REFRESH_INTERVAL)
+                .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(true).build())
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(UNIQUE_NAME, policy, request)
         }

@@ -70,8 +70,11 @@ object PeerVerifier {
             val signatures: Array<Signature>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val info = pm.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES)
                 val signing = info.signingInfo ?: return null
+                // apkContentsSigners returns only the CURRENT active signing cert(s).
+                // signingCertificateHistory also returns rotated-away old certs, so an
+                // attacker holding a compromised rotated key would still pass the check.
                 if (signing.hasMultipleSigners()) signing.apkContentsSigners
-                else signing.signingCertificateHistory
+                else signing.apkContentsSigners
             } else {
                 @Suppress("DEPRECATION")
                 pm.getPackageInfo(pkg, PackageManager.GET_SIGNATURES).signatures
