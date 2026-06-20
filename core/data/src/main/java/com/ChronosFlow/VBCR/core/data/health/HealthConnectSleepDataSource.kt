@@ -61,7 +61,7 @@ class HealthConnectSleepDataSource @Inject constructor(
 ) {
     companion object {
         const val HEALTH_CONNECT_PROVIDER_PACKAGE = "com.google.android.apps.healthdata"
-        private const val TAG = "HealthConnectSleepDataSource"
+        const val TAG = "HealthConnectSleepDataSource"
     }
     /** Grant required for the feature to function at all. */
     val requiredPermissions: Set<String> =
@@ -151,7 +151,4 @@ class HealthConnectSleepDataSource @Inject constructor(
         return SleepChangesResult.Changes(upserted, hasDeletions, cursor)
     }
 
-    private companion object {
-        const val TAG = "HealthConnectSleepDataSource"
-    }
 }

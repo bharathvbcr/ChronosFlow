@@ -138,9 +138,7 @@ class MedicationViewModel @Inject constructor(
             return
         }
         _adherenceAssistSnapshot.value =
-            runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }
-                .onFailure { e -> android.util.Log.w(TAG, "Background AI snapshot refresh failed in refreshAdherenceSuggestions", e) }
-                .getOrNull()
+            runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }.getOrNull()
         val now = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
         val results = runCatching {
             medicationAdherenceAssistPlanner.suggestAdjustments(active, LocalDate.now(), now)

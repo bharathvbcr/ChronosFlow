@@ -84,8 +84,6 @@ class DeleteAllDataUseCase @Inject constructor(
     private fun deleteDataStoreFile(name: String) {
         runCatching {
             java.io.File(context.filesDir, "datastore/$name.preferences_pb").delete()
-        }.onFailure { e ->
-            android.util.Log.w(TAG, "DataStore file deletion failed for '$name' — file may remain on disk", e)
         }
     }
 

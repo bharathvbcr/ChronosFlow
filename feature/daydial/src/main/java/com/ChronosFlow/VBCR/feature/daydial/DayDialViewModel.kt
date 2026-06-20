@@ -608,7 +608,7 @@ class DayDialViewModel @Inject constructor(
                 )
             }
         }.onFailure { e ->
-            android.util.Log.w(TAG, "Background calendar sync failed for $date", e)
+            appEventLog.record(AppEventCategory.SESSION, "Background calendar sync failed for $date: $e")
         }
     }
 
@@ -853,7 +853,7 @@ class DayDialViewModel @Inject constructor(
     fun requestRoutineAssist(request: RoutineAssistRequest) {
         viewModelScope.launch {
             val snapshot = runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }
-                .onFailure { e -> android.util.Log.w(TAG, "Background AI snapshot refresh failed in requestRoutineAssist", e) }
+                .onFailure { e -> appEventLog.record(AppEventCategory.SESSION, "Background AI snapshot refresh failed in requestRoutineAssist: $e") }
                 .getOrNull()
             _routineAssistState.value = RoutineAssistUiState(isLoading = true, assistSnapshot = snapshot)
             val suggestions = runCatching { routineAssistPlanner.suggest(request) }

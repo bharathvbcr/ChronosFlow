@@ -240,7 +240,8 @@ class DayDialViewModelTest {
             routineAssistPlanner = mockk(relaxed = true),
             genAiAssistCoordinator = mockk(relaxed = true),
             currentBlockNotificationCoordinator = mockk(relaxed = true),
-            appEventLog = AppEventLog()
+            appEventLog = AppEventLog(),
+            deleteAllDataUseCase = mockk(relaxed = true)
         )
         viewModel.dataExportDispatcher = testDispatcher
         viewModel.cancelMinuteTickerForTest()

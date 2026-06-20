@@ -64,6 +64,7 @@ class HealthConnectSleepSyncManagerTest {
     private fun availableWithSession() {
         every { dataSource.isAvailable() } returns true
         coEvery { dataSource.hasSleepReadPermission() } returns true
+        coEvery { dataSource.hasBackgroundReadPermission() } returns true
         coEvery { dataSource.readSessions(any(), any()) } returns listOf(overnight)
         coEvery { dataSource.changesToken() } returns "fresh-token"
         every { preferences.getString(any(), any()) } returns ""
@@ -125,6 +126,7 @@ class HealthConnectSleepSyncManagerTest {
     fun `classifies a security exception as a non-retryable skip`() = runTest {
         every { dataSource.isAvailable() } returns true
         coEvery { dataSource.hasSleepReadPermission() } returns true
+        coEvery { dataSource.hasBackgroundReadPermission() } returns true
         coEvery { dataSource.readSessions(any(), any()) } throws SecurityException("revoked")
 
         val outcome = manager.runSync()
@@ -139,6 +141,7 @@ class HealthConnectSleepSyncManagerTest {
     fun `idle incremental cycle reads nothing and writes nothing`() = runTest {
         every { dataSource.isAvailable() } returns true
         coEvery { dataSource.hasSleepReadPermission() } returns true
+        coEvery { dataSource.hasBackgroundReadPermission() } returns true
         every { preferences.getString(any(), any()) } returns "stored-token"
         coEvery { dataSource.changesSince("stored-token") } returns
             SleepChangesResult.Changes(upserted = emptyList(), hasDeletions = false, nextToken = "next-token")
@@ -155,6 +158,7 @@ class HealthConnectSleepSyncManagerTest {
     fun `a deletion upstream removes the matching imported night`() = runTest {
         every { dataSource.isAvailable() } returns true
         coEvery { dataSource.hasSleepReadPermission() } returns true
+        coEvery { dataSource.hasBackgroundReadPermission() } returns true
         every { preferences.getString(any(), any()) } returns "stored-token"
         coEvery { dataSource.changesSince("stored-token") } returns
             SleepChangesResult.Changes(upserted = emptyList(), hasDeletions = true, nextToken = "next-token")
@@ -172,6 +176,7 @@ class HealthConnectSleepSyncManagerTest {
     fun `does not delete a manual night when its imported session disappears`() = runTest {
         every { dataSource.isAvailable() } returns true
         coEvery { dataSource.hasSleepReadPermission() } returns true
+        coEvery { dataSource.hasBackgroundReadPermission() } returns true
         every { preferences.getString(any(), any()) } returns "stored-token"
         coEvery { dataSource.changesSince("stored-token") } returns
             SleepChangesResult.Changes(upserted = emptyList(), hasDeletions = true, nextToken = "next-token")
@@ -188,6 +193,7 @@ class HealthConnectSleepSyncManagerTest {
     fun `re-importing an unchanged night does not rewrite it`() = runTest {
         every { dataSource.isAvailable() } returns true
         coEvery { dataSource.hasSleepReadPermission() } returns true
+        coEvery { dataSource.hasBackgroundReadPermission() } returns true
         every { preferences.getString(any(), any()) } returns "stored-token"
         coEvery { dataSource.changesSince("stored-token") } returns
             SleepChangesResult.Changes(upserted = listOf(overnight), hasDeletions = false, nextToken = "next-token")

@@ -319,9 +319,7 @@ class TaskViewModel @Inject constructor(
 
     fun requestTaskAssist(request: TaskAssistRequest) {
         viewModelScope.launch {
-            val snapshot = runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }
-                .onFailure { e -> android.util.Log.w(TAG, "Background AI snapshot refresh failed in requestTaskAssist", e) }
-                .getOrNull()
+            val snapshot = runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }.getOrNull()
             _assistState.value = TaskAssistUiState(isLoading = true, assistSnapshot = snapshot)
             val suggestions = runCatching { taskAssistPlanner.suggest(request) }
                 .onFailure { error ->
