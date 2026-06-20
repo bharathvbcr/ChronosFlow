@@ -119,6 +119,7 @@ import com.ChronosFlow.VBCR.feature.daydial.rememberPersistentString
 import com.ChronosFlow.VBCR.core.ui.theme.categoryColor
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 internal enum class DeveloperFeatureFlag {
     HABITS,
@@ -190,9 +191,11 @@ internal fun SidebarPageContent(
     review: DailyReview,
     privacyMode: PrivacyMode,
     previewOnDeviceModel: Boolean,
+    cloudAiEnabled: Boolean,
     onSelectDate: (LocalDate) -> Unit,
     onPrivacyModeSelected: (PrivacyMode) -> Unit,
     onPreviewOnDeviceModelChanged: (Boolean) -> Unit,
+    onCloudAiEnabledChanged: (Boolean) -> Unit,
     planningStyle: String,
     onPlanningStyleSelected: (String) -> Unit,
     protectFocusBlocks: Boolean,
@@ -304,6 +307,7 @@ internal fun SidebarPageContent(
     onQuickMedicationTaken: (String, Int?) -> Unit,
     onQuickMedicationMissed: (String, Int?) -> Unit,
     onOpenBlock: (String?) -> Unit,
+    onDeleteAllData: () -> Unit = {},
     contentTopPadding: Dp = 0.dp,
     contentBottomPadding: Dp = 0.dp,
     showMessage: (String) -> Unit
@@ -536,7 +540,7 @@ internal fun SidebarPageContent(
                                 ChronosIconButton(onClick = { onSelectDate(selectedDate.minusMonths(1)) }) {
                                     Icon(Icons.Default.ChevronLeft, contentDescription = previousMonthLabel)
                                 }
-                                Text(selectedDate.format(DateTimeFormatter.ofPattern("MMMM yyyy")), style = MaterialTheme.typography.titleMedium)
+                                Text(selectedDate.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())), style = MaterialTheme.typography.titleMedium)
                                 ChronosIconButton(onClick = { onSelectDate(selectedDate.plusMonths(1)) }) {
                                     Icon(Icons.Default.ChevronRight, contentDescription = nextMonthLabel)
                                 }
@@ -737,7 +741,7 @@ internal fun SidebarPageContent(
                     }
                     ChronosSectionTitle(
                         title = "Detailed calendar",
-                        subtitle = "Calendar, tasks, habits, and medications for ${selectedDate.format(DateTimeFormatter.ofPattern("MMM d"))}"
+                        subtitle = "Calendar, tasks, habits, and medications for ${selectedDate.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))}"
                     )
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                             val timelineItems = remember(
@@ -902,6 +906,15 @@ internal fun SidebarPageContent(
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChronosSectionTitle(title = "Privacy", subtitle = "Where AI runs and which model it uses")
+                            com.ChronosFlow.VBCR.core.ui.components.ChronosSettingsRow(
+                                title = "Use cloud AI for planning",
+                                // PRIV-001 disclosure: list specific data categories sent to Google.
+                                subtitle = "Sends task titles, habit names, block titles, and medication names " +
+                                    "to Google (Firebase AI Logic / Gemini) for smarter suggestions. " +
+                                    "Off by default — data stays on device when disabled.",
+                                checked = cloudAiEnabled,
+                                onCheckedChange = onCloudAiEnabledChanged
+                            )
                             PrivacyModeSelector(privacyMode, onPrivacyModeSelected)
                             CheckboxSetting(
                                 "Use preview Gemini Nano model",
@@ -1055,6 +1068,58 @@ internal fun SidebarPageContent(
                         onExpandedChange = { companionAppExpanded = it }
                     ) {
                         CompanionAppStatusCard()
+                    }
+                    // ---- Data deletion (Play Store Data Safety compliance) ----
+                    var showDeleteAllConfirm by rememberSaveable { mutableStateOf(false) }
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ChronosSectionTitle(
+                                title = "Data",
+                                subtitle = "Permanently remove all your data from this device"
+                            )
+                            Text(
+                                "This deletes all tasks, habits, journal entries, sleep data, medications, " +
+                                    "goals, and settings stored on this device. It cannot be undone.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = backdropMutedText
+                            )
+                            ChronosOutlinedButton(
+                                onClick = { showDeleteAllConfirm = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Text("Delete all my data")
+                            }
+                        }
+                    }
+                    if (showDeleteAllConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showDeleteAllConfirm = false },
+                            title = { Text("Delete all your data?") },
+                            text = {
+                                Text(
+                                    "This permanently deletes all tasks, habits, journal entries, " +
+                                        "sleep data, medications, goals, and settings. This cannot be undone."
+                                )
+                            },
+                            confirmButton = {
+                                ChronosTextButton(
+                                    onClick = {
+                                        showDeleteAllConfirm = false
+                                        onDeleteAllData()
+                                    }
+                                ) {
+                                    Text("Delete everything", color = MaterialTheme.colorScheme.error)
+                                }
+                            },
+                            dismissButton = {
+                                ChronosTextButton(onClick = { showDeleteAllConfirm = false }) {
+                                    Text("Cancel")
+                                }
+                            }
+                        )
                     }
                 }
                 SidebarPage.NOTIFICATIONS -> {
@@ -1482,12 +1547,12 @@ internal fun clearDayConfirmationMessage(blockCount: Int, selectedDate: LocalDat
 
 internal fun calendarMonthNavigationLabel(selectedDate: LocalDate, monthOffset: Int): String {
     val targetMonth = selectedDate.plusMonths(monthOffset.toLong())
-    return "Go to ${targetMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy"))}"
+    return "Go to ${targetMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault()))}"
 }
 
 internal fun calendarDaySelectionLabel(date: LocalDate, isSelected: Boolean): String {
     val action = if (isSelected) "Selected" else "Select"
-    return "$action ${date.format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy"))}"
+    return "$action ${date.format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy", Locale.getDefault()))}"
 }
 
 internal fun templateApplyActionLabel(template: TemplateBlueprint): String = "Apply ${template.name} template"

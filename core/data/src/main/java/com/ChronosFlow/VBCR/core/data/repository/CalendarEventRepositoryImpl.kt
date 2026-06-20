@@ -63,7 +63,21 @@ class CalendarEventRepositoryImpl @Inject constructor(
         }
         // Serialize so a background-worker sync overlapping a foreground/manual one can't
         // interleave its wipe-and-replace and drop the other's just-imported blocks.
-        syncMutex.withLock { performDeviceCalendarSync(start, end) }
+        runCatching {
+            syncMutex.withLock { performDeviceCalendarSync(start, end) }
+        }.onFailure { e ->
+            val message = when (e) {
+                is SecurityException -> "Permission revoked during calendar sync"
+                else -> e.message ?: "Unknown error during calendar sync"
+            }
+            syncStatusStore.recordFailure(message)
+            android.util.Log.w(TAG, "Calendar sync failed: $message", e)
+            throw e // re-throw so callers (manual sync, background worker) can also react
+        }
+    }
+
+    private companion object {
+        const val TAG = "CalendarEventRepositoryImpl"
     }
 
     private suspend fun performDeviceCalendarSync(start: Instant, end: Instant) {
@@ -103,12 +117,18 @@ class CalendarEventRepositoryImpl @Inject constructor(
         cursor?.use { c ->
             while (c.moveToNext()) {
                 val eventId = c.getLong(0)
-                val title = c.getString(1) ?: "Untitled Event"
+                // Sanitize device-calendar strings: cap lengths and strip non-printable control
+                // characters (U+0000-U+0008, U+000B, U+000C, U+000E-U+001F except TAB/LF/CR) that can cause display glitches
+                // or assertion failures deeper in the DB/UI stack. Priority item C.
+                val title = (c.getString(1) ?: "Untitled Event")
+                    .take(255).replace(Regex("[\u0000-\u0008\u000B\u000C\u000E-\u001F]"), "")
                 val description = c.getString(2)
+                    ?.take(2000)?.replace(Regex("[\u0000-\u0008\u000B\u000C\u000E-\u001F]"), "")
                 val begin = c.getLong(3)
                 val endMillis = c.getLong(4)
                 val timezone = c.getString(5) ?: syncZone.id
                 val location = c.getString(6)
+                    ?.take(255)?.replace(Regex("[\u0000-\u0008\u000B\u000C\u000E-\u001F]"), "")
                 val allDay = c.getInt(7) == 1
 
                 val domainEvent = CalendarEvent(

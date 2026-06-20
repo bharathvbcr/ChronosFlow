@@ -57,6 +57,11 @@ class InteropProvider : ContentProvider() {
         return true
     }
 
+    // projection, selection, selectionArgs, and sortOrder are intentionally ignored — all queries
+    // use hardcoded SQL. This is the correct design for a read-only interop provider: it prevents
+    // any possibility of column/row injection even if a caller supplies crafted arguments.
+    // Do NOT wire caller-supplied arguments into queries in future changes without also adding a
+    // platform android:permission attribute to the <provider> declaration as a safety net.
     override fun query(
         uri: Uri,
         projection: Array<out String>?,
@@ -65,6 +70,10 @@ class InteropProvider : ContentProvider() {
         sortOrder: String?,
     ): Cursor? {
         val ctx = context ?: return null
+        // PRIV-006: Refuse all queries until the user has explicitly consented to interop data
+        // sharing. This is the server-side gate — it fires before PeerVerifier so even a trusted
+        // peer cannot read any ChronosFlow data without the user's explicit opt-in.
+        if (!preferencesDataSource(ctx).isInteropConsentGranted()) return null
         PeerVerifier.requireTrusted(ctx, callingPackage)
         val db = database(ctx).openHelper.readableDatabase
         return when (matcher.match(uri)) {
@@ -106,6 +115,11 @@ class InteropProvider : ContentProvider() {
 
     private fun eventsCursor(db: SupportSQLiteDatabase): Cursor {
         val out = MatrixCursor(InteropContract.EVENT_COLUMNS)
+        // calendar_events is a disposable snapshot (regenerated on every calendar sync) with no
+        // per-row modification timestamp. Use query-time as updated_at so DevTime's incremental
+        // sync sees events as "fresh" after each ChronosFlow calendar re-import rather than
+        // treating startAt (immutable) as "last modified" and silently dropping title/description edits.
+        val queryTimeMs = System.currentTimeMillis()
         db.query(
             "SELECT id, startAt, title, description, endAt, timezone, location, isAllDay " +
                 "FROM calendar_events ORDER BY startAt ASC",
@@ -123,7 +137,7 @@ class InteropProvider : ContentProvider() {
                         if (c.isNull(5)) null else c.getString(5),  // timezone
                         c.getInt(7),                                // is_all_day
                         if (c.isNull(6)) null else c.getString(6),  // location
-                        startAt,                                    // updated_at
+                        queryTimeMs,                                // updated_at (proxy: time of this query)
                     ),
                 )
             }

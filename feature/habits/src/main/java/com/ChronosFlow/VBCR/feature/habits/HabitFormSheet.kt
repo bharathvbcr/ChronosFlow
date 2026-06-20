@@ -337,8 +337,12 @@ internal fun HabitFormSheet(
     } else {
         null
     }
-    val appliedSuggestionIds = remember(habitKey, assistState.suggestions) {
-        mutableStateListOf<String>()
+    // Keyed only on the stable habitKey — using the unstable List<T> as a key would discard the
+    // applied-suggestion set on every recomposition triggered by a new list object. A LaunchedEffect
+    // clears the set when a fresh request replaces the batch (suggestions become empty).
+    val appliedSuggestionIds = remember(habitKey) { mutableStateListOf<String>() }
+    LaunchedEffect(assistState.suggestions) {
+        if (assistState.suggestions.isEmpty()) appliedSuggestionIds.clear()
     }
     val redundantAssistSuggestionIds = redundantHabitAssistSuggestionIds(
         suggestions = assistState.suggestions,

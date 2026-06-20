@@ -1,5 +1,6 @@
 package com.ChronosFlow.VBCR.feature.daydial
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ChronosFlow.VBCR.core.ai.AssistNarrative
@@ -139,6 +140,7 @@ private fun Long.formatBytes(): String = when {
     else -> "$this B"
 }
 
+@Immutable
 data class RoutineAssistUiState(
     val isLoading: Boolean = false,
     val suggestions: List<RoutineAssistSuggestion> = emptyList(),
@@ -183,7 +185,8 @@ class DayDialViewModel @Inject constructor(
     private val routineAssistPlanner: RoutineAssistPlanner,
     private val genAiAssistCoordinator: GenAiAssistCoordinator,
     private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator,
-    private val appEventLog: AppEventLog
+    private val appEventLog: AppEventLog,
+    private val deleteAllDataUseCase: DeleteAllDataUseCase
 ) : ViewModel() {
 
     /** Recent in-memory app events surfaced by the developer "View Logs" sheet. */
@@ -270,6 +273,7 @@ class DayDialViewModel @Inject constructor(
     val aiPlanResult = aiDelegate.aiPlanResult
     val privacyMode = aiDelegate.privacyMode
     val previewOnDeviceModel = aiDelegate.previewOnDeviceModel
+    val cloudAiEnabled = aiDelegate.cloudAiEnabled
     val suggestedBlocks = aiDelegate.suggestedBlocks
     val isGenerating = aiDelegate.isGenerating
     val explainPlan = aiDelegate.explainPlan
@@ -603,6 +607,8 @@ class DayDialViewModel @Inject constructor(
                     date.plusDays(1).atStartOfDay(zone).toInstant()
                 )
             }
+        }.onFailure { e ->
+            android.util.Log.w(TAG, "Background calendar sync failed for $date", e)
         }
     }
 
@@ -846,7 +852,9 @@ class DayDialViewModel @Inject constructor(
      */
     fun requestRoutineAssist(request: RoutineAssistRequest) {
         viewModelScope.launch {
-            val snapshot = runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }.getOrNull()
+            val snapshot = runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }
+                .onFailure { e -> android.util.Log.w(TAG, "Background AI snapshot refresh failed in requestRoutineAssist", e) }
+                .getOrNull()
             _routineAssistState.value = RoutineAssistUiState(isLoading = true, assistSnapshot = snapshot)
             val suggestions = runCatching { routineAssistPlanner.suggest(request) }
                 .getOrElse { throwable ->
@@ -1231,6 +1239,8 @@ class DayDialViewModel @Inject constructor(
 
     fun setPrivacyMode(mode: PrivacyMode) = aiDelegate.setPrivacyMode(mode)
 
+    fun setCloudAiEnabled(enabled: Boolean) = aiDelegate.setCloudAiEnabled(enabled)
+
     fun setAppLockEnabled(enabled: Boolean) = appLockDelegate.setAppLockEnabled(enabled)
 
     fun setLockOnResume(enabled: Boolean) = appLockDelegate.setLockOnResume(enabled)
@@ -1261,6 +1271,31 @@ class DayDialViewModel @Inject constructor(
                     errorMessage = reason
                 )
                 appEventLog.record(AppEventCategory.ERROR, "Data export failed: $reason")
+            }
+        }
+    }
+
+    /**
+     * Permanently deletes all user data: Room tables, WorkManager workers, scheduled alarms,
+     * DataStore, and all SharedPreferences files. This cannot be undone. The caller is responsible
+     * for showing a confirmation dialog before invoking this function.
+     *
+     * [onComplete] is called on the main thread when the deletion finishes (success or failure).
+     * [onError] is called with a human-readable message if an unexpected error occurs.
+     */
+    fun deleteAllData(onComplete: () -> Unit, onError: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    deleteAllDataUseCase()
+                }
+            }.onSuccess {
+                appEventLog.record(AppEventCategory.EXPORT, "All user data deleted by user request")
+                onComplete()
+            }.onFailure { error ->
+                val reason = error.message ?: error::class.java.simpleName
+                appEventLog.record(AppEventCategory.ERROR, "Delete all data failed: $reason")
+                onError("Failed to delete data: $reason")
             }
         }
     }
@@ -1389,6 +1424,10 @@ class DayDialViewModel @Inject constructor(
 
     fun clearFocusGuidance() {
         _focusGuidance.value = null
+    }
+
+    private companion object {
+        const val TAG = "DayDialViewModel"
     }
 }
 

@@ -37,6 +37,7 @@ import com.ChronosFlow.VBCR.core.ui.components.formatDurationLabel
 import com.ChronosFlow.VBCR.feature.daydial.BlockEditorMaxDurationMinutes
 import com.ChronosFlow.VBCR.feature.daydial.BlockEditorMinDurationMinutes
 import com.ChronosFlow.VBCR.feature.daydial.TimeBlockUiModel
+import java.util.Locale
 
 /** Shared minimum height so every suggestion action renders at the same size. */
 private val AiReviewActionHeight = 44.dp
@@ -208,7 +209,7 @@ private fun formatReviewActionMinute(minute: Int): String {
         0 -> 12
         else -> h
     }
-    return "%d:%02d %s".format(displayHour, minutePart, suffix)
+    return String.format(Locale.getDefault(), "%d:%02d %s", displayHour, minutePart, suffix)
 }
 
 private fun formatReviewActionDuration(durationMinutes: Int): String =

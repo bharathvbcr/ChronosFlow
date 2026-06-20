@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -54,19 +55,31 @@ fun MedicationAdherenceChart(
                 )
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(14.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.24f))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(adherence)
+                        .weight(1f)
                         .height(14.dp)
                         .clip(RoundedCornerShape(999.dp))
-                        .background(adherenceColor(adherence))
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.24f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(adherence)
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(adherenceColor(adherence))
+                    )
+                }
+                Text(
+                    text = adherenceStatusLabel(adherence),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = adherenceColor(adherence),
+                    fontWeight = FontWeight.SemiBold
                 )
             }
 
@@ -118,7 +131,7 @@ private fun MedicationAdherenceRow(plan: MedicationPlan) {
             )
         }
         Text(
-            "${(score * 100).toInt()}%",
+            "${(score * 100).toInt()}% · ${adherenceStatusLabel(score)}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface
         )
@@ -132,4 +145,10 @@ private fun adherenceColor(score: Float): Color {
         score >= 0.7f -> ChronosColors.AdherenceMid
         else -> MaterialTheme.colorScheme.error
     }
+}
+
+private fun adherenceStatusLabel(score: Float): String = when {
+    score >= 0.9f -> "Good"
+    score >= 0.7f -> "Fair"
+    else -> "Low"
 }

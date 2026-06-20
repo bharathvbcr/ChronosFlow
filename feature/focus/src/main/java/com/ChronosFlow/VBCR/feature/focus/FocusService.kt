@@ -573,7 +573,9 @@ class FocusService : Service() {
         val now = LocalTime.now()
         val pick = findNextFocusBlock(blocks, now.hour * 60 + now.minute) ?: return null
         proactiveAssistCache.focusNextBlockLine(today, pick.id)?.let { return it }
-        return "Next up: ${pick.title} at %02d:%02d".format(
+        return getString(
+            com.ChronosFlow.VBCR.core.notifications.R.string.notification_next_up,
+            pick.title,
             pick.startMinuteOfDay / 60,
             pick.startMinuteOfDay % 60
         )

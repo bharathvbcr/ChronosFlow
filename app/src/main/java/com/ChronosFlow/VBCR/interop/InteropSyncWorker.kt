@@ -1,12 +1,14 @@
 package com.ChronosFlow.VBCR.interop
 
 import android.content.Context
+import android.util.Log
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.ChronosFlow.VBCR.core.data.datastore.ChronosPreferencesDataSource
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -14,14 +16,12 @@ import dagger.hilt.components.SingletonComponent
 import java.util.concurrent.TimeUnit
 
 /**
- * Periodically mirrors DevTime (Meridian)'s shared tasks into ChronosFlow via [InteropSyncManager],
- * so DevTime edits show up here even when the user never opens the app — the background counterpart
- * to ChronosFlow exposing its own data through [InteropProvider].
+ * Periodically mirrors DevTime (Meridian)'s shared tasks into ChronosFlow via [InteropSyncManager].
  *
- * Quiet by design: [InteropSyncManager.syncFromPeer] no-ops when DevTime isn't installed or isn't a
- * trusted peer, so the worker is safe to keep scheduled before (or without) the user ever connecting
- * DevTime. Uses the plain [CoroutineWorker] + [EntryPointAccessors] pattern (no @HiltWorker factory),
- * matching [com.ChronosFlow.VBCR.core.data.sync.CalendarBackgroundSyncWorker].
+ * PRIV-006: This worker will NOT be scheduled unless the user has explicitly granted interop consent
+ * ([ChronosPreferencesDataSource.isInteropConsentGranted] == true). Call [ensureScheduled] on every
+ * app startup — it is a no-op when consent has not been granted, and cancels any previously-scheduled
+ * work if consent is revoked so the worker never runs without explicit permission.
  */
 class InteropSyncWorker(
     appContext: Context,
@@ -30,6 +30,16 @@ class InteropSyncWorker(
 
     override suspend fun doWork(): Result {
         if (runAttemptCount > 5) return Result.failure()
+        // Double-check consent inside doWork in case it was revoked after the worker was enqueued.
+        val prefs = EntryPointAccessors.fromApplication(
+            applicationContext,
+            InteropSyncWorkerEntryPoint::class.java,
+        ).chronosPreferencesDataSource()
+        if (!prefs.isInteropConsentGranted()) {
+            Log.i(TAG, "Interop consent not granted — skipping sync and cancelling future runs.")
+            WorkManager.getInstance(applicationContext).cancelUniqueWork(UNIQUE_WORK_NAME)
+            return Result.success()
+        }
         val manager = EntryPointAccessors.fromApplication(
             applicationContext,
             InteropSyncWorkerEntryPoint::class.java,
@@ -43,9 +53,21 @@ class InteropSyncWorker(
     companion object {
         const val UNIQUE_WORK_NAME = "chronosflow_interop_sync"
         const val SYNC_INTERVAL_HOURS = 6L
+        private const val TAG = "InteropSyncWorker"
 
-        /** Enqueue (or update) the periodic DevTime sync. Safe to call on every app startup. */
+        /**
+         * Enqueue the periodic DevTime sync only when the user has granted interop consent.
+         * Cancels the unique work when consent has not been granted, so previously-scheduled
+         * instances from before the PRIV-006 gate was added are also cleaned up.
+         */
         fun ensureScheduled(context: Context) {
+            val prefs = context.getSharedPreferences("chronos_preferences", Context.MODE_PRIVATE)
+            val consentGranted = prefs.getBoolean("interop.consent.granted", false)
+            if (!consentGranted) {
+                // Cancel any work that may have been scheduled before this consent gate was added.
+                WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_WORK_NAME)
+                return
+            }
             val request = PeriodicWorkRequestBuilder<InteropSyncWorker>(
                 SYNC_INTERVAL_HOURS,
                 TimeUnit.HOURS,
@@ -58,7 +80,7 @@ class InteropSyncWorker(
                 .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 UNIQUE_WORK_NAME,
-                ExistingPeriodicWorkPolicy.UPDATE,
+                ExistingPeriodicWorkPolicy.KEEP,
                 request,
             )
         }
@@ -69,4 +91,5 @@ class InteropSyncWorker(
 @InstallIn(SingletonComponent::class)
 interface InteropSyncWorkerEntryPoint {
     fun interopSyncManager(): InteropSyncManager
+    fun chronosPreferencesDataSource(): ChronosPreferencesDataSource
 }

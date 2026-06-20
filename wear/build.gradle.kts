@@ -28,8 +28,16 @@ extensions.configure<ApplicationExtension> {
     }
     buildTypes {
         debug { enableUnitTestCoverage = true; enableAndroidTestCoverage = true }
-        if (keystorePropsFile.exists()) {
-            release { signingConfig = signingConfigs.getByName("release") }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     namespace = "com.ChronosFlow.VBCR.wear"
@@ -54,6 +62,7 @@ extensions.configure<ApplicationExtension> {
             initWith(getByName("release"))
             isDebuggable = false
             isMinifyEnabled = false
+            isShrinkResources = false // shrinkResources requires minifyEnabled; benchmark keeps resources for profiling
             matchingFallbacks += listOf("release")
             // Debug-signed so it side-loads for on-watch perf checks; debug builds carry
             // Jacoco instrumentation + debuggable overhead that makes Compose feel laggy.

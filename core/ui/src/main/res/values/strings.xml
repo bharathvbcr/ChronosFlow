@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Content description for the ChronosFlow logo image, used by TalkBack. -->
+    <string name="cd_chronosflow_logo">ChronosFlow logo</string>
+</resources>

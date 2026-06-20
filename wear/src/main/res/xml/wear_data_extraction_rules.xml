@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Wear OS data-extraction rules.
+    The Wear app holds only a mirror of the phone-side schedule (no source-of-truth data),
+    so cloud backup and device-transfer are both excluded. All persistent state lives in the
+    phone app and is re-synced via the Wearable Data Layer when the watch reconnects.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+    </device-transfer>
+</data-extraction-rules>

@@ -227,6 +227,7 @@ internal fun DayDialMainContent(
     review: DailyReview,
     privacyMode: PrivacyMode,
     previewOnDeviceModel: Boolean,
+    cloudAiEnabled: Boolean,
     compactMode: Boolean,
     compactWindowStart: Int,
     missedBlocks: List<TimeBlockUiModel>,
@@ -335,6 +336,7 @@ internal fun DayDialMainContent(
     dataExportCanAuthenticate: Boolean,
     dataExportAuthError: String?,
     onUnlockDataExport: () -> Unit,
+    onDeleteAllData: () -> Unit = {},
     contentBottomPadding: Dp = 0.dp,
     onOpenPlanTab: () -> Unit,
     showMessage: (String) -> Unit,
@@ -718,9 +720,11 @@ internal fun DayDialMainContent(
                         review = review,
                         privacyMode = privacyMode,
                         previewOnDeviceModel = previewOnDeviceModel,
+                        cloudAiEnabled = cloudAiEnabled,
                         onSelectDate = viewModel::selectDate,
                         onPrivacyModeSelected = viewModel::setPrivacyMode,
                         onPreviewOnDeviceModelChanged = onPreviewOnDeviceModelChanged,
+                        onCloudAiEnabledChanged = viewModel::setCloudAiEnabled,
                         onGeneratePlan = {
                             viewModel.onAiPlanRequested(listOf("Generate plan for $selectedDate"))
                             onActiveSheetChanged(SheetTarget.AiPlan)
@@ -841,6 +845,7 @@ internal fun DayDialMainContent(
                         onQuickMedicationTaken = viewModel::markDayQuickMedicationTaken,
                         onQuickMedicationMissed = viewModel::markDayQuickMedicationMissed,
                         onOpenBlock = viewModel::onBlockSelected,
+                        onDeleteAllData = onDeleteAllData,
                         contentTopPadding = scaffoldPadding.calculateTopPadding(),
                         contentBottomPadding = contentBottomPadding + scaffoldPadding.calculateBottomPadding(),
                         showMessage = showMessage

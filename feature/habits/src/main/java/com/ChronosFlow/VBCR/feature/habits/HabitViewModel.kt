@@ -1,5 +1,6 @@
 package com.ChronosFlow.VBCR.feature.habits
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ChronosFlow.VBCR.core.ai.HabitAssistPlanner
@@ -50,6 +51,7 @@ data class HabitRepairSuggestion(
     val source: RoutineAssistSource = RoutineAssistSource.LOCAL
 )
 
+@Immutable
 data class HabitAssistUiState(
     val isLoading: Boolean = false,
     val suggestions: List<HabitAssistSuggestion> = emptyList(),

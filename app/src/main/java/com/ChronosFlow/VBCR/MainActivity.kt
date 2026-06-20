@@ -187,9 +187,34 @@ private fun ChronosFlowApp(
     reduceMotionEnabled: Boolean,
     onNotificationLaunchHandled: () -> Unit
 ) {
-    val appContentResolver = androidx.compose.ui.platform.LocalContext.current.contentResolver
+    val appContext = LocalContext.current
+    val appContentResolver = appContext.contentResolver
     val notificationPlan = remember(launchGeneration, launchIntent) {
-        buildNotificationNavigationPlan(launchIntent, appContentResolver)
+        val basePlan = buildNotificationNavigationPlan(launchIntent, appContentResolver)
+        // Attach the calling app's human-readable label when the launch originates from a share
+        // (ACTION_SEND / ACTION_PROCESS_TEXT). The referrer URI has the form
+        // android-app://com.example.app; we extract the host as the package name and resolve the
+        // label via PackageManager. This is API 22+ (minSdk is already above that).
+        val sourceAppLabel: String? = if (
+            launchIntent?.action == android.content.Intent.ACTION_SEND ||
+            launchIntent?.action == android.content.Intent.ACTION_PROCESS_TEXT
+        ) {
+            val activity = appContext as? android.app.Activity
+            val pkg = activity?.referrer?.host
+            pkg?.let { packageName ->
+                runCatching {
+                    val pm = appContext.packageManager
+                    pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
+                }.getOrNull()
+            }
+        } else null
+        if (sourceAppLabel != null && basePlan.notificationLaunch != null) {
+            basePlan.copy(
+                notificationLaunch = basePlan.notificationLaunch.copy(sourceAppLabel = sourceAppLabel)
+            )
+        } else {
+            basePlan
+        }
     }
     val navState = rememberChronosNavigationState(
         startDayTarget = initialDayTargetForNotificationLaunch(notificationPlan.notificationLaunch)

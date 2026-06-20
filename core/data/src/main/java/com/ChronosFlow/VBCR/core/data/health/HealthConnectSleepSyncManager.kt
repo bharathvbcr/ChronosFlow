@@ -89,6 +89,7 @@ class HealthConnectSleepSyncManager @Inject constructor(
     suspend fun runSync(): HealthConnectSleepSyncOutcome {
         if (!dataSource.isAvailable()) return recordSkipped("Health Connect is not available")
         if (!dataSource.hasSleepReadPermission()) return recordSkipped("Sleep access not granted yet")
+        if (!dataSource.hasBackgroundReadPermission()) return recordSkipped("Background read permission not granted")
         return withContext(Dispatchers.IO) {
             runCatching {
                 val zone = ZoneId.systemDefault()
@@ -270,19 +271,12 @@ class HealthConnectSleepSyncWorker(
             HealthConnectSleepSyncEntryPoint::class.java
         )
         val manager = entryPoint.healthConnectSleepSyncManager()
-        val dataSource = entryPoint.healthConnectSleepDataSource()
-
-        if (!dataSource.hasBackgroundReadPermission()) {
-            // Permission not yet granted — return success so the periodic work stays alive and
-            // retries at the next scheduled interval. Result.failure() would mark this period
-            // as permanently failed, but runAttemptCount is always 0 for periodic workers
-            // (it only increments on Result.retry()), so the >5 guard was dead code here.
-            android.util.Log.w("HealthConnectSleepSync", "Background read permission not granted — deferring sleep sync")
-            return Result.success()
-        }
-
+        // All permission checks (including hasBackgroundReadPermission) are handled inside
+        // runSync() which also updates KEY_LAST_RESULT so the Settings UI stays accurate.
         return when (manager.runSync()) {
             is HealthConnectSleepSyncOutcome.Success -> Result.success()
+            // Skipped = HC unavailable or permissions not granted; return success so the
+            // periodic chain stays alive for the next scheduled interval.
             is HealthConnectSleepSyncOutcome.Skipped -> Result.success()
             is HealthConnectSleepSyncOutcome.Failure -> Result.failure()
         }

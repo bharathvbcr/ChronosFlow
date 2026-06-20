@@ -30,13 +30,21 @@ class AppLockManager @Inject constructor(
     fun requiresSensitiveAuth(area: SensitiveArea): Boolean {
         if (!preferences.requireAuthFor(area)) return false
         if (_appLockState.value == AppLockState.LOCKED) return true
-        val unlockedAt = sensitiveAreaUnlockTimes[area] ?: return true
-        if (System.currentTimeMillis() - unlockedAt > SENSITIVE_SESSION_TIMEOUT_MS) {
-            sensitiveAreaUnlockTimes.remove(area)
-            bumpSensitiveSession()
-            return true
+        // Use compute() for an atomic read-check-remove so a concurrent unlockSensitiveArea()
+        // call cannot insert a fresh timestamp between our read and our remove().
+        var sessionExpired = false
+        val kept = sensitiveAreaUnlockTimes.compute(area) { _, unlockedAt ->
+            when {
+                unlockedAt == null -> null
+                System.currentTimeMillis() - unlockedAt > SENSITIVE_SESSION_TIMEOUT_MS -> {
+                    sessionExpired = true
+                    null
+                }
+                else -> unlockedAt
+            }
         }
-        return false
+        if (sessionExpired) bumpSensitiveSession()
+        return kept == null
     }
 
     fun onAppForegrounded(fromBackground: Boolean) {

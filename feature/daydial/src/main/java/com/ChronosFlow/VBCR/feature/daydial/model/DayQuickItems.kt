@@ -1,5 +1,6 @@
 package com.ChronosFlow.VBCR.feature.daydial.model
 
+import androidx.compose.runtime.Stable
 import com.ChronosFlow.VBCR.core.domain.model.Habit
 import com.ChronosFlow.VBCR.core.domain.model.HabitEventType
 import com.ChronosFlow.VBCR.core.domain.model.HabitRecurrenceRule
@@ -19,6 +20,7 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 
 private const val DAY_MINUTES = 24 * 60
 
@@ -46,6 +48,7 @@ internal data class DayQuickContextActionUiModel(
     val appLaunchTarget: AppLaunchTarget? = null
 )
 
+@Stable
 internal data class DayQuickItemsUiState(
     val tasks: List<DayQuickItemUiModel> = emptyList(),
     val habits: List<DayQuickItemUiModel> = emptyList(),
@@ -316,7 +319,7 @@ private fun formatDayQuickMinute(minute: Int): String {
         0 -> 12
         else -> h
     }
-    return "%d:%02d %s".format(displayHour, m, suffix)
+    return String.format(Locale.getDefault(), "%d:%02d %s", displayHour, m, suffix)
 }
 
 private fun formatDayQuickDuration(durationMinutes: Int): String =

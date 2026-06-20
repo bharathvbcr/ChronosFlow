@@ -65,6 +65,9 @@ class DayDialAiDelegate @Inject constructor(
     private val _previewOnDeviceModel = MutableStateFlow(assistantPreferences.preferPreviewNanoModel())
     val previewOnDeviceModel = _previewOnDeviceModel.asStateFlow()
 
+    private val _cloudAiEnabled = MutableStateFlow(assistantPreferences.isCloudAiEnabled())
+    val cloudAiEnabled = _cloudAiEnabled.asStateFlow()
+
     val genAiRuntimeStatus = aiPlanner.genAiRuntimeStatus
 
     private val _suggestedBlocks = MutableStateFlow<List<TimeBlockUiModel>>(emptyList())
@@ -106,6 +109,16 @@ class DayDialAiDelegate @Inject constructor(
     fun setPreviewOnDeviceModel(enabled: Boolean) {
         _previewOnDeviceModel.value = enabled
         assistantPreferences.setPreferPreviewNanoModel(enabled)
+    }
+
+    /**
+     * Persists the user's cloud AI consent decision and updates the live state so the UI reflects
+     * the change immediately. The coordinator's [GenAiAssistCoordinator.privacyMode] gate reads
+     * the same preference at call time, so the effect is immediate for the next generation request.
+     */
+    fun setCloudAiEnabled(enabled: Boolean) {
+        _cloudAiEnabled.value = enabled
+        assistantPreferences.setCloudAiEnabled(enabled)
     }
 
     fun refreshGenAiStatus(scope: CoroutineScope) {

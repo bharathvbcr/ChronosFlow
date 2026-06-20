@@ -348,6 +348,18 @@ class AlarmScheduler @Inject constructor(
         setBootReceiverEnabled(hasPersistedReminders())
     }
 
+    /**
+     * Cancels every scheduled alarm persisted by this scheduler. Used by the "Delete all my data"
+     * flow to remove all pending PendingIntents from the AlarmManager before the database is wiped.
+     */
+    fun cancelAllAlarms() {
+        getPersistedIds().toSet().forEach { id -> cancelAlarm(id) }
+        // Also clear the entire alarm SharedPreferences file so no stale IDs survive.
+        preferences.edit().clear().apply()
+        pending.clear()
+        setBootReceiverEnabled(false)
+    }
+
     fun routeToExactAlarmSetting() {
         buildExactAlarmSettingsIntentSpecs(
             packageName = context.packageName,

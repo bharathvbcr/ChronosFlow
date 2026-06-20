@@ -4,9 +4,12 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosTextButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosOutlinedButton
 
+import android.Manifest
 import android.os.Build
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -272,10 +275,12 @@ private fun OnboardingPermissionsPage(
     sleepImportRequested: Boolean
 ) {
     val context = LocalContext.current
+    val activity = LocalActivity.current
 
     var notificationsGranted by remember {
         mutableStateOf(NotificationPermissions.hasStandardPermission(context))
     }
+    var showNotificationRationale by remember { mutableStateOf(false) }
     val notificationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
@@ -285,8 +290,44 @@ private fun OnboardingPermissionsPage(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || notificationsGranted) {
             notificationsGranted = true
         } else {
-            notificationLauncher.launch(NotificationPermissions.requiredPermissions())
+            // NOTIF-001: Check shouldShowRequestPermissionRationale before launching the system
+            // prompt. If Android says we should show a rationale (user denied once), surface an
+            // explanation first so the user understands why the permission is needed.
+            val shouldShowRationale = activity != null &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ActivityCompat.shouldShowRequestPermissionRationale(
+                    activity, Manifest.permission.POST_NOTIFICATIONS
+                )
+            if (shouldShowRationale) {
+                showNotificationRationale = true
+            } else {
+                notificationLauncher.launch(NotificationPermissions.requiredPermissions())
+            }
         }
+    }
+
+    if (showNotificationRationale) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showNotificationRationale = false },
+            title = { Text("Enable reminders?") },
+            text = {
+                Text(
+                    "ChronosFlow uses notifications to deliver medication reminders, focus alerts, " +
+                        "and daily review prompts. Without this permission those reminders stay " +
+                        "silent. You can enable it later in your device Settings → Apps → " +
+                        "ChronosFlow → Notifications."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showNotificationRationale = false
+                    notificationLauncher.launch(NotificationPermissions.requiredPermissions())
+                }) { Text("Enable") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNotificationRationale = false }) { Text("Not now") }
+            }
+        )
     }
 
     // Sleep import is the one permission that is strictly opt-in: only surface it when the user kept
@@ -331,8 +372,9 @@ private fun OnboardingPermissionsPage(
             PermissionCard(
                 icon = Icons.Outlined.Bedtime,
                 title = "Import sleep from Health Connect",
-                why = "Reads your sleep sessions so the Sleep tracker can chart trends without " +
-                    "manual logging. You can still log sleep by hand if you skip this.",
+                why = "Sleep data is read periodically in the background (approximately every " +
+                    "6 hours) to help plan your day, even when the app is not open. " +
+                    "You can still log sleep by hand if you skip this.",
                 granted = sleepGranted,
                 grantedLabel = "Sleep import connected",
                 actionLabel = "Connect Health Connect",

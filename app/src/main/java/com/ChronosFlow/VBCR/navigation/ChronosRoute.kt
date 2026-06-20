@@ -79,7 +79,9 @@ sealed interface ChronosRoute : NavKey {
         val taskId: String? = null,
         val target: String? = null,
         val capture: String? = null,
-        val bulkCapture: List<String>? = null
+        val bulkCapture: List<String>? = null,
+        /** Human-readable label of the app that shared content via ACTION_SEND/ACTION_PROCESS_TEXT. */
+        val sourceAppLabel: String? = null
     ) : ChronosRoute {
         override val section: String get() = SECTION_TASKS
 
@@ -90,8 +92,9 @@ sealed interface ChronosRoute : NavKey {
                 taskId: String? = null,
                 target: String? = null,
                 capture: String? = null,
-                bulkCapture: List<String>? = null
-            ): Tasks = Tasks(taskId, target, capture, bulkCapture)
+                bulkCapture: List<String>? = null,
+                sourceAppLabel: String? = null
+            ): Tasks = Tasks(taskId, target, capture, bulkCapture, sourceAppLabel)
         }
     }
 
@@ -324,7 +327,8 @@ sealed interface ChronosRoute : NavKey {
                     taskId = launch.taskId,
                     target = launch.target,
                     capture = launch.capture,
-                    bulkCapture = launch.bulkCapture
+                    bulkCapture = launch.bulkCapture,
+                    sourceAppLabel = launch.sourceAppLabel
                 )
                 SECTION_HABITS -> if (featureFlags.habitsEnabled) Habits() else Day()
                 SECTION_GOALS -> if (featureFlags.goalsEnabled) Goals() else Day()

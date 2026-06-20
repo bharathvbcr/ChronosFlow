@@ -18,6 +18,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -402,7 +403,15 @@ internal fun DayDialTemplateEditorSheet(
         )
 
         if (onRequestAssist != null) {
-            val appliedAssistIds = remember(assistState.suggestions) { mutableStateListOf<String>() }
+            // Keyed only on composable lifecycle — cleared explicitly via LaunchedEffect when
+            // the suggestions batch is replaced, rather than using the unstable List<T> as a key
+            // (which would reset applied IDs on every recomposition triggered by a new list object).
+            val appliedAssistIds = remember { mutableStateListOf<String>() }
+            LaunchedEffect(assistState.suggestions) {
+                // When a fresh suggestions batch arrives (empty list = new request started),
+                // clear the set so the user can re-apply from the new suggestions.
+                if (assistState.suggestions.isEmpty()) appliedAssistIds.clear()
+            }
             val visibleAssistSuggestions = assistState.suggestions.filter { it.id !in appliedAssistIds }
 
             fun applyRoutineAssistSuggestion(suggestion: RoutineAssistSuggestion) {

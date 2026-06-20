@@ -17,8 +17,12 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosSwitch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -146,9 +150,10 @@ internal fun HealthConnectSleepCard(viewModel: HealthConnectSleepViewModel = hil
             color = MaterialTheme.colorScheme.onSurface
         )
         Text(
-            "Automatically import last night's sleep from Health Connect a few times a day. " +
+            "Sleep and workout data is read periodically in the background (approximately every " +
+                "6 hours) to help plan your day, even when the app is not open. " +
                 "Bed/wake times and interruptions are filled in for you; nights you log by hand are " +
-                "left untouched.",
+                "left untouched. This access is required by Google Play Health Connect policy to be disclosed.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -193,16 +198,17 @@ internal fun HealthConnectSleepSyncButton(
     val isRunning by viewModel.isRunning.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
+    var syncErrorText by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(viewModel) {
         viewModel.syncOutcomes.collect { outcome ->
-            haptics.performHapticFeedback(
-                if (outcome is HealthConnectSleepSyncOutcome.Failure) {
-                    HapticFeedbackType.Reject
-                } else {
-                    HapticFeedbackType.Confirm
-                }
-            )
+            if (outcome is HealthConnectSleepSyncOutcome.Failure) {
+                haptics.performHapticFeedback(HapticFeedbackType.Reject)
+                syncErrorText = "Sync failed — check Health Connect permissions and try again."
+            } else {
+                haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                syncErrorText = null
+            }
         }
     }
 
@@ -216,6 +222,7 @@ internal fun HealthConnectSleepSyncButton(
             HealthConnectAvailability.AVAILABLE -> {
                 ChronosOutlinedButton(
                     onClick = {
+                        syncErrorText = null
                         // Already set up → pull straight away; otherwise request read access first.
                         if (status.enabled) viewModel.runNow() else permissionLauncher.launch(viewModel.requestPermissions)
                     },
@@ -224,7 +231,14 @@ internal fun HealthConnectSleepSyncButton(
                 ) {
                     Text(if (isRunning) "Syncing…" else "Sync from Health Connect")
                 }
-                if (status.lastResult.isNotEmpty()) {
+                val errorMessage = syncErrorText
+                if (errorMessage != null) {
+                    Text(
+                        errorMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                } else if (status.lastResult.isNotEmpty()) {
                     Text(
                         status.lastResult,
                         style = MaterialTheme.typography.bodySmall,

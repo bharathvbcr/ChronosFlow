@@ -1,5 +1,6 @@
 package com.ChronosFlow.VBCR.feature.tasks
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ChronosFlow.VBCR.core.ai.TaskAssistPlanner
@@ -53,6 +54,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+@Immutable
 data class TaskAssistUiState(
     val isLoading: Boolean = false,
     val suggestions: List<TaskAssistSuggestion> = emptyList(),
@@ -317,7 +319,9 @@ class TaskViewModel @Inject constructor(
 
     fun requestTaskAssist(request: TaskAssistRequest) {
         viewModelScope.launch {
-            val snapshot = runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }.getOrNull()
+            val snapshot = runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }
+                .onFailure { e -> android.util.Log.w(TAG, "Background AI snapshot refresh failed in requestTaskAssist", e) }
+                .getOrNull()
             _assistState.value = TaskAssistUiState(isLoading = true, assistSnapshot = snapshot)
             val suggestions = runCatching { taskAssistPlanner.suggest(request) }
                 .onFailure { error ->
@@ -512,6 +516,10 @@ class TaskViewModel @Inject constructor(
 
     private fun AlarmRequest.taskIdOrNull(): String? {
         return blockId ?: id.removePrefix("task:").takeIf { it != id }
+    }
+
+    private companion object {
+        const val TAG = "TaskViewModel"
     }
 
     private fun AlarmRequest.withScheduleResult(result: AlarmScheduleResult): AlarmRequest {

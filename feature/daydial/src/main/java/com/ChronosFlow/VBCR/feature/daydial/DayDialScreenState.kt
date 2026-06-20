@@ -1,6 +1,7 @@
 package com.ChronosFlow.VBCR.feature.daydial
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +29,10 @@ import com.ChronosFlow.VBCR.feature.daydial.model.SheetTarget
 import com.ChronosFlow.VBCR.feature.daydial.model.SidebarPage
 import java.time.LocalDate
 
+// All fields are read-only references replaced atomically by the ViewModel — never mutated in-place.
+// @Immutable tells the Compose compiler to trust this so it can skip recomposition when the
+// reference hasn't changed, avoiding churn from List<T>/Set<T> fields that are otherwise unstable.
+@Immutable
 internal data class DayDialViewModelState(
     val timeBlocks: List<TimeBlockUiModel>,
     val freeTime: List<TimeRangeUi>,
@@ -43,6 +48,7 @@ internal data class DayDialViewModelState(
     val review: DailyReview,
     val privacyMode: PrivacyMode,
     val previewOnDeviceModel: Boolean,
+    val cloudAiEnabled: Boolean,
     val suggestedBlocks: List<TimeBlockUiModel>,
     val aiPlanResult: String?,
     val explainPlan: String?,
@@ -87,6 +93,7 @@ internal fun rememberDayDialViewModelState(viewModel: DayDialViewModel): DayDial
     val review by viewModel.dailyReview.collectAsStateWithLifecycle()
     val privacyMode by viewModel.privacyMode.collectAsStateWithLifecycle()
     val previewOnDeviceModel by viewModel.previewOnDeviceModel.collectAsStateWithLifecycle()
+    val cloudAiEnabled by viewModel.cloudAiEnabled.collectAsStateWithLifecycle()
     val suggestedBlocks by viewModel.suggestedBlocks.collectAsStateWithLifecycle()
     val aiPlanResult by viewModel.aiPlanResult.collectAsStateWithLifecycle()
     val explainPlan by viewModel.explainPlan.collectAsStateWithLifecycle()
@@ -129,6 +136,7 @@ internal fun rememberDayDialViewModelState(viewModel: DayDialViewModel): DayDial
         review = review,
         privacyMode = privacyMode,
         previewOnDeviceModel = previewOnDeviceModel,
+        cloudAiEnabled = cloudAiEnabled,
         suggestedBlocks = suggestedBlocks,
         aiPlanResult = aiPlanResult,
         explainPlan = explainPlan,

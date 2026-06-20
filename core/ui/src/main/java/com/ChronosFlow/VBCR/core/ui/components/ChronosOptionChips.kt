@@ -3,7 +3,6 @@ package com.ChronosFlow.VBCR.core.ui.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,6 +21,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ChronosFlow.VBCR.core.ui.motion.ChronosValueAnimationFactory
@@ -93,10 +96,15 @@ fun ChronosOptionChips(
                         .clip(MaterialTheme.shapes.small)
                         .background(baseColor)
                         .border(1.dp, borderCol, MaterialTheme.shapes.small)
-                        .clickable {
-                            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                            onSelected(option)
-                        }
+                        .selectable(
+                            selected = isSelected,
+                            role = Role.RadioButton,
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                                onSelected(option)
+                            }
+                        )
+                        .semantics { selected = isSelected }
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
                     Text(

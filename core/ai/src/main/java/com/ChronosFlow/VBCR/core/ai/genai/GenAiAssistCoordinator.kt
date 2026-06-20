@@ -28,9 +28,18 @@ class GenAiAssistCoordinator @Inject constructor(
 ) {
     val runtimeStatus: StateFlow<GenAiRuntimeStatus> = onDeviceGateway.runtimeStatus
 
-    fun privacyMode(): PrivacyMode = runCatching {
-        PrivacyMode.valueOf(assistantPreferences.assistantPrivacyModeValue())
-    }.getOrDefault(PrivacyMode.ON_DEVICE_ONLY)
+    fun privacyMode(): PrivacyMode {
+        val stored = runCatching {
+            PrivacyMode.valueOf(assistantPreferences.assistantPrivacyModeValue())
+        }.getOrDefault(PrivacyMode.ON_DEVICE_ONLY)
+        // Cloud calls require explicit user consent. If the stored mode is CLOUD_ALLOWED but the
+        // user has not opted in (or has since revoked consent), silently fall back to on-device.
+        return if (stored == PrivacyMode.CLOUD_ALLOWED && !assistantPreferences.isCloudAiEnabled()) {
+            PrivacyMode.ON_DEVICE_ONLY
+        } else {
+            stored
+        }
+    }
 
     suspend fun refreshRuntimeStatus(): GenAiRuntimeStatus {
         onDeviceGateway.refreshStatus()

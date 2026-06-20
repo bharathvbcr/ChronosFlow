@@ -134,7 +134,7 @@ internal fun dateNavHeaderLabel(selectedDate: LocalDate): String =
 
 internal fun dayNavigationActionLabel(selectedDate: LocalDate, dayOffset: Int): String {
     val targetDate = selectedDate.plusDays(dayOffset.toLong())
-    return "Go to ${targetDate.format(DateTimeFormatter.ofPattern("MMM d"))}"
+    return "Go to ${targetDate.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))}"
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)

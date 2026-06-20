@@ -77,15 +77,21 @@ class HealthConnectWorkoutDataSource @Inject constructor(
     /** Exercise sessions overlapping [[start], [end]], flattened to [ImportedWorkout]. Empty when unavailable. */
     suspend fun readWorkouts(start: Instant, end: Instant, zoneId: ZoneId = ZoneId.systemDefault()): List<ImportedWorkout> {
         val client = clientOrNull() ?: return emptyList()
-        return client.readRecords(
-            ReadRecordsRequest(
-                recordType = ExerciseSessionRecord::class,
-                timeRangeFilter = TimeRangeFilter.between(start, end)
-            )
-        ).records.map { it.toImportedWorkout(zoneId) }
+        return try {
+            client.readRecords(
+                ReadRecordsRequest(
+                    recordType = ExerciseSessionRecord::class,
+                    timeRangeFilter = TimeRangeFilter.between(start, end)
+                )
+            ).records.map { it.toImportedWorkout(zoneId) }
+        } catch (e: SecurityException) {
+            android.util.Log.w(TAG, "Health Connect workout read permission revoked mid-call", e)
+            emptyList()
+        }
     }
 
     private companion object {
+        const val TAG = "HealthConnectWorkoutDataSource"
         const val HEALTH_CONNECT_PROVIDER_PACKAGE = "com.google.android.apps.healthdata"
     }
 }

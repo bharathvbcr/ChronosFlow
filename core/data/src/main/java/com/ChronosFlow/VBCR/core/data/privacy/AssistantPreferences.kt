@@ -22,6 +22,17 @@ class AssistantPreferences @Inject constructor(
         preferences.putBoolean(KEY_PREFER_PREVIEW_NANO_MODEL, enabled)
     }
 
+    /**
+     * Returns true when the user has explicitly opted in to sending schedule data to Google
+     * cloud AI (Gemini). False by default — cloud calls are gated on this consent flag so no
+     * data leaves the device without the user actively turning this on.
+     */
+    fun isCloudAiEnabled(): Boolean = preferences.isCloudAiEnabled()
+
+    fun setCloudAiEnabled(enabled: Boolean) {
+        preferences.setCloudAiEnabled(enabled)
+    }
+
     companion object {
         const val DEFAULT_PRIVACY_MODE = "ON_DEVICE_ONLY"
         const val KEY_ASSISTANT_PRIVACY_MODE = "assistant_privacy_mode"

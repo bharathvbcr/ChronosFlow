@@ -351,6 +351,7 @@ internal fun DayDialScreenChrome(
                                 review = vmState.review,
                                 privacyMode = vmState.privacyMode,
                                 previewOnDeviceModel = vmState.previewOnDeviceModel,
+                                cloudAiEnabled = vmState.cloudAiEnabled,
                                 compactMode = vmState.compactMode,
                                 compactWindowStart = vmState.compactWindowStart,
                                 missedBlocks = missedBlocks,
@@ -474,6 +475,19 @@ internal fun DayDialScreenChrome(
                                             }
                                         }
                                     }
+                                },
+                                onDeleteAllData = {
+                                    viewModel.deleteAllData(
+                                        onComplete = {
+                                            // Navigate away from settings back to the root tab so the
+                                            // user lands on an empty-but-valid state.
+                                            uiState.activeSidebarPage = null
+                                            uiState.snackbarMessage = "All data has been deleted."
+                                        },
+                                        onError = { reason ->
+                                            uiState.snackbarMessage = reason
+                                        }
+                                    )
                                 },
                                 contentBottomPadding = bottomContentPadding,
                                 onOpenPlanTab = {

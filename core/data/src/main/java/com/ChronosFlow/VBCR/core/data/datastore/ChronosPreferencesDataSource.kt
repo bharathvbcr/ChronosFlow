@@ -56,17 +56,22 @@ class ChronosPreferencesDataSource @Inject constructor(
         preferences.getBoolean(KEY_INTEROP_SHARING_MEDICATIONS, false)
 
     /**
+     * Master consent gate for DevTime/Meridian interop (PRIV-006).
+     * Defaults to false — InteropSyncWorker will not be scheduled and InteropProvider will not
+     * serve any data until the user explicitly grants consent via the disclosure dialog.
+     */
+    fun isInteropConsentGranted(): Boolean =
+        preferences.getBoolean(KEY_INTEROP_CONSENT_GRANTED, false)
+
+    fun setInteropConsentGranted(granted: Boolean) {
+        preferences.edit().putBoolean(KEY_INTEROP_CONSENT_GRANTED, granted).apply()
+    }
+
+    /**
      * Whether the user has opted in to sending schedule data to Google cloud AI (Gemini).
      * Defaults to false so no user data is ever sent to a remote model without explicit consent.
      */
-    suspend fun isCloudAiEnabled(): Boolean =
-        preferences.getBoolean(KEY_CLOUD_AI_ENABLED, false)
-
-    /**
-     * Non-suspend variant used by synchronous call sites (e.g. preference accessors that cannot be
-     * called from a coroutine). Reads the same key as [isCloudAiEnabled].
-     */
-    fun isCloudAiEnabledSync(): Boolean =
+    fun isCloudAiEnabled(): Boolean =
         preferences.getBoolean(KEY_CLOUD_AI_ENABLED, false)
 
     fun setCloudAiEnabled(enabled: Boolean) {
@@ -86,6 +91,7 @@ class ChronosPreferencesDataSource @Inject constructor(
     private companion object {
         const val PREFERENCES_NAME = "chronos_preferences"
         const val KEY_INTEROP_SHARING_MEDICATIONS = "interop.sharing.medications.enabled"
+        const val KEY_INTEROP_CONSENT_GRANTED = "interop.consent.granted"
         const val KEY_CLOUD_AI_ENABLED = "ai.cloud.enabled"
     }
 }

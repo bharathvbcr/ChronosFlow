@@ -61,6 +61,7 @@ class HealthConnectSleepDataSource @Inject constructor(
 ) {
     companion object {
         const val HEALTH_CONNECT_PROVIDER_PACKAGE = "com.google.android.apps.healthdata"
+        private const val TAG = "HealthConnectSleepDataSource"
     }
     /** Grant required for the feature to function at all. */
     val requiredPermissions: Set<String> =
@@ -108,12 +109,17 @@ class HealthConnectSleepDataSource @Inject constructor(
     /** Reads every sleep session whose time range overlaps [[start], [end]]. Empty when unavailable. */
     suspend fun readSessions(start: Instant, end: Instant): List<SleepSessionRecord> {
         val client = clientOrNull() ?: return emptyList()
-        return client.readRecords(
-            ReadRecordsRequest(
-                recordType = SleepSessionRecord::class,
-                timeRangeFilter = TimeRangeFilter.between(start, end)
-            )
-        ).records
+        return try {
+            client.readRecords(
+                ReadRecordsRequest(
+                    recordType = SleepSessionRecord::class,
+                    timeRangeFilter = TimeRangeFilter.between(start, end)
+                )
+            ).records
+        } catch (e: SecurityException) {
+            android.util.Log.w(TAG, "Health Connect sleep read permission revoked mid-call", e)
+            emptyList()
+        }
     }
 
     /** A fresh differential-changes token scoped to sleep sessions, or null when unavailable. */
@@ -143,5 +149,9 @@ class HealthConnectSleepDataSource @Inject constructor(
             if (!response.hasMore) break
         }
         return SleepChangesResult.Changes(upserted, hasDeletions, cursor)
+    }
+
+    private companion object {
+        const val TAG = "HealthConnectSleepDataSource"
     }
 }

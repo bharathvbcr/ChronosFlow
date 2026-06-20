@@ -73,7 +73,9 @@ fun TaskBulkImportSheet(
                     .heightIn(max = 360.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                itemsIndexed(candidates, key = { index, title -> "$index:$title".hashCode().toLong() xor index.toLong() }) { index, title ->
+                // Use index as the primary key component so duplicate or hash-colliding strings
+                // each get a unique, stable slot. String.hashCode() alone is not collision-safe.
+                itemsIndexed(candidates, key = { idx, title -> "${idx}_${title}" }) { index, title ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

@@ -247,7 +247,14 @@ internal fun TaskFormSheet(
     onSaveTemplate: ((TaskTemplate) -> Unit)? = null,
     onDeleteTemplate: ((String) -> Unit)? = null,
     onAddAnother: AddTaskConfirm? = null,
-    onOpenExistingTask: ((title: String) -> Unit)? = null
+    onOpenExistingTask: ((title: String) -> Unit)? = null,
+    /**
+     * Human-readable label of the app that shared this content via ACTION_SEND or
+     * ACTION_PROCESS_TEXT (e.g. "Google Keep"). Null for all other entry points. When non-null a
+     * small "Shared from [App Name]" label is shown below the title field so the user knows where
+     * the pre-filled text originated.
+     */
+    sourceAppLabel: String? = null
 ) {
     if (target == null) return
 
@@ -364,8 +371,12 @@ internal fun TaskFormSheet(
             addAll(initialTask?.attachments?.map(TaskAttachment::toDraft).orEmpty())
         }
     }
-    val appliedSuggestionIds = remember(taskKey, assistState.suggestions) {
-        mutableStateListOf<String>()
+    // Keyed only on the stable taskKey — using the unstable List<T> as a key would discard the
+    // applied-suggestion set on every recomposition triggered by a new list object. A LaunchedEffect
+    // clears the set when a fresh request replaces the batch (suggestions become empty).
+    val appliedSuggestionIds = remember(taskKey) { mutableStateListOf<String>() }
+    LaunchedEffect(assistState.suggestions) {
+        if (assistState.suggestions.isEmpty()) appliedSuggestionIds.clear()
     }
     // Blank = no explicit choice yet; the pending action type then follows the task
     // context (e.g. "Email follow-up" defaults the editor to EMAIL, not WEBSITE).
@@ -1110,6 +1121,16 @@ internal fun TaskFormSheet(
                         Text("Open the existing task instead")
                     }
                 }
+            }
+
+            // Show the sharing provenance when content was sent from another app via the
+            // Android share sheet so the user knows where the pre-filled text originated.
+            if (sourceAppLabel != null && target is TaskSheetTarget.Add) {
+                ChronosFilterChip(
+                    selected = false,
+                    onClick = {},
+                    label = { Text("Shared from $sourceAppLabel") }
+                )
             }
 
             OutlinedTextField(

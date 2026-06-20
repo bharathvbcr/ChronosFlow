@@ -1,10 +1,15 @@
 package com.ChronosFlow.VBCR.feature.daydial.model
 
+import androidx.compose.runtime.Immutable
 import com.ChronosFlow.VBCR.core.ai.AssistDigest
 import com.ChronosFlow.VBCR.core.ai.InsightRecommendation
 import com.ChronosFlow.VBCR.core.ai.genai.GenAiAssistUiSnapshot
 import com.ChronosFlow.VBCR.core.domain.model.ReviewInsight
 
+// @Immutable (stronger than @Stable) because the ViewModel only ever replaces this object — it is
+// never mutated in place. This allows the Compose compiler to skip recomposition when the reference
+// is unchanged, even though List<T> fields are otherwise considered unstable.
+@Immutable
 data class InsightsTabUiState(
     val reviewInsights: List<ReviewInsight> = emptyList(),
     val recommendations: List<InsightRecommendation> = emptyList(),

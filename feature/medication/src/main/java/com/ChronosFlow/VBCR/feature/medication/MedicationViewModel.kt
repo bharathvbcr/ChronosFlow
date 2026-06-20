@@ -1,5 +1,6 @@
 package com.ChronosFlow.VBCR.feature.medication
 
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ChronosFlow.VBCR.core.ai.MedicationAdherenceAssistPlanner
@@ -49,6 +50,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+@Stable
 data class MedicationAssistUiState(
     val isLoading: Boolean = false,
     val suggestions: List<MedicationAssistSuggestion> = emptyList(),
@@ -136,7 +138,9 @@ class MedicationViewModel @Inject constructor(
             return
         }
         _adherenceAssistSnapshot.value =
-            runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }.getOrNull()
+            runCatching { genAiAssistCoordinator.refreshAssistUiSnapshot() }
+                .onFailure { e -> android.util.Log.w(TAG, "Background AI snapshot refresh failed in refreshAdherenceSuggestions", e) }
+                .getOrNull()
         val now = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
         val results = runCatching {
             medicationAdherenceAssistPlanner.suggestAdjustments(active, LocalDate.now(), now)
@@ -707,6 +711,10 @@ class MedicationViewModel @Inject constructor(
     private fun Instant.localMinuteOfDay(): Int {
         val localDateTime = atZone(ZoneId.systemDefault())
         return localDateTime.hour * 60 + localDateTime.minute
+    }
+
+    private companion object {
+        const val TAG = "MedicationViewModel"
     }
 }
 

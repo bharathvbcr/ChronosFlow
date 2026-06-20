@@ -318,6 +318,11 @@ class JournalViewModel @Inject constructor(
             val end = Instant.now()
             val start = end.minus(Duration.ofDays(WORKOUT_LOOKBACK_DAYS))
             val workouts = runCatching { workoutDataSource.readWorkouts(start, end) }.getOrDefault(emptyList())
+            // If zero workouts were returned, check whether the permission was revoked mid-call.
+            if (workouts.isEmpty() && !workoutDataSource.hasWorkoutReadPermission()) {
+                _workoutImport.value = WorkoutImportState.Unavailable("Workout access was revoked — re-grant Health Connect permission to import.")
+                return@launch
+            }
             val now = Instant.now()
             workouts.forEach { workout ->
                 journalRepository.save(

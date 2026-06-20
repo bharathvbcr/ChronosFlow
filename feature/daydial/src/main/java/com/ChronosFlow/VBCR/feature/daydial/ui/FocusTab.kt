@@ -89,6 +89,7 @@ import com.ChronosFlow.VBCR.feature.daydial.model.FocusPhaseKind
 import com.ChronosFlow.VBCR.feature.daydial.model.FocusPhasePlanner
 import com.ChronosFlow.VBCR.feature.daydial.isAllDayCalendarImport
 import com.ChronosFlow.VBCR.feature.daydial.model.DayDialTab
+import java.util.Locale
 import kotlin.math.roundToInt
 
 internal data class FocusTabBriefingUiState(
@@ -1008,7 +1009,7 @@ private fun formatFocusMinute(minute: Int): String {
         0 -> 12
         else -> h
     }
-    return "%d:%02d %s".format(displayHour, min, suffix)
+    return String.format(Locale.getDefault(), "%d:%02d %s", displayHour, min, suffix)
 }
 
 internal fun isFocusSessionActiveForTab(focusSession: FocusExecutionState): Boolean =

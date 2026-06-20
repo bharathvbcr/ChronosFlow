@@ -51,5 +51,5 @@ internal fun formatClockLabel(minute: Int): String {
         0 -> 12
         else -> h
     }
-    return "%d:%02d %s".format(displayHour, m, suffix)
+    return String.format(Locale.getDefault(), "%d:%02d %s", displayHour, m, suffix)
 }

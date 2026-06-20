@@ -32,6 +32,8 @@
     <string name="focus_metric_remaining_label">Remaining</string>
     <string name="focus_completion_channel_name">Focus completion</string>
     <string name="focus_completion_channel_description">Alerts when a focus session finishes</string>
+    <!-- Live notification body showing the next scheduled block title and start time. -->
+    <string name="notification_next_up">Next up: %1$s at %2$02d:%3$02d</string>
     <string name="notification_permission_enabled">Notifications enabled</string>
     <string name="notification_permission_promoted_fallback">Notifications enabled; Live Updates may stay in standard notification surfaces</string>
     <string name="notification_permission_denied">Notifications permission denied</string>

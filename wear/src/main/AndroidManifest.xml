@@ -11,7 +11,8 @@
         android:icon="@drawable/ic_chronosflow_tile"
         android:label="ChronosFlow"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault">
+        android:theme="@android:style/Theme.DeviceDefault"
+        android:dataExtractionRules="@xml/wear_data_extraction_rules">
 
         <!-- Standalone Wear app: usable without a phone-side companion. -->
         <meta-data

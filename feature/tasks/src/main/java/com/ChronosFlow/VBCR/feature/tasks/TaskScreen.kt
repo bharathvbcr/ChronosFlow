@@ -130,6 +130,8 @@ fun TaskScreen(
     openAddSheet: Boolean = false,
     initialAddCapture: String? = null,
     initialBulkImport: List<String>? = null,
+    /** Human-readable label of the sharing app when the sheet was opened via ACTION_SEND. */
+    initialSourceAppLabel: String? = null,
     navTargetGeneration: Int = 0
 ) {
     val context = LocalContext.current
@@ -444,6 +446,7 @@ fun TaskScreen(
 
     TaskFormSheet(
         target = sheetTarget,
+        sourceAppLabel = if (sheetTarget is TaskSheetTarget.Add) initialSourceAppLabel else null,
         onDismiss = { sheetTarget = null },
         goalOptions = goalOptions,
         initialGoalId = (sheetTarget as? TaskSheetTarget.Edit)?.task?.goalId,

@@ -568,7 +568,7 @@ private fun ReviewInsightRow(insight: ReviewInsight) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = insight.type.name.replace('_', ' '),
+                    text = "[${insight.severity.name.lowercase().replaceFirstChar { it.uppercase() }}] ${insight.type.name.replace('_', ' ')}",
                     style = MaterialTheme.typography.labelSmall,
                     color = severityColor
                 )

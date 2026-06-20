@@ -1551,7 +1551,7 @@ internal fun focusSessionFinishLabel(currentMinuteOfDay: Int, remainingSeconds: 
         0 -> 12
         else -> h
     }
-    return "Ends %d:%02d %s".format(hour12, minute, suffix)
+    return String.format(Locale.getDefault(), "Ends %d:%02d %s", hour12, minute, suffix)
 }
 
 /** Daily focus-time goal options offered in the modal, in minutes (0 = off). */
@@ -1711,8 +1711,12 @@ internal fun DataExportPanel(
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
+        // PRIV-007 disclosure: list specific sensitive data categories included in the export.
         Text(
-            "Exports the local database, schema, settings, and app preference files as JSON.",
+            "Exports the local database, schema, settings, and app preference files as plaintext JSON. " +
+                "The file includes medication names and dosages, journal entries, habits, tasks, " +
+                "and sleep logs. Once shared externally the file is unencrypted — share only with " +
+                "trusted destinations.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

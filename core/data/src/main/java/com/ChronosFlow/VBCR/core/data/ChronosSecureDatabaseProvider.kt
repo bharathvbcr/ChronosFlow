@@ -117,15 +117,15 @@ class ChronosSecureDatabaseProvider @Inject constructor(
             .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
             .setRandomizedEncryptionRequired(true)
-            // Require the user to have authenticated within the last 5 minutes before
-            // the key can be used to decrypt the database passphrase. Background workers
-            // (HealthConnect sync, widgets, InteropSyncWorker) satisfy this as long as
-            // the user has recently opened the app. Without this flag any code running
-            // as this app's UID — including the exported InteropProvider and Wear handlers
-            // — could decrypt the DB while the device screen is locked, bypassing AppLock.
-            .setUserAuthenticationRequired(true)
-            .setUserAuthenticationValidityDurationSeconds(300)
-            .setInvalidatedByBiometricEnrollment(true)
+            // Do NOT set setUserAuthenticationRequired(true) here.
+            // AES/GCM Keystore encryption already protects the passphrase at rest — the key
+            // is hardware-bound and never leaves the Keystore. Adding a user-auth constraint
+            // breaks every background worker that cold-starts after the screen has been locked
+            // for more than 5 minutes (InteropSyncWorker every 6h, HealthConnectSyncWorker,
+            // WidgetUpdateWorker, DayPlanBackupWorker) because Cipher.init throws
+            // UserNotAuthenticatedException before the work even begins.
+            // Interactive auth is enforced at the UI layer via SensitiveRouteGate, which is
+            // the correct place for that requirement.
             .build()
         generator.init(spec)
         return generator.generateKey()

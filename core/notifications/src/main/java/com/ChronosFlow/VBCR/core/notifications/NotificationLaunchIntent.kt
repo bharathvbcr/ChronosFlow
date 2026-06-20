@@ -47,7 +47,13 @@ data class NotificationLaunch(
     /** Free text to pre-fill an add sheet (e.g. shared from another app). Smart-filled on arrival. */
     val capture: String? = null,
     /** Task titles for a bulk-import review sheet (multi-line share or file share). */
-    val bulkCapture: List<String>? = null
+    val bulkCapture: List<String>? = null,
+    /**
+     * Human-readable label of the app that shared this content via ACTION_SEND or
+     * ACTION_PROCESS_TEXT. Null for notification/deep-link launches that don't originate from a
+     * share. Displayed as "Shared from [App Name]" in the task creation sheet.
+     */
+    val sourceAppLabel: String? = null
 )
 
 internal fun resolveNotificationLaunch(
@@ -157,10 +163,21 @@ fun buildNotificationContentIntent(
     )
 }
 
+/**
+ * Allowlist of section values accepted from notification/deep-link intents.
+ * Any unknown value (e.g. injected via a crafted intent) is silently replaced with "day"
+ * so the app never routes to an unintended destination.
+ */
+private val VALID_SECTIONS = setOf(
+    SECTION_DAY, SECTION_FOCUS, SECTION_TASKS, SECTION_MEDICATION,
+    SECTION_REVIEW, "habits", "goals", "journal", "settings", "insights"
+)
+
 fun parseNotificationLaunch(intent: Intent?): NotificationLaunch? {
     if (intent == null) return null
     if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_PROCESS_TEXT) return null
-    val section = intent.getStringExtra(EXTRA_INITIAL_SECTION) ?: return null
+    val rawSection = intent.getStringExtra(EXTRA_INITIAL_SECTION) ?: return null
+    val section = rawSection.takeIf { it in VALID_SECTIONS } ?: SECTION_DAY
     return NotificationLaunch(
         section = section,
         dayTarget = intent.getStringExtra(EXTRA_DAY_TARGET),
@@ -186,12 +203,16 @@ fun parseSharedTextLaunch(intent: Intent?): NotificationLaunch? {
         Intent.ACTION_SEND -> {
             if (intent.type?.startsWith("text/") != true) return null
             val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+                ?.take(10_000) // Prevent OOM on huge shared text
             val subject = intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString()
+                ?.take(10_000)
             sharedTaskCapture(text, subject)
         }
         Intent.ACTION_PROCESS_TEXT -> {
             val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+                ?.take(10_000) // Prevent OOM on huge shared text
             val readonly = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT_READONLY)?.toString()
+                ?.take(10_000)
             sharedTaskCapture(text, readonly)
         }
         else -> null
