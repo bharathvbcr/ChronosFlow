@@ -110,3 +110,38 @@ when unavailable they surface a friendly reason and the rest of the app is unaff
   completion date on each spawn (intended for the advance-on-complete model; not a fixed-calendar series).
 - Watch complication timeline / cross-device focus mirror / streaming-with-tools are correct by
   construction but only runtime-verifiable on a paired device with Apple Intelligence.
+
+## 8. Android→iOS parity update (2026-06-21) — macOS finalization checklist
+
+A large parity pass brought iOS up to the current Android app. The plan + per-area gap reports are in
+`ios/PARITY_PLAN.md` and `ios/PARITY_REPORTS.json`. **ChronosCore is fully built & tested on Windows
+(680 tests green)**; the app/widget/watch targets were authored correct-by-construction but **could not
+be compiled here (no iOS SDK)**. Do this on macOS + Xcode 27 first:
+
+1. `cd ios && xcodegen generate` (project.yml gained watch-widget targets) → `./build.sh`, fix residual
+   type/signature drift (the only class of issue that can't be caught on Windows).
+
+**Known wiring TODOs the authors flagged (each is a small, local change):**
+- **Register `FocusSessionSnapshot` @Model** in `ChronosStore.schema` (Persistence/ChronosStore) — added
+  in Phase 1 but not yet in the container schema, so split-session restore + widget fetch won't work until it is.
+- **Publish the focus widget snapshot:** call `FocusWidgetBridge.publish(...)` from `FocusTimerModel` on
+  every session change (start/pause/advance/extend/stop; `publish(nil)` on stop) + `WidgetCenter.shared
+  .reloadTimelines(ofKind:"ChronosFocusWidget")`. Until then the home `FocusWidget` shows its idle state
+  (still functional). Mirrors the existing `FocusCommandBridge` app-side TODO.
+- **Activate interop sync:** `ChronosFlowApp`'s `ChronosBackgroundSync` stub handler for
+  `com.chronosflow.interop.sync` should call `InteropSync.handleRefresh()` (matching task id already wired).
+- **Share extension + ChronosCore:** `ChronosShareExtension` is not linked against ChronosCore, so
+  `ShareViewController` mirrors `splitSharedTaskLines` inline. Either add the dependency in `project.yml` or
+  keep the (functionally identical) inline copy.
+- **Name disambiguation to confirm under the compiler:** `import ChronosCore` shadows app types in DayDial
+  (`PlannerMath`/`FreeWindow`/`BlockSpan`/`BlockProvenance`/`BlockFlexibility`/`EnergyIntensity`) and the
+  `JournalMood` (CC struct vs app enum) / `SleepReadiness` (CC vs app enum, bridged by rawValue) pairs —
+  references were qualified, but verify no ambiguity.
+- **Minor/deferred:** `DoseStatus` has no `.paused` (pause currently logged as `.snoozed`); the +15m snooze
+  reschedule belongs in the `UNUserNotificationCenterDelegate`; `aiEnabled` could join the feature-graduation
+  companion wave in `ChronosSettings`; medication SCREEN_TIME insights have no public iOS API (out of scope).
+- **Entitlements** (App Groups / HealthKit / EventKit / Live Activities / Face ID / Background fetch) must be
+  provisioned per §3 — interop, calendar export, sleep import, and widgets fail silently without them.
+- **Foundation Models** call sites (planner JSON parse, journal/insights/text-tools, assistant streaming)
+  fall back to the ChronosCore offline heuristics when the model is unavailable; confirm the streaming
+  `snapshot.content` shape against the shipping SDK (see §4).

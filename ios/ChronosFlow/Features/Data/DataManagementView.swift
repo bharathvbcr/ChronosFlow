@@ -1,9 +1,12 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+import ChronosCore
 
 /// Settings → Data: export the whole store to a JSON file and restore it back. Ports the Android
-/// full-export/restore. Restore is destructive (replaces current data) and is confirmed first.
+/// full-export/restore. Restore offers two modes (BK04): "Replace all data" (destructive, confirmed
+/// first) and "Only fill empty data" (non-destructive merge — never overwrites live entities), the
+/// latter being the safe default for moving data onto a device that already has some.
 struct DataManagementView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +17,14 @@ struct DataManagementView: View {
     @State private var pendingRestore: ChronosBackup?
     @State private var message: String?
     @State private var cloudSync = ChronosStore.cloudSyncEnabled
+    @State private var shareData: Data?
+    @State private var isSharing = false
+
+    /// Restore policy applied by both file restore and stored-snapshot restore (BK04). Bound to the
+    /// picker as a Bool (the ChronosCore `RestoreMode` is value-typed but not `Hashable`, which a
+    /// `Picker` tag requires) and mapped to `restoreMode` for the restore calls.
+    @State private var replaceAllOnRestore = false
+    private var restoreMode: RestoreMode { replaceAllOnRestore ? .destructive : .mergeIfEmpty }
 
     // Scheduled auto-backup state.
     @State private var autoBackupEnabled = false
@@ -30,11 +41,19 @@ struct DataManagementView: View {
                         exporting = true
                     } label: { Label("Export all data (JSON)", systemImage: "square.and.arrow.up") }
 
+                    Picker("Restore mode", selection: $replaceAllOnRestore) {
+                        Text("Only fill empty data").tag(false)
+                        Text("Replace all data").tag(true)
+                    }
+                    .pickerStyle(.menu)
+
                     Button {
                         importing = true
                     } label: { Label("Restore from file…", systemImage: "square.and.arrow.down") }
                 } footer: {
-                    Text("Export creates a single JSON file with every task, habit, goal, block, medication, journal entry, sleep night, and check-in. Restoring replaces all current data.")
+                    Text(restoreMode == .mergeIfEmpty
+                         ? "Export creates a single JSON file with every task, habit, goal, block, medication, journal entry, sleep night, and check-in. \"Only fill empty data\" merges a backup non-destructively — it adds data only to categories that are currently empty and never overwrites what's already here. Ideal for moving data onto a device you've started using."
+                         : "Export creates a single JSON file with every task, habit, goal, block, medication, journal entry, sleep night, and check-in. \"Replace all data\" wipes everything on this device first, then restores the backup.")
                 }
 
                 Section("Automatic backup") {
@@ -93,6 +112,32 @@ struct DataManagementView: View {
                          : "iCloud sync is off — your data stays on this device. Turn it on to mirror across your devices via iCloud (applies after relaunch). Until then, use Export/Restore to move data between devices.")
                 }
 
+                Section("Device transfer") {
+                    Button {
+                        let backup = ChronosBackupService.export(from: context)
+                        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+                        if let data = try? encoder.encode(backup) {
+                            shareData = data
+                            isSharing = true
+                        }
+                    } label: {
+                        Label("Share backup to another device", systemImage: "arrow.right.circle.fill")
+                    }
+
+                    Button {
+                        do {
+                            let url = try ChronosDeviceTransfer.writeSnapshot(from: context)
+                            message = "Transfer snapshot saved to \(url.lastPathComponent). A new install that starts with no data will pick it up automatically on first launch."
+                        } catch {
+                            message = "Couldn't write transfer snapshot: \(error.localizedDescription)"
+                        }
+                    } label: {
+                        Label("Prepare device-transfer snapshot", systemImage: "externaldrive.badge.timemachine")
+                    }
+                } footer: {
+                    Text("Share backup opens the iOS share sheet (AirDrop, Files, Messages). \"Prepare device-transfer snapshot\" writes a portable copy inside the app's shared storage; a fresh install that starts empty restores it non-destructively on first launch (it never overwrites existing data).")
+                }
+
                 if let message {
                     Section { Text(message).font(.chronosCaption).foregroundStyle(.secondary) }
                 }
@@ -119,18 +164,27 @@ struct DataManagementView: View {
                     message = "Import failed: \(e.localizedDescription)"
                 }
             }
-            .alert("Replace all data?", isPresented: Binding(
+            .alert(restoreMode == .destructive ? "Replace all data?" : "Restore backup?",
+                   isPresented: Binding(
                 get: { pendingRestore != nil }, set: { if !$0 { pendingRestore = nil } })) {
                 Button("Cancel", role: .cancel) { pendingRestore = nil }
-                Button("Restore", role: .destructive) {
+                Button(restoreMode == .destructive ? "Replace" : "Restore",
+                       role: restoreMode == .destructive ? .destructive : nil) {
                     if let backup = pendingRestore {
-                        ChronosBackupService.restore(backup, into: context)
-                        message = "Restored \(backup.tasks.count) tasks, \(backup.blocks.count) blocks, \(backup.habits.count) habits."
+                        let summary = ChronosBackupService.restore(backup, into: context, mode: restoreMode)
+                        message = restoreMessage(for: summary)
                     }
                     pendingRestore = nil
                 }
             } message: {
-                Text("This replaces everything currently in ChronosFlow with the contents of the backup file.")
+                Text(restoreMode == .destructive
+                     ? "This replaces everything in ChronosFlow with: \(pendingRestore?.tasks.count ?? 0) tasks, \(pendingRestore?.blocks.count ?? 0) blocks, \(pendingRestore?.habits.count ?? 0) habits, \(pendingRestore?.journal.count ?? 0) journal entries."
+                     : "This adds data only to categories that are currently empty. Categories that already have data on this device are left untouched.")
+            }
+            .sheet(isPresented: $isSharing) {
+                if let data = shareData {
+                    ShareSheet(items: [data as Any])
+                }
             }
         }
     }
@@ -139,6 +193,24 @@ struct DataManagementView: View {
         autoBackups = ChronosAutoBackup.listBackups()
         lastBackupDate = ChronosAutoBackup.lastBackupDate
         lastBackupResult = ChronosAutoBackup.lastResult
+    }
+
+    /// User-facing result string for a restore, tailored to the mode (BK04). Destructive reports the
+    /// full restored set; mergeIfEmpty reports what was filled and what was left untouched.
+    private func restoreMessage(for summary: ChronosBackupService.RestoreSummary) -> String {
+        if restoreMode == .destructive {
+            return "Restored \(summary.insertedRows) records across \(summary.filledTables.count) categories."
+        }
+        if summary.nothingRestored {
+            return summary.skippedNonEmptyTables.isEmpty
+                ? "Nothing to restore — the backup was empty."
+                : "Nothing added — every category on this device already has data, so the backup was left unused."
+        }
+        var msg = "Added \(summary.insertedRows) records to \(summary.filledTables.count) empty categories."
+        if !summary.skippedNonEmptyTables.isEmpty {
+            msg += " Left \(summary.skippedNonEmptyTables.count) category(ies) untouched (already had data)."
+        }
+        return msg
     }
 
     /// Decode a stored auto-backup and route it through the same confirm-then-restore alert as file restore.
@@ -163,4 +235,12 @@ struct DataManagementView: View {
             message = "Couldn't read backup: \(error.localizedDescription)"
         }
     }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }

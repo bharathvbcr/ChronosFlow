@@ -37,7 +37,8 @@ struct HabitsProvider: TimelineProvider {
                 if l != r { return !l }
                 return lhs.streakCount > rhs.streakCount
             }
-        let rows = habits.prefix(4).map {
+        // Carry up to the largest family's limit; the view trims per its actual family.
+        let rows = habits.prefix(8).map {
             HabitsEntry.Row(id: $0.id, title: $0.title, streak: $0.streakCount, done: $0.isCompleted(on: .now))
         }
         let done = habits.filter { $0.isCompleted(on: .now) }.count
@@ -47,38 +48,63 @@ struct HabitsProvider: TimelineProvider {
 
 struct HabitsWidgetView: View {
     var entry: HabitsEntry
+    @Environment(\.widgetFamily) private var family
+
+    /// Row limit per family — the iOS analogue of Android's COMPACT (4) / TALL (8) responsive limits.
+    private var rowLimit: Int {
+        switch family {
+        case .systemSmall:  return 3
+        case .systemMedium: return 4
+        default:            return 8   // systemLarge
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: "heart.fill").foregroundStyle(.pink)
-                Text("\(entry.doneCount)/\(entry.total) today")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if entry.rows.isEmpty {
-                Text("No habits yet").font(.caption).foregroundStyle(.secondary)
-            } else {
-                ForEach(entry.rows) { row in
-                    HStack(spacing: 6) {
-                        // Tap to toggle today's completion in place (Android HabitMark).
-                        Button(intent: ToggleHabitIntent(habitID: row.id)) {
-                            Image(systemName: row.done ? "checkmark.circle.fill" : "circle")
-                                .font(.caption2)
-                                .foregroundStyle(row.done ? .green : .secondary)
-                        }
-                        .buttonStyle(.plain)
-                        Text(row.title).font(.caption).lineLimit(1)
-                        Spacer(minLength: 2)
-                        if row.streak > 0 {
-                            Text("\(row.streak)🔥").font(.caption2).foregroundStyle(.secondary)
+        // Wrap the entire card in a Link so tapping anywhere opens the Habits section in the app.
+        Link(destination: URL(string: "chronosflow://habits")!) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "heart.fill").foregroundStyle(.pink)
+                    Text("\(entry.doneCount)/\(entry.total) today")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if entry.rows.isEmpty {
+                    Text("No habits yet").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(entry.rows.prefix(rowLimit)) { row in
+                        HStack(spacing: 6) {
+                            // Tap to toggle today's completion in place (Android HabitMark).
+                            Button(intent: ToggleHabitIntent(habitID: row.id)) {
+                                Image(systemName: row.done ? "checkmark.circle.fill" : "circle")
+                                    .font(.caption2)
+                                    .foregroundStyle(row.done ? .green : .secondary)
+                            }
+                            .buttonStyle(.plain)
+                            Text(row.title).font(.caption).lineLimit(1)
+                            Spacer(minLength: 2)
+                            if row.streak > 0 {
+                                Text("\(row.streak)🔥").font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .containerBackground(.fill.tertiary, for: .widget)
     }
+}
+
+#Preview(as: .systemMedium) {
+    HabitsWidget()
+} timeline: {
+    HabitsEntry(date: .now, rows: [
+        .init(id: "1", title: "Read", streak: 12, done: true),
+        .init(id: "2", title: "Workout", streak: 4, done: false),
+        .init(id: "3", title: "Meditate", streak: 7, done: false),
+    ], doneCount: 1, total: 3)
+    HabitsEntry(date: .now, rows: [], doneCount: 0, total: 0)
 }
 
 struct HabitsWidget: Widget {
@@ -88,6 +114,6 @@ struct HabitsWidget: Widget {
         }
         .configurationDisplayName("Habits")
         .description("Today's habits and streaks at a glance.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

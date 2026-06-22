@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import ChronosCore
 
 /// The Plan tab: the Chronos Dial over the day's blocks, plus a chronological list, conflict
 /// banner, free-window chips, and the AI day-planner entry point. Ports `feature/daydial`.
@@ -12,6 +13,11 @@ struct DayDialScreen: View {
     /// The block whose drag handles/live preview the dial shows. Selected by starting a drag on it;
     /// a plain tap still opens the editor (see `onTapBlock`).
     @State private var selectedBlockID: String?
+    /// Value-typed undo/redo stack mirroring Android's PlannerCommandHistory. Held in @State so each
+    /// mutation yields a new value and the toolbar re-derives canUndo/canRedo. Cleared on date change.
+    @State private var history = PlannerCommandHistory()
+    /// Transient toast for duplicate success/failure (mirrors Android's PlannerOperationResult toast).
+    @State private var toast: String?
     private let calendarProvider = CalendarOverlayProvider()
 
     @Query private var allBlocks: [TimeBlock]
@@ -23,6 +29,7 @@ struct DayDialScreen: View {
         case ai
         case gapFill
         case resolve
+        case repairAI
         var id: String {
             switch self {
             case .edit(let b): "edit-\(b.id)"
@@ -30,6 +37,7 @@ struct DayDialScreen: View {
             case .ai: "ai"
             case .gapFill: "gapfill"
             case .resolve: "resolve"
+            case .repairAI: "repairAI"
             }
         }
     }
@@ -40,8 +48,10 @@ struct DayDialScreen: View {
             .sorted { $0.startMinuteOfDay < $1.startMinuteOfDay }
     }
 
-    private var conflicts: [ScheduleConflict] { PlannerMath.conflicts(in: dayBlocks) }
-    private var freeWindows: [FreeWindow] { PlannerMath.freeWindows(in: dayBlocks) }
+    // App-side `PlannerMath`/`FreeWindow` are qualified because importing ChronosCore brings the
+    // same type names into scope; the bare names would be ambiguous.
+    private var conflicts: [ScheduleConflict] { ChronosFlow.PlannerMath.conflicts(in: dayBlocks) }
+    private var freeWindows: [ChronosFlow.FreeWindow] { ChronosFlow.PlannerMath.freeWindows(in: dayBlocks) }
 
     /// Every block id involved in any conflict — drawn as a dashed error overlay on the dial.
     private var conflictBlockIDs: Set<String> {
@@ -69,10 +79,7 @@ struct DayDialScreen: View {
                             onSelectBlock: { selectedBlockID = $0 },
                             onCreate: { activeSheet = .create(minute: $0) },
                             onAdjustBlock: { block, newStart, newDuration in
-                                guard !block.isLocked, block.flexibility != .fixed else { return }
-                                block.updateStart(newStart)
-                                block.updateDuration(newDuration)
-                                try? context.save()
+                                adjustBlock(block, newStart: newStart, newDuration: newDuration)
                             }
                         )
                         .frame(maxWidth: 380)
@@ -96,6 +103,12 @@ struct DayDialScreen: View {
                         .labelsHidden()
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button { undo() } label: { Image(systemName: "arrow.uturn.backward") }
+                        .disabled(!history.canUndo)
+                        .accessibilityLabel("Undo")
+                    Button { redo() } label: { Image(systemName: "arrow.uturn.forward") }
+                        .disabled(!history.canRedo)
+                        .accessibilityLabel("Redo")
                     Button {
                         showCalendar.toggle()
                         if showCalendar { Task { await loadOverlay() } }
@@ -106,6 +119,13 @@ struct DayDialScreen: View {
                     Menu {
                         Button { activeSheet = .ai } label: { Label("AI day plan", systemImage: "sparkles") }
                         Button { activeSheet = .gapFill } label: { Label("Fill free time", systemImage: "rectangle.compress.vertical") }
+                        if !conflicts.isEmpty {
+                            Divider()
+                            // Deterministic, undoable conflict repair (Android "Fix schedule").
+                            Button { activeSheet = .resolve } label: { Label("Fix schedule", systemImage: "wrench.and.screwdriver") }
+                            // Hybrid: auto-resolve, then AI text for whatever can't be moved (Android "Repair with AI").
+                            Button { activeSheet = .repairAI } label: { Label("Repair with AI", systemImage: "sparkles") }
+                        }
                     } label: {
                         Image(systemName: "wand.and.stars")
                     }
@@ -115,6 +135,8 @@ struct DayDialScreen: View {
                 }
             }
             .task(id: selectedDate) { if showCalendar { await loadOverlay() } }
+            // A new day's edits are a fresh audit trail — drop the prior day's undo/redo stack.
+            .onChange(of: selectedDate) { _, _ in history.clear() }
             .sheet(item: $activeSheet) { sheet in
                 switch sheet {
                 case .edit(let block):
@@ -126,9 +148,30 @@ struct DayDialScreen: View {
                 case .gapFill:
                     GapFillSheet(date: selectedDate, existingBlocks: dayBlocks)
                 case .resolve:
-                    ConflictResolveSheet(blocks: dayBlocks)
+                    // Deterministic Fix-schedule: apply the moves and record one undoable batch.
+                    ConflictResolveSheet(blocks: dayBlocks, mode: .deterministic) { applied in
+                        recordResolveBatch(applied)
+                    }
+                case .repairAI:
+                    // Hybrid Repair-with-AI: auto-resolve first, then hand the leftovers to the planner.
+                    ConflictResolveSheet(blocks: dayBlocks, mode: .repairWithAI) { applied in
+                        recordResolveBatch(applied)
+                    }
                 }
             }
+            .overlay(alignment: .bottom) { toastView }
+        }
+    }
+
+    @ViewBuilder private var toastView: some View {
+        if let toast {
+            Text(toast)
+                .font(.chronosLabel)
+                .padding(.horizontal, ChronosSpacing.standard)
+                .padding(.vertical, ChronosSpacing.small)
+                .glassEffect(.regular, in: Capsule())
+                .padding(.bottom, ChronosSpacing.large)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
@@ -184,9 +227,208 @@ struct DayDialScreen: View {
             ForEach(dayBlocks) { block in
                 Button { activeSheet = .edit(block) } label: { BlockRow(block: block) }
                     .buttonStyle(.plain)
+                    // Smart duplicate (free-gap heuristics) + delete, both undoable. Mirrors the
+                    // Android swipe/long-press actions on the timeline row.
+                    .contextMenu {
+                        Button { duplicate(block) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                        Button(role: .destructive) { deleteBlock(block) } label: { Label("Delete", systemImage: "trash") }
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                        Button { duplicate(block) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                            .tint(ChronosColors.brandSecondary)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) { deleteBlock(block) } label: { Label("Delete", systemImage: "trash") }
+                    }
             }
         }
         .padding(.horizontal, ChronosSpacing.standard)
+    }
+
+    // MARK: - Command-history-backed edits (mirror DayDialBlockDelegate)
+
+    /// Move/resize commit routed through the undo stack: skip immovable blocks, push the matching
+    /// command (move and/or resize carry the originals so they invert losslessly), then persist.
+    private func adjustBlock(_ block: TimeBlock, newStart: Int, newDuration: Int) {
+        guard !block.isLocked, block.flexibility != .fixed else { return }
+        let originalStart = block.startMinuteOfDay
+        let originalDuration = block.durationMinutes
+        guard newStart != originalStart || newDuration != originalDuration else { return }
+
+        if newStart != originalStart {
+            history.push(.move(id: UUID().uuidString, blockId: block.id,
+                               targetStartMinute: newStart, originalStartMinute: originalStart))
+        }
+        if newDuration != originalDuration {
+            history.push(.resize(id: UUID().uuidString, blockId: block.id,
+                                 targetDurationMinutes: newDuration, originalDurationMinutes: originalDuration))
+        }
+        block.updateStart(newStart)
+        block.updateDuration(newDuration)
+        try? context.save()
+    }
+
+    /// Smart duplicate: pick a free slot via the ported heuristic, materialize a standalone copy,
+    /// insert it, and record a CreateTimeBlockCommand so it undoes cleanly. Surfaces a toast on the
+    /// no-room case (Android's PlannerOperationResult).
+    private func duplicate(_ block: TimeBlock) {
+        let planBlocks = dayBlocks.map(plannerBlock(from:))
+        guard let source = planBlocks.first(where: { $0.id == block.id }),
+              let placement = nextDuplicatePlacement(dayBlocks: planBlocks, source: source) else {
+            showToast("No free time to place a copy")
+            return
+        }
+        let copy = makeDuplicate(of: source, placement: placement, newId: UUID().uuidString)
+        let inserted = timeBlock(from: copy, on: block.date)
+        context.insert(inserted)
+        history.push(.create(id: UUID().uuidString, block: copy))
+        try? context.save()
+        showToast("Duplicated to \(copy.startMinuteOfDay.clockTime)")
+    }
+
+    /// Delete routed through the undo stack: snapshot the block first so undo re-creates it exactly.
+    private func deleteBlock(_ block: TimeBlock) {
+        let snapshot = plannerBlock(from: block)
+        if block.id == selectedBlockID { selectedBlockID = nil }
+        history.push(.delete(id: UUID().uuidString, blockSnapshot: snapshot))
+        context.delete(block)
+        try? context.save()
+    }
+
+    /// Record a deterministic conflict-repair as one undoable batch (ResolveConflictsCommand).
+    /// `applied` is the per-block (original → new) start change the sheet committed.
+    private func recordResolveBatch(_ applied: [BlockStartChange]) {
+        guard !applied.isEmpty else { return }
+        history.push(.resolveConflicts(id: UUID().uuidString, changes: applied))
+    }
+
+    private func undo() {
+        guard let command = history.popUndo() else { return }
+        replay(command.inverse(on: currentPlannerBlocks()))
+    }
+
+    private func redo() {
+        guard let command = history.popRedo() else { return }
+        replay(command.apply(to: currentPlannerBlocks()))
+    }
+
+    /// The day's blocks as portable PlannerBlocks (the value type commands reduce over).
+    private func currentPlannerBlocks() -> [PlannerBlock] { dayBlocks.map(plannerBlock(from:)) }
+
+    /// Reconcile SwiftData with the command's resulting `[PlannerBlock]`: delete dropped rows,
+    /// insert new ones, and mirror start/duration onto survivors. One save commits the whole step.
+    private func replay(_ result: [PlannerBlock]) {
+        let resultByID = Dictionary(uniqueKeysWithValues: result.map { ($0.id, $0) })
+        let existingByID = Dictionary(uniqueKeysWithValues: dayBlocks.map { ($0.id, $0) })
+
+        // Rows the command removed (e.g. undo of a create, or apply of a delete).
+        for block in dayBlocks where resultByID[block.id] == nil {
+            if block.id == selectedBlockID { selectedBlockID = nil }
+            context.delete(block)
+        }
+        // Rows the command re-introduced (e.g. undo of a delete) or repositioned.
+        for pb in result {
+            if let existing = existingByID[pb.id] {
+                if existing.startMinuteOfDay != pb.startMinuteOfDay { existing.updateStart(pb.startMinuteOfDay) }
+                if existing.durationMinutes != pb.durationMinutes { existing.updateDuration(pb.durationMinutes) }
+            } else {
+                context.insert(timeBlock(from: pb, on: selectedDate))
+            }
+        }
+        try? context.save()
+    }
+
+    private func showToast(_ message: String) {
+        withAnimation(.smooth) { toast = message }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            withAnimation(.smooth) { toast = nil }
+        }
+    }
+
+    // MARK: - TimeBlock <-> PlannerBlock mapping
+
+    /// Project a SwiftData `TimeBlock` onto the portable `PlannerBlock` the planner commands reduce
+    /// over (provenance/flexibility/energy translate by raw value across the two module enums).
+    private func plannerBlock(from block: TimeBlock) -> PlannerBlock {
+        PlannerBlock(
+            id: block.id,
+            title: block.title,
+            category: block.category,
+            startMinuteOfDay: block.startMinuteOfDay,
+            durationMinutes: block.durationMinutes,
+            timezone: block.timezoneIdentifier,
+            provenance: coreProvenance(block.provenance),
+            flexibility: ChronosCore.BlockFlexibility(rawValue: block.flexibility.rawValue) ?? .movable,
+            energyLevel: ChronosCore.EnergyIntensity(rawValue: block.energyLevel.rawValue) ?? .moderate,
+            source: block.source,
+            taskId: block.taskID,
+            calendarEventId: block.calendarEventID,
+            medicationPlanId: block.medicationPlanID,
+            habitId: block.habitID,
+            goalId: block.goalID,
+            routineId: block.routineID,
+            recurrenceRuleId: block.recurrenceRuleID,
+            isLocked: block.isLocked,
+            isProtected: block.isProtected,
+            actualStartMinuteOfDay: block.actualStartMinuteOfDay,
+            actualEndMinuteOfDay: block.actualEndMinuteOfDay
+        )
+    }
+
+    /// Materialize a `PlannerBlock` (e.g. a duplicate, or an undone delete) into a SwiftData row.
+    private func timeBlock(from pb: PlannerBlock, on date: Date) -> TimeBlock {
+        TimeBlock(
+            id: pb.id,
+            date: date,
+            title: pb.title,
+            category: pb.category,
+            startMinuteOfDay: min(max(pb.startMinuteOfDay, 0), 1439),
+            durationMinutes: min(max(pb.durationMinutes, 1), 1440),
+            timezoneIdentifier: pb.timezone,
+            provenance: appProvenance(pb.provenance),
+            // App-side enums qualified — ChronosCore exports same-named enums, so bare names are ambiguous.
+            flexibility: ChronosFlow.BlockFlexibility(rawValue: pb.flexibility.rawValue) ?? .movable,
+            energyLevel: ChronosFlow.EnergyIntensity(rawValue: pb.energyLevel.rawValue) ?? .moderate,
+            source: pb.source,
+            taskID: pb.taskId,
+            calendarEventID: pb.calendarEventId,
+            medicationPlanID: pb.medicationPlanId,
+            habitID: pb.habitId,
+            goalID: pb.goalId,
+            routineID: pb.routineId,
+            recurrenceRuleID: pb.recurrenceRuleId,
+            isLocked: pb.isLocked,
+            isProtected: pb.isProtected,
+            actualStartMinuteOfDay: pb.actualStartMinuteOfDay,
+            actualEndMinuteOfDay: pb.actualEndMinuteOfDay
+        )
+    }
+
+    /// App `BlockProvenance` → ChronosCore `BlockProvenance`. The core enum has no `.routine`
+    /// case, so routine blocks fall back to USER; everything else maps one-for-one.
+    private func coreProvenance(_ p: ChronosFlow.BlockProvenance) -> ChronosCore.BlockProvenance {
+        switch p {
+        case .manual: return .user
+        case .ai: return .aiSuggested
+        case .calendar: return .calendar
+        case .medication: return .medication
+        case .habit: return .habit
+        case .task: return .task
+        case .routine: return .user
+        }
+    }
+
+    /// ChronosCore `BlockProvenance` → app `BlockProvenance` (USER lands back on `.manual`).
+    private func appProvenance(_ p: ChronosCore.BlockProvenance) -> ChronosFlow.BlockProvenance {
+        switch p {
+        case .user: return .manual
+        case .aiSuggested: return .ai
+        case .calendar: return .calendar
+        case .medication: return .medication
+        case .habit: return .habit
+        case .task: return .task
+        }
     }
 }
 

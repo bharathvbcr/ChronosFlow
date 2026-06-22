@@ -40,9 +40,19 @@ struct TaskEditorSheet: View {
     /// A detected one-tap action (email / phone / url) kept on the draft after applying.
     @State private var actionHint: ActionHint?
 
-    init(task: TaskItem?) {
+    /// Source-app provenance label ("Shared from …") when this draft was pre-filled from another
+    /// app's share. Read once from the App Group for a fresh single-share pre-fill; nil otherwise.
+    private let sourceAppLabel: String?
+
+    init(task: TaskItem?, initialTitle: String? = nil) {
         self.existing = task
-        _title = State(initialValue: task?.title ?? "")
+        // Surface the share provenance only for a fresh share-driven new-task pre-fill.
+        if task == nil, initialTitle != nil {
+            self.sourceAppLabel = TaskEditorSheet.pendingShareSourceApp()
+        } else {
+            self.sourceAppLabel = nil
+        }
+        _title = State(initialValue: initialTitle ?? task?.title ?? "")
         _detail = State(initialValue: task?.detail ?? "")
         _priority = State(initialValue: task?.priority ?? 0)
         _hasDueDate = State(initialValue: task?.dueDate != nil)
@@ -60,6 +70,18 @@ struct TaskEditorSheet: View {
                 Section {
                     TextField("Task title", text: $title)
                         .onChange(of: title) { _, newValue in detectSmartFill(newValue) }
+                        // Pressing Return/Done submits if the form is valid (Android keyboardActions
+                        // onDone). A quick-capture win so a one-field task needs no toolbar tap.
+                        .onSubmit {
+                            if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { save() }
+                        }
+                    if let source = sourceAppLabel {
+                        // "Shared from [App]" provenance chip (Android TaskFormSheet ~1128), shown when
+                        // the draft was pre-filled from another app's share.
+                        Label("Shared from \(source)", systemImage: "square.and.arrow.up")
+                            .font(.chronosCaption)
+                            .foregroundStyle(.secondary)
+                    }
                     TextField("Notes", text: $detail, axis: .vertical)
                     if textTools.isAvailable && !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Menu {
@@ -267,6 +289,19 @@ struct TaskEditorSheet: View {
         guard repeats else { return nil }
         return RecurrenceSpec(frequency: frequency, interval: interval,
                               weekdays: frequency == .weekly ? weekdays : [])
+    }
+
+    /// Reads (and consumes) the "Shared from [App]" provenance label the Share Extension wrote into
+    /// the App Group alongside `share.pendingText`, recent-only. Consuming it here keeps a stale
+    /// label from leaking onto a later, unrelated new-task draft.
+    private static func pendingShareSourceApp() -> String? {
+        let defaults = UserDefaults(suiteName: "group.com.chronosflow.shared")
+        guard let source = defaults?.string(forKey: "share.sourceApp"),
+              !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let ts = defaults?.double(forKey: "share.pendingTimestamp"),
+              Date().timeIntervalSince1970 - ts < 30 else { return nil }
+        defaults?.removeObject(forKey: "share.sourceApp")
+        return source
     }
 
     // MARK: - Smart fill

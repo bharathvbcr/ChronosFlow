@@ -32,6 +32,11 @@
     <string>ChronosFlow overlays your calendar events on the Chronos Dial.</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>ChronosFlow overlays your calendar events on the Chronos Dial so you can plan around fixed commitments.</string>
+    <!-- Journal photo attachments (PhotosPicker + in-app camera). -->
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>ChronosFlow lets you attach photos to journal entries to capture your day.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>ChronosFlow lets you take a photo directly in the journal composer.</string>
     <!-- Voice dictation for journal entries (Speech + microphone). -->
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>ChronosFlow transcribes your speech so you can dictate journal entries.</string>

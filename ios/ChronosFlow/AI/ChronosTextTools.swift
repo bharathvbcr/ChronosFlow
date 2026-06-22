@@ -9,7 +9,11 @@ import FoundationModels
 // condensed without leaving the device. Used from the task editor's notes field.
 
 enum ChronosTextOp: String, CaseIterable, Identifiable {
-    case proofread, shorten, elaborate, friendly, professional, summarize
+    // Mirrors the Android ML Kit text-tools enums (TextToolsGenAi.kt): proofreading + the full
+    // RewriteStyle set (REPHRASE→shorten/elaborate/friendly/professional + EMOJIFY) + the two
+    // SummaryStyle variants (ONE_BULLET, THREE_BULLETS). Foundation Models has no Summarizer/
+    // Rewriter option enums, so each variant is differentiated by its own instruction string.
+    case proofread, shorten, elaborate, friendly, professional, emojify, summarizeOneBullet, summarizeThreeBullets
     var id: String { rawValue }
 
     var label: String {
@@ -19,7 +23,9 @@ enum ChronosTextOp: String, CaseIterable, Identifiable {
         case .elaborate: "Elaborate"
         case .friendly: "Friendly"
         case .professional: "Professional"
-        case .summarize: "Summarize"
+        case .emojify: "Emojify"
+        case .summarizeOneBullet: "Summarize"
+        case .summarizeThreeBullets: "Key points"
         }
     }
 
@@ -30,11 +36,15 @@ enum ChronosTextOp: String, CaseIterable, Identifiable {
         case .elaborate: "text.append"
         case .friendly: "face.smiling"
         case .professional: "briefcase"
-        case .summarize: "list.bullet.rectangle"
+        case .emojify: "face.smiling.inverse"
+        case .summarizeOneBullet: "list.bullet.rectangle"
+        case .summarizeThreeBullets: "list.bullet"
         }
     }
 
-    /// The instruction handed to the model. Mirrors the Android rewrite styles + proofreading.
+    /// The instruction handed to the model. Mirrors the Android rewrite styles + proofreading +
+    /// the one/three-bullet summary variants. Foundation Models learns multi-bullet output from the
+    /// instruction text in place of ML Kit's structured SummaryStyle/RewriteStyle option enums.
     fileprivate var instruction: String {
         switch self {
         case .proofread:
@@ -47,8 +57,12 @@ enum ChronosTextOp: String, CaseIterable, Identifiable {
             "Rewrite in a warm, friendly tone. Return only the rewritten text."
         case .professional:
             "Rewrite in a clear, professional tone. Return only the rewritten text."
-        case .summarize:
+        case .emojify:
+            "Add a few fitting emojis to the text to make it more expressive, while preserving the wording and meaning. Return only the emojified text."
+        case .summarizeOneBullet:
             "Summarize into one short line. Return only the summary."
+        case .summarizeThreeBullets:
+            "Summarize into exactly three short bullet points, one per line, each starting with \"• \". Return only the bullet points."
         }
     }
 }
@@ -77,9 +91,11 @@ final class ChronosTextTools {
     var isAvailable: Bool { unavailableReason == nil }
 
     /// Run a text op on `input`, returning the transformed text (or `nil` on failure/empty).
+    /// Honors `ChronosSettings.privacyMode` (N01): when DISABLED, no on-device generation runs.
     func run(_ op: ChronosTextOp, on input: String) async -> String? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isAvailable, !trimmed.isEmpty, !isWorking else { return nil }
+        guard ChronosSettings.shared.privacyMode.allowsOnDeviceGeneration,
+              isAvailable, !trimmed.isEmpty, !isWorking else { return nil }
         // Replay an identical transform without a cold inference.
         if let cached = cache.value(op: op.rawValue, input: trimmed) { return cached }
         isWorking = true

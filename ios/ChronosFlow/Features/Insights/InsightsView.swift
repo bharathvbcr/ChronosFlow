@@ -2,11 +2,19 @@ import SwiftUI
 import SwiftData
 import Charts
 import ChronosCore
+import FoundationModels
 
 /// The Review tab (== Insights page): period-switched execution rollups, per-category breakdown,
-/// a severity-ranked findings list, plus habit / sleep / mood trends. Ports the unified
-/// Review/Insights surface (the Insights tab IS the Review page; the detailed planned/actual sheet
-/// is reachable from here). Period rollups + findings are computed by ChronosCore (unit-tested).
+/// a severity-ranked findings list + AI recommendations, screen-time, plus habit / sleep / mood
+/// trends. Ports the unified Review/Insights surface (the Insights tab IS the Review page; the
+/// detailed planned/actual sheet is reachable from here).
+///
+/// Section model mirrors Android's `InsightsSection` (EXECUTION / CATEGORIES / INSIGHTS /
+/// SCREEN_TIME / TRENDS) rendered top-to-bottom; quick-filter pills toggle them via
+/// `insightsSectionVisible` (empty selection = show everything). Cards collapse via
+/// `ChronosSettings.insightsCardCollapsed`. Recommendations come from
+/// `InsightsRecommendationsPlanner` (deterministic local heuristics, optionally enriched by
+/// Foundation Models). Period rollups + findings are computed by ChronosCore (unit-tested).
 struct InsightsView: View {
     @Query private var blocks: [TimeBlock]
     @Query private var habits: [Habit]
@@ -16,8 +24,22 @@ struct InsightsView: View {
     @State private var showingDayReview = false
     @State private var period: InsightsPeriod = .day
 
+    // MARK: Section filter state — empty set means "no filter" (all sections show), matching
+    // Android's `rememberSaveable Set<String>`. Stored as raw section names so it's byte-compatible.
+    @State private var selectedSections: Set<String> = []
+
+    // MARK: AI recommendations
+    @State private var recommendations: [InsightRecommendation] = []
+    @State private var isRefreshingRecommendations = false
+
+    private var settings: ChronosSettings { .shared }
+
     private var todayBlocks: [TimeBlock] {
         blocks.filter { Calendar.current.isDateInToday($0.date) }
+    }
+
+    private func sectionVisible(_ section: InsightsSection) -> Bool {
+        insightsSectionVisible(section: section, selected: selectedSections)
     }
 
     // MARK: Period rollup (ChronosCore.summarize)
@@ -77,16 +99,67 @@ struct InsightsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
                     periodPicker
-                    periodSummaryCard
-                    categoryBreakdownCard
-                    findingsCard
-                    balanceCard
-                    if let best = bestWindow { bestWindowCard(best) }
-                    if !medications.isEmpty { adherenceCard }
-                    if let corr = sleepMoodCorrelation { correlationCard(corr) }
-                    habitChart
-                    sleepChart
-                    moodChart
+                    sectionFilterPills
+
+                    // MARK: EXECUTION — rollup metrics + balance
+                    if sectionVisible(.execution) {
+                        periodSummaryCard
+                        collapsibleCard(key: "balance", title: "Day balance") {
+                            balanceCard
+                        }
+                    }
+
+                    // MARK: CATEGORIES — per-category breakdown
+                    if sectionVisible(.categories) {
+                        categoryBreakdownCard
+                    }
+
+                    // MARK: INSIGHTS — findings + AI recommendations
+                    if sectionVisible(.insights) {
+                        collapsibleCard(key: "findings", title: "Review findings") {
+                            findingsCard
+                        }
+                        recommendationsCard
+                    }
+
+                    // MARK: SCREEN_TIME
+                    if sectionVisible(.screenTime) {
+                        screenTimeCard
+                    }
+
+                    // MARK: TRENDS — habit / sleep / mood charts + derived signals
+                    if sectionVisible(.trends) {
+                        if !habits.isEmpty {
+                            collapsibleCard(key: "habitChart", title: "Habit streaks") {
+                                habitChart
+                            }
+                        }
+                        if nights.count >= 2 {
+                            collapsibleCard(key: "sleepChart", title: "Sleep (last 7 nights)") {
+                                sleepChart
+                            }
+                        }
+                        if let best = bestWindow {
+                            collapsibleCard(key: "bestWindow", title: "Best deep-work window") {
+                                bestWindowCard(best)
+                            }
+                        }
+                        if checkIns.count >= 2 {
+                            collapsibleCard(key: "moodChart", title: "Mood & energy") {
+                                moodChart
+                            }
+                        }
+                        if let corr = sleepMoodCorrelation {
+                            collapsibleCard(key: "correlation", title: "Sleep shapes your mood") {
+                                correlationCard(corr)
+                            }
+                        }
+                        if !medications.isEmpty, adherenceRate > 0 {
+                            collapsibleCard(key: "adherence", title: "Medication adherence") {
+                                adherenceCard
+                            }
+                        }
+                    }
                 }
                 .padding(ChronosSpacing.standard)
             }
@@ -101,7 +174,78 @@ struct InsightsView: View {
             .sheet(isPresented: $showingDayReview) {
                 DayReviewSheet(blocks: todayBlocks)
             }
+            .task { refreshRecommendationsBaseline() }
+            .onChange(of: period) { _, _ in refreshRecommendationsBaseline() }
         }
+    }
+
+    // MARK: Section filter pills
+
+    private var sectionFilterPills: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: ChronosSpacing.compact) {
+                ForEach(InsightsSection.allCases) { section in
+                    let selected = selectedSections.contains(section.rawValue)
+                    Button {
+                        if selected {
+                            selectedSections.remove(section.rawValue)
+                        } else {
+                            selectedSections.insert(section.rawValue)
+                        }
+                    } label: {
+                        Text(section.label)
+                            .font(.chronosCaption)
+                            .padding(.horizontal, ChronosSpacing.compact)
+                            .padding(.vertical, 6)
+                            .background(
+                                selected
+                                    ? ChronosColors.brandPrimary.opacity(0.18)
+                                    : Color.secondary.opacity(0.10),
+                                in: Capsule()
+                            )
+                            .foregroundStyle(
+                                selected ? ChronosColors.brandPrimary : .secondary
+                            )
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(
+                                        selected ? ChronosColors.brandPrimary.opacity(0.5) : Color.clear,
+                                        lineWidth: 1
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .animation(.easeInOut(duration: 0.15), value: selected)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    // MARK: CollapsibleInsightsCard helper
+
+    /// Wraps any card view in a DisclosureGroup whose collapsed state is persisted via
+    /// `ChronosSettings.insightsCardCollapsed` (Android parity: `insights.collapsed.*` keys).
+    @ViewBuilder
+    private func collapsibleCard<Content: View>(
+        key: String,
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        DisclosureGroup(
+            isExpanded: Binding(
+                get: { !settings.insightsCardCollapsed(key) },
+                set: { settings.setInsightsCardCollapsed(key, !$0) }
+            )
+        ) {
+            content()
+        } label: {
+            Text(title)
+                .font(.chronosLabel)
+                .foregroundStyle(.secondary)
+        }
+        .tint(ChronosColors.brandPrimary)
+        .padding(.vertical, 2)
     }
 
     // MARK: Period switcher
@@ -251,7 +395,152 @@ struct InsightsView: View {
         }
     }
 
-    // MARK: Adherence rate (shared with findings)
+    // MARK: AI recommendations (ChronosCore.InsightsRecommendationsPlanner + Foundation Models)
+
+    private var recommendationsCard: some View {
+        ChronosGlassCard(tint: ChronosColors.brandPrimary) {
+            VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+                HStack {
+                    Label("AI recommendations", systemImage: "sparkles").font(.chronosHeadline)
+                    Spacer()
+                    Button {
+                        Task { await refreshRecommendationsWithAI() }
+                    } label: {
+                        if isRefreshingRecommendations {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Refresh", systemImage: "arrow.clockwise").font(.chronosCaption)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isRefreshingRecommendations)
+                }
+                if recommendations.isEmpty {
+                    Text("Refresh to generate schedule recommendations from your review data.")
+                        .font(.chronosBody).foregroundStyle(.secondary)
+                } else {
+                    ForEach(recommendations) { rec in
+                        HStack(alignment: .top, spacing: ChronosSpacing.compact) {
+                            Image(systemName: "lightbulb.fill")
+                                .foregroundStyle(ChronosColors.brandSecondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(rec.text).font(.chronosLabel)
+                                Text(sourceLabel(rec.source)).font(.chronosCaption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// User-facing label for a recommendation's GenAI source. Mirrors Android's
+    /// `GenAiAssistCopy.assistSourceLabel`.
+    private func sourceLabel(_ source: AssistGenAiSource) -> String {
+        switch source {
+        case .local: return "On-device heuristics"
+        case .geminiNano: return "On-device AI"
+        case .cloudGemini: return "Cloud AI"
+        }
+    }
+
+    /// Recent companion trends fed into the recommendation planner so suggestions reflect
+    /// multi-day patterns. Derived from the local queries; oldest-first to match the core's math.
+    private var trendSections: CompanionTrendSections {
+        CompanionTrendSections(
+            peakEnergyHour: peakEnergyHour,
+            habitCompletion: habitDailyCompletions,
+            medicationAdherence: medicationDailyAdherence)
+    }
+
+    /// Hour of day (0…23) with the highest average energy across recent check-ins, when known.
+    private var peakEnergyHour: Int? {
+        var totals: [Int: (sum: Int, count: Int)] = [:]
+        for c in checkIns {
+            let hour = Calendar.current.component(.hour, from: c.recordedAt)
+            let e = totals[hour] ?? (0, 0)
+            totals[hour] = (e.sum + c.energyScore, e.count + 1)
+        }
+        return totals.max { a, b in
+            Double(a.value.sum) / Double(a.value.count) < Double(b.value.sum) / Double(b.value.count)
+        }?.key
+    }
+
+    /// Per-day habit completion tallies over a trailing 14-day window, oldest-first.
+    private var habitDailyCompletions: [HabitDailyCompletion] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        return (0..<14).reversed().compactMap { offset -> HabitDailyCompletion? in
+            guard let day = cal.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            let completed = habits.filter { $0.isCompleted(on: day) }.count
+            return HabitDailyCompletion(completedCount: completed,
+                                        missedCount: max(habits.count - completed, 0))
+        }
+    }
+
+    /// Per-day medication adherence tallies over a trailing 14-day window, oldest-first.
+    private var medicationDailyAdherence: [MedicationDailyAdherence] {
+        guard !medications.isEmpty else { return [] }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        return (0..<14).reversed().compactMap { offset -> MedicationDailyAdherence? in
+            guard let day = cal.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            var taken = 0, expected = 0
+            for plan in medications {
+                let perDay = max(plan.reminderMinutes.count, 1)
+                expected += perDay
+                let count = plan.takenAt.filter { cal.isDate($0, inSameDayAs: day) }.count
+                taken += min(count, perDay)
+            }
+            return MedicationDailyAdherence(takenCount: taken, missedCount: max(expected - taken, 0))
+        }
+    }
+
+    /// Seed recommendations from the deterministic local heuristic (no inference) so the card is
+    /// never empty on appear and whenever the period changes.
+    private func refreshRecommendationsBaseline() {
+        let planner = InsightsRecommendationsPlanner()
+        recommendations = planner.localRecommendations(
+            summary: periodSummary, insights: findings, trends: trendSections)
+    }
+
+    /// Refresh recommendations, layering Foundation Models on top of the local baseline when
+    /// on-device AI is available; otherwise this resolves to the deterministic baseline.
+    private func refreshRecommendationsWithAI() async {
+        guard !isRefreshingRecommendations else { return }
+        isRefreshingRecommendations = true
+        defer { isRefreshingRecommendations = false }
+        let generator: AssistTextGenerator? = FoundationModelsRecommendationGenerator()
+        let planner = InsightsRecommendationsPlanner(generator: generator)
+        recommendations = await planner.suggest(
+            summary: periodSummary, insights: findings, trends: trendSections)
+    }
+
+    // MARK: Screen time
+
+    /// Native screen-time mirror of Android's `ScreenTimeCard`. iOS surfaces app usage via the
+    /// Screen Time / DeviceActivity authorization flow; until that's granted this is an informational
+    /// entry point so the section parity-matches Android's placement on the page.
+    private var screenTimeCard: some View {
+        ChronosGlassCard(tint: ChronosColors.brandPrimary) {
+            HStack(spacing: ChronosSpacing.compact) {
+                Image(systemName: "hourglass").font(.title2).foregroundStyle(ChronosColors.brandPrimary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Screen time").font(.chronosHeadline)
+                    Text("Track focused vs. distracting app time to protect your deep-work windows.")
+                        .font(.chronosCaption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    // MARK: Adherence rate (shared with findings + trends)
 
     private var adherenceRate: Double {
         let window = 7
@@ -490,6 +779,35 @@ struct InsightsView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+// MARK: - Foundation Models recommendation generator
+
+/// Bridges ChronosCore's `AssistTextGenerator` to Apple's on-device Foundation Models. When the
+/// model is unavailable (or generation fails) it returns a nil text so the planner falls back to
+/// its deterministic local baseline. Attributes successful generations to `.geminiNano` — the
+/// on-device source bucket — matching the Android "on-device AI" labeling.
+private struct FoundationModelsRecommendationGenerator: AssistTextGenerator {
+    func generateAssistText(prompt: String) async -> AssistTextGeneration {
+        guard case .available = SystemLanguageModel.default.availability else {
+            return AssistTextGeneration(text: nil, source: .local)
+        }
+        let session = LanguageModelSession(
+            instructions: Instructions {
+                "You generate concise schedule recommendations from supplied metrics only. "
+                + "Return one recommendation per line as recommendation|reason. "
+                + "No invented tasks or medical advice."
+            })
+        do {
+            let response = try await session.respond(
+                to: prompt,
+                options: GenerationOptions(temperature: GenerationProfile.balanced.temperature))
+            let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            return AssistTextGeneration(text: text.isEmpty ? nil : text, source: .geminiNano)
+        } catch {
+            return AssistTextGeneration(text: nil, source: .local)
         }
     }
 }

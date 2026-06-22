@@ -7,5 +7,7 @@ import SwiftUI
 struct ChronosWatchWidgetBundle: WidgetBundle {
     var body: some Widget {
         NextBlockComplication()
+        HabitsComplication()
+        MedsComplication()
     }
 }

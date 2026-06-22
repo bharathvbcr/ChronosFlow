@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UserNotifications
+import BackgroundTasks
 
 /// App entry point. The iOS-native analogue of `ChronosApplication` + `MainActivity`.
 @main
@@ -15,6 +16,11 @@ struct ChronosFlowApp: App {
         UNUserNotificationCenter.current().delegate = ChronosNotificationDelegate.shared
         // Register the background auto-backup task before launch finishes (BGTaskScheduler rule).
         ChronosAutoBackup.register()
+        // Register the background interop / calendar sync tasks (I02 / C03). No-op-safe scaffolding:
+        // the handlers reschedule and complete cleanly until those items fill in the real sync work,
+        // and registration silently skips any identifier not yet declared in Info.plist's
+        // BGTaskSchedulerPermittedIdentifiers so a missing declaration never traps at launch.
+        ChronosBackgroundSync.registerAll()
         // Bring up the watchOS Data Layer link (the iOS analogue of the Android Wear DataClient).
         PhoneWatchSync.shared.activate()
         // First-run seed (mirrors the Android first-run onboarding/seed pass), then enqueue backup
@@ -22,7 +28,19 @@ struct ChronosFlowApp: App {
         Task { @MainActor in
             SeedData.populate(container.mainContext)
             ChronosAutoBackup.schedule()
+            ChronosBackgroundSync.scheduleAll()
+            // Wire the cross-process focus command bridge as the UI comes up. This is the fix for the
+            // #1 parity bug: Live Activity / focus-widget buttons posted commands to the App-Group
+            // queue (FocusCommandBridge) but nothing ever drained them, so every control was a silent
+            // no-op. startObserving() registers the Darwin observer (apply-while-running) and drain()
+            // applies anything queued while the app was terminated, now that the shared timer is ready.
+            ChronosFocusCommandRouter.startObserving()
+            ChronosFocusCommandRouter.drain()
             PhoneWatchSync.shared.pushSnapshot()
+            // Re-arm the evening log reminder each launch so it survives app reinstall / reboot.
+            if ChronosSettings.shared.logReminderEnabled {
+                await ChronosNotifications.shared.scheduleLogReminder()
+            }
         }
     }
 
@@ -32,5 +50,110 @@ struct ChronosFlowApp: App {
                 .tint(ChronosColors.brandPrimary)
         }
         .modelContainer(container)
+    }
+}
+
+// MARK: - Focus command router (app-wide drain of the cross-process bridge)
+
+/// App-wide owner of the `FocusCommandBridge` drain. The Focus UI drains on its own appear/scene
+/// events, but those only fire while the Focus tab is mounted. This router makes the bridge live for
+/// the WHOLE app lifetime so a Live Activity / focus-widget control applies even when the user is on
+/// another tab or the app was just relaunched — the actual fix for the silent-no-op bug.
+///
+/// It reuses the existing Darwin→Foundation bridge (`FocusCommandObserver`) rather than adding a
+/// second `CFNotificationCenter` observer, then forwards each queued command to the process-wide
+/// `FocusTimerModel.shared` via the F-FOCUS `apply(command:)` contract. Draining is idempotent: the
+/// bridge clears the queue on read, so a double-drain (router + FocusView) simply finds it empty.
+@MainActor
+enum ChronosFocusCommandRouter {
+    private static var started = false
+    private static var observer: NSObjectProtocol?
+
+    /// Register the Darwin observer (once) and start forwarding queued commands to the shared timer.
+    /// Safe to call repeatedly; idempotent.
+    static func startObserving() {
+        guard !started else { return }
+        started = true
+        // Ensure the Darwin → Foundation bridge is live app-wide, not just while FocusView is shown.
+        FocusCommandObserver.startIfNeeded()
+        // A command tapped while the app is running (any tab) drains immediately.
+        observer = NotificationCenter.default.addObserver(
+            forName: FocusCommandObserver.didReceive,
+            object: nil,
+            queue: .main) { _ in
+                MainActor.assumeIsolated { drain() }
+            }
+    }
+
+    /// Apply and clear every queued cross-process focus command, routing each into the shared timer.
+    static func drain() {
+        FocusCommandBridge.drain { command in
+            FocusTimerModel.shared.apply(command: command)
+        }
+    }
+}
+
+// MARK: - Background sync scaffolding (I02 interop / C03 calendar)
+
+/// No-op-safe `BGTaskScheduler` scaffolding for the background DevTime interop (I02) and calendar
+/// (C03) sync. This item only establishes registration + scheduling plumbing; the real sync work is
+/// filled in by those items (which own `Interop/InteropSync.swift` and `CalendarBackgroundSync.swift`).
+///
+/// Registration is defensive by design: it skips any identifier not present in the bundle's
+/// `BGTaskSchedulerPermittedIdentifiers`, so until the plist declares them this is a true no-op and a
+/// missing declaration can never trap `BGTaskScheduler.register` at launch. When an owning item adds
+/// its handler it can call `BGTaskScheduler.shared.register` itself; this scaffold steps aside for any
+/// identifier it does not recognise.
+enum ChronosBackgroundSync {
+    /// 6h cadence to mirror the Android InteropSyncWorker periodic schedule.
+    static let interopTaskIdentifier = "com.chronosflow.interop.sync"
+    /// 7-day calendar sync window refresh (Android calendar background sync parity).
+    static let calendarTaskIdentifier = "com.chronosflow.calendar.sync"
+
+    private static let interopInterval: TimeInterval = 6 * 60 * 60
+    private static let calendarInterval: TimeInterval = 24 * 60 * 60
+
+    /// Identifiers actually permitted by Info.plist — registering an unlisted identifier traps, so we
+    /// gate on this set and silently no-op for anything not yet declared.
+    private static var permittedIdentifiers: Set<String> {
+        let raw = Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers") as? [String]
+        return Set(raw ?? [])
+    }
+
+    /// Register the interop + calendar background-sync handlers. Call once, early, at launch.
+    static func registerAll() {
+        let permitted = permittedIdentifiers
+        if permitted.contains(interopTaskIdentifier) {
+            BGTaskScheduler.shared.register(forTaskWithIdentifier: interopTaskIdentifier, using: nil) { task in
+                handle(task, identifier: interopTaskIdentifier, interval: interopInterval)
+            }
+        }
+        if permitted.contains(calendarTaskIdentifier) {
+            BGTaskScheduler.shared.register(forTaskWithIdentifier: calendarTaskIdentifier, using: nil) { task in
+                handle(task, identifier: calendarTaskIdentifier, interval: calendarInterval)
+            }
+        }
+    }
+
+    /// Enqueue the next run for each permitted task. Safe to call repeatedly; the scheduler de-dupes
+    /// by identifier. A failed submit (e.g. simulator without background support) is non-fatal.
+    static func scheduleAll() {
+        let permitted = permittedIdentifiers
+        if permitted.contains(interopTaskIdentifier) { schedule(interopTaskIdentifier, after: interopInterval) }
+        if permitted.contains(calendarTaskIdentifier) { schedule(calendarTaskIdentifier, after: calendarInterval) }
+    }
+
+    private static func schedule(_ identifier: String, after interval: TimeInterval) {
+        let request = BGAppRefreshTaskRequest(identifier: identifier)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: interval)
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    /// Stub handler: always reschedule the next cadence, then complete. Owning items (I02/C03) replace
+    /// the body with their real sync once their sync entry points land; the reschedule keeps the
+    /// cadence alive in the meantime.
+    private static func handle(_ task: BGTask, identifier: String, interval: TimeInterval) {
+        schedule(identifier, after: interval)
+        task.setTaskCompleted(success: true)
     }
 }

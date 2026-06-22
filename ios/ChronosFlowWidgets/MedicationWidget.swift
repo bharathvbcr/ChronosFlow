@@ -55,43 +55,68 @@ struct MedicationProvider: TimelineProvider {
             return lhs.time < rhs.time
         }
         let pending = doses.filter { !$0.taken }.count
-        return MedicationEntry(date: .now, doses: Array(doses.prefix(4)), pendingCount: pending, redacted: redact)
+        // Carry up to the largest family's limit; the view trims per its actual family.
+        return MedicationEntry(date: .now, doses: Array(doses.prefix(8)), pendingCount: pending, redacted: redact)
     }
 }
 
 struct MedicationWidgetView: View {
     var entry: MedicationEntry
+    @Environment(\.widgetFamily) private var family
+
+    /// Dose-row limit per family — the iOS analogue of Android's COMPACT (4) / TALL (8) limits.
+    private var rowLimit: Int {
+        switch family {
+        case .systemSmall:  return 3
+        case .systemMedium: return 4
+        default:            return 8   // systemLarge
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: "pills.fill").foregroundStyle(.teal)
-                Text(entry.pendingCount == 0 ? "All taken" : "\(entry.pendingCount) due")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if entry.doses.isEmpty {
-                Text("No medications").font(.caption).foregroundStyle(.secondary)
-            } else {
-                ForEach(entry.doses) { dose in
-                    HStack(spacing: 6) {
-                        // Tap to acknowledge the dose in place (Android DoseAck). Disabled once taken.
-                        Button(intent: MarkDoseTakenIntent(planID: dose.planID)) {
-                            Image(systemName: dose.taken ? "checkmark.circle.fill" : "circle")
-                                .font(.caption2)
-                                .foregroundStyle(dose.taken ? .green : .secondary)
+        // Wrap the entire card in a Link so tapping anywhere opens the Medication section in the app.
+        Link(destination: URL(string: "chronosflow://medication")!) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "pills.fill").foregroundStyle(.teal)
+                    Text(entry.pendingCount == 0 ? "All taken" : "\(entry.pendingCount) due")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if entry.doses.isEmpty {
+                    Text("No medications").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(entry.doses.prefix(rowLimit)) { dose in
+                        HStack(spacing: 6) {
+                            // Tap to acknowledge the dose in place (Android DoseAck). Disabled once taken.
+                            Button(intent: MarkDoseTakenIntent(planID: dose.planID)) {
+                                Image(systemName: dose.taken ? "checkmark.circle.fill" : "circle")
+                                    .font(.caption2)
+                                    .foregroundStyle(dose.taken ? .green : .secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(dose.taken)
+                            Text(dose.name).font(.caption).lineLimit(1)
+                            Spacer(minLength: 2)
+                            Text(dose.time).font(.caption2).foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(dose.taken)
-                        Text(dose.name).font(.caption).lineLimit(1)
-                        Spacer(minLength: 2)
-                        Text(dose.time).font(.caption2).foregroundStyle(.secondary)
                     }
                 }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .containerBackground(.fill.tertiary, for: .widget)
     }
+}
+
+#Preview(as: .systemMedium) {
+    MedicationWidget()
+} timeline: {
+    MedicationEntry(date: .now, doses: [
+        .init(id: "1", planID: "1", name: "Vitamin D", time: "8:00 AM", taken: true),
+        .init(id: "2", planID: "2", name: "Omega-3", time: "8:00 PM", taken: false),
+    ], pendingCount: 1, redacted: false)
+    MedicationEntry(date: .now, doses: [], pendingCount: 0, redacted: false)
 }
 
 struct MedicationWidget: Widget {
@@ -101,6 +126,6 @@ struct MedicationWidget: Widget {
         }
         .configurationDisplayName("Medication")
         .description("Today's doses and reminder times.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

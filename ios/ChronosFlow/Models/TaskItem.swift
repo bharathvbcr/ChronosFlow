@@ -28,6 +28,16 @@ final class TaskItem {
     /// Checklist sub-items, stored inline as a value type (matches `TaskChecklistItem`).
     var checklist: [ChecklistItem]
 
+    /// Backup/restore round-trip representation of task attachments. Mirrors Android
+    /// `Task.attachments: List<TaskAttachment>` (default empty). Uses the ChronosCore
+    /// `AttachmentDTO` (the cross-platform Codable mirror) so a full-data export written by
+    /// either platform decodes here unchanged.
+    ///
+    /// Declared OPTIONAL with a `nil` default so adding it is a zero-migration, CloudKit-safe
+    /// change: a `TaskItem` saved before the field existed decodes it as `nil`. Use the
+    /// `attachmentList` accessor for the Android-equivalent "empty list" semantics.
+    var attachments: [AttachmentDTO]?
+
     init(
         id: String = UUID().uuidString,
         title: String,
@@ -42,7 +52,8 @@ final class TaskItem {
         targetDate: Date? = nil,
         goalID: String? = nil,
         recurrence: RecurrenceSpec? = nil,
-        checklist: [ChecklistItem] = []
+        checklist: [ChecklistItem] = [],
+        attachments: [AttachmentDTO]? = nil
     ) {
         self.id = id
         self.title = title
@@ -58,6 +69,14 @@ final class TaskItem {
         self.goalID = goalID
         self.recurrence = recurrence
         self.checklist = checklist
+        self.attachments = attachments
+    }
+
+    /// Android-equivalent non-optional view of `attachments` (treats `nil` as the empty list, the
+    /// same default `Task.attachments` carries). Use this for read/round-trip logic.
+    var attachmentList: [AttachmentDTO] {
+        get { attachments ?? [] }
+        set { attachments = newValue.isEmpty ? nil : newValue }
     }
 
     var priorityLabel: String {

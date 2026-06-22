@@ -83,7 +83,9 @@ final class ChronosAssistant {
     /// the (confirmed) non-streaming `respond(to:)` API below, so the assistant still works.
     func send(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isResponding, isAvailable else { return }
+        // Honor ChronosSettings.privacyMode (N01): DISABLED means no on-device generation at all.
+        guard ChronosSettings.shared.privacyMode.allowsOnDeviceGeneration,
+              !trimmed.isEmpty, !isResponding, isAvailable else { return }
         messages.append(ChronosChatMessage(role: .user, text: trimmed))
         isResponding = true
         currentReply = ""

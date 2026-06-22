@@ -49,6 +49,11 @@ final class FocusTimerModel {
     private var blockID: String?
     private var plannedBlockMinutes = 25
 
+    /// SwiftData context used to persist the split-session snapshot (F03) so a session survives an
+    /// app kill. Set once via `attach(context:)` from app-entry / FocusView.onAppear; nil means
+    /// snapshots are skipped (no store available).
+    private var snapshotContext: ModelContext?
+
     // MARK: Derived state for the UI
 
     /// Total phases in the current block-bounded plan.
@@ -154,6 +159,26 @@ final class FocusTimerModel {
         updateLiveActivity()
     }
 
+    /// Insert an immediate short break WITHOUT ending the current work phase.
+    /// The break plays out, then awaitingPhaseAdvance fires so the user taps to resume work.
+    /// This is the iOS port of the Android onInjectBreak() fix.
+    func injectBreak(minutes: Int) {
+        guard phase == .work, !isPaused, !awaitingPhaseAdvance, minutes > 0 else { return }
+        // Pause the current work phase at the boundary by setting awaitingPhaseAdvance, then
+        // splice a synthetic short-break phase immediately after the current position so that
+        // advancePhase() runs it next. The work phases that follow are preserved unchanged.
+        let breakPhase = FocusPhase(kind: .break, durationMinutes: minutes)
+        // Insert the injected break right after the current phase index.
+        let insertAt = currentPhaseIndex + 1
+        phasePlan.insert(breakPhase, at: insertAt)
+        // Hold at the boundary — the UI will show the normal "Start break" boundary controls.
+        ticker?.invalidate()
+        remaining = 0
+        if currentFocusPhase?.kind == .work { completedWorkSessions += 1 }
+        awaitingPhaseAdvance = true
+        updateLiveActivity()
+    }
+
     func stop(context: ModelContext? = nil) {
         ticker?.invalidate()
         // Completed if the block ran its full course OR the session already finished; an early stop
@@ -161,7 +186,59 @@ final class FocusTimerModel {
         logSession(context: context, completed: phase == .completed || blockFullyElapsed)
         phase = .completed
         awaitingPhaseAdvance = false
+        clearSnapshot(context: context)
         endLiveActivity()
+    }
+
+    /// The mid-session break lengths offered as chips during an active work phase (minutes). Mirrors
+    /// the Android `FocusMidSessionBreakPresets` (5 / 10 / 15). `injectBreak(minutes:)` accepts any
+    /// of these.
+    var breakPresets: [Int] { [5, 10, 15] }
+
+    /// End an in-progress break early. Mirrors Android `DayDialFocusDelegate.endBreakNow()`:
+    /// - Returns `false` and no-ops when not currently on a break.
+    /// - Returns `true` when the break is the LAST phase — there is nothing to return to, so the
+    ///   caller should finish the session (`stop(context:)`).
+    /// - Otherwise drops to the phase boundary (PAUSED-equivalent: holds at `awaitingPhaseAdvance`
+    ///   for the next focus phase) and returns `false`.
+    @discardableResult
+    func endBreakNow() -> Bool {
+        guard phase == .shortBreak || phase == .longBreak else { return false }
+        // Last phase: nothing to advance into — caller finishes.
+        if currentPhaseIndex >= phasePlan.count - 1 {
+            ticker?.invalidate()
+            blockFullyElapsed = true
+            return true
+        }
+        // Drop to the boundary so the user taps to continue into the next focus phase.
+        ticker?.invalidate()
+        remaining = 0
+        awaitingPhaseAdvance = true
+        updateLiveActivity()
+        return false
+    }
+
+    // MARK: Cross-process command bridge (W01)
+
+    /// Apply a `FocusCommandBridge.Command` drained on app-entry / foreground to the live timer. This
+    /// is the app-side mapping the bridge's TODO described — it lets a Live-Activity / widget control
+    /// drive the in-memory session. `.start` is intentionally NOT handled here: starting a session
+    /// needs the selected `TimeBlock` (title / minutes / preset) resolved from the store, which the
+    /// app-entry drain owns; this method only steers an already-running session.
+    func apply(command: FocusCommandBridge.Command, context: ModelContext? = nil) {
+        switch command {
+        case .togglePause:
+            togglePause()
+        case .stop:
+            stop(context: context)
+        case .extend(let minutes):
+            extend(minutes: minutes)
+        case .advance:
+            advancePhase()
+        case .start:
+            // Owned by the app-entry drain (needs TimeBlock resolution); no-op on the live model.
+            break
+        }
     }
 
     // MARK: Phase machine
@@ -195,7 +272,8 @@ final class FocusTimerModel {
         ticker?.invalidate()
         phase = .completed
         awaitingPhaseAdvance = false
-        // Note: persistence happens in stop(context:) where the ModelContext is available.
+        // Note: FocusSession logging happens in stop(context:) where the ModelContext is available.
+        clearSnapshot(context: snapshotContext)
         endLiveActivity()
     }
 
@@ -237,25 +315,50 @@ final class FocusTimerModel {
             case .longBreak: .longBreak
             default: .work
         }
+        // Compute overall block progress for the segmented Live Activity bar.
+        let totalSecs = TimeInterval(plannedBlockMinutes * 60)
+        let elapsed = totalSecs - (phaseEndsAt.map { max(0, $0.timeIntervalSinceNow) } ?? 0)
+        let completion = totalSecs > 0 ? min(1, max(0, elapsed / totalSecs)) : 0
+        // Render-ready segmented bar via ChronosCore (empty for a flat session). The current phase's
+        // live total is fed in so a +/-5m adjustment is reflected; the bar state mirrors pause /
+        // ending-soon emphasis.
+        let plan = focusPhaseSegments(from: phasePlan)
+        let currentTotalSeconds = Int((phaseTotal ?? 0).rounded())
+        let barState = focusBarState(isPaused: isPaused, timeLeftSeconds: Int(remaining.rounded()))
+        let segments = focusBarSegments(
+            plan: plan,
+            currentPhaseIndex: currentPhaseIndex,
+            currentPhaseTotalSeconds: max(currentTotalSeconds, 1),
+            state: barState)
         return .init(
             phase: mapped,
             phaseEndsAt: phaseEndsAt ?? .now,
             isPaused: isPaused,
             awaitingAdvance: awaitingPhaseAdvance,
             phaseNumber: phaseNumber,
-            totalPhases: max(totalPhases, 1))
+            totalPhases: max(totalPhases, 1),
+            blockTitle: blockTitle,
+            blockStartsAt: sessionStart,
+            blockEndsAt: sessionStart.map { $0.addingTimeInterval(TimeInterval(plannedBlockMinutes * 60)) },
+            nextBlockTitle: nil,
+            completionPercent: completion,
+            phaseSegments: segments.map(FocusActivityAttributes.ContentState.PhaseSegmentInfo.init(from:)),
+            currentPhaseIndex: min(max(currentPhaseIndex, 0), max(phasePlan.count - 1, 0)))
     }
 
     private func startLiveActivity() {
         guard ChronosSettings.shared.focusLiveActivityEnabled else { return }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        let attributes = FocusActivityAttributes(blockTitle: blockTitle)
+        let attributes = FocusActivityAttributes(blockTitle: blockTitle,
+                                                  totalPhaseDurationMinutes: plannedBlockMinutes)
         activity = try? Activity.request(
             attributes: attributes,
             content: .init(state: contentState(), staleDate: nil))
     }
 
     private func updateLiveActivity() {
+        // Persist the split snapshot on every state change (F03) so a kill mid-phase resumes exactly.
+        saveSnapshot()
         // Mirror to the watch regardless of whether a Live Activity is running.
         publishWatchFocus(active: true)
         guard let activity else { return }
@@ -284,5 +387,171 @@ final class FocusTimerModel {
             PhoneWatchSync.publishFocusState(nil)
         }
         PhoneWatchSync.shared.pushSnapshot()
+    }
+
+    // MARK: Split-session persistence (F03)
+
+    /// Attach the SwiftData context and restore any in-flight split session left by a previous app
+    /// run. Call once from app-entry / FocusView.onAppear. Mirrors Android
+    /// `DayDialFocusDelegate.restoreFromPersistedSession`: only a RUNNING/PAUSED split snapshot is
+    /// resumed; a stale or completed snapshot is cleared. Returns true if a session was restored.
+    @discardableResult
+    func attach(context: ModelContext) -> Bool {
+        snapshotContext = context
+        // Only restore into a fresh/idle model — never clobber a live session.
+        guard phase == .idle else { return false }
+        guard let snap = latestSnapshot(in: context) else { return false }
+        guard snap.statusValue == .running || snap.statusValue == .paused,
+              !snap.phaseList.isEmpty else {
+            // Stale/completed snapshot — drop it.
+            context.delete(snap)
+            try? context.save()
+            return false
+        }
+        restore(from: snap)
+        return true
+    }
+
+    /// Rehydrate the live timer from a persisted snapshot and resume ticking (unless it was paused).
+    private func restore(from snap: FocusSessionSnapshot) {
+        blockTitle = snap.blockTitle ?? "Focus session"
+        blockID = snap.blockID
+        preset = snap.presetValue
+        plannedBlockMinutes = max(snap.plannedBlockMinutes, 1)
+        defaultBlockMinutes = plannedBlockMinutes
+        phasePlan = snap.phaseList
+        currentPhaseIndex = min(max(snap.currentIndex, 0), max(phasePlan.count - 1, 0))
+        completedWorkSessions = snap.completedWorkSessions
+        interruptions = snap.interruptions
+        blockFullyElapsed = false
+        sessionStart = snap.startedAt ?? .now
+        awaitingPhaseAdvance = snap.awaitingAdvance
+
+        guard let p = currentFocusPhase else { phase = .idle; return }
+        phase = (p.kind == .work) ? .work : .shortBreak
+
+        if snap.awaitingAdvance {
+            // Was holding at a boundary — keep holding; no ticker.
+            isPaused = false
+            remaining = 0
+            phaseEndsAt = nil
+        } else if snap.statusValue == .paused {
+            isPaused = true
+            remaining = max(0, TimeInterval(snap.remainingSeconds))
+            phaseEndsAt = nil
+        } else {
+            // RUNNING: continue counting down from where we left off (wall-clock based).
+            isPaused = false
+            remaining = max(0, TimeInterval(snap.remainingSeconds))
+            phaseEndsAt = Date.now.addingTimeInterval(remaining)
+            runTicker()
+        }
+        startLiveActivity()
+        updateLiveActivity()
+    }
+
+    /// Persist the current split session, mirroring Android's "only while a SPLIT session is RUNNING
+    /// or PAUSED" rule. A flat (single-phase) or terminal session clears any stored snapshot.
+    private func saveSnapshot() {
+        guard let context = snapshotContext else { return }
+        let isLive = phase == .work || phase == .shortBreak || phase == .longBreak
+        guard isSplitSession, isLive else {
+            clearSnapshot(context: context)
+            return
+        }
+        let status: FocusSessionSnapshot.Status =
+            awaitingPhaseAdvance ? .paused : (isPaused ? .paused : .running)
+        let snap = latestSnapshot(in: context) ?? {
+            let s = FocusSessionSnapshot()
+            context.insert(s)
+            return s
+        }()
+        snap.blockID = blockID
+        snap.blockTitle = blockTitle
+        snap.presetRaw = preset.rawValue
+        snap.plannedBlockMinutes = plannedBlockMinutes
+        snap.encodePhases(phasePlan)
+        snap.currentIndex = currentPhaseIndex
+        snap.statusRaw = status.rawValue
+        snap.awaitingAdvance = awaitingPhaseAdvance
+        snap.remainingSeconds = Int(remaining.rounded())
+        snap.completedWorkSessions = completedWorkSessions
+        snap.interruptions = interruptions
+        snap.startedAt = sessionStart
+        snap.updatedAt = .now
+        try? context.save()
+    }
+
+    /// Remove any persisted snapshot (session ended / not a split / not live).
+    private func clearSnapshot(context: ModelContext?) {
+        guard let context = context ?? snapshotContext else { return }
+        let all = (try? context.fetch(FetchDescriptor<FocusSessionSnapshot>())) ?? []
+        guard !all.isEmpty else { return }
+        all.forEach { context.delete($0) }
+        try? context.save()
+    }
+
+    /// Most-recently-updated snapshot (there should be at most one live session).
+    private func latestSnapshot(in context: ModelContext) -> FocusSessionSnapshot? {
+        var descriptor = FocusSessionSnapshot.fetchDescriptor
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
+    }
+}
+
+/// SwiftData snapshot of an in-flight SPLIT focus session, so a session survives an app kill (F03).
+/// The iOS analogue of the Android `FocusSplitSessionStore` (SharedPreferences-backed). Persisted
+/// only while a split session is RUNNING/PAUSED and cleared otherwise. All stored properties are
+/// optional or default-initialized (CloudKit-safe); the phase list is stored as a Codable JSON blob.
+@Model
+final class FocusSessionSnapshot {
+    /// Coarse lifecycle status of the snapshot. Only RUNNING/PAUSED snapshots are resumed.
+    enum Status: String, Codable, Sendable {
+        case running
+        case paused
+        case completed
+    }
+
+    var blockID: String?
+    var blockTitle: String?
+    /// `FocusSplitPreset.rawValue`; resolved via `presetValue`.
+    var presetRaw: String?
+    var plannedBlockMinutes: Int = 25
+    /// The planned phase sequence, JSON-encoded `[FocusPhase]`; read via `phaseList`.
+    var phasesData: Data?
+    var currentIndex: Int = 0
+    /// `Status.rawValue`; read via `statusValue`.
+    var statusRaw: String?
+    var awaitingAdvance: Bool = false
+    /// Seconds left in the current phase at the moment of the last save (for PAUSED/RUNNING resume).
+    var remainingSeconds: Int = 0
+    var completedWorkSessions: Int = 0
+    var interruptions: Int = 0
+    var startedAt: Date?
+    var updatedAt: Date = Date.now
+
+    init() {}
+
+    /// Decoded phase plan (empty if missing/corrupt).
+    var phaseList: [FocusPhase] {
+        guard let phasesData,
+              let decoded = try? JSONDecoder().decode([FocusPhase].self, from: phasesData) else { return [] }
+        return decoded
+    }
+
+    /// Store the phase plan as a JSON blob.
+    func encodePhases(_ phases: [FocusPhase]) {
+        phasesData = try? JSONEncoder().encode(phases)
+    }
+
+    /// Resolved status (defaults to `.running` for legacy/missing values).
+    var statusValue: Status { statusRaw.flatMap(Status.init(rawValue:)) ?? .running }
+
+    /// Resolved preset (defaults to the 25·5 default to match `FocusTimerModel.preset`).
+    var presetValue: FocusSplitPreset { presetRaw.flatMap(FocusSplitPreset.init(rawValue:)) ?? .p25_5 }
+
+    /// Newest-first fetch descriptor (the live session, if any).
+    static var fetchDescriptor: FetchDescriptor<FocusSessionSnapshot> {
+        FetchDescriptor<FocusSessionSnapshot>(sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])
     }
 }

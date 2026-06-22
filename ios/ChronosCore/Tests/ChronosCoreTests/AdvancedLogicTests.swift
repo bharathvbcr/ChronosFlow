@@ -1,7 +1,7 @@
 import XCTest
 @testable import ChronosCore
 
-private var utc: Calendar = {
+private let utc: Calendar = {
     var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "UTC")!; return c
 }()
 private func d(_ y: Int, _ m: Int, _ day: Int) -> Date {

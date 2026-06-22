@@ -13,6 +13,10 @@ struct NextBlockEntry: TimelineEntry {
     let current: WatchBlock?
     let next: WatchBlock?
     let focus: WatchFocusState?
+    /// Doses still due today (mirrors the snapshot's `medsDueCount`) — surfaced as a footer line in
+    /// the rectangular form when non-zero, so the Smart Stack glance flags medication without a
+    /// dedicated complication.
+    var medsDueCount: Int = 0
 }
 
 struct NextBlockProvider: TimelineProvider {
@@ -54,7 +58,8 @@ struct NextBlockProvider: TimelineProvider {
         let blocks = snapshot?.blocks ?? []
         let current = blocks.first { now >= $0.startMinute && now < $0.startMinute + $0.durationMinutes }
         let next = blocks.first { $0.startMinute > now }
-        return NextBlockEntry(date: .now, current: current, next: next, focus: snapshot?.focus)
+        return NextBlockEntry(date: .now, current: current, next: next, focus: snapshot?.focus,
+                              medsDueCount: snapshot?.medsDueCount ?? 0)
     }
 }
 
@@ -146,6 +151,11 @@ struct NextBlockWidgetView: View {
             } else {
                 Text("Open time").font(.headline)
                 Text("No blocks scheduled").font(.caption).foregroundStyle(.secondary)
+            }
+            if entry.medsDueCount > 0 {
+                Label("\(entry.medsDueCount) dose\(entry.medsDueCount == 1 ? "" : "s") due",
+                      systemImage: "pills.fill")
+                    .font(.caption2).foregroundStyle(.red)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)

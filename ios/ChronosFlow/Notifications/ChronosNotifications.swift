@@ -38,6 +38,10 @@ final class ChronosNotifications {
     static let taskThread = "thread.tasks"
     static let habitThread = "thread.habits"
     static let blockThread = "thread.blocks"
+    static let logReminderThread = "thread.log"
+
+    // Log-reminder category (passive, no actions — Android: AlarmRequestType.LOG_REMINDER).
+    static let logReminderCategory = "LOG_REMINDER"
 
     /// How many days of remaining supply still triggers a "refill soon" line (Android refillThreshold).
     static let refillWarningThresholdDays = 3
@@ -84,7 +88,12 @@ final class ChronosNotifications {
             identifier: Self.currentBlockCategory, actions: [],
             intentIdentifiers: [], options: [])
 
-        center.setNotificationCategories([medication, task, habit, currentBlock])
+        // Log reminder: passive 20:00 nudge for sleep & journal (Android: LOG_REMINDER channel).
+        let logReminder = UNNotificationCategory(
+            identifier: Self.logReminderCategory, actions: [],
+            intentIdentifiers: [], options: [])
+
+        center.setNotificationCategories([medication, task, habit, currentBlock, logReminder])
     }
 
     // MARK: Medication
@@ -248,6 +257,36 @@ final class ChronosNotifications {
             repeats: false)
         try? await center.add(UNNotificationRequest(
             identifier: "block-next", content: content, trigger: trigger))
+    }
+
+    // MARK: Log reminder (sleep & journal)
+
+    /// Schedule the 20:00 daily "log sleep & journal" reminder. Fires at 20:00, shifted out of
+    /// quiet hours when necessary. Repeats daily. The Android analogue is
+    /// `AlarmRequestType.LOG_REMINDER` → deep-link `:logsleep → DAY_TARGET_SLEEP`.
+    func scheduleLogReminder(settings: ChronosSettings = .shared) async {
+        await requestAuthorization()
+        cancel(idPrefix: "log-reminder")
+        guard settings.remindersEnabled, settings.logReminderEnabled else { return }
+
+        let fireMinute = QuietHours.nextAllowedMinute(
+            minute: 20 * 60,  // 20:00
+            startMinute: settings.quietHoursStartMinute,
+            endMinute: settings.quietHoursEndMinute)
+
+        let content = UNMutableNotificationContent()
+        content.title = "Log your day"
+        content.body = "Take a moment to log tonight's sleep and write in your journal."
+        content.sound = .default
+        content.categoryIdentifier = Self.logReminderCategory
+        content.threadIdentifier = Self.logReminderThread
+        content.interruptionLevel = .active
+        content.userInfo = ["section": "sleep"]
+
+        let trigger = UNCalendarNotificationTrigger(
+            dateMatching: clockComponents(fireMinute), repeats: true)
+        try? await center.add(UNNotificationRequest(
+            identifier: "log-reminder", content: content, trigger: trigger))
     }
 
     // MARK: Cancellation

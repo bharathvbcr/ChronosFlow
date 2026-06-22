@@ -1,6 +1,8 @@
 import AppIntents
 import SwiftData
 import Foundation
+import ActivityKit
+import ChronosCore
 
 // App Intents + Siri Shortcuts — the iOS-native equivalent of the Android AppFunctions surface
 // (ChronosAppFunctions.kt, ~20 functions): expose the core workflows so they run from Siri,
@@ -21,6 +23,14 @@ private func clampScore(_ v: Int, _ range: ClosedRange<Int> = 1...5) -> Int {
 private func nowMinuteOfDay() -> Int {
     let c = Calendar.current.dateComponents([.hour, .minute], from: .now)
     return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+}
+
+/// Feature-flag gate for AppIntents. Mirrors Android AppFunctions' `featureEnabled { it.XXXEnabled }`
+/// guards: when the user has the feature turned off, the intent must not act — it returns a friendly
+/// dialog instead of mutating data so a Siri/Shortcuts user can't operate a hidden surface.
+@MainActor
+private func featureDialog(_ enabled: Bool, _ disabledMessage: String) -> IntentDialog? {
+    enabled ? nil : IntentDialog(stringLiteral: disabledMessage)
 }
 
 // MARK: - Create / log (existing)
@@ -55,22 +65,27 @@ enum TaskPriorityAppEnum: Int, AppEnum {
 
 struct LogMoodIntent: AppIntent {
     static let title: LocalizedStringResource = "Log Mood Check-in"
-    static let description = IntentDescription("Record a quick mood and energy check-in.")
+    static let description = IntentDescription("Record a quick mood, energy, stress, and focus check-in.")
 
     @Parameter(title: "Mood (1–5)", default: 3) var mood: Int
     @Parameter(title: "Energy (1–5)", default: 3) var energy: Int
+    // Android logMoodEnergyCheckIn takes all four scores; iOS exposes them with defaults so a voice
+    // flow can populate the full MoodEnergyCheckIn while still working from a one-word "log my mood".
+    @Parameter(title: "Stress (1–5)", default: 3) var stress: Int
+    @Parameter(title: "Focus (1–5)", default: 3) var focus: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Log mood \(\.$mood) and energy \(\.$energy)")
+        Summary("Log mood \(\.$mood), energy \(\.$energy), stress \(\.$stress), focus \(\.$focus)")
     }
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let context = chronosContext()
+        let m = clampScore(mood), e = clampScore(energy), s = clampScore(stress), f = clampScore(focus)
         context.insert(MoodEnergyCheckIn(
-            moodScore: clampScore(mood), energyScore: clampScore(energy)))
+            moodScore: m, stressScore: s, energyScore: e, focusScore: f))
         try? context.save()
-        return .result(dialog: "Logged your check-in. Mood \(clampScore(mood))/5, energy \(clampScore(energy))/5.")
+        return .result(dialog: "Logged your check-in. Mood \(m)/5, energy \(e)/5, stress \(s)/5, focus \(f)/5.")
     }
 }
 
@@ -88,6 +103,9 @@ struct LogHabitIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        if let off = featureDialog(ChronosSettings.shared.habitsEnabled, "Habits are turned off in ChronosFlow.") {
+            return .result(dialog: off)
+        }
         let context = chronosContext()
         let id = habit.id
         guard let model = try? context.fetch(
@@ -100,6 +118,39 @@ struct LogHabitIntent: AppIntent {
         return .result(dialog: wasDone
             ? "Unmarked “\(model.title)” for today."
             : "Marked “\(model.title)” done. \(model.streakCount)-day streak.")
+    }
+}
+
+/// AI03: port of Android AppFunctions.logHabitSkipped — defer/skip a habit for today without breaking
+/// the streak. Uses the Habit `skipDates`/`toggleSkip` fields added in Phase 1A (mirrors the SKIPPED
+/// HabitEvent). Toggling: skipping a day clears any logged completion; running it again un-skips.
+struct SkipHabitIntent: AppIntent {
+    static let title: LocalizedStringResource = "Skip Habit"
+    static let description = IntentDescription("Skip (defer) a habit for today without breaking its streak.")
+
+    @Parameter(title: "Habit") var habit: HabitEntity
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Skip habit \(\.$habit)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        if let off = featureDialog(ChronosSettings.shared.habitsEnabled, "Habits are turned off in ChronosFlow.") {
+            return .result(dialog: off)
+        }
+        let context = chronosContext()
+        let id = habit.id
+        guard let model = try? context.fetch(
+            FetchDescriptor<Habit>(predicate: #Predicate { $0.id == id })).first else {
+            return .result(dialog: "I couldn't find that habit.")
+        }
+        let wasSkipped = model.isSkipped(on: .now)
+        model.toggleSkip(on: .now)
+        try? context.save()
+        return .result(dialog: wasSkipped
+            ? "Un-skipped “\(model.title)” for today."
+            : "Skipped “\(model.title)” for today.")
     }
 }
 
@@ -117,6 +168,9 @@ struct LogMedicationDoseIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        if let off = featureDialog(ChronosSettings.shared.medicationEnabled, "Medication tracking is turned off in ChronosFlow.") {
+            return .result(dialog: off)
+        }
         let context = chronosContext()
         let id = plan.id
         guard let model = try? context.fetch(
@@ -129,6 +183,63 @@ struct LogMedicationDoseIntent: AppIntent {
             return .result(dialog: "Logged your \(model.name) dose. About \(days) days of supply left.")
         }
         return .result(dialog: "Logged your \(model.name) dose.")
+    }
+}
+
+/// AI03: port of Android AppFunctions.logMedicationSkipped — record that a scheduled dose was skipped.
+/// Appends a `.skipped` DoseEvent (Phase 1A) with an optional reason; does NOT touch remaining supply.
+struct SkipMedicationDoseIntent: AppIntent {
+    static let title: LocalizedStringResource = "Skip Medication Dose"
+    static let description = IntentDescription("Record that you skipped a scheduled medication dose.")
+
+    @Parameter(title: "Medication") var plan: MedicationEntity
+    @Parameter(title: "Reason") var reason: String?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Skip dose for \(\.$plan)") { \.$reason }
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        if let off = featureDialog(ChronosSettings.shared.medicationEnabled, "Medication tracking is turned off in ChronosFlow.") {
+            return .result(dialog: off)
+        }
+        let context = chronosContext()
+        let id = plan.id
+        guard let model = try? context.fetch(
+            FetchDescriptor<MedicationPlan>(predicate: #Predicate { $0.id == id })).first else {
+            return .result(dialog: "I couldn't find that medication.")
+        }
+        let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+        model.recordDose(.skipped, reason: (trimmedReason?.isEmpty == false) ? trimmedReason : nil)
+        try? context.save()
+        return .result(dialog: "Skipped your \(model.name) dose for today.")
+    }
+}
+
+/// AI03: port of Android AppFunctions.listMedications — read back active medications with dosage and
+/// reminder time. Mirrors ListHabitsIntent / ListOpenTasksIntent. Feature-gated by medicationEnabled.
+struct ListMedicationsIntent: AppIntent {
+    static let title: LocalizedStringResource = "List Medications"
+    static let description = IntentDescription("Read back your active medications and reminder times.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
+        guard ChronosSettings.shared.medicationEnabled else {
+            return .result(value: "Medication tracking is turned off.", dialog: "Medication tracking is turned off in ChronosFlow.")
+        }
+        let context = chronosContext()
+        let meds = (try? context.fetch(FetchDescriptor<MedicationPlan>()))?
+            .filter(\.isActive)
+            .sorted { $0.reminderMinuteOfDay < $1.reminderMinuteOfDay } ?? []
+        guard !meds.isEmpty else {
+            return .result(value: "No medications.", dialog: "You have no medications set up yet.")
+        }
+        let summary = meds.map { m -> String in
+            let dose = m.dosage.isEmpty ? "" : " \(m.dosage)\(m.unit.isEmpty ? "" : " \(m.unit)")"
+            return "\(m.name)\(dose) at \(m.reminderMinuteOfDay.clockTime)"
+        }.joined(separator: ", ")
+        return .result(value: summary, dialog: "Your medications: \(summary).")
     }
 }
 
@@ -236,6 +347,9 @@ struct LogSleepIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        if let off = featureDialog(ChronosSettings.shared.sleepEnabled, "Sleep tracking is turned off in ChronosFlow.") {
+            return .result(dialog: off)
+        }
         let context = chronosContext()
         let today = Calendar.current.startOfDay(for: .now)
         // Merge into any existing track for the day (date is logically unique).
@@ -273,6 +387,9 @@ struct AddJournalEntryIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        if let off = featureDialog(ChronosSettings.shared.journalEnabled, "Journaling is turned off in ChronosFlow.") {
+            return .result(dialog: off)
+        }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .result(dialog: "Nothing to journal.") }
         let context = chronosContext()
@@ -297,6 +414,9 @@ struct CreateGoalIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        if let off = featureDialog(ChronosSettings.shared.goalsEnabled, "Goals are turned off in ChronosFlow.") {
+            return .result(dialog: off)
+        }
         let context = chronosContext()
         context.insert(Goal(title: goalTitle, targetValue: max(targetValue, 1)))
         try? context.save()
@@ -316,34 +436,80 @@ struct ApplyRoutineIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        if let off = featureDialog(ChronosSettings.shared.routinesEnabled, "Routines are turned off in ChronosFlow.") {
+            return .result(dialog: off)
+        }
         let context = chronosContext()
         let id = routine.id
         guard let model = try? context.fetch(
             FetchDescriptor<Routine>(predicate: #Predicate { $0.id == id })).first else {
             return .result(dialog: "I couldn't find that routine.")
         }
-        let today = Calendar.current.startOfDay(for: .now)
-        // Routine step offsets are absolute minute-of-day; instantiate each as a TimeBlock (anchor 0).
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        // R02: instantiate via the rollover-correct ChronosCore API. Each step's offset is treated as
+        // an absolute minute-of-day (anchor 0); steps crossing midnight roll onto the following date
+        // (floorDiv/floorMod over 1440) instead of folding back to the same day. Applying a routine is
+        // NOT "completing" it, so we deliberately leave `lastCompletedDate` untouched (Android parity:
+        // ApplyRoutineToDateUseCase places blocks; completion is tracked separately).
+        let specs = model.steps.map {
+            RoutineStepSpec(
+                title: $0.title,
+                category: $0.category,
+                offsetMinute: $0.offsetMinute,
+                durationMinutes: $0.durationMinutes,
+                energyLevel: $0.energyLevel)
+        }
+        guard let placed = instantiateRoutineOnDates(
+            steps: specs, startMinute: 0, anchorDate: today, calendar: calendar) else {
+            return .result(dialog: "I couldn't schedule “\(model.title)”.")
+        }
         var created = 0
-        for step in model.steps {
-            let start = min(max(step.offsetMinute, 0), 1439)
+        for (block, date) in placed {
             context.insert(TimeBlock(
-                date: today,
-                title: step.title,
-                category: step.category,
-                startMinuteOfDay: start,
-                durationMinutes: min(max(step.durationMinutes, 1), 1440),
+                date: date,
+                title: block.title,
+                category: block.category,
+                startMinuteOfDay: block.startMinuteOfDay,
+                durationMinutes: block.durationMinutes,
                 provenance: .routine,
-                energyLevel: EnergyIntensity.fromLevel(step.energyLevel),
+                energyLevel: EnergyIntensity.fromLevel(block.energyLevel),
                 source: "routine",
                 routineID: model.id))
             created += 1
         }
-        model.lastCompletedDate = today
         try? context.save()
         return created >= 1
             ? .result(dialog: "Applied “\(model.title)” — scheduled \(created) blocks.")
             : .result(dialog: "“\(model.title)” has no steps to schedule.")
+    }
+}
+
+/// Mark a routine as completed for today WITHOUT scheduling its blocks (the inverse of applying it).
+/// Android tracks routine completion separately from placement; this lets a user say "I finished my
+/// morning routine" to stamp `lastCompletedDate` for streak/insights without re-instantiating blocks.
+struct MarkRoutineCompleteIntent: AppIntent {
+    static let title: LocalizedStringResource = "Mark Routine Complete"
+    static let description = IntentDescription("Mark a saved routine as completed for today.")
+
+    @Parameter(title: "Routine") var routine: RoutineEntity
+
+    static var parameterSummary: some ParameterSummary { Summary("Mark routine \(\.$routine) complete") }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        if let off = featureDialog(ChronosSettings.shared.routinesEnabled, "Routines are turned off in ChronosFlow.") {
+            return .result(dialog: off)
+        }
+        let context = chronosContext()
+        let id = routine.id
+        guard let model = try? context.fetch(
+            FetchDescriptor<Routine>(predicate: #Predicate { $0.id == id })).first else {
+            return .result(dialog: "I couldn't find that routine.")
+        }
+        model.lastCompletedDate = Calendar.current.startOfDay(for: .now)
+        try? context.save()
+        return .result(dialog: "Marked “\(model.title)” complete for today.")
     }
 }
 
@@ -426,6 +592,9 @@ struct ListHabitsIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
+        guard ChronosSettings.shared.habitsEnabled else {
+            return .result(value: "Habits are turned off.", dialog: "Habits are turned off in ChronosFlow.")
+        }
         let context = chronosContext()
         let habits = (try? context.fetch(FetchDescriptor<Habit>()))?
             .filter(\.isActive)
@@ -445,14 +614,66 @@ struct ListHabitsIntent: AppIntent {
 
 struct StartFocusSessionIntent: AppIntent {
     static let title: LocalizedStringResource = "Start Focus Session"
-    static let description = IntentDescription("Open ChronosFlow to start a focus session.")
-    static let openAppWhenRun = true
+    static let description = IntentDescription("Start a focus session in the background, with a live timer on the Lock Screen.")
+    // AI02: Android startFocusSession persists a Running session immediately and best-effort starts the
+    // foreground surface; the session exists even if the app stays closed. Match that — do NOT open the app.
+    static let openAppWhenRun = false
+
+    @Parameter(title: "Duration (minutes)", default: 25) var durationMinutes: Int
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Start a \(\.$durationMinutes)-minute focus session")
+    }
 
     @MainActor
-    func perform() async throws -> some IntentResult {
-        // Opening the app lands on the Focus tab via the default selection flow.
-        .result()
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let minutes = min(max(durationMinutes, 1), 480)
+        let now = Date.now
+        let context = chronosContext()
+
+        // 1. Persist the running session immediately so it survives even if the live surface fails
+        //    to start (Android: the FocusSessionState.Running is saved before FocusService is touched).
+        let session = FocusSession(
+            date: now,
+            plannedDurationMinutes: minutes,
+            startedAt: now,
+            isCompleted: false)
+        context.insert(session)
+        try? context.save()
+
+        // 2. Best-effort: surface a Live Activity countdown on the Lock Screen / Dynamic Island.
+        //    Mirrors FocusTimerModel.startLiveActivity (same gating: setting on + activities authorized).
+        startBackgroundFocusActivity(minutes: minutes, startedAt: now)
+
+        return .result(dialog: "Started a \(minutes)-minute focus session.")
     }
+}
+
+/// Best-effort Live Activity start for a session created outside the in-app `FocusTimerModel`
+/// (e.g. from Siri while the app is closed). A single flat work phase ending `minutes` from now.
+/// Gated identically to `FocusTimerModel.startLiveActivity`: respects the user's Live Activity
+/// setting and the system authorization. Silently no-ops when unavailable.
+@MainActor
+private func startBackgroundFocusActivity(minutes: Int, startedAt: Date) {
+    guard ChronosSettings.shared.focusLiveActivityEnabled else { return }
+    guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+    let endsAt = startedAt.addingTimeInterval(TimeInterval(minutes * 60))
+    let attributes = FocusActivityAttributes(blockTitle: "Focus session", totalPhaseDurationMinutes: minutes)
+    let state = FocusActivityAttributes.ContentState(
+        phase: .work,
+        phaseEndsAt: endsAt,
+        isPaused: false,
+        awaitingAdvance: false,
+        phaseNumber: 1,
+        totalPhases: 1,
+        blockTitle: "Focus session",
+        blockStartsAt: startedAt,
+        blockEndsAt: endsAt,
+        nextBlockTitle: nil,
+        completionPercent: 0,
+        phaseSegments: [],
+        currentPhaseIndex: 0)
+    _ = try? Activity.request(attributes: attributes, content: .init(state: state, staleDate: endsAt))
 }
 
 struct NextBlockIntent: AppIntent {
@@ -583,6 +804,93 @@ struct RoutineEntityQuery: EntityQuery {
     }
 }
 
+// MARK: - Combined log (ports combined sleep+journal quick-log)
+
+struct LogSleepAndJournalIntent: AppIntent {
+    static let title: LocalizedStringResource = "Log Sleep & Journal"
+    static let description = IntentDescription("Record last night's sleep and optionally add a journal note.")
+
+    @Parameter(title: "Sleep quality (1–5)", default: 3) var quality: Int
+    @Parameter(title: "Journal note", default: "") var note: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Log sleep quality \(\.$quality) and note \(\.$note)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let sleepOn = ChronosSettings.shared.sleepEnabled
+        let journalOn = ChronosSettings.shared.journalEnabled
+        // The combined evening log needs at least one of the two surfaces enabled.
+        guard sleepOn || journalOn else {
+            return .result(dialog: "Sleep tracking and journaling are both turned off in ChronosFlow.")
+        }
+        let context = chronosContext()
+        let today = Calendar.current.startOfDay(for: .now)
+        let q = clampScore(quality)
+
+        // Sleep (only when sleep tracking is enabled)
+        var sleepMsg = ""
+        if sleepOn {
+            let existing = (try? context.fetch(FetchDescriptor<SleepTrack>()))?
+                .first { Calendar.current.isDate($0.date, inSameDayAs: today) }
+            if let existing { existing.sleepQuality = q } else {
+                context.insert(SleepTrack(date: today, sleepQuality: q, source: .manual))
+            }
+            sleepMsg = "Logged sleep quality \(q)/5."
+        }
+
+        // Journal (only if non-empty AND journaling is enabled)
+        var journalMsg = ""
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if journalOn && !trimmed.isEmpty {
+            context.insert(JournalEntry(body: trimmed))
+            journalMsg = sleepMsg.isEmpty ? "Journal entry saved." : " Journal entry saved."
+        }
+        try? context.save()
+        let dialog = (sleepMsg + journalMsg).isEmpty ? "Nothing to log." : sleepMsg + journalMsg
+        return .result(dialog: dialog)
+    }
+}
+
+// MARK: - Block from share (ports Android share-to-task quick-add path)
+
+struct AddTaskFromTextIntent: AppIntent {
+    static let title: LocalizedStringResource = "Add Task from Text"
+    static let description = IntentDescription("Parse text into a new ChronosFlow task with smart-fill (date, priority, recurrence).")
+
+    @Parameter(title: "Text") var text: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Add task from \(\.$text)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let context = chronosContext()
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .result(dialog: "No text to add.") }
+        // Use ChronosCore parseSmartFill to parse the text (mirrors Android taskTitleSmartFill).
+        let parsed = parseSmartFill(trimmed, now: .now)
+        let finalTitle = parsed.cleanedTitle.isEmpty ? trimmed : parsed.cleanedTitle
+        // Map TaskPriorityHint (.high=3, .medium=2, .low=1) to the app's integer priority scale.
+        let priorityInt: Int
+        switch parsed.priority {
+        case .high: priorityInt = 3
+        case .medium: priorityInt = 2
+        case .low: priorityInt = 1
+        case nil: priorityInt = 0
+        }
+        let task = TaskItem(
+            title: finalTitle,
+            priority: priorityInt,
+            dueDate: parsed.dueDate)
+        context.insert(task)
+        try? context.save()
+        return .result(dialog: "Added task: \(task.title).")
+    }
+}
+
 // MARK: - Shortcut phrases
 //
 // Registers spoken phrases for the highest-value intents (the system caps the visible set, so we
@@ -609,6 +917,15 @@ struct ChronosShortcuts: AppShortcutsProvider {
         AppShortcut(intent: LogMedicationDoseIntent(),
                     phrases: ["Log a dose in \(.applicationName)", "I took my medication in \(.applicationName)"],
                     shortTitle: "Log Dose", systemImageName: "pills.fill")
+        AppShortcut(intent: SkipHabitIntent(),
+                    phrases: ["Skip a habit in \(.applicationName)", "\(.applicationName) skip habit"],
+                    shortTitle: "Skip Habit", systemImageName: "arrow.uturn.forward")
+        AppShortcut(intent: SkipMedicationDoseIntent(),
+                    phrases: ["Skip a dose in \(.applicationName)", "\(.applicationName) skip medication"],
+                    shortTitle: "Skip Dose", systemImageName: "pills")
+        AppShortcut(intent: ListMedicationsIntent(),
+                    phrases: ["List my medications in \(.applicationName)", "\(.applicationName) my medications"],
+                    shortTitle: "List Medications", systemImageName: "list.bullet.clipboard")
         AppShortcut(intent: LogSleepIntent(),
                     phrases: ["Log my sleep in \(.applicationName)", "\(.applicationName) sleep log"],
                     shortTitle: "Log Sleep", systemImageName: "bed.double.fill")
@@ -621,5 +938,11 @@ struct ChronosShortcuts: AppShortcutsProvider {
         AppShortcut(intent: ReflowRemainingDayIntent(),
                     phrases: ["Reflow my day in \(.applicationName)", "Fix my day in \(.applicationName)"],
                     shortTitle: "Reflow Day", systemImageName: "arrow.triangle.2.circlepath")
+        AppShortcut(intent: LogSleepAndJournalIntent(),
+                    phrases: ["Log sleep and journal in \(.applicationName)", "\(.applicationName) evening log"],
+                    shortTitle: "Evening Log", systemImageName: "moon.zzz.fill")
+        AppShortcut(intent: AddTaskFromTextIntent(),
+                    phrases: ["Add a task from this text in \(.applicationName)"],
+                    shortTitle: "Task from Text", systemImageName: "text.badge.plus")
     }
 }

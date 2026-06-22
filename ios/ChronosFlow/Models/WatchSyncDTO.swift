@@ -20,19 +20,43 @@ struct WatchSnapshot: Codable, Equatable, Sendable {
     var blocks: [WatchBlock]
     var tasks: [WatchTask]
     var habits: [WatchHabit]
+    /// Medication doses scheduled for today. Empty when none — or when titles are redacted (the
+    /// privacy gate drops the array but keeps `medsDueCount` so the watch still shows urgency).
+    /// Mirrors Android's `WearDaySummary.meds` + `KEY_MED_ENTRIES`.
+    var medications: [WatchMed]
+    /// Count of doses still due today (untaken). Always sent — even when `medications` is redacted —
+    /// so the today page / complication can surface "N due" without leaking titles. Mirrors
+    /// Android's `WearDaySummary.medsDueCount` / `MEDS_DUE_COUNT`.
+    var medsDueCount: Int
+    /// One-line AI day digest pre-generated on the phone (cached; never triggers watch inference).
+    /// `nil` when redacted or not yet generated. Mirrors Android's `WearDaySummary.digest`/`KEY_DIGEST`.
+    var digest: String?
     /// Present only while a focus session is running on the phone.
     var focus: WatchFocusState?
+    /// Wall-clock epoch millis when the phone built this snapshot (0 = never synced on this device).
+    /// Lets the watch flag a schedule that may be out of date when the phone has been out of reach —
+    /// the "now"/"until"/dial claims are time-relative and silently rot otherwise. Feeds
+    /// `WearFormat.syncAgeLabel`. Mirrors Android's `WearDaySummary.receivedAtMillis`.
+    var receivedAtMillis: Int64
 
     init(date: Date = Calendar.current.startOfDay(for: .now),
          blocks: [WatchBlock] = [],
          tasks: [WatchTask] = [],
          habits: [WatchHabit] = [],
-         focus: WatchFocusState? = nil) {
+         medications: [WatchMed] = [],
+         medsDueCount: Int = 0,
+         digest: String? = nil,
+         focus: WatchFocusState? = nil,
+         receivedAtMillis: Int64 = 0) {
         self.date = date
         self.blocks = blocks
         self.tasks = tasks
         self.habits = habits
+        self.medications = medications
+        self.medsDueCount = medsDueCount
+        self.digest = digest
         self.focus = focus
+        self.receivedAtMillis = receivedAtMillis
     }
 }
 
@@ -48,6 +72,10 @@ struct WatchBlock: Codable, Equatable, Identifiable, Sendable {
 
     /// End minute-of-day, wrapping past midnight (mirrors `TimeBlock.plannedEndMinuteOfDay`).
     var endMinute: Int { (startMinute + durationMinutes) % 1440 }
+
+    /// Whether this block is a break/rest span — used to split "next event" vs "next break" on the
+    /// watch (mirrors Android's break-aware NowScreen). Matches the BREAK category case-insensitively.
+    var isBreak: Bool { category.uppercased() == "BREAK" }
 }
 
 struct WatchTask: Codable, Equatable, Identifiable, Sendable {
@@ -62,6 +90,31 @@ struct WatchHabit: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var title: String
     var doneToday: Bool
+}
+
+/// A single medication dose mirrored from the phone. Mirrors Android's `WearMed`
+/// (id, name, doseLabel, reminderMinute, taken). The watch shows these on a dedicated Meds page
+/// with per-dose "Taken" controls; `reminderMinute` (minute-of-day) drives overdue/earliest sorting.
+struct WatchMed: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var name: String
+    /// Human dose summary, e.g. "1 tablet · 10mg" (mirrors Android `WearMed.doseLabel`).
+    var doseLabel: String
+    var reminderMinute: Int
+    var taken: Bool
+
+    /// Whether this dose is past its reminder time and still untaken, relative to `nowMinute`.
+    /// Mirrors Android's `!med.taken && med.reminderMinute < nowMinute`.
+    func isOverdue(nowMinute: Int) -> Bool { !taken && reminderMinute < nowMinute }
+}
+
+/// Orders doses for an at-a-glance list: untaken first (earliest reminder first, so anything already
+/// overdue floats to the top), taken doses last. 1:1 port of Android's `sortMedsForGlance`.
+func sortMedsForGlance(_ meds: [WatchMed]) -> [WatchMed] {
+    meds.sorted { lhs, rhs in
+        if lhs.taken != rhs.taken { return !lhs.taken }      // untaken first
+        return lhs.reminderMinute < rhs.reminderMinute        // then earliest reminder
+    }
 }
 
 /// Live focus state mirrored to the watch so it can render a countdown (`Text(timerInterval:)`)
@@ -89,6 +142,8 @@ enum WatchCommand: Codable, Equatable, Sendable {
     case startFocus(blockID: String)
     case togglePauseFocus
     case stopFocus
+    /// Watch opened — ask the phone to push a fresh snapshot immediately (mirrors Android TYPE_SYNC).
+    case syncRequest
 }
 
 // MARK: - WatchConnectivity payload keys

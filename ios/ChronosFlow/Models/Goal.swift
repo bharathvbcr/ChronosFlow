@@ -1,8 +1,13 @@
 import Foundation
 import SwiftData
+import ChronosCore
 
 /// A measurable objective that completed tasks and habit completions can roll up into.
 /// Ported from `Goal.kt` plus its `deriveGoalProgress` helper.
+///
+/// `id` is stable (assigned once at creation) so linked work — `TimeBlock`/`TaskItem`/`Habit`
+/// rows carrying a matching `goalID` — can be filtered against it. `category` is a non-optional
+/// defaulted String (CloudKit-safe) that `GoalDetailView` reads for its category chip + tint.
 @Model
 final class Goal {
     @Attribute(.unique) var id: String
@@ -38,16 +43,29 @@ final class Goal {
         self.isCompleted = isCompleted
     }
 
-    /// Manual progress + derived linked-work counts, capped at the target.
-    /// Mirrors `deriveGoalProgress(goal, derived)`.
+    /// Manual progress + derived linked-work counts, capped at the target. Delegates to the
+    /// shared ChronosCore `deriveGoalProgress` so the rollup math lives in one place.
     func totalProgress(completedTasks: Int = 0, habitCompletions: Int = 0) -> Int {
-        let combined = progressValue + completedTasks + habitCompletions
-        return targetValue <= 0 ? combined : min(combined, targetValue)
+        deriveGoalProgress(
+            progressValue: progressValue,
+            targetValue: targetValue,
+            derived: GoalDerivedProgress(
+                completedTaskCount: completedTasks,
+                habitCompletionCount: habitCompletions
+            )
+        )
     }
 
+    /// Fraction in 0...1 for a progress ring. Delegates to ChronosCore `goalProgressFraction`.
     func progressFraction(completedTasks: Int = 0, habitCompletions: Int = 0) -> Double {
-        guard targetValue > 0 else { return isCompleted ? 1 : 0 }
-        let value = Double(totalProgress(completedTasks: completedTasks, habitCompletions: habitCompletions))
-        return min(max(value / Double(targetValue), 0), 1)
+        goalProgressFraction(
+            progressValue: progressValue,
+            targetValue: targetValue,
+            isCompleted: isCompleted,
+            derived: GoalDerivedProgress(
+                completedTaskCount: completedTasks,
+                habitCompletionCount: habitCompletions
+            )
+        )
     }
 }

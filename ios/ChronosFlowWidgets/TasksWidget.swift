@@ -7,6 +7,7 @@ import SwiftData
 struct TasksEntry: TimelineEntry {
     let date: Date
     struct Row: Identifiable { let id: String; let title: String }
+    /// Up to 8 open tasks; the view trims to the limit its family allows (Android's COMPACT/TALL).
     let rows: [Row]
     let openCount: Int
 }
@@ -27,34 +28,60 @@ struct TasksProvider: TimelineProvider {
         let open = (try? context.fetch(FetchDescriptor<TaskItem>()))?
             .filter { !$0.isCompleted }
             .sorted { $0.priority > $1.priority } ?? []
-        let rows = open.prefix(4).map { TasksEntry.Row(id: $0.id, title: $0.title) }
+        // Carry up to the largest family's limit; the view trims per its actual family.
+        let rows = open.prefix(8).map { TasksEntry.Row(id: $0.id, title: $0.title) }
         return TasksEntry(date: .now, rows: Array(rows), openCount: open.count)
     }
 }
 
 struct TasksWidgetView: View {
     var entry: TasksEntry
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: "checklist")
-                Text("\(entry.openCount) open").font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach(entry.rows) { row in
-                HStack(spacing: 6) {
-                    // Tap the circle to complete the task in place (Android TaskComplete).
-                    Button(intent: CompleteTaskIntent(taskID: row.id)) {
-                        Image(systemName: "circle").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    Text(row.title).font(.caption).lineLimit(1)
-                }
-            }
-            Spacer()
+    @Environment(\.widgetFamily) private var family
+
+    /// Row limit per family — the iOS analogue of Android's COMPACT (4) / TALL (8) responsive limits.
+    private var rowLimit: Int {
+        switch family {
+        case .systemSmall:  return 3
+        case .systemMedium: return 4
+        default:            return 8   // systemLarge
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    var body: some View {
+        // Wrap the entire card in a Link so tapping anywhere opens the Tasks section in the app.
+        Link(destination: URL(string: "chronosflow://tasks")!) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "checklist")
+                    Text("\(entry.openCount) open").font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(entry.rows.prefix(rowLimit)) { row in
+                    HStack(spacing: 6) {
+                        // Tap the circle to complete the task in place (Android TaskComplete).
+                        Button(intent: CompleteTaskIntent(taskID: row.id)) {
+                            Image(systemName: "circle").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        Text(row.title).font(.caption).lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        }
         .containerBackground(.fill.tertiary, for: .widget)
     }
+}
+
+#Preview(as: .systemMedium) {
+    TasksWidget()
+} timeline: {
+    TasksEntry(date: .now, rows: [
+        .init(id: "1", title: "Finish report"),
+        .init(id: "2", title: "Reply to email"),
+        .init(id: "3", title: "Buy groceries"),
+    ], openCount: 5)
+    TasksEntry(date: .now, rows: [], openCount: 0)
 }
 
 struct TasksWidget: Widget {
@@ -64,6 +91,6 @@ struct TasksWidget: Widget {
         }
         .configurationDisplayName("Tasks")
         .description("Your open tasks at a glance.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

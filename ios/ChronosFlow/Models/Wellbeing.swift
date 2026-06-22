@@ -51,6 +51,16 @@ final class JournalEntry {
     var promptType: String?
     var moodCheckInID: String?
     var isPrimary: Bool
+    /// 0 = unset; 1=awful 2=sad 3=neutral 4=happy 5=ecstatic. Mirrors Android `moodRating`.
+    var moodRating: Int
+    /// Local file URLs for photos attached to this entry. Mirrors Android `photoUris`.
+    var photoUris: [String]
+    /// Which rotating prompt key is active for this entry. Mirrors Android `shuffledPromptKey`.
+    var shuffledPromptKey: String?
+    /// True when this entry was imported from HealthKit/workout data. Mirrors Android `isWorkoutEntry`.
+    var isWorkoutEntry: Bool
+    /// The user's journal streak on this day, populated at save time. Mirrors Android `streakDay`.
+    var streakDay: Int
 
     init(
         id: String = UUID().uuidString,
@@ -60,7 +70,12 @@ final class JournalEntry {
         body: String,
         promptType: String? = nil,
         moodCheckInID: String? = nil,
-        isPrimary: Bool = true
+        isPrimary: Bool = true,
+        moodRating: Int = 0,
+        photoUris: [String] = [],
+        shuffledPromptKey: String? = nil,
+        isWorkoutEntry: Bool = false,
+        streakDay: Int = 0
     ) {
         self.id = id
         self.entryDate = Calendar.current.startOfDay(for: entryDate)
@@ -70,6 +85,11 @@ final class JournalEntry {
         self.promptType = promptType
         self.moodCheckInID = moodCheckInID
         self.isPrimary = isPrimary
+        self.moodRating = moodRating
+        self.photoUris = photoUris
+        self.shuffledPromptKey = shuffledPromptKey
+        self.isWorkoutEntry = isWorkoutEntry
+        self.streakDay = streakDay
     }
 }
 

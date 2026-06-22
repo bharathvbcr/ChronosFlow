@@ -8,10 +8,12 @@ struct TodayView: View {
     @Query private var allBlocks: [TimeBlock]
     @Query private var tasks: [TaskItem]
     @Query private var sleepNights: [SleepTrack]
+    @Query(sort: \JournalEntry.entryDate, order: .reverse) private var journalEntries: [JournalEntry]
+    @Query private var habits: [Habit]
     @State private var activeSheet: TodaySheet?
 
     private enum TodaySheet: String, Identifiable {
-        case assistant, checkIn, data, newTask, newBlock, logSleep
+        case assistant, checkIn, data, newTask, newBlock, logSleep, journal
         var id: String { rawValue }
     }
 
@@ -46,6 +48,16 @@ struct TodayView: View {
         }
     }
 
+    private var hasTodayJournalEntry: Bool {
+        journalEntries.contains { Calendar.current.isDateInToday($0.entryDate) }
+    }
+
+    private var hasTodaySleepLog: Bool {
+        sleepNights.contains { Calendar.current.isDateInToday($0.date) }
+    }
+
+    private var activeHabits: [Habit] { habits.filter(\.isActive) }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -54,8 +66,11 @@ struct TodayView: View {
                     VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
                         if readiness != .unknown && readiness != .normal { readinessBanner }
                         nowCard
+                        if !hasTodayJournalEntry { journalActionCard }
+                        if !hasTodaySleepLog { sleepActionCard }
                         if let upNext { upNextCard(upNext) }
                         taskSection
+                        if !activeHabits.isEmpty { habitSummarySection }
                     }
                     .padding(ChronosSpacing.standard)
                 }
@@ -97,6 +112,7 @@ struct TodayView: View {
                 case .newTask: TaskEditorSheet(task: nil)
                 case .newBlock: TimeBlockEditorSheet(block: nil)
                 case .logSleep: SleepLogSheet()
+                case .journal: JournalView()
                 }
             }
         }
@@ -182,6 +198,68 @@ struct TodayView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var journalActionCard: some View {
+        ChronosGlassCard(tint: ChronosColors.brandSecondary) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Reflect on your day", systemImage: "book.closed.fill")
+                        .font(.chronosHeadline)
+                        .foregroundStyle(ChronosColors.brandSecondary)
+                    Text("Write in your journal to build your streak.")
+                        .font(.chronosCaption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+            }
+        }
+        .onTapGesture { activeSheet = .journal }
+    }
+
+    private var sleepActionCard: some View {
+        ChronosGlassCard(tone: .quiet) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Log tonight's sleep", systemImage: "moon.zzz.fill")
+                        .font(.chronosHeadline)
+                    Text("Track your sleep to adapt tomorrow's plan.")
+                        .font(.chronosCaption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { activeSheet = .logSleep } label: {
+                    Text("Log").font(.chronosLabel)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(ChronosColors.brandPrimary.opacity(0.15), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var habitSummarySection: some View {
+        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+            Text("Today's habits").font(.chronosTitle)
+            ForEach(activeHabits.prefix(5)) { habit in
+                Button {
+                    habit.toggleCompletion(on: .now)
+                    try? context.save()
+                } label: {
+                    HStack {
+                        Image(systemName: habit.isCompleted(on: .now) ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(habit.isCompleted(on: .now) ? ChronosColors.brandSecondary : .secondary)
+                        Text(habit.title).font(.chronosBody)
+                        Spacer()
+                        if habit.streakCount > 0 {
+                            Text("\(habit.streakCount)d").font(.chronosCaption)
+                                .foregroundStyle(ChronosColors.brandPrimary)
+                        }
+                    }
+                    .padding(.vertical, ChronosSpacing.micro)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 

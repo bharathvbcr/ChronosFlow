@@ -42,6 +42,10 @@ struct ChronosDialCanvas: View {
     @State private var previewStart: Int?
     @State private var previewDuration: Int?
     @State private var lastSnappedMinute = -1
+    /// True while the live preview window would overlap another block — drives a warning tint on the
+    /// dragged arc (mirrors Android's previewMove → Conflict result feedback). Recomputed each move
+    /// via `ChronosCore.PlannerMath.conflicts` over the other blocks + the candidate preview.
+    @State private var previewHasConflict = false
 
     private var motionDisabled: Bool {
         ChronosSettings.shared.motionDisabled(systemReduceMotion)
@@ -154,7 +158,10 @@ struct ChronosDialCanvas: View {
                         startAngle: .degrees(arc.startAngleDegrees),
                         endAngle: .degrees(arc.startAngleDegrees + arc.sweepDegrees),
                         clockwise: false)
-            let color = ChronosColors.category(block.category)
+            // Warn (error tint) when the live preview of the dragged block would collide; otherwise
+            // the block's normal category color, full-opacity while selected.
+            let warning = selected && dragKind != nil && previewHasConflict
+            let color = warning ? ChronosColors.brandAccent : ChronosColors.category(block.category)
             context.stroke(path, with: .color(color.opacity(selected ? 1 : 0.85)),
                            style: StrokeStyle(lineWidth: lineWidth - (selected ? 0 : 3),
                                               lineCap: .round))
@@ -279,6 +286,11 @@ struct ChronosDialCanvas: View {
 
     // MARK: Drag to move / resize with live preview (math mirrors ChronosCore.DialDrag, unit-tested)
 
+    // BENCHMARK-FIRST (DD03 latency): each pointer event runs geometry.hitTest, an O(n) block lookup,
+    // and updatePreviewConflict's O(n) conflict scan. For a day's worth of blocks (tens) this is
+    // negligible. iOS is single-process SwiftData (no Android-style WAL contention), and we only
+    // persist on drag *end*, not per event — so no drag-session cache is added here unless on-device
+    // profiling shows a real cost at high block counts.
     private func updateDrag(at value: DragGesture.Value, center: CGPoint, maxRadius: Double) {
         if dragKind == nil { beginDrag(at: value.startLocation, center: center, maxRadius: maxRadius) }
         guard let kind = dragKind, let id = dragBlockID,
@@ -304,6 +316,18 @@ struct ChronosDialCanvas: View {
             previewDuration = forwardSpan(from: snappedTarget, to: oldEnd)
             emitSnap(at: snappedTarget)
         }
+        updatePreviewConflict(for: id)
+    }
+
+    /// Recompute whether the dragged block's *preview* window overlaps any other block, reusing the
+    /// shared `ChronosCore.PlannerMath.conflicts`. Cheap (≤ n spans) and pure — no persistence.
+    private func updatePreviewConflict(for id: String) {
+        guard let start = previewStart, let duration = previewDuration else { previewHasConflict = false; return }
+        var spans = blocks
+            .filter { $0.id != id }
+            .map { ChronosCore.BlockSpan(id: $0.id, startMinute: $0.startMinuteOfDay, durationMinutes: $0.durationMinutes) }
+        spans.append(ChronosCore.BlockSpan(id: id, startMinute: start, durationMinutes: duration))
+        previewHasConflict = ChronosCore.PlannerMath.conflicts(in: spans).contains { $0.firstID == id || $0.secondID == id }
     }
 
     private func beginDrag(at start: CGPoint, center: CGPoint, maxRadius: Double) {
@@ -321,7 +345,7 @@ struct ChronosDialCanvas: View {
     }
 
     private func endDrag(at location: CGPoint, center: CGPoint, maxRadius: Double) {
-        defer { dragKind = nil; dragBlockID = nil; previewStart = nil; previewDuration = nil; lastSnappedMinute = -1 }
+        defer { dragKind = nil; dragBlockID = nil; previewStart = nil; previewDuration = nil; lastSnappedMinute = -1; previewHasConflict = false }
         guard let id = dragBlockID, dragKind != nil,
               let block = blocks.first(where: { $0.id == id }),
               let start = previewStart, let duration = previewDuration

@@ -71,28 +71,31 @@ struct TodayProvider: TimelineProvider {
 struct TodayWidgetView: View {
     var entry: TodayEntry
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let current = entry.current {
-                Text("NOW").font(.caption2).foregroundStyle(.secondary)
-                Text(current.title).font(.headline)
-                Text("until \(current.endMinute.clockTime)").font(.caption).foregroundStyle(.secondary)
-                focusButton(for: current)
-            } else if let next = entry.next {
-                Text("UP NEXT").font(.caption2).foregroundStyle(.secondary)
-                Text(next.title).font(.headline)
-                Text("at \(next.startMinute.clockTime)").font(.caption).foregroundStyle(.secondary)
-                focusButton(for: next)
-            } else {
-                Text("Open time").font(.headline)
+        // Wrap the entire card in a Link so tapping anywhere opens the Today section in the app.
+        Link(destination: URL(string: "chronosflow://today")!) {
+            VStack(alignment: .leading, spacing: 6) {
+                if let current = entry.current {
+                    Text("NOW").font(.caption2).foregroundStyle(.secondary)
+                    Text(current.title).font(.headline)
+                    Text("until \(current.endMinute.clockTime)").font(.caption).foregroundStyle(.secondary)
+                    focusButton(for: current)
+                } else if let next = entry.next {
+                    Text("UP NEXT").font(.caption2).foregroundStyle(.secondary)
+                    Text(next.title).font(.headline)
+                    Text("at \(next.startMinute.clockTime)").font(.caption).foregroundStyle(.secondary)
+                    focusButton(for: next)
+                } else {
+                    Text("Open time").font(.headline)
+                }
+                Spacer()
+                if let digest = entry.digest, !digest.isEmpty {
+                    Text(digest).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                } else {
+                    Text("\(entry.blockCount) blocks today").font(.caption2).foregroundStyle(.secondary)
+                }
             }
-            Spacer()
-            if let digest = entry.digest, !digest.isEmpty {
-                Text(digest).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-            } else {
-                Text("\(entry.blockCount) blocks today").font(.caption2).foregroundStyle(.secondary)
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .containerBackground(.fill.tertiary, for: .widget)
     }
 
@@ -115,4 +118,17 @@ struct TodayWidget: Widget {
         .description("Your current and upcoming time blocks.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
+}
+
+#Preview(as: .systemMedium) {
+    TodayWidget()
+} timeline: {
+    TodayEntry(
+        date: .now,
+        current: WidgetBlock(id: "1", title: "Deep work", category: "FOCUS", startMinute: 540, endMinute: 660),
+        next: WidgetBlock(id: "2", title: "Lunch", category: "MEAL", startMinute: 750, endMinute: 795),
+        blockCount: 6,
+        digest: "2 of 6 blocks done · 3 tasks open"
+    )
+    TodayEntry(date: .now, current: nil, next: nil, blockCount: 0, digest: nil)
 }

@@ -89,3 +89,87 @@ enum GenerationProfile: String, Codable, Sendable {
         }
     }
 }
+
+// Journal mood (big emoji face picker, matches Android JournalMood enum)
+enum JournalMood: Int, Codable, CaseIterable, Sendable {
+    case unset = 0
+    case awful = 1
+    case sad = 2
+    case neutral = 3
+    case happy = 4
+    case ecstatic = 5
+
+    var emoji: String {
+        switch self {
+        case .unset: return ""
+        case .awful: return "😞"
+        case .sad: return "😕"
+        case .neutral: return "😐"
+        case .happy: return "😊"
+        case .ecstatic: return "🤩"
+        }
+    }
+    var label: String {
+        switch self {
+        case .unset: return "How are you feeling?"
+        case .awful: return "Awful"
+        case .sad: return "Sad"
+        case .neutral: return "Neutral"
+        case .happy: return "Happy"
+        case .ecstatic: return "Ecstatic"
+        }
+    }
+}
+
+/// How the assistant is allowed to run, mirroring Android `PrivacyMode`
+/// (ON_DEVICE_ONLY / CLOUD_ALLOWED / DISABLED).
+///
+/// On iOS the only implemented backend is on-device Foundation Models; `.cloud`
+/// is a structural placeholder for a future provider layer (see N01) and is
+/// treated as on-device until that path lands. `.disabled` turns the assistant off.
+enum PrivacyMode: String, Codable, CaseIterable, Sendable {
+    case onDeviceOnly    // ON_DEVICE_ONLY — Foundation Models only, never leaves device
+    case cloudAllowed    // CLOUD_ALLOWED — structural placeholder; cloud provider is TODO
+    case disabled        // DISABLED — no AI generation at all
+
+    /// Whether any on-device generation may run for this mode. Cloud falls back
+    /// to on-device until a cloud provider exists, so both allow on-device work.
+    var allowsOnDeviceGeneration: Bool {
+        switch self {
+        case .onDeviceOnly, .cloudAllowed: true
+        case .disabled: false
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .onDeviceOnly: "On-device only"
+        case .cloudAllowed: "Cloud allowed"
+        case .disabled: "Disabled"
+        }
+    }
+}
+
+// Insights section filter (mirrors Android InsightsSection enum for section filter pills)
+enum InsightsSection: String, CaseIterable, Identifiable, Sendable {
+    case execution, habits, sleep, mood, medications
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .execution: return "Execution"
+        case .habits: return "Habits"
+        case .sleep: return "Sleep"
+        case .mood: return "Mood"
+        case .medications: return "Medications"
+        }
+    }
+    var systemImage: String {
+        switch self {
+        case .execution: return "chart.bar.fill"
+        case .habits: return "heart.fill"
+        case .sleep: return "moon.zzz.fill"
+        case .mood: return "face.smiling"
+        case .medications: return "pills.fill"
+        }
+    }
+}

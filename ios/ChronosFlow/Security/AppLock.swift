@@ -80,19 +80,68 @@ final class AppLock {
     }
 }
 
-// MARK: - MedicationLockGate
+// MARK: - SensitiveArea
 
-/// Wraps protected content behind `AppLock`. Shows a glassy "locked" overlay with an Unlock
-/// button while `ChronosSettings.shared.medicationLockEnabled` is on and the gate hasn't been
-/// satisfied; otherwise renders `content`. Re-locks on background via `scenePhase`.
-struct MedicationLockGate<Content: View>: View {
+/// Identifies a protected surface. iOS analogue of Android's SensitiveRouteGate generalization
+/// (medication + data-export). Add new cases here when more areas need optional auth-gating.
+enum SensitiveArea: String, CaseIterable {
+    case medication
+    case dataExport
+
+    /// Whether this surface requires authentication right now (reads live settings flags).
+    var requiresLock: Bool {
+        switch self {
+        case .medication: return ChronosSettings.shared.medicationLockEnabled
+        case .dataExport: return false  // data export NOT locked by default (user can enable later)
+        }
+    }
+
+    var lockedTitle: String {
+        switch self {
+        case .medication: return "Medications are protected"
+        case .dataExport: return "Data export is protected"
+        }
+    }
+
+    var lockedDescription: String {
+        switch self {
+        case .medication: return "Unlock with Face ID, Touch ID, or your passcode to view your medication schedule."
+        case .dataExport: return "Unlock to export your personal health and schedule data."
+        }
+    }
+
+    var unlockReason: String {
+        switch self {
+        case .medication: return "Unlock to view your medications"
+        case .dataExport: return "Unlock to export your data"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .medication: return "pills.fill"
+        case .dataExport: return "externaldrive.fill"
+        }
+    }
+
+    var tint: Color { ChronosColors.category(rawValue.uppercased()) }
+
+    var unavailableReason: String {
+        "Device authentication isn't set up, so \(rawValue) isn't locked."
+    }
+}
+
+// MARK: - SensitiveAreaGate
+
+/// Generic auth gate for any `SensitiveArea`. Renders `content` normally when the area doesn't
+/// require a lock or the user has already authenticated; otherwise shows a glassy `LockedOverlay`.
+/// Re-locks whenever the app leaves the foreground.
+struct SensitiveAreaGate<Content: View>: View {
+    let area: SensitiveArea
     @ViewBuilder var content: () -> Content
 
     @State private var lock = AppLock()
     @Environment(\.scenePhase) private var scenePhase
-
-    /// Read once per body eval — the settings flag can be toggled live from Settings.
-    private var lockEnabled: Bool { ChronosSettings.shared.medicationLockEnabled }
 
     var body: some View {
         ZStack {
@@ -102,39 +151,50 @@ struct MedicationLockGate<Content: View>: View {
                 .allowsHitTesting(!showOverlay)
 
             if showOverlay {
-                LockedOverlay(lock: lock)
+                LockedOverlay(lock: lock, area: area)
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
         }
         .animation(ChronosMotion.smooth, value: showOverlay)
-        .task(id: lockEnabled) {
-            // On first appearance (or when the flag is switched on) immediately prompt so the
+        .task(id: area.requiresLock) {
+            // Immediately prompt on first appearance (or when the flag is switched on) so the
             // user lands on the biometric sheet rather than a dead "tap to unlock" wall.
-            if lockEnabled, !lock.isUnlocked { await lock.unlock() }
+            if area.requiresLock, !lock.isUnlocked { await lock.unlock() }
         }
         .onChange(of: scenePhase) { _, phase in
-            // Re-arm the gate whenever we leave the foreground.
             if phase != .active { lock.lock() }
         }
     }
 
-    private var showOverlay: Bool { lockEnabled && !lock.isUnlocked }
+    private var showOverlay: Bool { area.requiresLock && !lock.isUnlocked }
 }
+
+// MARK: - MedicationLockGate (backwards compatibility)
+
+/// Retained for call sites that haven't migrated to `SensitiveAreaGate` / `.sensitiveGate(_:)`.
+/// Internally delegates to `SensitiveAreaGate(area: .medication)` so behaviour is identical.
+struct MedicationLockGate<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    var body: some View { SensitiveAreaGate(area: .medication, content: content) }
+}
+
+// MARK: - LockedOverlay
 
 private struct LockedOverlay: View {
     @Bindable var lock: AppLock
+    let area: SensitiveArea
 
     var body: some View {
         VStack(spacing: ChronosSpacing.standard) {
-            Image(systemName: "lock.fill")
+            Image(systemName: area.systemImage)
                 .font(.system(size: 44, weight: .semibold, design: .rounded))
-                .foregroundStyle(ChronosColors.category("MEDICATION"))
+                .foregroundStyle(area.tint)
                 .symbolEffect(.bounce, value: lock.isAuthenticating)
 
             VStack(spacing: ChronosSpacing.micro) {
-                Text("Medications are protected")
+                Text(area.lockedTitle)
                     .font(.chronosTitle)
-                Text("Unlock with Face ID, Touch ID, or your passcode to view your medication schedule.")
+                Text(area.lockedDescription)
                     .font(.chronosCaption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -151,13 +211,20 @@ private struct LockedOverlay: View {
             }
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.capsule)
-            .tint(ChronosColors.category("MEDICATION"))
+            .tint(area.tint)
             .disabled(lock.isAuthenticating)
 
             if let error = lock.lastError {
                 Text(error)
                     .font(.chronosCaption)
                     .foregroundStyle(ChronosColors.brandAccent)
+                    .multilineTextAlignment(.center)
+            }
+
+            if let note = lock.unavailableReason {
+                Text(note)
+                    .font(.chronosCaption)
+                    .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
             }
         }
@@ -186,8 +253,16 @@ private struct LockedOverlayBackground: ViewModifier {
 }
 
 extension View {
+    /// Gate this view behind the given `SensitiveArea`. Shows the auth overlay when the area's
+    /// `requiresLock` flag is on and the device can evaluate a policy; fails open otherwise so
+    /// no user is ever stranded (mirrors Android's `canAuthenticate == false` fallback).
+    func sensitiveGate(_ area: SensitiveArea) -> some View {
+        SensitiveAreaGate(area: area) { self }
+    }
+
     /// Gate this view behind the medication app-lock (respects the privacy settings flag).
+    /// Kept for backwards compatibility — internally calls `sensitiveGate(.medication)`.
     func medicationLock() -> some View {
-        MedicationLockGate { self }
+        sensitiveGate(.medication)
     }
 }

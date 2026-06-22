@@ -7,6 +7,14 @@ import ActivityKit
 ///
 /// Mirrors the block-bounded phase model: shows phase N of M, a live countdown while running, and a
 /// "Tap to continue" prompt while holding at a phase boundary (`awaitingAdvance`).
+///
+/// CANONICAL Live Activity widget: this widget-extension implementation is the one that ships. It
+/// renders the multi-phase (Pomodoro) progress bar from `ContentState.phaseSegments` (built in the
+/// app via `ChronosCore.focusBarSegments`) AND carries the interactive Pause/Stop/Extend/Continue
+/// controls. The in-app `FocusLiveActivityView.swift` is the view-only companion (it has no buttons,
+/// since a Live Activity's buttons must run in the extension process). `FocusActivityAttributes` and
+/// `FocusCommandBridge` are defined in the main app target and shared via the App Group, matching the
+/// Android FocusService Live Updates architecture.
 struct FocusLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: FocusActivityAttributes.self) { context in
@@ -22,6 +30,10 @@ struct FocusLiveActivityWidget: Widget {
                     Spacer()
                     trailing(context.state)
                 }
+                // Segmented (Pomodoro) bar — one capsule per work/break phase, sized + colored from
+                // the render-ready segments the app built via `focusBarSegments`. Empty for a flat
+                // session, which renders nothing here.
+                segmentedBar(context.state.phaseSegments)
                 controls(context.state)
             }
             .padding()
@@ -39,6 +51,7 @@ struct FocusLiveActivityWidget: Widget {
                     VStack(spacing: 8) {
                         Text(context.attributes.blockTitle).font(.headline)
                         Text(subtitle(context.state)).font(.caption2).foregroundStyle(.secondary)
+                        segmentedBar(context.state.phaseSegments)
                         controls(context.state)
                     }
                 }
@@ -88,6 +101,48 @@ struct FocusLiveActivityWidget: Widget {
                 }
                 .buttonStyle(.bordered).tint(.red)
             }
+        }
+    }
+
+    /// Thin multi-segment Pomodoro bar from the render-ready `phaseSegments`. One capsule per
+    /// work/break phase, laid out by `fractionalWidth` and tinted by phase kind / live state — the
+    /// iOS render of the Android segmented foreground-notification bar (logic in
+    /// `ChronosCore.focusBarSegments`). Renders nothing for a flat (single-phase) session.
+    @ViewBuilder private func segmentedBar(
+        _ segments: [FocusActivityAttributes.ContentState.PhaseSegmentInfo]
+    ) -> some View {
+        if segments.count > 1 {
+            GeometryReader { geo in
+                HStack(spacing: 2) {
+                    ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                        Capsule()
+                            .fill(segmentColor(segment))
+                            // Subtract the cumulative 2pt gaps so the widths still sum to the bar.
+                            .frame(width: max(2, segment.fractionalWidth * availableBarWidth(geo.size.width, count: segments.count)))
+                    }
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
+            }
+            .frame(height: 5)
+            .accessibilityHidden(true)
+        }
+    }
+
+    private func availableBarWidth(_ total: CGFloat, count: Int) -> CGFloat {
+        max(0, total - CGFloat(max(count - 1, 0)) * 2)
+    }
+
+    /// Maps a segment's kind / live state to the brand palette, mirroring Android
+    /// `focusSegmentColorRes` precedence (break → current-state → steady work).
+    private func segmentColor(_ segment: FocusActivityAttributes.ContentState.PhaseSegmentInfo) -> Color {
+        if segment.isBreak { return ChronosColors.brandSecondary }          // teal break
+        guard segment.isCurrent, let state = segment.currentState else {
+            return ChronosColors.brandPrimary.opacity(0.55)                 // non-current work (steady)
+        }
+        switch state {
+        case .running:    return ChronosColors.brandPrimary                 // current work, ticking
+        case .endingSoon: return ChronosColors.brandAccent                  // current work, < 1 min left
+        case .paused:     return ChronosColors.brandPrimary.opacity(0.4)    // current work, paused
         }
     }
 

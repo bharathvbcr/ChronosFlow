@@ -5,9 +5,16 @@ import SwiftData
 /// Ports `feature/tasks`.
 struct TasksView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: [SortDescriptor(\TaskItem.priority, order: .reverse),
                   SortDescriptor(\TaskItem.createdAt)]) private var tasks: [TaskItem]
     @State private var activeSheet: TaskSheet?
+    /// Candidates drained from a multi-line / .txt / .ics share (written by ChronosShareExtension to
+    /// the App Group under `share.pendingBulkTasks`). Non-nil drives the bulk-import review sheet.
+    @State private var bulkImportCandidates: [String]?
+
+    /// App Group the Share Extension writes pending shares into.
+    private static let appGroup = "group.com.chronosflow.shared"
 
     private var open: [TaskItem] { tasks.filter { !$0.isCompleted } }
     private var done: [TaskItem] { tasks.filter(\.isCompleted) }
@@ -46,7 +53,43 @@ struct TasksView: View {
                 case .new: TaskEditorSheet(task: nil)
                 }
             }
+            // Bulk-import review for a multi-line / .txt / .ics share routed here by the Share
+            // Extension. Mirrors Android TaskBulkImportSheet.
+            .sheet(item: bulkSheetBinding) { box in
+                TaskBulkImportSheet(candidates: box.candidates)
+            }
+            .onAppear { drainPendingBulkImport() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { drainPendingBulkImport() }
+            }
         }
+    }
+
+    /// Wraps the optional candidate list in an `Identifiable` box so `.sheet(item:)` presents it,
+    /// and clears the state when the sheet is dismissed.
+    private var bulkSheetBinding: Binding<BulkImportBox?> {
+        Binding(
+            get: { bulkImportCandidates.map(BulkImportBox.init) },
+            set: { if $0 == nil { bulkImportCandidates = nil } }
+        )
+    }
+
+    private struct BulkImportBox: Identifiable {
+        let candidates: [String]
+        var id: String { candidates.joined(separator: "\u{1f}") }
+    }
+
+    /// Pull any pending bulk-import candidates the Share Extension left in the App Group (recent
+    /// only, mirroring the 30s freshness window the add-task single-share path uses) and surface the
+    /// review sheet. Consumed once so it doesn't re-fire on the next foreground.
+    private func drainPendingBulkImport() {
+        let defaults = UserDefaults(suiteName: Self.appGroup)
+        guard let candidates = defaults?.stringArray(forKey: "share.pendingBulkTasks"),
+              !candidates.isEmpty,
+              let ts = defaults?.double(forKey: "share.pendingTimestamp"),
+              Date().timeIntervalSince1970 - ts < 30 else { return }
+        defaults?.removeObject(forKey: "share.pendingBulkTasks")
+        bulkImportCandidates = candidates
     }
 
     private func delete(_ offsets: IndexSet, from list: [TaskItem]) {

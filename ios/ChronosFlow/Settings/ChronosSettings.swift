@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import ChronosCore
 
 // MARK: - ChronosSettings
 //
@@ -27,14 +28,18 @@ final class ChronosSettings {
         // `.standard` when the App Group isn't provisioned (e.g. a bare simulator).
         self.defaults = UserDefaults(suiteName: ChronosStore.appGroup) ?? .standard
 
-        // Feature flags (graduated on-by-default, matching Android's FeatureGraduations).
-        habitsEnabled = defaults.boolOr("flag.habits", true)
-        goalsEnabled = defaults.boolOr("flag.goals", true)
-        medicationEnabled = defaults.boolOr("flag.medication", true)
-        journalEnabled = defaults.boolOr("flag.journal", true)
-        sleepEnabled = defaults.boolOr("flag.sleep", true)
+        // Feature flags. Each graduated flag is resolved through ChronosCore's FeatureGraduations:
+        // installs that parked a stale `false` before the feature graduated are promoted on-by-default
+        // exactly once (while the wave's promotion marker is unset), after which a deliberate stored
+        // choice is respected. The one-time promotion is made durable here by persisting the marker.
+        // `routines` is the only flag that never shipped off, so it is not graduated (plain default).
+        habitsEnabled = Self.resolveGraduated(defaults, "flag.habits", FeatureGraduationKeys.habitsEnabled)
+        medicationEnabled = Self.resolveGraduated(defaults, "flag.medication", FeatureGraduationKeys.medicationEnabled)
+        insightsEnabled = Self.resolveGraduated(defaults, "flag.insights", FeatureGraduationKeys.reviewEnabled)
+        goalsEnabled = Self.resolveGraduated(defaults, "flag.goals", FeatureGraduationKeys.goalsEnabled)
+        journalEnabled = Self.resolveGraduated(defaults, "flag.journal", FeatureGraduationKeys.journalEnabled)
+        sleepEnabled = Self.resolveGraduated(defaults, "flag.sleep", FeatureGraduationKeys.sleepEnabled)
         routinesEnabled = defaults.boolOr("flag.routines", true)
-        insightsEnabled = defaults.boolOr("flag.insights", true)
 
         // Appearance.
         themeMode = ThemeMode(rawValue: defaults.string(forKey: "appearance.theme") ?? "") ?? .system
@@ -58,23 +63,68 @@ final class ChronosSettings {
         focusLiveActivityEnabled = defaults.boolOr("notif.focusLiveActivity", true)
         quietHoursStartMinute = defaults.intOr("notif.quietStart", 22 * 60)
         quietHoursEndMinute = defaults.intOr("notif.quietEnd", 7 * 60)
+        logReminderEnabled = defaults.boolOr("notif.logReminder", false)
 
         // Privacy.
         medicationLockEnabled = defaults.boolOr("privacy.medicationLock", true)
         healthKitSleepEnabled = defaults.boolOr("privacy.healthKitSleep", false)
+        sensitiveTitlesRedacted = defaults.boolOr("privacy.redactTitles", false)
+
+        // AI privacy mode. iOS Foundation Models is on-device only, so the default is the on-device
+        // path; the enum still mirrors Android (ON_DEVICE_ONLY / CLOUD_ALLOWED / DISABLED) so a cloud
+        // route can graduate in later. Android parity: the assistant privacy-mode preference.
+        privacyMode = PrivacyMode(rawValue: defaults.string(forKey: "ai.privacyMode") ?? "") ?? .onDeviceOnly
+
+        // Companion-app (Meridian / DevTime) interop. Off until the user grants consent in each app
+        // independently (no cross-app trust pinning on iOS). Android parity: KEY_INTEROP_SHARING_*.
+        interopConsentGranted = defaults.boolOr("privacy.interop.consentGranted", false)
+        interopMedicationSharingEnabled = defaults.boolOr("privacy.interop.medicationSharing", false)
+
+        // Collapsible Privacy & Sync section expand-state (Android parity: privacy.*.expanded,
+        // rememberPersistentUiBooleanSetting defaultValue = true → all open on first run).
+        privacyAppPermissionsExpanded = defaults.boolOr("privacy.appPermissions.expanded", true)
+        privacySensitiveContentExpanded = defaults.boolOr("privacy.sensitiveContent.expanded", true)
+        privacyCloudSyncExpanded = defaults.boolOr("privacy.cloudSync.expanded", true)
+        privacyWearLinkExpanded = defaults.boolOr("privacy.wearLink.expanded", true)
+        privacyCompanionAppExpanded = defaults.boolOr("privacy.companionApp.expanded", true)
+
+        // Focus: remember the user's last-selected work/break split preset across sessions.
+        // Android parity: presets are not persisted there, but iOS keeps the last pick (UX polish).
+        focusLastPreset = FocusSplitPreset(rawValue: defaults.string(forKey: "focus.lastPreset") ?? "") ?? .p25_5
+
+        // Screen Time.
+        screenTimeEnabled = defaults.boolOr("screenTime.enabled", false)
 
         // Sync. Shares the key ChronosStore reads at container-build time; takes effect next launch.
         cloudSyncEnabled = defaults.boolOr(ChronosStore.cloudSyncKey, false)
     }
 
     // MARK: Feature flags
-    var habitsEnabled: Bool { didSet { defaults.set(habitsEnabled, forKey: "flag.habits") } }
-    var goalsEnabled: Bool { didSet { defaults.set(goalsEnabled, forKey: "flag.goals") } }
-    var medicationEnabled: Bool { didSet { defaults.set(medicationEnabled, forKey: "flag.medication") } }
-    var journalEnabled: Bool { didSet { defaults.set(journalEnabled, forKey: "flag.journal") } }
-    var sleepEnabled: Bool { didSet { defaults.set(sleepEnabled, forKey: "flag.sleep") } }
+    //
+    // Every graduated flag persists both the stored value AND its wave's promotion marker on write:
+    // a deliberate user choice records that the one-time off→on promotion has happened, so the stored
+    // value (including an explicit `false`) is respected from then on. Mirrors Android's
+    // writeChronosUiBooleanSetting, which sets the marker on every deliberate write of a graduated key.
+    var habitsEnabled: Bool {
+        didSet { defaults.set(habitsEnabled, forKey: "flag.habits"); markPromoted(FeatureGraduationKeys.habitsEnabled) }
+    }
+    var medicationEnabled: Bool {
+        didSet { defaults.set(medicationEnabled, forKey: "flag.medication"); markPromoted(FeatureGraduationKeys.medicationEnabled) }
+    }
+    var insightsEnabled: Bool {
+        didSet { defaults.set(insightsEnabled, forKey: "flag.insights"); markPromoted(FeatureGraduationKeys.reviewEnabled) }
+    }
+    var goalsEnabled: Bool {
+        didSet { defaults.set(goalsEnabled, forKey: "flag.goals"); markPromoted(FeatureGraduationKeys.goalsEnabled) }
+    }
+    var journalEnabled: Bool {
+        didSet { defaults.set(journalEnabled, forKey: "flag.journal"); markPromoted(FeatureGraduationKeys.journalEnabled) }
+    }
+    var sleepEnabled: Bool {
+        didSet { defaults.set(sleepEnabled, forKey: "flag.sleep"); markPromoted(FeatureGraduationKeys.sleepEnabled) }
+    }
+    /// Routines never shipped disabled, so it is a plain default-on flag (no graduation marker).
     var routinesEnabled: Bool { didSet { defaults.set(routinesEnabled, forKey: "flag.routines") } }
-    var insightsEnabled: Bool { didSet { defaults.set(insightsEnabled, forKey: "flag.insights") } }
 
     // MARK: Appearance
     var themeMode: ThemeMode { didSet { defaults.set(themeMode.rawValue, forKey: "appearance.theme") } }
@@ -99,6 +149,9 @@ final class ChronosSettings {
     var focusLiveActivityEnabled: Bool { didSet { defaults.set(focusLiveActivityEnabled, forKey: "notif.focusLiveActivity") } }
     var quietHoursStartMinute: Int { didSet { defaults.set(quietHoursStartMinute, forKey: "notif.quietStart") } }
     var quietHoursEndMinute: Int { didSet { defaults.set(quietHoursEndMinute, forKey: "notif.quietEnd") } }
+    /// When on, a 20:00 nudge reminds the user to log tonight's sleep and write in their journal.
+    /// Android parity: AlarmRequestType.LOG_REMINDER + the "Log sleep & journal" notification toggle.
+    var logReminderEnabled: Bool { didSet { defaults.set(logReminderEnabled, forKey: "notif.logReminder") } }
 
     // MARK: Privacy
     /// When on, the Medication tab is gated behind Face ID / Touch ID / device passcode.
@@ -106,6 +159,38 @@ final class ChronosSettings {
     var medicationLockEnabled: Bool { didSet { defaults.set(medicationLockEnabled, forKey: "privacy.medicationLock") } }
     /// When on, sleep nights are imported read-only from HealthKit (Android: Health Connect).
     var healthKitSleepEnabled: Bool { didSet { defaults.set(healthKitSleepEnabled, forKey: "privacy.healthKitSleep") } }
+    /// When on, block titles are hidden in widgets and notifications (show a placeholder instead).
+    /// Off by default. Android parity: Wear redaction default OFF + "Hide sensitive titles" toggle.
+    var sensitiveTitlesRedacted: Bool { didSet { defaults.set(sensitiveTitlesRedacted, forKey: "privacy.redactTitles") } }
+
+    // MARK: AI privacy mode
+    /// Which inference paths the AI assist surfaces may use. iOS ships on-device-only; the enum mirrors
+    /// Android so a cloud path can graduate later. Android parity: PrivacyMode (ON_DEVICE_ONLY / CLOUD_ALLOWED / DISABLED).
+    var privacyMode: PrivacyMode { didSet { defaults.set(privacyMode.rawValue, forKey: "ai.privacyMode") } }
+
+    // MARK: Companion-app interop (Meridian / DevTime)
+    /// Whether the user has consented to cross-app interop with the Meridian companion app. Off until
+    /// granted in each app independently (iOS uses App-Group entitlements, not signature-pinned trust).
+    var interopConsentGranted: Bool { didSet { defaults.set(interopConsentGranted, forKey: "privacy.interop.consentGranted") } }
+    /// Whether medication names may be shared with the companion app. Off by default.
+    /// Android parity: PrivacyPreferences.isMedicationSharingEnabled / KEY_INTEROP_SHARING_MEDICATIONS.
+    var interopMedicationSharingEnabled: Bool { didSet { defaults.set(interopMedicationSharingEnabled, forKey: "privacy.interop.medicationSharing") } }
+
+    // MARK: Privacy & Sync collapsible section state (default expanded)
+    var privacyAppPermissionsExpanded: Bool { didSet { defaults.set(privacyAppPermissionsExpanded, forKey: "privacy.appPermissions.expanded") } }
+    var privacySensitiveContentExpanded: Bool { didSet { defaults.set(privacySensitiveContentExpanded, forKey: "privacy.sensitiveContent.expanded") } }
+    var privacyCloudSyncExpanded: Bool { didSet { defaults.set(privacyCloudSyncExpanded, forKey: "privacy.cloudSync.expanded") } }
+    var privacyWearLinkExpanded: Bool { didSet { defaults.set(privacyWearLinkExpanded, forKey: "privacy.wearLink.expanded") } }
+    var privacyCompanionAppExpanded: Bool { didSet { defaults.set(privacyCompanionAppExpanded, forKey: "privacy.companionApp.expanded") } }
+
+    // MARK: Focus
+    /// The user's last-selected work/break split preset, restored on the next focus session.
+    var focusLastPreset: FocusSplitPreset { didSet { defaults.set(focusLastPreset.rawValue, forKey: "focus.lastPreset") } }
+
+    // MARK: Screen Time
+    /// When on, app usage is read from Screen Time to surface productive vs. wasted time in Insights.
+    /// Android parity: screenTime.enabled + UsageStatsManager opt-in.
+    var screenTimeEnabled: Bool { didSet { defaults.set(screenTimeEnabled, forKey: "screenTime.enabled") } }
 
     // MARK: Sync
     /// iCloud/CloudKit mirroring. `ChronosStore` reads the same key when building its container, so a
@@ -126,6 +211,48 @@ final class ChronosSettings {
         case .balanced: .balanced
         case .flexible: .creative
         }
+    }
+
+    // MARK: Insights collapsible-card state
+    //
+    // The Insights/Review page persists each card's collapsed state under `insights.collapsed.<key>`
+    // (Android parity: the `insights.collapsed.*` DataStore keys). The view owns its own card key list,
+    // so these accessors keep ChronosSettings the single UserDefaults source of truth for that namespace.
+
+    /// Whether the insights card named `key` is collapsed. Defaults to `false` (expanded) so newly
+    /// added cards start open, matching Android's `rememberPersistentBoolean(default = false)`.
+    func insightsCardCollapsed(_ key: String) -> Bool {
+        defaults.boolOr("insights.collapsed.\(key)", false)
+    }
+
+    /// Persist the collapsed state for the insights card named `key`.
+    func setInsightsCardCollapsed(_ key: String, _ collapsed: Bool) {
+        defaults.set(collapsed, forKey: "insights.collapsed.\(key)")
+    }
+
+    // MARK: - Feature graduation plumbing (O01)
+
+    /// Resolve a graduated feature flag's effective value at load time via ChronosCore's
+    /// `FeatureGraduations`, persisting the wave's promotion marker the first time it forces the
+    /// feature on. `storeKey` is the iOS UserDefaults key; `graduationKey` is the Android-parity
+    /// graduated key whose wave owns the promotion marker.
+    private static func resolveGraduated(_ defaults: UserDefaults, _ storeKey: String, _ graduationKey: String) -> Bool {
+        let stored: Bool? = defaults.object(forKey: storeKey) == nil ? nil : defaults.bool(forKey: storeKey)
+        let markerKey = FeatureGraduations.markerKey(forKey: graduationKey)
+        let markerSet = markerKey.map { defaults.bool(forKey: $0) } ?? true
+        let result = FeatureGraduations.graduationForFlag(stored: stored, markerSet: markerSet, defaultOn: true)
+        if result.newMarker, let markerKey {
+            // One-time promotion is now due: make it durable so the next read respects the stored value.
+            defaults.set(true, forKey: markerKey)
+        }
+        return result.effective
+    }
+
+    /// Record that the user has made a deliberate choice for a graduated flag, setting its wave's
+    /// promotion marker so the stored value (including an explicit `false`) is honored from now on.
+    private func markPromoted(_ graduationKey: String) {
+        guard let markerKey = FeatureGraduations.markerKey(forKey: graduationKey) else { return }
+        defaults.set(true, forKey: markerKey)
     }
 }
 

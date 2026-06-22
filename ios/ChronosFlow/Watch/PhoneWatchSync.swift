@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import SwiftData
 import WatchConnectivity
+import ChronosCore
 
 /// The phone half of the watchOS Data Layer — the iOS-native analogue of the Android phone-side
 /// Wear `DataClient`/`MessageClient` bridge. It activates a `WCSession`, builds a `WatchSnapshot`
@@ -55,18 +56,24 @@ final class PhoneWatchSync: NSObject, WCSessionDelegate {
         }
     }
 
-    /// Snapshot today's blocks/tasks/habits + any running focus session from the shared store.
+    /// Snapshot today's blocks/tasks/habits/meds + any running focus session from the shared store.
+    ///
+    /// Honours `ChronosSettings.sensitiveTitlesRedacted` exactly like the Android `WearDaySummaryBridge`:
+    /// when redaction is on, block titles become "Scheduled block", the task/habit/med title arrays are
+    /// dropped (empty), and the AI digest is suppressed — but times, ids, counts and the meds-due tally
+    /// still travel so the watch keeps its progress bars, controls and "N due" urgency.
     private func buildSnapshot() -> WatchSnapshot {
         let context = ChronosStore.shared.mainContext
         let cal = Calendar.current
         let today = cal.startOfDay(for: .now)
+        let redacted = ChronosSettings.shared.sensitiveTitlesRedacted
 
         let blocks: [WatchBlock] = (try? context.fetch(FetchDescriptor<TimeBlock>()))?
             .filter { cal.isDate($0.date, inSameDayAs: today) }
             .sorted { $0.startMinuteOfDay < $1.startMinuteOfDay }
             .map {
                 WatchBlock(id: $0.id,
-                           title: $0.title,
+                           title: redacted ? "Scheduled block" : $0.title,
                            startMinute: $0.startMinuteOfDay,
                            durationMinutes: $0.durationMinutes,
                            category: $0.category,
@@ -74,21 +81,47 @@ final class PhoneWatchSync: NSObject, WCSessionDelegate {
             } ?? []
 
         // Open tasks (incomplete) plus anything due/targeted today, highest priority first.
-        let tasks: [WatchTask] = (try? context.fetch(FetchDescriptor<TaskItem>()))?
+        // Titles are dropped entirely (empty array) when redacted — the count still rides the snapshot.
+        let tasks: [WatchTask] = redacted ? [] : ((try? context.fetch(FetchDescriptor<TaskItem>()))?
             .filter { !$0.isCompleted }
             .sorted { $0.priority > $1.priority }
             .prefix(20)
-            .map { WatchTask(id: $0.id, title: $0.title, priority: $0.priority, isCompleted: $0.isCompleted) } ?? []
+            .map { WatchTask(id: $0.id, title: $0.title, priority: $0.priority, isCompleted: $0.isCompleted) } ?? [])
 
-        let habits: [WatchHabit] = (try? context.fetch(FetchDescriptor<Habit>()))?
+        let habits: [WatchHabit] = redacted ? [] : ((try? context.fetch(FetchDescriptor<Habit>()))?
             .filter(\.isActive)
-            .map { WatchHabit(id: $0.id, title: $0.title, doneToday: $0.isCompleted(on: .now)) } ?? []
+            .map { WatchHabit(id: $0.id, title: $0.title, doneToday: $0.isCompleted(on: .now)) } ?? [])
+
+        // Active, unpaused medication plans scheduled for today. The watch Meds page renders one row
+        // per reminder time; we surface the earliest still-untaken reminder per plan as the actionable
+        // dose (acknowledgeDose records one TAKEN event), matching the Android per-dose glance.
+        let activeMeds = ((try? context.fetch(FetchDescriptor<MedicationPlan>()))?
+            .filter { $0.isActive && !$0.isPaused(on: .now) }) ?? []
+        let medsDueCount = activeMeds.filter { !$0.isTaken(on: today) }.count
+        let medications: [WatchMed] = redacted ? [] : activeMeds.map { plan in
+            let taken = plan.isTaken(on: today)
+            let reminder = plan.reminderMinutes.min() ?? plan.reminderMinuteOfDay
+            let doseLabel = plan.dosage.isEmpty ? plan.unit : "\(plan.dosage) \(plan.unit)"
+            return WatchMed(id: plan.id,
+                            name: plan.name,
+                            doseLabel: doseLabel,
+                            reminderMinute: reminder,
+                            taken: taken)
+        }
+
+        // One-line AI day digest, cached on the phone (foreground writes / background reads). Dropped
+        // when redacted since it can mention the next block's title.
+        let digest = redacted ? nil : ProactiveDigest.cachedHeadline()
 
         return WatchSnapshot(date: today,
                              blocks: blocks,
                              tasks: tasks,
                              habits: habits,
-                             focus: currentFocusState())
+                             medications: medications,
+                             medsDueCount: medsDueCount,
+                             digest: digest,
+                             focus: currentFocusState(),
+                             receivedAtMillis: Int64(Date.now.timeIntervalSince1970 * 1000))
     }
 
     /// The phone's live focus state, if any. The `FocusTimerModel` is in-memory in the app process,
@@ -152,6 +185,11 @@ final class PhoneWatchSync: NSObject, WCSessionDelegate {
             FocusCommandBridge.post(.togglePause)
         case .stopFocus:
             FocusCommandBridge.post(.stop)
+        case .syncRequest:
+            // Watch opened and is asking for a fresh snapshot — push immediately and return so we
+            // don't double-push (the pushSnapshot() call below is skipped via early return).
+            pushSnapshot()
+            return
         }
         // Reflect the mutation back to the watch immediately.
         pushSnapshot()

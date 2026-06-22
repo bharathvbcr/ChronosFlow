@@ -1,20 +1,34 @@
 import SwiftUI
+import ChronosCore
 
-/// Vertically-paged watch UI — Today · Tasks · Habits · Focus — mirroring the Android Wear pager.
-/// All pages read the cached `WatchSnapshot` from `WatchConnectivityClient` (the phone's mirror) and
-/// send one-tap `WatchCommand`s back. There is NO local store — WatchConnectivity is the data layer.
+/// Vertically-paged watch UI — Today · Tasks · Habits · (Meds) · Focus — mirroring the Android Wear
+/// pager. All pages read the cached `WatchSnapshot` from `WatchConnectivityClient` (the phone's
+/// mirror) and send one-tap `WatchCommand`s back. There is NO local store — WatchConnectivity is the
+/// data layer. The Meds page is inserted only when the phone reports meds today (Android parity:
+/// `HomePage.MEDS` is conditional on `summary.meds.isNotEmpty() || medsDueCount > 0`).
 struct WatchRootView: View {
     @Environment(WatchConnectivityClient.self) private var client
 
+    private var hasMeds: Bool {
+        let snap = client.snapshot
+        return !(snap?.medications.isEmpty ?? true) || (snap?.medsDueCount ?? 0) > 0
+    }
+
     var body: some View {
         TabView {
-            WatchTodayPage().tag(0)
-            WatchTasksPage().tag(1)
-            WatchHabitsPage().tag(2)
-            WatchFocusPage().tag(3)
+            WatchTodayPage()
+            WatchTasksPage()
+            WatchHabitsPage()
+            if hasMeds { WatchMedsPage() }
+            WatchFocusPage()
         }
         .tabViewStyle(.verticalPage)
         .containerBackground(WatchTokens.brandPrimary.gradient, for: .tabView)
+        .onAppear {
+            // Pull-on-open: ask the phone for a fresh snapshot as soon as the watch UI appears.
+            // Mirrors Android Wear's TYPE_SYNC message sent when the watch app is opened.
+            client.sendSyncRequest()
+        }
     }
 }
 
@@ -47,6 +61,63 @@ private struct WatchEmptyState: View {
     }
 }
 
+// MARK: - Day-dial ring
+//
+// The watch take on the phone's DayDial: today mapped onto a 24-hour ring (midnight at the top,
+// clockwise). Each scheduled block is an arc — the one happening now in full primary, past ones
+// dimmed grey, upcoming dimmed primary — and a tertiary dot marks the current time, so "what does
+// my day look like" is answered visually. 1:1 port of Android Wear's `DayDialRing.kt` Canvas logic.
+struct WatchDayDialRing: View {
+    var blocks: [WatchBlock]
+    var nowMinute: Int
+
+    var body: some View {
+        Canvas { ctx, size in
+            let stroke: CGFloat = 5
+            let inset = stroke / 2
+            let rect = CGRect(x: inset, y: inset, width: size.width - stroke, height: size.height - stroke)
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+
+            // Background track (dim full circle).
+            ctx.stroke(Path(ellipseIn: rect),
+                       with: .color(WatchTokens.brandPrimary.opacity(0.08)),
+                       style: StrokeStyle(lineWidth: stroke))
+
+            for block in blocks {
+                let sweep = max(0, block.endMinute - block.startMinute)
+                guard sweep > 0 else { continue }
+                let isCurrent = nowMinute >= block.startMinute && nowMinute < block.endMinute
+                let color: Color = isCurrent
+                    ? WatchTokens.brandPrimary
+                    : (block.endMinute <= nowMinute
+                        ? Color.white.opacity(0.22)                  // past
+                        : WatchTokens.brandPrimary.opacity(0.45))    // upcoming
+                var arc = Path()
+                arc.addArc(center: center,
+                           radius: rect.width / 2,
+                           startAngle: .degrees(angleOf(block.startMinute)),
+                           endAngle: .degrees(angleOf(block.startMinute + min(sweep, 1440))),
+                           clockwise: false)
+                ctx.stroke(arc, with: .color(color),
+                           style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+            }
+
+            // Current-time marker dot (tertiary/accent).
+            let radius = (min(size.width, size.height) - stroke) / 2
+            let a = angleOf(nowMinute % 1440) * .pi / 180
+            let dot = CGPoint(x: center.x + cos(a) * radius, y: center.y + sin(a) * radius)
+            ctx.fill(Path(ellipseIn: CGRect(x: dot.x - stroke * 0.8, y: dot.y - stroke * 0.8,
+                                            width: stroke * 1.6, height: stroke * 1.6)),
+                     with: .color(WatchTokens.brandAccent))
+        }
+        .padding(2)
+    }
+
+    /// Minute-of-day → polar angle, midnight at the top (–90°), clockwise. Mirrors Android's
+    /// `angleOf(minute) = minute / 1440f * 360f - 90f`.
+    private func angleOf(_ minute: Int) -> Double { Double(minute) / 1440 * 360 - 90 }
+}
+
 // MARK: - Today
 
 struct WatchTodayPage: View {
@@ -55,10 +126,28 @@ struct WatchTodayPage: View {
     private var blocks: [WatchBlock] {
         (client.snapshot?.blocks ?? []).sorted { $0.startMinute < $1.startMinute }
     }
+    private var now: Int { watchNowMinuteOfDay }
     private var current: WatchBlock? {
-        blocks.first { watchNowMinuteOfDay >= $0.startMinute && watchNowMinuteOfDay < $0.startMinute + $0.durationMinutes }
+        blocks.first { now >= $0.startMinute && now < $0.startMinute + $0.durationMinutes }
     }
-    private var next: WatchBlock? { blocks.first { $0.startMinute > watchNowMinuteOfDay } }
+    /// Next upcoming non-break event (Android `nextTitle`).
+    private var nextEvent: WatchBlock? { blocks.first { $0.startMinute > now && !$0.isBreak } }
+    /// Next upcoming break (Android `nextBreakStartMinute`/`nextBreakTitle`).
+    private var nextBreak: WatchBlock? { blocks.first { $0.startMinute > now && $0.isBreak } }
+
+    /// "Synced Nm/Nh ago" when the mirror is stale enough that its time-relative claims may rot;
+    /// nil when fresh or never synced. Mirrors Android's NowScreen stale warning.
+    private var staleLabel: String? {
+        guard let received = client.snapshot?.receivedAtMillis, received > 0 else { return nil }
+        return WearFormat.syncAgeLabel(receivedAtMillis: received,
+                                       nowMillis: Int64(Date.now.timeIntervalSince1970 * 1000))
+    }
+
+    /// Doses past their reminder and still untaken — surfaced as a red alert here so urgency reaches
+    /// the today page without swiping to Meds (Android NowScreen parity).
+    private var overdueMedCount: Int {
+        (client.snapshot?.medications ?? []).filter { $0.isOverdue(nowMinute: now) }.count
+    }
 
     var body: some View {
         ScrollView {
@@ -66,25 +155,74 @@ struct WatchTodayPage: View {
                 Text("Today").font(.headline)
 
                 if client.snapshot == nil {
-                    WatchEmptyState(icon: "iphone.slash", message: "Open ChronosFlow on iPhone to sync")
-                        .frame(height: 80)
+                    switch client.syncState {
+                    case .syncing:
+                        WatchEmptyState(icon: "arrow.triangle.2.circlepath", message: "Syncing…")
+                            .frame(height: 80)
+                    case .unreachable:
+                        WatchEmptyState(icon: "iphone.slash", message: "Can't reach iPhone")
+                            .frame(height: 80)
+                    case .idle:
+                        WatchEmptyState(icon: "iphone.slash", message: "Open ChronosFlow on iPhone to sync")
+                            .frame(height: 80)
+                    }
                 } else {
+                    // 24h day-dial ring with the current/next cards laid over it.
+                    ZStack {
+                        WatchDayDialRing(blocks: blocks, nowMinute: now)
+                            .frame(height: 96)
+                        if let current {
+                            VStack(spacing: 1) {
+                                Text(current.title).font(.caption2).bold().lineLimit(1)
+                                Text(WearFormat.remainingLabel(endMinute: current.endMinute, nowMinute: now))
+                                    .font(.caption2).foregroundStyle(WatchTokens.brandPrimary)
+                            }
+                            .padding(.horizontal, 4)
+                        } else {
+                            Text("Open time").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if let stale = staleLabel {
+                        Label(stale, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption2).foregroundStyle(.red)
+                    }
+                    if overdueMedCount > 0 {
+                        Label("\(overdueMedCount) med\(overdueMedCount == 1 ? "" : "s") overdue",
+                              systemImage: "pills.fill")
+                            .font(.caption2).foregroundStyle(.red)
+                    }
+
                     if let current {
                         blockCard(title: current.title,
-                                  detail: "until \(watchClock(current.endMinute))",
+                                  detail: WearFormat.windowLabel(startMinute: current.startMinute,
+                                                                 endMinute: current.endMinute),
                                   tint: WatchTokens.category(current.category))
-                    } else {
-                        blockCard(title: "Open time", detail: "nothing scheduled", tint: .secondary)
                     }
-                    if let next {
-                        blockCard(title: "Next · \(next.title)",
-                                  detail: "at \(watchClock(next.startMinute))",
-                                  tint: WatchTokens.category(next.category))
+                    if let nextEvent {
+                        blockCard(title: "Next · \(nextEvent.title)",
+                                  detail: WearFormat.startsInLabel(startMinute: nextEvent.startMinute, nowMinute: now),
+                                  tint: WatchTokens.category(nextEvent.category))
                     }
+                    if let nextBreak {
+                        let label = nextBreak.title.isEmpty || nextBreak.title.caseInsensitiveCompare("Break") == .orderedSame
+                            ? "Break \(WearFormat.startsInLabel(startMinute: nextBreak.startMinute, nowMinute: now))"
+                            : "Break \(WearFormat.startsInLabel(startMinute: nextBreak.startMinute, nowMinute: now)) · \(nextBreak.title)"
+                        Text(label).font(.caption2).foregroundStyle(.secondary)
+                    }
+
+                    if let digest = client.snapshot?.digest, !digest.isEmpty {
+                        Text(digest).font(.caption2).foregroundStyle(.secondary)
+                            .padding(.top, WatchSpacing.micro)
+                    }
+
                     HStack {
                         stat("\(client.snapshot?.tasks.count ?? 0)", "tasks")
                         let habits = client.snapshot?.habits ?? []
                         stat("\(habits.filter(\.doneToday).count)/\(habits.count)", "habits")
+                        if (client.snapshot?.medsDueCount ?? 0) > 0 {
+                            stat("\(client.snapshot?.medsDueCount ?? 0)", "due")
+                        }
                     }
                     .padding(.top, WatchSpacing.micro)
                 }
@@ -181,6 +319,71 @@ struct WatchHabitsPage: View {
                         }
                     }
                     .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, WatchSpacing.micro)
+        }
+    }
+}
+
+// MARK: - Meds
+
+/// Per-dose medication page. Mirrors Android Wear's `MedsScreen`: "N due" / "All taken" header,
+/// privacy-hidden note when the title array was redacted, and a one-tap "Taken" control per dose
+/// sorted untaken-earliest-first with an overdue marker. Marking a dose sends `WatchCommand.markDose`
+/// back to the phone, which records a TAKEN `DoseEvent`.
+struct WatchMedsPage: View {
+    @Environment(WatchConnectivityClient.self) private var client
+
+    private var now: Int { watchNowMinuteOfDay }
+    private var meds: [WatchMed] { sortMedsForGlance(client.snapshot?.medications ?? []) }
+    private var dueCount: Int { client.snapshot?.medsDueCount ?? 0 }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: WatchSpacing.small) {
+                Text("Medication").font(.headline).frame(maxWidth: .infinity, alignment: .leading)
+
+                if dueCount > 0 {
+                    Text("\(dueCount) due").font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                } else if !meds.isEmpty {
+                    Text("✓ All taken").font(.caption).bold().foregroundStyle(WatchTokens.brandSecondary)
+                        .frame(maxWidth: .infinity)
+                }
+
+                if meds.isEmpty {
+                    if dueCount > 0 {
+                        // Titles redacted for privacy but doses are still due — say so (Android parity).
+                        Text("Hidden for privacy").font(.caption2).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text("No medication today").font(.caption).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+
+                ForEach(meds) { med in
+                    Button {
+                        if !med.taken { client.send(.markDose(id: med.id)) }
+                    } label: {
+                        HStack {
+                            Image(systemName: med.taken ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(med.taken ? WatchTokens.brandSecondary : .secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(med.name).font(.caption).lineLimit(2)
+                                let overdue = med.isOverdue(nowMinute: now)
+                                Text((overdue ? "Overdue · " : "")
+                                     + "\(med.doseLabel) · \(WearFormat.minuteOfDay(med.reminderMinute))")
+                                    .font(.caption2)
+                                    .foregroundStyle(overdue ? Color.red : .secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(med.taken)
                 }
             }
             .padding(.horizontal, WatchSpacing.micro)

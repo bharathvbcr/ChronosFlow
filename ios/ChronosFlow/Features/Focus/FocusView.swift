@@ -19,6 +19,11 @@ struct FocusView: View {
                 VStack(spacing: ChronosSpacing.hero) {
                     Text(phaseTitle).font(.chronosTitle).foregroundStyle(.secondary)
                     timerRing
+                    if timer.isPaused && timer.phase != .idle {
+                        Label("Paused", systemImage: "pause.fill")
+                            .font(.chronosLabel).foregroundStyle(.secondary)
+                            .transition(.opacity)
+                    }
                     if timer.isSplitSession && timer.phase != .idle { phaseDots }
                     controls
                     if timer.completedWorkSessions > 0 {
@@ -35,6 +40,11 @@ struct FocusView: View {
             .onAppear {
                 FocusCommandObserver.startIfNeeded()
                 drainFocusCommands()
+                // Restore the user's last-used split preset (persisted in ChronosSettings) when idle,
+                // so a new session defaults to their preference instead of the hard-coded 25 · 5.
+                if timer.phase == .idle || timer.phase == .completed {
+                    timer.preset = ChronosSettings.shared.focusLastPreset
+                }
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { drainFocusCommands() }
@@ -102,7 +112,6 @@ struct FocusView: View {
                         Text(timeString)
                             .font(.system(size: 56, weight: .bold, design: .rounded)).monospacedDigit()
                     }
-                    if timer.isPaused { Text("Paused").font(.chronosCaption).foregroundStyle(.secondary) }
                 }
             }
         }
@@ -167,7 +176,12 @@ struct FocusView: View {
             Text("Split").font(.chronosCaption).foregroundStyle(.secondary)
             HStack(spacing: ChronosSpacing.small) {
                 ForEach(FocusSplitPreset.allCases, id: \.self) { preset in
-                    Button { timer.preset = preset } label: {
+                    Button {
+                        timer.preset = preset
+                        // Remember the choice across launches (Android FocusTab resets per session,
+                        // but persisting is the noted iOS UX polish — see parity F: preset config).
+                        ChronosSettings.shared.focusLastPreset = preset
+                    } label: {
                         Text(preset.label)
                             .font(.chronosLabel)
                             .padding(.horizontal, 14).padding(.vertical, 8)
@@ -210,7 +224,29 @@ struct FocusView: View {
     }
 
     private var runningControls: some View {
-        HStack(spacing: ChronosSpacing.large) {
+        VStack(spacing: ChronosSpacing.medium) {
+            // Mid-session break injection — only during an ACTIVE work phase (not paused / boundary),
+            // matching Android's FocusTab guard rails. Offers the 5 / 10 / 15m presets.
+            if timer.phase == .work && !timer.isPaused {
+                breakInjectionChips
+            }
+            // Early end-of-break — only while a break is actively running, mirroring Android's
+            // onEndBreak. Finishes the block when the break is the last phase.
+            if (timer.phase == .shortBreak || timer.phase == .longBreak) && !timer.isPaused {
+                Button {
+                    if timer.endBreakNow() { timer.stop(context: context) }
+                } label: {
+                    Label("End break", systemImage: "forward.end.fill")
+                        .font(.chronosCaption)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(ChronosColors.brandSecondary.opacity(0.15), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(ChronosColors.brandSecondary)
+            }
+            // Adjust the current phase length on the fly (Android +/- session controls).
+            adjustControls
+            HStack(spacing: ChronosSpacing.large) {
             Button { timer.togglePause() } label: {
                 Image(systemName: timer.isPaused ? "play.fill" : "pause.fill").font(.title)
             }
@@ -226,6 +262,48 @@ struct FocusView: View {
                 Image(systemName: "forward.fill").font(.title)
             }
             .buttonStyle(.bordered).buttonBorderShape(.circle).controlSize(.large)
+            }
+        }
+    }
+
+    /// The 5 / 10 / 15m mid-session break chips (Android `FocusMidSessionBreakPresets`). Each chip
+    /// injects a break right after the current work phase via `injectBreak(minutes:)`.
+    private var breakInjectionChips: some View {
+        VStack(spacing: 6) {
+            Text("Take a break").font(.chronosCaption).foregroundStyle(.secondary)
+            HStack(spacing: ChronosSpacing.small) {
+                ForEach(timer.breakPresets, id: \.self) { minutes in
+                    Button { timer.injectBreak(minutes: minutes) } label: {
+                        Label("\(minutes)m", systemImage: "cup.and.saucer.fill")
+                            .font(.chronosLabel)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(ChronosColors.brandSecondary)
+                    .buttonBorderShape(.capsule)
+                }
+            }
+        }
+    }
+
+    /// +5m / +15m controls to lengthen the CURRENT phase mid-session (Android's session extend).
+    /// (Shorten is intentionally omitted: `FocusTimerModel.extend` clamps to positive minutes, so a
+    /// "-5m" control would be a no-op — extend-only matches the working model API.)
+    private var adjustControls: some View {
+        HStack(spacing: ChronosSpacing.medium) {
+            Button { timer.extend(minutes: 5) } label: {
+                Label("5m", systemImage: "plus").font(.chronosCaption)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+            }
+            .buttonStyle(.bordered).buttonBorderShape(.capsule).tint(ChronosColors.brandPrimary)
+            .accessibilityLabel("Add 5 minutes")
+
+            Button { timer.extend(minutes: 15) } label: {
+                Label("15m", systemImage: "plus").font(.chronosCaption)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+            }
+            .buttonStyle(.bordered).buttonBorderShape(.capsule).tint(ChronosColors.brandPrimary)
+            .accessibilityLabel("Add 15 minutes")
         }
     }
 

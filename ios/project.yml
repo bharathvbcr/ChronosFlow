@@ -52,6 +52,8 @@ targets:
       - target: ChronosFlowWidgets
       - target: ChronosWatch
         embed: true   # bundle the watch app inside the iOS app
+      - target: ChronosShareExtension
+        embed: true
 
   # watchOS companion — the iOS-native analogue of the Android `wear/` module. App Groups are
   # device-local, so the watch does NOT open the phone's SwiftData store; it talks to the phone over
@@ -72,6 +74,9 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: ChronosFlow
         TARGETED_DEVICE_FAMILY: "4"   # watchOS
     dependencies:
+      # The watch screens render glance labels via the shared, unit-tested ChronosCore.WearFormat
+      # (Foundation-only) so iOS and Android show identical "Xm left" / "Next in Xm" / sync-age text.
+      - package: ChronosCore
       - target: ChronosWatchWidgets
         embed: true   # bundle the watch widget extension inside the watch app
 
@@ -90,6 +95,17 @@ targets:
         INFOPLIST_FILE: ChronosWatchWidgets/Info.plist
         CODE_SIGN_ENTITLEMENTS: ChronosWatchWidgets/ChronosWatchWidgets.entitlements
         TARGETED_DEVICE_FAMILY: "4"   # watchOS
+
+  ChronosShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - ChronosShareExtension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chronosflow.app.share
+        INFOPLIST_FILE: ChronosShareExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ChronosShareExtension/ShareExtension.entitlements
 
   ChronosFlowWidgets:
     type: app-extension

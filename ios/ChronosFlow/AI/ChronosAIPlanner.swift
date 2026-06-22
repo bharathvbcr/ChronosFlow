@@ -72,11 +72,57 @@ final class ChronosAIPlanner {
 
     /// Generate a balanced day plan around the existing fixed blocks and free windows.
     /// Mirrors the Android "generate a balanced day plan / find open deep-work windows" intents.
+    ///
+    /// Privacy mode (N01 / Android parity: `PrivacyMode` ON_DEVICE_ONLY / CLOUD_ALLOWED / DISABLED):
+    ///   - `.disabled` — no generation at all; we surface the local-only message and stop.
+    ///   - `.cloudAllowed` — structural placeholder for a future cloud provider. iOS has no cloud
+    ///     gateway yet (Foundation Models is on-device), so this falls back to the on-device path
+    ///     exactly like `.onDeviceOnly`. When a cloud route graduates it slots in ahead of the
+    ///     on-device attempt here.
+    ///   - `.onDeviceOnly` — Foundation Models on-device.
+    ///
+    /// Layered generation (mirrors the Android cloud→Nano→local cascade, minus the cloud rung):
+    ///   1. Foundation Models guided `@Generable` generation (typed, schema-valid).
+    ///   2. If that throws / the model is unavailable, a raw-text prompt assembled by ChronosCore's
+    ///      `PlanningPromptBuilder`, parsed with the tolerant `DayPlanResponseParser` (with one
+    ///      `jsonRepairPrompt` corrective re-ask — the iOS analogue of the Android corrective retry).
+    ///   3. If everything on-device fails, ChronosCore's deterministic `LocalPlanningHeuristics`.
     func generatePlan(date: Date, existingBlocks: [TimeBlock], readiness: SleepReadiness) async {
-        guard isAvailable else { return }
+        let mode = ChronosSettings.shared.privacyMode
+        guard mode.allowsOnDeviceGeneration else {
+            // DISABLED: no generation. Mirror Android's "AI off" — the planner produces nothing.
+            state = .unavailable("AI planning is turned off. Enable it in Settings to suggest a plan.")
+            suggestion = nil
+            return
+        }
+
         state = .thinking
         suggestion = nil
 
+        // 1 & 2: on-device generation, only when the model is actually available.
+        if isAvailable {
+            // CLOUD_ALLOWED structural placeholder: a cloud attempt would go here, ahead of the
+            // on-device session. iOS has no cloud gateway, so we proceed straight to on-device.
+            if let generated = await generateOnDevice(
+                date: date, existingBlocks: existingBlocks, readiness: readiness
+            ) {
+                suggestion = generated
+                state = .done
+                return
+            }
+        }
+
+        // 3: deterministic offline fallback (model unavailable, or both on-device paths failed).
+        suggestion = localFallbackSuggestion(date: date, existingBlocks: existingBlocks)
+        state = .done
+    }
+
+    /// On-device generation: guided `@Generable` first, then a `PlanningPromptBuilder` text prompt
+    /// run through `DayPlanResponseParser` with a single corrective re-ask. Returns `nil` when both
+    /// on-device attempts fail so the caller can drop to local heuristics.
+    private func generateOnDevice(
+        date: Date, existingBlocks: [TimeBlock], readiness: SleepReadiness
+    ) async -> AIPlanSuggestion? {
         let instructions = Instructions {
             """
             You are ChronosFlow's day planner. You suggest a calm, balanced 24-hour plan as time \
@@ -108,17 +154,115 @@ final class ChronosAIPlanner {
         Suggest time blocks that fill the free windows without overlapping the fixed blocks.
         """
 
+        let temperature = ChronosSettings.shared.plannerProfile.temperature
+
+        // Attempt 1: guided generation — typed and schema-valid, no parsing needed.
         do {
             let response = try await session.respond(
                 to: prompt,
                 generating: AIPlanSuggestion.self,
-                options: GenerationOptions(temperature: GenerationProfile.deterministic.temperature)
+                options: GenerationOptions(temperature: temperature)
             )
-            suggestion = response.content
-            state = .done
+            return response.content
         } catch {
-            state = .failed(error.localizedDescription)
+            // Fall through to the text + corrective-parse path below.
         }
+
+        // Attempt 2: raw-text prompt via ChronosCore's PlanningPromptBuilder, parsed by
+        // DayPlanResponseParser, with one jsonRepairPrompt corrective re-ask.
+        return await generateViaTextParse(
+            date: date, existingBlocks: existingBlocks, readiness: readiness, temperature: temperature)
+    }
+
+    /// Raw-text generation + tolerant parse. Builds the prompt with `PlanningPromptBuilder`, asks the
+    /// model for plain text, and recovers a plan with `DayPlanResponseParser`. On a parse miss it does
+    /// one corrective re-ask (`jsonRepairPrompt`) before giving up — the iOS analogue of the Android
+    /// corrective JSON retry. Returns `nil` if no usable plan survives (caller drops to heuristics).
+    private func generateViaTextParse(
+        date: Date, existingBlocks: [TimeBlock], readiness: SleepReadiness, temperature: Double
+    ) async -> AIPlanSuggestion? {
+        let calendar = Calendar.current
+        let timezone = calendar.timeZone.identifier
+        let existing = existingBlocks.map {
+            PlanExistingBlock(id: $0.id,
+                              startMinuteOfDay: $0.startMinuteOfDay,
+                              durationMinutes: $0.durationMinutes)
+        }
+        let existingLabels = existingBlocks
+            .sorted { $0.startMinuteOfDay < $1.startMinuteOfDay }
+            .map { "- \($0.title) (\($0.category)) \($0.startMinuteOfDay)-\($0.plannedEndMinuteOfDay)m" }
+        let preferences = readinessPreference(readiness)
+
+        let prompt = PlanningPromptBuilder.dayPlanPrompt(
+            userPreferences: preferences,
+            date: date,
+            calendar: calendar,
+            timezone: timezone,
+            review: nil,
+            existingBlocks: existing,
+            existingBlockLabels: existingLabels
+        )
+        let fallbackExplanation = "ChronosFlow generated this on-device. Review every suggestion before applying it."
+
+        let session = LanguageModelSession()
+        let options = GenerationOptions(temperature: temperature)
+
+        guard let raw = try? await session.respond(to: prompt, options: options).content else {
+            return nil
+        }
+        if let parsed = DayPlanResponseParser.parse(
+            raw: raw, timezone: timezone, fallbackExplanation: fallbackExplanation) {
+            return suggestion(from: parsed)
+        }
+
+        // Corrective re-ask: echo the prompt + the malformed reply and demand bare JSON.
+        let repairPrompt = PlanningPromptBuilder.jsonRepairPrompt(
+            originalPrompt: prompt, malformedResponse: raw)
+        guard let repaired = try? await session.respond(to: repairPrompt, options: options).content,
+              let parsed = DayPlanResponseParser.parse(
+                raw: repaired, timezone: timezone, fallbackExplanation: fallbackExplanation)
+        else { return nil }
+        return suggestion(from: parsed)
+    }
+
+    /// Deterministic, model-free plan from ChronosCore's `LocalPlanningHeuristics`. Used when the
+    /// on-device model is unavailable or both generation attempts fail (Android parity: the local
+    /// heuristic fallback when Gemini is unavailable).
+    private func localFallbackSuggestion(date: Date, existingBlocks: [TimeBlock]) -> AIPlanSuggestion {
+        let calendar = Calendar.current
+        let structured = LocalPlanningHeuristics.generateIdealDayPlan(
+            packageName: "com.ChronosFlow.VBCR",
+            userPreferences: "balanced day",
+            date: date,
+            calendar: calendar,
+            currentTimeZone: calendar.timeZone.identifier
+        )
+        return suggestion(from: structured)
+    }
+
+    /// Maps a free-text planning preference from the night's sleep readiness, so the offline prompt
+    /// nudges the same way the guided prompt's `readinessHint` does.
+    private func readinessPreference(_ readiness: SleepReadiness) -> String {
+        switch readiness {
+        case .depleted: "recovery, low energy"
+        case .rested: "balanced day with deep work"
+        default: "balanced day"
+        }
+    }
+
+    /// Converts a ChronosCore `StructuredDayPlanSuggestion` into the UI-facing `AIPlanSuggestion`.
+    /// The `materialize` step re-clamps and re-checks overlaps, so this is a straight field map.
+    private func suggestion(from structured: ChronosCore.StructuredDayPlanSuggestion) -> AIPlanSuggestion {
+        AIPlanSuggestion(
+            summary: structured.reason,
+            blocks: structured.proposedBlocks.map {
+                AISuggestedBlock(
+                    title: $0.title,
+                    category: $0.category,
+                    startMinuteOfDay: $0.startMinuteOfDay,
+                    durationMinutes: $0.durationMinutes,
+                    rationale: structured.explanation)
+            })
     }
 
     /// Turn accepted suggestions into real TimeBlocks (provenance = .ai), skipping any that

@@ -26,11 +26,18 @@ public struct JournalPrompt: Sendable, Equatable, Identifiable {
     public var id: String { key }
 }
 
-/// The default three-prompt set, matching the Android ordering and wording.
+/// The rotating prompt pool for the daily journal shuffle. Mirrors Android's expanded set.
 public let journalPrompts: [JournalPrompt] = [
-    JournalPrompt(key: "went_well", label: "What went well", question: "What went well today?"),
-    JournalPrompt(key: "drained", label: "What drained me", question: "What drained you today?"),
-    JournalPrompt(key: "tomorrow", label: "Tomorrow…", question: "One thing to make tomorrow better?")
+    JournalPrompt(key: "went_well",  label: "What went well",   question: "What went well today?"),
+    JournalPrompt(key: "drained",    label: "What drained me",  question: "What drained you today?"),
+    JournalPrompt(key: "tomorrow",   label: "Tomorrow…",        question: "One thing to make tomorrow better?"),
+    JournalPrompt(key: "grateful",   label: "Grateful for",     question: "What are you grateful for right now?"),
+    JournalPrompt(key: "learned",    label: "Learned",          question: "What did you learn today?"),
+    JournalPrompt(key: "energy",     label: "Energy",           question: "What drained your energy? What filled it?"),
+    JournalPrompt(key: "proud",      label: "Proud of",         question: "What are you most proud of from today?"),
+    JournalPrompt(key: "feeling",    label: "Feeling",          question: "How are you really feeling right now?"),
+    JournalPrompt(key: "distracted", label: "Distracted by",    question: "What distracted you most today?"),
+    JournalPrompt(key: "kindness",   label: "Kindness",         question: "Did you do something kind for someone — or yourself?"),
 ]
 
 // MARK: - Word count

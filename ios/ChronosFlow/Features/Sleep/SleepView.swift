@@ -12,7 +12,20 @@ struct SleepView: View {
     private var settings: ChronosSettings { .shared }
 
     private var lastNight: SleepTrack? { nights.first }
-    private var readiness: SleepReadiness { deriveSleepReadiness(lastNight: lastNight) }
+    /// Readiness banner routed through the single ChronosCore facade (`SleepReadinessCore`) so the
+    /// rule set lives in exactly one portable, unit-tested place — the raw-field overload lets us pass
+    /// a SwiftData row without the app-side bridge.
+    private var readiness: SleepReadiness {
+        guard let lastNight else { return .unknown }
+        // `SleepReadinessCore.deriveReadiness` returns the ChronosCore enum; bridge to the app enum by
+        // raw value (both are identical `String`-backed cases — same convention as GapFillSheet).
+        let core = SleepReadinessCore.deriveReadiness(
+            sleepQuality: lastNight.sleepQuality,
+            interruptedCount: lastNight.interruptedCount,
+            actualStartMinute: lastNight.actualStartMinute,
+            actualEndMinute: lastNight.actualEndMinute)
+        return SleepReadiness(rawValue: core.rawValue) ?? .unknown
+    }
 
     var body: some View {
         NavigationStack {
@@ -58,6 +71,7 @@ struct SleepView: View {
                 }
             }
             .sheet(isPresented: $logging) { SleepLogSheet() }
+            .task { await scheduleLogReminder() }
         }
     }
 
@@ -169,6 +183,9 @@ struct SleepView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(importer.isImporting || !settings.healthKitSleepEnabled)
+
+                    Toggle("Evening reminder (20:00)", isOn: logReminderBinding)
+                        .font(.chronosBody)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -179,6 +196,24 @@ struct SleepView: View {
     private var healthKitToggle: Binding<Bool> {
         Binding(get: { settings.healthKitSleepEnabled },
                 set: { settings.healthKitSleepEnabled = $0 })
+    }
+
+    /// Two-way binding for the 20:00 log-sleep-and-journal reminder toggle.
+    /// Writing the flag also re-schedules (or cancels) the notification immediately.
+    private var logReminderBinding: Binding<Bool> {
+        Binding(get: { ChronosSettings.shared.logReminderEnabled },
+                set: { ChronosSettings.shared.logReminderEnabled = $0
+                       Task { await scheduleLogReminder() }
+                })
+    }
+
+    /// Schedule (or cancel) the 20:00 daily log reminder based on the current settings value.
+    private func scheduleLogReminder() async {
+        if ChronosSettings.shared.logReminderEnabled {
+            await ChronosNotifications.shared.scheduleLogReminder()
+        } else {
+            ChronosNotifications.shared.cancel(idPrefix: "log-reminder")
+        }
     }
 
     private func runImport() async {
@@ -229,10 +264,25 @@ struct SleepView: View {
 struct SleepLogSheet: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    /// Newest night, reverse-sorted — the import upserts here, so the sheet reacts and auto-populates.
+    @Query(sort: \SleepTrack.date, order: .reverse) private var nights: [SleepTrack]
     @State private var bedtime = Calendar.current.date(bySettingHour: 23, minute: 0, second: 0, of: .now) ?? .now
     @State private var wake = Calendar.current.date(bySettingHour: 7, minute: 0, second: 0, of: .now) ?? .now
     @State private var quality = 3.0
     @State private var interruptions = 0.0
+
+    // In-sheet one-time HealthKit pull (iOS analogue of Android's HealthConnectSleepSyncButton). This
+    // runs a single import on demand and NEVER flips `healthKitSleepEnabled` (the tab-level toggle owns
+    // the recurring import — matching Android's `onPermissionResultRunOnce`).
+    @State private var importer = HealthKitSleepImporter()
+    /// Becomes true after a one-time pull so completion feedback (and field auto-fill) only react to a
+    /// fetch the user triggered from this sheet, not a pre-existing newest night.
+    @State private var didSync = false
+    @State private var syncError: String?
+    /// Drives success/failure haptics off the `lastResult` change after a sync.
+    @State private var syncFeedback: SyncFeedback?
+
+    private enum SyncFeedback: Equatable { case success, failure }
 
     private var bedMinute: Int { minute(bedtime) }
     private var wakeMinute: Int { minute(wake) }
@@ -243,6 +293,7 @@ struct SleepLogSheet: View {
                 Section("Times") {
                     DatePicker("Bedtime", selection: $bedtime, displayedComponents: .hourAndMinute)
                     DatePicker("Wake", selection: $wake, displayedComponents: .hourAndMinute)
+                    healthSyncButton
                     liveHints
                 }
                 Section("Quality") {
@@ -273,8 +324,100 @@ struct SleepLogSheet: View {
                     }
                 }
             }
+            // When a sheet-triggered import lands a newer night, mirror its stage-derived values into
+            // the editable fields so the user reviews/saves rather than re-entering. We only react
+            // after `didSync` so a pre-existing night never clobbers fresh manual edits.
+            .onChange(of: nights.first?.id) { _, _ in if didSync { autoPopulateFromLatestImport() } }
+            // Success/failure haptics, parity with the Android sync button's Confirm/Reject feedback.
+            .sensoryFeedback(.success, trigger: syncFeedback) { _, new in new == .success }
+            .sensoryFeedback(.error, trigger: syncFeedback) { _, new in new == .failure }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    // MARK: In-sheet HealthKit sync (one-time pull; does NOT flip the persistent auto-sync setting)
+
+    /// The on-demand "pull last night from Apple Health" control. Hidden entirely when HealthKit is
+    /// unavailable on the device. Tapping requests read access if needed, then runs a single import.
+    @ViewBuilder
+    private var healthSyncButton: some View {
+        if importer.availability != .unavailable {
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    Task { await runOneTimeSync() }
+                } label: {
+                    HStack(spacing: ChronosSpacing.small) {
+                        if importer.isImporting {
+                            ProgressView()
+                            Text("Syncing…")
+                        } else {
+                            Image(systemName: "heart.fill").foregroundStyle(.pink)
+                            Text(importer.availability == .needsAuthorization
+                                 ? "Connect & sync from Health" : "Sync from Apple Health")
+                        }
+                    }
+                }
+                .disabled(importer.isImporting)
+                .font(.chronosBody)
+
+                if let syncError {
+                    Text(syncError)
+                        .font(.chronosCaption)
+                        .foregroundStyle(ChronosColors.brandAccent)
+                } else if didSync, let r = importer.lastResult {
+                    Text(syncSummary(r))
+                        .font(.chronosCaption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// One-time pull: grant read access first if needed, run the importer once, then surface feedback.
+    /// Deliberately does NOT touch `ChronosSettings.shared.healthKitSleepEnabled` — the recurring
+    /// background import stays under the user's control via the tab-level toggle.
+    private func runOneTimeSync() async {
+        syncError = nil
+        syncFeedback = nil   // reset so a repeat outcome still changes the trigger and re-fires haptics
+        if importer.availability == .needsAuthorization {
+            await importer.requestAuthorization()
+        }
+        // A denied/unavailable read yields zero nights; treat the no-data case as a soft failure hint.
+        let result = await importer.importRecent(into: context)
+        didSync = true
+        if result.nights == 0 {
+            syncError = "No recent nights found in Apple Health."
+            syncFeedback = .failure
+        } else {
+            syncFeedback = .success
+            autoPopulateFromLatestImport()
+        }
+    }
+
+    /// Mirror the newest imported night's stage-derived window/quality into the editable fields. Only
+    /// pulls from a `.healthKit` row (never a manual one — manual entries are never overwritten here,
+    /// matching the importer's provenance guard).
+    private func autoPopulateFromLatestImport() {
+        guard let latest = nights.first, latest.source == .healthKit else { return }
+        if let start = latest.actualStartMinute { bedtime = date(fromMinute: start) }
+        if let end = latest.actualEndMinute { wake = date(fromMinute: end) }
+        if latest.sleepQuality > 0 { quality = Double(latest.sleepQuality) }
+        interruptions = Double(latest.interruptedCount)
+    }
+
+    private func syncSummary(_ r: HealthKitSleepImporter.ImportResult) -> String {
+        if r.skippedManual > 0 && r.inserted == 0 && r.updated == 0 {
+            return "Kept your manual entry — Health night not imported."
+        }
+        if r.inserted > 0 { return "Imported last night from Apple Health." }
+        if r.updated > 0 { return "Updated last night from Apple Health." }
+        return "Already up to date."
+    }
+
+    /// Build today's `Date` at a given minute-of-day, for seeding the time pickers.
+    private func date(fromMinute m: Int) -> Date {
+        Calendar.current.date(
+            bySettingHour: m / 60, minute: m % 60, second: 0, of: .now) ?? .now
     }
 
     /// Live, derived feedback on the entered window — window label (+ overnight tag), time-in-bed,

@@ -382,9 +382,89 @@ public func deriveFindings(
     }
 }
 
-private func formatMinutes(_ minutes: Int) -> String {
+func formatMinutes(_ minutes: Int) -> String {
     let m = max(minutes, 0)
     if m < 60 { return "\(m)m" }
     let h = m / 60, rem = m % 60
     return rem == 0 ? "\(h)h" : "\(h)h \(rem)m"
+}
+
+// MARK: - Companion trend sections
+
+/// One day's habit completion tally. Mirrors Android's `HabitDailyCompletion`.
+public struct HabitDailyCompletion: Sendable, Equatable {
+    public let completedCount: Int
+    public let missedCount: Int
+
+    public init(completedCount: Int, missedCount: Int = 0) {
+        self.completedCount = completedCount
+        self.missedCount = missedCount
+    }
+}
+
+/// One day's medication adherence tally. Mirrors Android's `MedicationDailyAdherence`.
+public struct MedicationDailyAdherence: Sendable, Equatable {
+    public let takenCount: Int
+    public let missedCount: Int
+
+    public init(takenCount: Int, missedCount: Int) {
+        self.takenCount = takenCount
+        self.missedCount = missedCount
+    }
+}
+
+/// Recent companion-data trends fed into the recommendation generator so suggestions reflect
+/// multi-day patterns instead of only today's numbers. Foundation-only port of Android's
+/// `CompanionTrendContext`. All fields default to empty: callers that cannot supply trends lose
+/// nothing. The day lists are expected oldest-first (so `suffix(7)` is the most recent week),
+/// matching the Android ordering used by the week-over-week math.
+public struct CompanionTrendSections: Sendable, Equatable {
+    /// Hour of day (0…23) with the highest average energy across recent check-ins, when known.
+    public let peakEnergyHour: Int?
+    /// Per-day habit completion tallies, oldest-first.
+    public let habitCompletion: [HabitDailyCompletion]
+    /// Per-day medication adherence tallies, oldest-first.
+    public let medicationAdherence: [MedicationDailyAdherence]
+
+    public init(
+        peakEnergyHour: Int? = nil,
+        habitCompletion: [HabitDailyCompletion] = [],
+        medicationAdherence: [MedicationDailyAdherence] = []
+    ) {
+        self.peakEnergyHour = peakEnergyHour
+        self.habitCompletion = habitCompletion
+        self.medicationAdherence = medicationAdherence
+    }
+
+    /// True when no trend signal is available. Mirrors Android's `isEmpty`.
+    public var isEmpty: Bool {
+        peakEnergyHour == nil && habitCompletion.isEmpty && medicationAdherence.isEmpty
+    }
+
+    /// Completions over the most recent 7 days. Mirrors `habitCompletedLastWeek`.
+    public var habitCompletedLastWeek: Int {
+        habitCompletion.suffix(7).reduce(0) { $0 + $1.completedCount }
+    }
+
+    /// Completions over the 7 days before the most recent week. Mirrors `habitCompletedPriorWeek`.
+    public var habitCompletedPriorWeek: Int {
+        habitCompletion.dropLast(7).suffix(7).reduce(0) { $0 + $1.completedCount }
+    }
+
+    /// Last-week minus prior-week completions; nil without a full two-week window or a non-zero
+    /// prior-week baseline to compare against. Mirrors `habitWeekOverWeekDelta`.
+    public var habitWeekOverWeekDelta: Int? {
+        if habitCompletion.count < 14 || habitCompletedPriorWeek == 0 { return nil }
+        return habitCompletedLastWeek - habitCompletedPriorWeek
+    }
+
+    /// Total doses taken across the window. Mirrors `medicationTakenTotal`.
+    public var medicationTakenTotal: Int {
+        medicationAdherence.reduce(0) { $0 + $1.takenCount }
+    }
+
+    /// Total doses missed across the window. Mirrors `medicationMissedTotal`.
+    public var medicationMissedTotal: Int {
+        medicationAdherence.reduce(0) { $0 + $1.missedCount }
+    }
 }
