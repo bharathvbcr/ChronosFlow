@@ -80,7 +80,7 @@ class EnergyCorrelationEngine @Inject constructor(
             insights += EnergyInsight(
                 type = ReviewInsightType.PLANNING_OPTIMISM,
                 title = "Plans often run longer than actual focus",
-                detail = "Actual tracked time is about ${(actual * 100 / planned)}% of planned blocks.",
+                detail = "Actual tracked time is about ${(actual * 100L / planned)}% of planned blocks.",
                 confidence = 0.55f,
                 dataPoints = blocks.size
             )

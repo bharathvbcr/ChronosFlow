@@ -19,9 +19,11 @@ import com.ChronosFlow.VBCR.core.domain.repository.CalendarEventRepository
 import com.ChronosFlow.VBCR.core.domain.repository.GoalRepository
 import com.ChronosFlow.VBCR.core.domain.repository.FocusSessionRepository
 import com.ChronosFlow.VBCR.core.domain.repository.HabitRepository
+import com.ChronosFlow.VBCR.core.domain.repository.InboxRepository
 import com.ChronosFlow.VBCR.core.domain.repository.JournalRepository
 import com.ChronosFlow.VBCR.core.domain.repository.MedicationRepository
 import com.ChronosFlow.VBCR.core.domain.repository.MoodEnergyRepository
+import com.ChronosFlow.VBCR.core.domain.repository.ReadingListRepository
 import com.ChronosFlow.VBCR.core.domain.repository.ReviewRepository
 import com.ChronosFlow.VBCR.core.domain.repository.RoutineRepository
 import com.ChronosFlow.VBCR.core.domain.repository.SleepTrackRepository
@@ -56,6 +58,8 @@ class ChronosAppFunctionsTest {
     private val calendarEventRepository: CalendarEventRepository = mockk(relaxed = true)
     private val goalRepository: GoalRepository = mockk(relaxed = true)
     private val journalRepository: JournalRepository = mockk(relaxed = true)
+    private val readingListRepository: ReadingListRepository = mockk(relaxed = true)
+    private val inboxRepository: InboxRepository = mockk(relaxed = true)
     private val routineRepository: RoutineRepository = mockk(relaxed = true)
     private val sleepTrackRepository: SleepTrackRepository = mockk(relaxed = true)
     private val recordSleepUseCase: RecordSleepUseCase = mockk(relaxed = true)
@@ -79,6 +83,8 @@ class ChronosAppFunctionsTest {
         calendarEventRepository = calendarEventRepository,
         goalRepository = goalRepository,
         journalRepository = journalRepository,
+        readingListRepository = readingListRepository,
+        inboxRepository = inboxRepository,
         routineRepository = routineRepository,
         sleepTrackRepository = sleepTrackRepository,
         recordSleepUseCase = recordSleepUseCase,
@@ -125,6 +131,49 @@ class ChronosAppFunctionsTest {
         assertFalse(result)
         coVerify(exactly = 0) {
             taskRepository.saveTask(any())
+        }
+    }
+
+    @Test
+    fun addToReadingListSavesExtractedUrl() = runTest {
+        coEvery { readingListRepository.save(any()) } returns Unit
+
+        val result = appFunctions.addToReadingList(
+            appFunctionContext = appFunctionContext,
+            url = "Read this https://example.com/post later"
+        )
+
+        assertTrue(result)
+        coVerify(exactly = 1) {
+            readingListRepository.save(match {
+                it.url == "https://example.com/post" && it.domain == "example.com"
+            })
+        }
+    }
+
+    @Test
+    fun addToReadingListReturnsFalseWithoutUrl() = runTest {
+        val result = appFunctions.addToReadingList(
+            appFunctionContext = appFunctionContext,
+            url = "just some text, no link"
+        )
+
+        assertFalse(result)
+        coVerify(exactly = 0) { readingListRepository.save(any()) }
+    }
+
+    @Test
+    fun captureToInboxSavesText() = runTest {
+        coEvery { inboxRepository.save(any()) } returns Unit
+
+        val result = appFunctions.captureToInbox(
+            appFunctionContext = appFunctionContext,
+            text = "Call the dentist"
+        )
+
+        assertTrue(result)
+        coVerify(exactly = 1) {
+            inboxRepository.save(match { it.text == "Call the dentist" && it.url == null })
         }
     }
 

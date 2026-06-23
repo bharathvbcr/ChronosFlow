@@ -31,8 +31,8 @@ fun MedicationAdherenceChart(
 ) {
     val activePlans = remember(plans) { plans.filter { it.isActive } }
     val totalMissed = activePlans.sumOf { it.missedCount }
-    val totalExpected = activePlans.sumOf { (it.missedCount + 7).coerceAtLeast(7) }
-    val adherence = if (totalExpected == 0) 1f else ((totalExpected - totalMissed).toFloat() / totalExpected).coerceIn(0f, 1f)
+    val adherence = if (activePlans.isEmpty()) 1f else
+        (activePlans.sumOf { it.analytics.adherenceRate.toDouble() } / activePlans.size).toFloat().coerceIn(0f, 1f)
 
     ChronosListCard(modifier = modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -102,9 +102,7 @@ fun MedicationAdherenceChart(
 
 @Composable
 private fun MedicationAdherenceRow(plan: MedicationPlan) {
-    val missed = plan.missedCount.coerceAtLeast(0)
-    val expected = (missed + 7).coerceAtLeast(7)
-    val score = ((expected - missed).toFloat() / expected).coerceIn(0f, 1f)
+    val score = plan.analytics.adherenceRate.coerceIn(0f, 1f)
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp)

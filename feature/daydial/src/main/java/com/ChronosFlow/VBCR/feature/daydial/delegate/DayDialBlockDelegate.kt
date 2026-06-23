@@ -136,6 +136,8 @@ class DayDialBlockDelegate @Inject constructor(
             val preview = _dragPreview.value?.takeIf { it.blockId == blockId }
             _dragPreview.value = null
             if (preview?.result !is PlannerOperationResult.Applied) {
+                // Conflict or missing preview: snap block back silently. The preview already
+                // surfaced the conflict indicator; no commit callback is issued.
                 activeDragStartMinuteByBlock.remove(blockId)
                 return@launch
             }
@@ -176,7 +178,7 @@ class DayDialBlockDelegate @Inject constructor(
         scope.launch {
             val block = repository.getTimeBlockById(blockId) ?: return@launch
             val nextStart = DialUtils.snapToIncrement(startMinute).coerceIn(0, 1439)
-            val nextDuration = durationMinutes.coerceIn(10, 240)
+            val nextDuration = durationMinutes.coerceIn(10, (1440 - nextStart).coerceAtLeast(10))
             val result = sleepWindowResult(block.id, nextStart, nextDuration)
                 ?: plannerService.previewResizeWindow(block.id, nextStart, nextDuration)
             if (result is PlannerOperationResult.Applied) {
@@ -206,7 +208,7 @@ class DayDialBlockDelegate @Inject constructor(
             }
             val block = repository.getTimeBlockById(blockId) ?: return@launch
             val normalizedStart = DialUtils.snapToIncrement(finalStartMinute).coerceIn(0, 1439)
-            val normalizedDuration = finalDurationMinutes.coerceIn(10, 240)
+            val normalizedDuration = finalDurationMinutes.coerceIn(10, (1440 - normalizedStart).coerceAtLeast(10))
             val result = sleepWindowResult(block.id, normalizedStart, normalizedDuration)
                 ?: resizeBlockUseCase(block.id, normalizedStart, normalizedDuration)
             onResult(result, false)
@@ -217,7 +219,9 @@ class DayDialBlockDelegate @Inject constructor(
     }
 
     fun onBlockDragCancelled() {
+        val blockId = _dragPreview.value?.blockId
         _dragPreview.value = null
+        if (blockId != null) activeDragStartMinuteByBlock.remove(blockId)
     }
 
     fun createQuickBlock(
@@ -322,8 +326,13 @@ class DayDialBlockDelegate @Inject constructor(
                 blockId = block.id,
                 blockSnapshot = block
             )
-            executeCommand(command, onResult)
-            onDeleted(blockId)
+            executeCommand(
+                command = command,
+                onResult = { result, snapped ->
+                    onResult(result, snapped)
+                    if (result is PlannerOperationResult.Applied) onDeleted(blockId)
+                }
+            )
         }
     }
 
@@ -346,15 +355,15 @@ class DayDialBlockDelegate @Inject constructor(
             if (sourceBlocks.isEmpty()) {
                 return@launch
             }
-            if (sourceBlocks.any { sourceBlock ->
-                    sleepWindowResult(sourceBlock.id, sourceBlock.startMinuteOfDay, sourceBlock.durationMinutes) != null
-                }
-            ) {
+            val blocksToApply = sourceBlocks.filter { sourceBlock ->
+                sleepWindowResult(sourceBlock.id, sourceBlock.startMinuteOfDay, sourceBlock.durationMinutes) == null
+            }
+            if (blocksToApply.isEmpty()) {
                 onResult(PlannerOperationResult.Rejected(SLEEP_SCHEDULE_MESSAGE, ""), false)
                 return@launch
             }
 
-            sourceBlocks.forEach { sourceBlock ->
+            blocksToApply.forEach { sourceBlock ->
                 val copied = sourceBlock.copy(
                     id = UUID.randomUUID().toString(),
                     date = date,

@@ -25,7 +25,7 @@ fun deriveSleepReadiness(lastNight: SleepTrack?): SleepReadiness {
     if (quality != null) {
         return when {
             quality <= DEPLETED_QUALITY_MAX || heavilyInterrupted -> SleepReadiness.DEPLETED
-            quality >= RESTED_QUALITY_MIN -> SleepReadiness.RESTED
+            quality >= RESTED_QUALITY_MIN && !heavilyInterrupted -> SleepReadiness.RESTED
             else -> SleepReadiness.NORMAL
         }
     }

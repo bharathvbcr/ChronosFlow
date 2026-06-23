@@ -209,7 +209,7 @@ internal fun localJournalInsight(entries: List<JournalEntry>, today: LocalDate):
     if (entries.isEmpty()) {
         return "No reflections yet. Capturing even a one-tap mood each evening is how the streak — and the insights — begin."
     }
-    val journaledDays = journalDaysInWindow(entries, today, windowDays = 14)
+    val journaledDays = journalDaysInWindow(entries.filterNot { isJournalWorkoutEntry(it) }, today, windowDays = 14)
     val avg = journalAverageMood(entries.filter { it.entryDate in today.minusDays(13)..today })
     val streak = journalStreak(entries, today)
 

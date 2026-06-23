@@ -36,6 +36,8 @@ import com.ChronosFlow.VBCR.core.notifications.NotificationPermissions
 import com.ChronosFlow.VBCR.core.ui.components.ChronosSettingsRow
 import com.ChronosFlow.VBCR.core.ui.components.ChronosTextButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosWarningBanner
+import com.ChronosFlow.VBCR.core.ui.settings.ChronosUiSettingsKeys
+import com.ChronosFlow.VBCR.core.ui.settings.rememberPersistentUiBooleanSetting
 import com.ChronosFlow.VBCR.feature.daydial.CalendarPermissionStatus
 import com.ChronosFlow.VBCR.feature.daydial.HealthConnectSleepViewModel
 import com.ChronosFlow.VBCR.feature.daydial.ScreenTimeViewModel
@@ -137,6 +139,59 @@ internal fun CompanionAppStatusCard(onStatusChanged: (Boolean) -> Unit = {}) {
             onCheckedChange = { enabled ->
                 medicationSharingEnabled = enabled
                 privacyPreferences.setMedicationSharingEnabled(enabled)
+            }
+        )
+    }
+}
+
+internal fun readingConnectionSummary(autoFetchEnabled: Boolean): String =
+    if (autoFetchEnabled) "Browser link sharing · details auto-fetched" else "Browser link sharing · offline"
+
+/**
+ * Surfaces ChronosFlow's "incoming" connected-app capability: any app can share a link/text to it
+ * via the "Save to ChronosFlow" share target, and (optionally) ChronosFlow reaches out over the
+ * network to enrich saved links. Lives next to [CompanionAppStatusCard] under "Connected apps"
+ * since both describe how ChronosFlow exchanges data with other apps.
+ */
+@Composable
+internal fun ReadingConnectionCard() {
+    val privacyPreferences = rememberPrivacyPreferences()
+    var autoFetch by rememberPersistentUiBooleanSetting(
+        ChronosUiSettingsKeys.KEY_READING_METADATA_AUTOFETCH,
+        true
+    )
+    var acceptHandoffs by remember { mutableStateOf(privacyPreferences.isInboundHandoffAccepted()) }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "\"Save to ChronosFlow\" appears in any app's share sheet. Share a link to add it to " +
+                "your reading list, or share text to drop it in your inbox.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        ChronosSettingsRow(
+            title = "Auto-fetch link details",
+            subtitle = if (autoFetch) {
+                "Fetches each saved link's title, icon, and read time (one network request per link)."
+            } else {
+                "Reading list stays fully offline — no requests to saved links."
+            },
+            checked = autoFetch,
+            onCheckedChange = { autoFetch = it }
+        )
+        ChronosSettingsRow(
+            title = "Accept items from Curio",
+            subtitle = if (acceptHandoffs) {
+                "Curio can save links to your reading list (with reminders), inbox, and tasks."
+            } else {
+                "Curio handoffs are turned off — nothing can be added from Curio."
+            },
+            checked = acceptHandoffs,
+            onCheckedChange = { enabled ->
+                acceptHandoffs = enabled
+                privacyPreferences.setInboundHandoffAccepted(enabled)
             }
         )
     }

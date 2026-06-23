@@ -15,7 +15,7 @@ class DoseAcknowledgementAction : ActionCallback {
         parameters: ActionParameters
     ) {
         val planId = parameters[ActionParameters.Key<String>(PLAN_ID_KEY)] ?: return
-        val taken = parameters[ActionParameters.Key<Boolean>(TAKEN_KEY)] ?: true
+        val taken = parameters[ActionParameters.Key<Boolean>(TAKEN_KEY)] ?: return
         val entryPoint = EntryPointAccessors.fromApplication(
             context.applicationContext,
             WidgetActionEntryPoint::class.java

@@ -44,10 +44,24 @@ private val daySidebarLaunchTargets = setOf(
 internal fun isDaySidebarLaunchTarget(target: String?): Boolean =
     target in daySidebarLaunchTargets
 
+// Day targets that open an in-place modal sheet (not a tab, not a sidebar page). navigate(Day)
+// keeps the base Day NavKey and only updates requestedDayTarget, so these travel via shellDayTarget
+// (= requestedDayTarget) with routeTarget == null. They must pass through here so applyLaunchTarget
+// can open their sheet; otherwise the Add-FAB "New block" / "Journal entry" / "Log sleep" items
+// resolve to a null launch target and silently do nothing. dayTargetGeneration gates re-firing, so
+// a persisted requestedDayTarget is safe.
+private val daySheetLaunchTargets = setOf(
+    ChronosRoute.Day.TARGET_ADD_BLOCK,
+    ChronosRoute.Day.TARGET_JOURNAL,
+    ChronosRoute.Day.TARGET_SLEEP
+)
+
 internal fun dayLaunchTargetForRoute(
     routeTarget: String?,
     shellDayTarget: String?
-): String? = routeTarget ?: shellDayTarget?.takeIf(::isDaySidebarLaunchTarget)
+): String? = routeTarget ?: shellDayTarget?.takeIf {
+    isDaySidebarLaunchTarget(it) || it in daySheetLaunchTargets
+}
 
 internal fun taskScreenDayDialTarget(): String = ChronosRoute.Day.TARGET_TODAY
 

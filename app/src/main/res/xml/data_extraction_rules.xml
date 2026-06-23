@@ -11,12 +11,13 @@
     <device-transfer>
         <include domain="sharedpref" path="." />
         <include domain="file" path="datastore/daydial_ui_settings.preferences_pb" />
-        <!-- Portable backup JSON is excluded from device-transfer: it is a plaintext export of
-             all tasks, habits, and events that ships with no encryption. Cloud backup is protected
-             by Android 12+ end-to-end encryption; device-transfer (ADB/cable) has no such
-             guarantee, so the file is excluded here to prevent plaintext exfiltration. -->
+        <!-- Portable backup JSON is intentionally NOT included in device-transfer: it is a
+             plaintext export of all tasks, habits, and events that ships with no encryption.
+             Cloud backup is protected by Android 12+ end-to-end encryption; device-transfer
+             (ADB/cable) has no such guarantee. Since device-transfer only ships explicitly
+             included paths, omitting android_transfer/ keeps the plaintext export off the wire
+             without an explicit <exclude> (which lint rejects as outside any included path). -->
         <include domain="file" path="task_attachments/" />
-        <exclude domain="file" path="android_transfer/chronosflow_portable_backup.json" />
         <exclude domain="sharedpref" path="chronos_secure_database.xml" />
         <exclude domain="sharedpref" path="chronos_db_migration.xml" />
         <exclude domain="sharedpref" path="chronos_preferences.xml" />

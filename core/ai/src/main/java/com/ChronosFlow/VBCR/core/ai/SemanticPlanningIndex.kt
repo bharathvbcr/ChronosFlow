@@ -39,7 +39,8 @@ data class SemanticSearchHit(
  */
 @Singleton
 class SemanticPlanningIndex @Inject constructor() {
-    private val documents = mutableListOf<IndexedDocument>()
+    @Volatile
+    private var documents: List<IndexedDocument> = emptyList()
 
     fun rebuild(
         reviews: List<DailyReviewSummary>,
@@ -50,23 +51,23 @@ class SemanticPlanningIndex @Inject constructor() {
         focusSessions: List<FocusSession>,
         redactMedicationNames: Boolean = true
     ) {
-        documents.clear()
+        val newDocuments = mutableListOf<IndexedDocument>()
         reviews.forEach { review ->
-            documents += IndexedDocument(
+            newDocuments += IndexedDocument(
                 id = "review-${review.date}",
                 type = SemanticDocumentType.REVIEW,
                 text = "${review.date} planned ${review.plannedMinutes} actual ${review.actualMinutes} drift ${review.driftMinutes}"
             )
         }
         blocks.forEach { block ->
-            documents += IndexedDocument(
+            newDocuments += IndexedDocument(
                 id = "block-${block.id}",
                 type = SemanticDocumentType.TIME_BLOCK,
                 text = "${block.title} ${block.category} ${block.date} ${block.startMinuteOfDay}"
             )
         }
         tasks.forEach { task ->
-            documents += IndexedDocument(
+            newDocuments += IndexedDocument(
                 id = "task-${task.id}",
                 type = SemanticDocumentType.TASK,
                 text = buildString {
@@ -81,7 +82,7 @@ class SemanticPlanningIndex @Inject constructor() {
             )
         }
         habits.forEach { habit ->
-            documents += IndexedDocument(
+            newDocuments += IndexedDocument(
                 id = "habit-${habit.id}",
                 type = SemanticDocumentType.HABIT,
                 text = "${habit.title} streak ${habit.streakCount} window ${habit.windowStartMinute}"
@@ -89,19 +90,20 @@ class SemanticPlanningIndex @Inject constructor() {
         }
         medications.forEach { plan ->
             val label = if (redactMedicationNames) "medication plan" else plan.name
-            documents += IndexedDocument(
+            newDocuments += IndexedDocument(
                 id = "med-${plan.id}",
                 type = SemanticDocumentType.MEDICATION,
                 text = "$label reminder ${plan.reminderMinuteOfDay} missed ${plan.missedCount}"
             )
         }
         focusSessions.forEach { session ->
-            documents += IndexedDocument(
+            newDocuments += IndexedDocument(
                 id = "focus-${session.id}",
                 type = SemanticDocumentType.FOCUS,
                 text = "focus completed=${session.isCompleted} block ${session.blockId ?: "none"} interruptions ${session.interruptions}"
             )
         }
+        documents = newDocuments
     }
 
     fun query(

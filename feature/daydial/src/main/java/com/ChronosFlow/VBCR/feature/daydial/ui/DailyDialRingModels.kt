@@ -339,7 +339,11 @@ private fun minutesUntil(currentMinute: Int, targetMinute: Int): Int {
 
 internal fun remainingMinutesInBlock(block: TimeBlockUiModel, currentMinute: Int): Int {
     val endMinute = block.startMinuteOfDay + block.durationMinutes
-    return ((endMinute - currentMinute + DAY_IN_MINUTES) % DAY_IN_MINUTES)
+    return if (endMinute <= DAY_IN_MINUTES) {
+        (endMinute - currentMinute).coerceAtLeast(0)
+    } else {
+        ((endMinute - currentMinute + DAY_IN_MINUTES) % DAY_IN_MINUTES)
+    }
 }
 
 private fun minutesSince(targetMinute: Int, currentMinute: Int): Int {

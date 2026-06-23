@@ -83,9 +83,6 @@ class AppLockSessionController @Inject constructor(
 
     fun setRequireAuthFor(area: SensitiveArea, enabled: Boolean) {
         preferences.setRequireAuthFor(area, enabled)
-        if (!enabled) {
-            appLockManager.unlockSensitiveArea(area)
-        }
         bumpSettings()
     }
 

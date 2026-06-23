@@ -77,6 +77,23 @@ class ChronosPreferencesDataSource @Inject constructor(
     }
 
     /**
+     * Whether ChronosFlow accepts inbound handoffs (reading-list saves, inbox captures, tasks) that
+     * a trusted peer app (Curio) writes into [InteropProvider]'s handoff path.
+     *
+     * This is the INBOUND counterpart of [isInteropConsentGranted] and is deliberately separate:
+     * the consent gate above governs sharing ChronosFlow's data OUT, whereas an inbound handoff only
+     * adds user-initiated items IN and never exposes existing data. Inbound writes are already
+     * restricted to the pinned peer signing cert by [PeerVerifier]; this flag is an additional
+     * user kill-switch. Defaults to true so the feature works out of the box for the trusted peer.
+     */
+    fun isInboundHandoffAccepted(): Boolean =
+        preferences.getBoolean(KEY_INTEROP_INBOUND_ACCEPTED, true)
+
+    fun setInboundHandoffAccepted(accepted: Boolean) {
+        preferences.edit().putBoolean(KEY_INTEROP_INBOUND_ACCEPTED, accepted).apply()
+    }
+
+    /**
      * Whether the user has opted in to sending schedule data to Google cloud AI (Gemini).
      * Defaults to false so no user data is ever sent to a remote model without explicit consent.
      */
@@ -101,6 +118,7 @@ class ChronosPreferencesDataSource @Inject constructor(
         const val PREFERENCES_NAME = "chronos_preferences"
         const val KEY_INTEROP_SHARING_MEDICATIONS = "interop.sharing.medications.enabled"
         const val KEY_INTEROP_CONSENT_GRANTED = "interop.consent.granted"
+        const val KEY_INTEROP_INBOUND_ACCEPTED = "interop.inbound.accepted"
         const val KEY_CLOUD_AI_ENABLED = "ai.cloud.enabled"
     }
 }

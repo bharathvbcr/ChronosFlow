@@ -68,6 +68,7 @@ fun SleepTrackEntity.toDomain(): SleepTrack = SleepTrack(
     sleepQuality = sleepQuality,
     windDownNotes = windDownNotes,
     interruptedCount = interruptedCount,
+    refreshedRating = refreshedRating,
     source = runCatching { SleepSource.valueOf(source) }.getOrDefault(SleepSource.MANUAL)
 )
 
@@ -81,5 +82,6 @@ fun SleepTrack.toEntity(): SleepTrackEntity = SleepTrackEntity(
     sleepQuality = sleepQuality,
     windDownNotes = windDownNotes,
     interruptedCount = interruptedCount,
+    refreshedRating = refreshedRating,
     source = source.name
 )

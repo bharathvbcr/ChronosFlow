@@ -15,6 +15,7 @@ import com.ChronosFlow.VBCR.core.data.dao.GoalDao
 import com.ChronosFlow.VBCR.core.data.dao.HabitEventDao
 import com.ChronosFlow.VBCR.core.data.dao.HabitDao
 import com.ChronosFlow.VBCR.core.data.dao.HabitScheduleDao
+import com.ChronosFlow.VBCR.core.data.dao.InboxItemDao
 import com.ChronosFlow.VBCR.core.data.dao.JournalAttachmentDao
 import com.ChronosFlow.VBCR.core.data.dao.JournalEntryDao
 import com.ChronosFlow.VBCR.core.data.dao.MedicationDoseEventDao
@@ -22,6 +23,7 @@ import com.ChronosFlow.VBCR.core.data.dao.MedicationDao
 import com.ChronosFlow.VBCR.core.data.dao.MedicationSafetyProfileDao
 import com.ChronosFlow.VBCR.core.data.dao.MedicationScheduleDao
 import com.ChronosFlow.VBCR.core.data.dao.MoodEnergyCheckInDao
+import com.ChronosFlow.VBCR.core.data.dao.ReadingItemDao
 import com.ChronosFlow.VBCR.core.data.dao.RecurrenceRuleDao
 import com.ChronosFlow.VBCR.core.data.dao.ReviewDao
 import com.ChronosFlow.VBCR.core.data.dao.RoutineDao
@@ -41,6 +43,7 @@ import com.ChronosFlow.VBCR.core.data.model.GoalEntity
 import com.ChronosFlow.VBCR.core.data.model.HabitEventEntity
 import com.ChronosFlow.VBCR.core.data.model.HabitEntity
 import com.ChronosFlow.VBCR.core.data.model.HabitScheduleEntity
+import com.ChronosFlow.VBCR.core.data.model.InboxItemEntity
 import com.ChronosFlow.VBCR.core.data.model.JournalAttachmentEntity
 import com.ChronosFlow.VBCR.core.data.model.JournalEntryEntity
 import com.ChronosFlow.VBCR.core.data.model.MedicationDoseEventEntity
@@ -48,6 +51,7 @@ import com.ChronosFlow.VBCR.core.data.model.MedicationPlanEntity
 import com.ChronosFlow.VBCR.core.data.model.MedicationSafetyProfileEntity
 import com.ChronosFlow.VBCR.core.data.model.MedicationScheduleEntity
 import com.ChronosFlow.VBCR.core.data.model.MoodEnergyCheckInEntity
+import com.ChronosFlow.VBCR.core.data.model.ReadingItemEntity
 import com.ChronosFlow.VBCR.core.data.model.RecurrenceRuleEntity
 import com.ChronosFlow.VBCR.core.data.model.ReviewInsightEntity
 import com.ChronosFlow.VBCR.core.data.model.RoutineEntity
@@ -98,9 +102,11 @@ import com.ChronosFlow.VBCR.core.data.util.Converters
         RoutineEntity::class,
         RoutineStepEntity::class,
         AppUsageDayEntity::class,
-        AppUsageOverrideEntity::class
+        AppUsageOverrideEntity::class,
+        ReadingItemEntity::class,
+        InboxItemEntity::class
     ],
-    version = 27,
+    version = 30,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -129,6 +135,8 @@ abstract class ChronosDatabase : RoomDatabase() {
     abstract fun routineDao(): RoutineDao
     abstract fun appUsageDao(): AppUsageDao
     abstract fun appUsageOverrideDao(): AppUsageOverrideDao
+    abstract fun readingItemDao(): ReadingItemDao
+    abstract fun inboxItemDao(): InboxItemDao
 
     companion object {
         val MIGRATION_2_3 = object : Migration(2, 3) {
@@ -1002,6 +1010,77 @@ abstract class ChronosDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS index_habit_events_habitId_recordedAt ON habit_events(habitId, recordedAt)"
                 )
+            }
+        }
+
+        val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Drop the standalone recordedAt indexes created by MIGRATION_25_26. The entities
+                // were since changed to use the composite index_habit_events_habitId_recordedAt
+                // (added in MIGRATION_26_27) and to drop medication's standalone recordedAt index
+                // entirely, but no migration removed the orphans — leaving a database that no longer
+                // matches the generated schema, which makes Room abort at open with
+                // "Migration didn't properly handle". Dropping them reconciles the two.
+                db.execSQL("DROP INDEX IF EXISTS index_habit_events_recordedAt")
+                db.execSQL("DROP INDEX IF EXISTS index_medication_dose_events_recordedAt")
+            }
+        }
+
+        val MIGRATION_28_29 = object : Migration(28, 29) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Additive nullable column capturing how refreshed the sleeper felt on waking (1–5);
+                // null for existing rows and Health Connect imports that don't self-report it.
+                db.execSQL("ALTER TABLE sleep_tracks ADD COLUMN refreshedRating INTEGER")
+            }
+        }
+
+        val MIGRATION_29_30 = object : Migration(29, 30) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Read-later queue ("remind me to read later"). Additive — no existing data touched.
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `reading_items` (
+                        `id` TEXT NOT NULL,
+                        `url` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `domain` TEXT NOT NULL,
+                        `faviconPath` TEXT,
+                        `estimatedReadMinutes` INTEGER,
+                        `wordCount` INTEGER,
+                        `status` TEXT NOT NULL,
+                        `metadataState` TEXT NOT NULL,
+                        `notes` TEXT,
+                        `reminderAt` INTEGER,
+                        `addedAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        `lastOpenedAt` INTEGER,
+                        `sortOrder` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_reading_items_status` ON `reading_items` (`status`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_reading_items_addedAt` ON `reading_items` (`addedAt`)")
+
+                // Quick-capture inbox for later triage into tasks/blocks/reading/journal.
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `inbox_items` (
+                        `id` TEXT NOT NULL,
+                        `text` TEXT NOT NULL,
+                        `url` TEXT,
+                        `source` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `triaged` INTEGER NOT NULL,
+                        `triagedTo` TEXT,
+                        `triagedRefId` TEXT,
+                        `sortOrder` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_inbox_items_triaged` ON `inbox_items` (`triaged`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_inbox_items_createdAt` ON `inbox_items` (`createdAt`)")
             }
         }
     }

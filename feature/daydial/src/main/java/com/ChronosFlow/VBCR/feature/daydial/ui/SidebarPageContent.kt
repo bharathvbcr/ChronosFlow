@@ -465,6 +465,10 @@ internal fun SidebarPageContent(
                 // The full standalone Journal page: history, search, mood strip, AI insights, and the
                 // unified composer sheet. Rendered inline in the More section's page surface.
                 SidebarPage.JOURNAL -> JournalPageRoute(onMessage = showMessage)
+                // Read-later queue: save links, fetch metadata, remind, and read with focus.
+                SidebarPage.READING_LIST -> ReadingListPageRoute(onMessage = showMessage)
+                // Quick-capture inbox: dump anything, triage later.
+                SidebarPage.INBOX -> InboxPageRoute(onMessage = showMessage)
                 SidebarPage.TEMPLATES -> {
                     ChronosSectionTitle(title = "Routines", subtitle = "Apply, edit, or duplicate reusable day blueprints")
                     templates.forEach { template ->
@@ -1063,11 +1067,13 @@ internal fun SidebarPageContent(
                     }
                     ChronosCollapsibleSection(
                         title = "Connected apps",
-                        summary = "Cross-app task & event sharing with DevTime",
+                        summary = "DevTime task sharing · browser link sharing",
                         expanded = companionAppExpanded,
                         onExpandedChange = { companionAppExpanded = it }
                     ) {
                         CompanionAppStatusCard()
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        ReadingConnectionCard()
                     }
                     // ---- Data deletion (Play Store Data Safety compliance) ----
                     var showDeleteAllConfirm by rememberSaveable { mutableStateOf(false) }

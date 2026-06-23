@@ -137,10 +137,11 @@ class ScreenTimeSyncManager @Inject constructor(
         overrideRepository.observeOverrides().map { overrides ->
             withContext(Dispatchers.IO) {
                 if (!dataSource.hasUsageAccess()) return@withContext emptyList()
+                val effectiveToday = LocalDate.now()
                 val totals = LinkedHashMap<String, Int>()
                 val labels = HashMap<String, String>()
                 for (offset in 0 until windowDays) {
-                    val date = today.minusDays(offset.toLong())
+                    val date = effectiveToday.minusDays(offset.toLong())
                     for (sample in dataSource.usageForDay(date)) {
                         if ((overrides[sample.packageName] ?: sample.category) != UsageCategory.DISTRACTING) continue
                         totals[sample.packageName] = (totals[sample.packageName] ?: 0) + sample.minutes
@@ -184,6 +185,7 @@ class ScreenTimeSyncManager @Inject constructor(
                 }
                 recordSuccess(synced)
             }.getOrElse { error ->
+                if (error is kotlinx.coroutines.CancellationException) throw error
                 recordFailure(error.message ?: error::class.java.simpleName)
             }
         }

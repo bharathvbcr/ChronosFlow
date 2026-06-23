@@ -3,9 +3,6 @@ package com.ChronosFlow.VBCR.core.data.health
 import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
 import androidx.test.core.app.ApplicationProvider
-import io.mockk.every
-import io.mockk.mockkStatic
-import io.mockk.unmockkAll
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -22,13 +19,11 @@ import java.time.Instant
  * not available on the device.
  *
  * The production class gates every HealthConnectClient call behind `isAvailable()` which
- * delegates to `HealthConnectClient.getSdkStatus(context)`. We use MockK's `mockkStatic`
- * to intercept that static call and return the NOT_SUPPORTED path, then call the real
- * production methods to verify they all short-circuit to empty/null/false rather than
- * throwing or calling into the unavailable client.
- *
- * This test covers the graceful-degradation contract on devices where Health Connect
- * is not installed or is disabled.
+ * delegates to `HealthConnectClient.getSdkStatus(context)`. We simulate unavailability
+ * via `sdkStatusOverride` — a @VisibleForTesting field that bypasses the real static HC
+ * call (which is a Kotlin inline function and cannot be intercepted by mockkStatic without
+ * the MockK JVM agent). All real production logic still runs; only the status probe is
+ * short-circuited.
  */
 @RunWith(RobolectricTestRunner::class)
 class HealthConnectSleepDataSourceUnavailableTest {
@@ -39,16 +34,14 @@ class HealthConnectSleepDataSourceUnavailableTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        // Intercept the static HealthConnectClient.getSdkStatus() call so the real
-        // production code in HealthConnectSleepDataSource.availability() returns NOT_SUPPORTED.
-        mockkStatic(HealthConnectClient::class)
-        every { HealthConnectClient.getSdkStatus(any()) } returns HealthConnectClient.SDK_UNAVAILABLE
         dataSource = HealthConnectSleepDataSource(context)
+        // Override the SDK status probe directly; avoids mockkStatic on the inline HC function.
+        dataSource.sdkStatusOverride = HealthConnectClient.SDK_UNAVAILABLE
     }
 
     @After
     fun tearDown() {
-        unmockkAll()
+        // No MockK statics to clean up.
     }
 
     /**

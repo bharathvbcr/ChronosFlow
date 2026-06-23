@@ -141,6 +141,27 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- A second share target distinct from the task share: "Save to ChronosFlow" drops a shared
+             link/text into the quick-capture inbox (URLs default to the reading list). Detected in
+             MainActivity by this alias's component name. -->
+        <activity-alias
+            android:name=".ReadingShareAlias"
+            android:exported="true"
+            android:targetActivity=".MainActivity"
+            android:label="@string/reading_share_alias_label"
+            android:icon="@mipmap/ic_launcher">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
+
         <activity
             android:name=".core.ui.bubble.BubbleActivity"
             android:allowEmbedded="true"
@@ -186,6 +207,11 @@
 
         <receiver
             android:name="com.ChronosFlow.VBCR.core.notifications.ReflowDayActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <receiver
+            android:name="com.ChronosFlow.VBCR.core.notifications.ReadingReminderActionReceiver"
             android:enabled="true"
             android:exported="false" />
 

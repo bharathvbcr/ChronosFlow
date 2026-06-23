@@ -549,7 +549,8 @@ class AlarmScheduler @Inject constructor(
             AlarmRequestType.BLOCK_START,
             AlarmRequestType.DAILY_REVIEW,
             AlarmRequestType.LOG_REMINDER,
-            AlarmRequestType.URGENT_TASK -> AlarmReceiver::class.java
+            AlarmRequestType.URGENT_TASK,
+            AlarmRequestType.READING_REMINDER -> AlarmReceiver::class.java
         }
     }
 

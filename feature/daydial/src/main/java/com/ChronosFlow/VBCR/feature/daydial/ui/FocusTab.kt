@@ -431,6 +431,7 @@ internal fun FocusTab(
             val totalSeconds = when {
                 phaseMinutes != null -> (phaseMinutes * 60).coerceAtLeast(1)
                 selectedBlock != null -> (selectedBlock.durationMinutes * 60).coerceAtLeast(1)
+                focusSession.plannedDurationMinutes > 0 -> focusSession.plannedDurationMinutes * 60
                 else -> 1500
             }
             val progressFraction = (remainingSeconds.toFloat() / totalSeconds.toFloat()).coerceIn(0f, 1f)

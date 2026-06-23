@@ -1,5 +1,6 @@
 package com.ChronosFlow.VBCR.core.data.assist
 
+import android.content.SharedPreferences
 import app.cash.turbine.test
 import com.ChronosFlow.VBCR.core.data.datastore.ChronosPreferencesDataSource
 import io.mockk.every
@@ -19,7 +20,21 @@ class ProactiveAssistCacheTest {
 
     @Before
     fun setup() {
+        val fakeEditor = mockk<SharedPreferences.Editor>(relaxed = true) {
+            every { putString(any(), any()) } answers {
+                store[firstArg()] = secondArg()
+                this@mockk
+            }
+        }
+        // edit { } takes a SharedPreferences.Editor.() -> Unit; run it against fakeEditor so
+        // putString calls inside the block are captured into store.
+        every { dataSource.edit(any()) } answers {
+            @Suppress("UNCHECKED_CAST")
+            (firstArg() as (SharedPreferences.Editor) -> Unit)(fakeEditor)
+        }
         every { dataSource.putString(any(), any()) } answers { store[firstArg()] = secondArg() }
+        // 1-arg getString (default-parameter call); used by all cache read methods.
+        every { dataSource.getString(any()) } answers { store[firstArg()] ?: "" }
         every { dataSource.getString(any(), any()) } answers { store[firstArg()] ?: secondArg() }
         every { dataSource.getAll() } answers { store.toMap() }
         every { dataSource.remove(any()) } answers { store.remove(firstArg<String>()) ; Unit }

@@ -17,6 +17,14 @@ object InteropContract {
     const val DEVTIME_PACKAGE = "com.Meridian.VBCR"
     const val CHRONOSFLOW_PACKAGE = "com.ChronosFlow.VBCR"
 
+    /**
+     * Curio — the research-index app that hands items off INTO ChronosFlow (a saved bookmark to the
+     * reading list with a "remind me to read later" time, the quick-capture inbox, or a follow-up
+     * task). Unlike DevTime, Curio does not expose a peer provider we read; it is a write-only
+     * client of our [PATH_HANDOFF] path. See [InteropProvider.insert].
+     */
+    const val CURIO_PACKAGE = "com.example"
+
     /** This app. */
     const val SELF_PACKAGE = CHRONOSFLOW_PACKAGE
     /** The app we share with. */
@@ -33,6 +41,31 @@ object InteropContract {
     const val PATH_HABITS = "habits"
     const val PATH_MEDICATIONS = "medications"
     const val PATH_GOALS = "goals"
+
+    // ── Inbound handoff (write path) ─────────────────────────────────────────
+    // A trusted peer (Curio) inserts rows here to create a reading-list item, an inbox capture, or
+    // a task inside ChronosFlow. This is the only writable path on the provider; every other path
+    // is read-only. Handled by InteropProvider.insert(), gated by PeerVerifier + the inbound-accept
+    // preference. Inbound rows are tagged with the caller's package as their `origin` so they are
+    // never re-shared OUT through the read cursors (which only serve `origin IS NULL`).
+    const val PATH_HANDOFF = "handoff"
+
+    /** Discriminator column on a [PATH_HANDOFF] insert: one of [KIND_READING], [KIND_INBOX], [KIND_TASK]. */
+    const val HANDOFF_KIND = "kind"
+    /** http/https link (required for [KIND_READING], optional otherwise). */
+    const val HANDOFF_URL = "url"
+    /** Display title for the created item. */
+    const val HANDOFF_TITLE = "title"
+    /** Free text body (used as the inbox note or the task description). */
+    const val HANDOFF_TEXT = "text"
+    /** Epoch-millis reminder time for a [KIND_READING] item; omit/null for no reminder. */
+    const val HANDOFF_REMINDER_AT = "reminder_at_epoch_ms"
+    /** Optional personal note carried onto the created item. */
+    const val HANDOFF_NOTES = "notes"
+
+    const val KIND_READING = "reading"
+    const val KIND_INBOX = "inbox"
+    const val KIND_TASK = "task"
 
     // Normalized columns. Cursor rows MUST be added in exactly the array order below.
     val TASK_COLUMNS = arrayOf(
@@ -74,13 +107,30 @@ object InteropContract {
     const val DEVTIME_RELEASE_CERT_SHA256 = ""
 
     /**
-     * Apps allowed to read this provider, pinned to their signing certificate. Add DevTime's
-     * RELEASE signing-cert SHA-256 to the set below before shipping release builds (release APKs
-     * are signed with a different key than the debug cert).
+     * Curio's DEBUG signing-cert SHA-256. Curio does NOT use the shared `~/.android/debug.keystore`;
+     * it signs debug builds with its own checked-in `debug.keystore`, so its debug cert differs from
+     * [DEBUG_SIGNING_CERT_SHA256]. Obtained with:
+     *   keytool -list -v -keystore curio/debug.keystore -alias androiddebugkey -storepass android
+     */
+    const val CURIO_DEBUG_CERT_SHA256 =
+        "B4CE786F8CDC77C41CC0640566D425D81C83256C4C77C775A727627BFA0A5CDD"
+
+    /**
+     * Curio's RELEASE signing-cert SHA-256. Must be filled before shipping release builds that
+     * accept Curio handoffs. Obtain with: apksigner verify --print-certs curio-release.apk
+     */
+    const val CURIO_RELEASE_CERT_SHA256 = ""
+
+    /**
+     * Apps allowed to talk to this provider, pinned to their signing certificate. Add each peer's
+     * RELEASE signing-cert SHA-256 to its set before shipping release builds (release APKs are
+     * signed with a different key than the debug cert).
      *
-     * The debug keystore cert is included ONLY in debug builds: the shared Android debug keystore
-     * (~/.android/debug.keystore) is the same across all developer workstations and emulators, so
-     * any app claiming to be DEVTIME_PACKAGE and signed with it would pass in a release build.
+     * DevTime is a read peer (it queries our shareable data). Curio is a write-only handoff client
+     * (it inserts into [PATH_HANDOFF]). PeerVerifier enforces the pinned cert for both directions.
+     *
+     * The debug keystore cert is included ONLY in debug builds: a debug keystore is not a secret, so
+     * any app claiming a peer's package name and signed with it would pass in a release build.
      */
     val TRUSTED_PEERS = listOf(
         TrustedPeer(
@@ -90,6 +140,13 @@ object InteropContract {
                 if (DEVTIME_RELEASE_CERT_SHA256.isNotEmpty()) add(DEVTIME_RELEASE_CERT_SHA256)
             }
         ),
+        TrustedPeer(
+            CURIO_PACKAGE,
+            buildSet {
+                if (BuildConfig.DEBUG) add(CURIO_DEBUG_CERT_SHA256)
+                if (CURIO_RELEASE_CERT_SHA256.isNotEmpty()) add(CURIO_RELEASE_CERT_SHA256)
+            }
+        ),
     )
 
     init {
@@ -97,13 +154,15 @@ object InteropContract {
         // rather than check() so a release build signed before the DevTime cert is available
         // doesn't hard-crash at class-init time — PeerVerifier.requireTrusted() already rejects
         // callers when certSha256 is empty, so security is still enforced.
-        if (!BuildConfig.DEBUG && TRUSTED_PEERS.any { it.certSha256.isEmpty() }) {
-            android.util.Log.e(
-                "InteropContract",
-                "SECURITY: Release build has no DevTime signing cert pinned. " +
-                    "Run: apksigner verify --print-certs devtime-release.apk " +
-                    "and add the SHA-256 to DEVTIME_RELEASE_CERT_SHA256 before shipping."
-            )
+        if (!BuildConfig.DEBUG) {
+            TRUSTED_PEERS.filter { it.certSha256.isEmpty() }.forEach { peer ->
+                android.util.Log.e(
+                    "InteropContract",
+                    "SECURITY: Release build has no signing cert pinned for ${peer.packageName}. " +
+                        "Run: apksigner verify --print-certs <peer-release.apk> " +
+                        "and add the SHA-256 to the matching *_RELEASE_CERT_SHA256 before shipping."
+                )
+            }
         }
     }
 

@@ -11,6 +11,8 @@ const val EXTRA_FOCUS_BLOCK_ID = "com.ChronosFlow.VBCR.extra.FOCUS_BLOCK_ID"
 const val EXTRA_TASK_ID = "com.ChronosFlow.VBCR.extra.TASK_ID"
 const val EXTRA_TASK_TARGET = "com.ChronosFlow.VBCR.extra.TASK_TARGET"
 const val EXTRA_TASK_CAPTURE = "com.ChronosFlow.VBCR.extra.TASK_CAPTURE"
+/** Set by a split-session phase-boundary notification: advance to the next phase on tap. */
+const val EXTRA_FOCUS_ADVANCE = "com.ChronosFlow.VBCR.extra.FOCUS_ADVANCE"
 
 const val SECTION_DAY = "day"
 const val SECTION_FOCUS = "focus"
@@ -21,6 +23,8 @@ const val SECTION_TASKS = "tasks"
 const val DAY_TARGET_TODAY = "today"
 const val DAY_TARGET_JOURNAL = "journal"
 const val DAY_TARGET_SLEEP = "sleep"
+const val DAY_TARGET_READING = "reading"
+const val DAY_TARGET_READING_INBOX = "reading-inbox"
 const val TASK_LAUNCH_TARGET_CONTEXT = "context"
 
 /**
@@ -49,6 +53,11 @@ data class NotificationLaunch(
     /** Task titles for a bulk-import review sheet (multi-line share or file share). */
     val bulkCapture: List<String>? = null,
     /**
+     * True when the launch came from a split-session phase-boundary notification: after routing to
+     * the Focus tab, the app advances the held session to its next phase (the "tap to continue" flow).
+     */
+    val focusAdvance: Boolean = false,
+    /**
      * Human-readable label of the app that shared this content via ACTION_SEND or
      * ACTION_PROCESS_TEXT. Null for notification/deep-link launches that don't originate from a
      * share. Displayed as "Shared from [App Name]" in the task creation sheet.
@@ -66,6 +75,12 @@ internal fun resolveNotificationLaunch(
     if (requestId == null) {
         return NotificationLaunch(section = SECTION_DAY, dayTarget = DAY_TARGET_TODAY)
     }
+    if (requestId.startsWith("task:")) {
+        return NotificationLaunch(
+            section = SECTION_TASKS,
+            taskId = requestId.removePrefix("task:")
+        )
+    }
     if (requestId.endsWith(":review")) {
         return NotificationLaunch(section = SECTION_REVIEW)
     }
@@ -73,11 +88,11 @@ internal fun resolveNotificationLaunch(
     if (requestId.endsWith(":logsleep")) {
         return NotificationLaunch(section = SECTION_DAY, dayTarget = DAY_TARGET_SLEEP)
     }
-    if (requestId.startsWith("task:")) {
-        return NotificationLaunch(
-            section = SECTION_TASKS,
-            taskId = requestId.removePrefix("task:")
-        )
+    // "Remind me to read later" — open the reading list page (requestId is "reading:<itemId>").
+    // Keyed off the requestId convention because the AlarmRequest isn't persisted, so the type
+    // isn't recoverable at delivery time.
+    if (requestId.startsWith("reading:")) {
+        return NotificationLaunch(section = SECTION_DAY, dayTarget = DAY_TARGET_READING)
     }
     if (requestId.startsWith("daydial:")) {
         val parts = requestId.split(":")
@@ -113,6 +128,11 @@ internal fun resolveNotificationLaunch(
         AlarmRequestType.URGENT_TASK -> NotificationLaunch(
             section = SECTION_TASKS,
             taskId = requestId?.takeIf { it.startsWith("task:") }?.removePrefix("task:")
+        )
+        // "Remind me to read later" lands on the reading list page.
+        AlarmRequestType.READING_REMINDER -> NotificationLaunch(
+            section = SECTION_DAY,
+            dayTarget = DAY_TARGET_READING
         )
         AlarmRequestType.FOCUS_BLOCK,
         AlarmRequestType.BLOCK_START -> {
@@ -154,6 +174,7 @@ fun buildNotificationContentIntent(
         launch.taskId?.let { putExtra(EXTRA_TASK_ID, it) }
         launch.target?.let { putExtra(EXTRA_TASK_TARGET, it) }
         launch.capture?.let { putExtra(EXTRA_TASK_CAPTURE, it) }
+        if (launch.focusAdvance) putExtra(EXTRA_FOCUS_ADVANCE, true)
     }
     return PendingIntent.getActivity(
         context,
@@ -184,7 +205,8 @@ fun parseNotificationLaunch(intent: Intent?): NotificationLaunch? {
         focusBlockId = intent.getStringExtra(EXTRA_FOCUS_BLOCK_ID),
         taskId = intent.getStringExtra(EXTRA_TASK_ID),
         target = intent.getStringExtra(EXTRA_TASK_TARGET),
-        capture = intent.getStringExtra(EXTRA_TASK_CAPTURE)
+        capture = intent.getStringExtra(EXTRA_TASK_CAPTURE),
+        focusAdvance = intent.getBooleanExtra(EXTRA_FOCUS_ADVANCE, false)
     )
 }
 
@@ -298,13 +320,15 @@ internal fun sharedTaskCapture(text: String?, fallback: String?): String? {
 fun buildFocusNotificationContentIntent(
     context: Context,
     blockId: String? = null,
-    requestCode: Int = FOCUS_NOTIFICATION_REQUEST_CODE
+    requestCode: Int = FOCUS_NOTIFICATION_REQUEST_CODE,
+    focusAdvance: Boolean = false
 ): PendingIntent {
     return buildNotificationContentIntent(
         context = context,
         launch = NotificationLaunch(
             section = SECTION_FOCUS,
-            focusBlockId = blockId
+            focusBlockId = blockId,
+            focusAdvance = focusAdvance
         ),
         requestCode = requestCode
     )
@@ -318,6 +342,7 @@ fun consumeNotificationLaunchExtras(intent: Intent): Intent {
         removeExtra(EXTRA_TASK_ID)
         removeExtra(EXTRA_TASK_TARGET)
         removeExtra(EXTRA_TASK_CAPTURE)
+        removeExtra(EXTRA_FOCUS_ADVANCE)
         // Neutralize a share / process-text launch so a later recomposition can't re-open the
         // capture sheet from the same intent (the launch is keyed to the intent, not a generation).
         if (action == Intent.ACTION_SEND || action == Intent.ACTION_PROCESS_TEXT) {

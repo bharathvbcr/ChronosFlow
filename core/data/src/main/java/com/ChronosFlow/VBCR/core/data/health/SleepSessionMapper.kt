@@ -71,7 +71,7 @@ private fun List<SleepSessionRecord>.primaryNightCluster(): List<SleepSessionRec
     }
     return clusters.maxByOrNull { cluster ->
         Duration.between(cluster.minOf { it.startTime }, cluster.maxOf { it.endTime })
-    }!!
+    } ?: emptyList()
 }
 
 private fun List<SleepSessionRecord>.toSleepTrack(date: LocalDate, zoneId: ZoneId): SleepTrack {

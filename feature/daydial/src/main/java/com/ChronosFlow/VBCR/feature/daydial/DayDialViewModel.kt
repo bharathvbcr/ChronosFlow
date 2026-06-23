@@ -32,6 +32,7 @@ import com.ChronosFlow.VBCR.core.data.dao.FocusSessionDao
 import com.ChronosFlow.VBCR.core.data.backup.ChronosDataExportFile
 import com.ChronosFlow.VBCR.core.data.backup.ChronosDataExportRepository
 import com.ChronosFlow.VBCR.core.data.focus.FocusMoodAccentCache
+import com.ChronosFlow.VBCR.core.data.focus.FocusPhaseAdvanceBus
 import com.ChronosFlow.VBCR.core.data.focus.ManualMissedBlockRegistry
 import com.ChronosFlow.VBCR.core.data.mapper.toDomain
 import com.ChronosFlow.VBCR.core.domain.model.FocusSessionState
@@ -186,7 +187,8 @@ class DayDialViewModel @Inject constructor(
     private val genAiAssistCoordinator: GenAiAssistCoordinator,
     private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator,
     private val appEventLog: AppEventLog,
-    private val deleteAllDataUseCase: DeleteAllDataUseCase
+    private val deleteAllDataUseCase: DeleteAllDataUseCase,
+    private val focusPhaseAdvanceBus: FocusPhaseAdvanceBus
 ) : ViewModel() {
 
     /** Recent in-memory app events surfaced by the developer "View Logs" sheet. */
@@ -365,12 +367,42 @@ class DayDialViewModel @Inject constructor(
                     persisted == null ||
                         persisted is FocusSessionState.Idle ||
                         persisted is FocusSessionState.Archived -> {
-                        if (!focusDelegate.isIdle()) {
-                            focusDelegate.clearToIdle()
+                        // The in-app layer owns split-session phase orchestration. The background
+                        // FocusService runs one timer per phase and transitions each intermediate
+                        // phase to COMPLETING when it elapses, which drops out of the recoverable
+                        // query and surfaces here as null. Treating that as an end-of-session signal
+                        // wiped the active split mid-way — the "tapping the break notification resets
+                        // the timer" bug. Only let the service mirror clear flat sessions, or a split
+                        // that is no longer actively running (finished/skipped).
+                        val inApp = focusDelegate.focusExecutionState.value
+                        val inAppOwnsActiveSplit = inApp.isSplitSession &&
+                            (inApp.status == FocusExecutionStatus.RUNNING ||
+                                inApp.status == FocusExecutionStatus.PAUSED)
+                        when {
+                            // Cold-start recovery: the service may have ended an intermediate phase
+                            // (so there's no recoverable Room session), yet an interrupted split still
+                            // lives in the split store — bring it back rather than dropping the day to
+                            // an empty Focus tab.
+                            focusDelegate.isIdle() -> focusDelegate.restoreActiveSplitFromStore()
+                            !inAppOwnsActiveSplit -> focusDelegate.clearToIdle()
                         }
                     }
                 }
             }
+        }
+        viewModelScope.launch {
+            focusPhaseAdvanceBus.requests
+                .catch { e -> appEventLog.record(AppEventCategory.SESSION, "collector error: $e") }
+                .collect {
+                    // "Tap to continue" from a split-session boundary notification. On a cold start the
+                    // in-app split may not be restored yet (the service finished the elapsed phase, so
+                    // the Room session no longer flags a recoverable one) — recover it from the split
+                    // store, settle to the boundary, then advance into the next phase.
+                    focusDelegate.restoreActiveSplitFromStore()
+                    focusDelegate.checkPhaseBoundary(viewModelScope, plannerService)
+                    focusDelegate.advancePhase()
+                    appEventLog.record(AppEventCategory.FOCUS, "Advanced focus phase from notification")
+                }
         }
         aiDelegate.refreshGenAiStatus(viewModelScope)
         minuteTickerJob = viewModelScope.launch {
@@ -479,7 +511,8 @@ class DayDialViewModel @Inject constructor(
         actualStartMinute: Int?,
         actualEndMinute: Int?,
         interruptions: Int,
-        windDownNotes: String?
+        windDownNotes: String?,
+        refreshed: Int?
     ) {
         viewModelScope.launch {
             journalDelegate.saveSleepLog(
@@ -489,6 +522,7 @@ class DayDialViewModel @Inject constructor(
                 actualEndMinute = actualEndMinute,
                 interruptions = interruptions,
                 windDownNotes = windDownNotes,
+                refreshed = refreshed,
                 existing = sleepTrackForDay.value
             )
         }

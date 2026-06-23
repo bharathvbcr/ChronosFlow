@@ -112,8 +112,13 @@ class InteropSyncManager @Inject constructor(
             return
         }
         val dueAt = task.dueAt ?: return
+        val now = System.currentTimeMillis()
         val lead = dueAt - REMINDER_LEAD_MILLIS
-        val triggerAt = if (lead > System.currentTimeMillis()) lead else dueAt
+        val triggerAt = when {
+            lead > now -> lead
+            dueAt > now -> dueAt
+            else -> return
+        }
         alarmScheduler.scheduleExactAlarm(
             id = id,
             time = Instant.ofEpochMilli(triggerAt),

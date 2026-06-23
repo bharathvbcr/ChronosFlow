@@ -17,6 +17,7 @@ import com.ChronosFlow.VBCR.core.domain.repository.HabitRepository
 import com.ChronosFlow.VBCR.core.domain.repository.TimeBlockRepository
 import com.ChronosFlow.VBCR.core.notifications.AlarmScheduleResult
 import com.ChronosFlow.VBCR.core.notifications.AlarmScheduler
+import java.util.Collections
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -38,7 +39,7 @@ class DayDialReminderDelegate @Inject constructor(
     private val alarmRequestRepository: AlarmRequestRepository,
     private val habitRepository: HabitRepository
 ) {
-    private val scheduledReminderIds = mutableSetOf<String>()
+    private val scheduledReminderIds: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
     private val _reminderScheduleStatus = MutableStateFlow("Reminders not scheduled")
     val reminderScheduleStatus = _reminderScheduleStatus.asStateFlow()
 
@@ -308,7 +309,7 @@ class DayDialReminderDelegate @Inject constructor(
                     "Exact alarm permission unavailable; scheduled with fallback window"
                 )
             }
-            is AlarmScheduleResult.Skipped -> Triple(AlarmReliability.BLOCKED, AlarmDeliveryState.FAILED, result.reason)
+            is AlarmScheduleResult.Skipped -> Triple(AlarmReliability.BLOCKED, AlarmDeliveryState.CANCELLED, result.reason)
             is AlarmScheduleResult.ExactDenied -> Triple(AlarmReliability.BLOCKED, AlarmDeliveryState.FAILED, "Exact alarm permission denied")
             is AlarmScheduleResult.PermissionDenied -> Triple(AlarmReliability.BLOCKED, AlarmDeliveryState.FAILED, "Notification permission denied")
         }
@@ -378,7 +379,7 @@ private fun recurrenceOccursOn(
     PlannerRecurrenceType.WEEKDAYS -> date.dayOfWeek in weekdaySet
     PlannerRecurrenceType.WEEKENDS -> date.dayOfWeek in weekendSet
     PlannerRecurrenceType.SELECTED_WEEKDAYS ->
-        recurrence.weekdays.isEmpty() || date.dayOfWeek in recurrence.weekdays
+        recurrence.weekdays.isNotEmpty() && date.dayOfWeek in recurrence.weekdays
     PlannerRecurrenceType.EVERY_N_DAYS -> {
         val days = ChronoUnit.DAYS.between(startDate, date)
         days >= 0 && days % recurrence.interval.coerceAtLeast(1) == 0L

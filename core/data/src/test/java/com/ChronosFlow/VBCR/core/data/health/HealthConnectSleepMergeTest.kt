@@ -64,11 +64,11 @@ class HealthConnectSleepMergeTest {
         assertEquals(23 * 60, merged.actualStartMinute)
         assertEquals(7 * 60, merged.actualEndMinute)
         assertEquals(2, merged.interruptedCount)
+        assertEquals(3, merged.sleepQuality)   // HC-measured quality always refreshed from incoming
         // Kept from the existing imported row:
         assertEquals("hc-$date", merged.id)
         assertEquals(1380, merged.plannedStartMinute)
         assertEquals(420, merged.plannedEndMinute)
-        assertEquals(4, merged.sleepQuality)
         assertEquals("imported notes", merged.windDownNotes)
         assertEquals(SleepSource.HEALTH_CONNECT, merged.source)
     }

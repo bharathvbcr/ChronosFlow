@@ -203,6 +203,8 @@ class MlKitGeminiNanoGateway @Inject constructor(
                     return Result.success(text)
                 }
                 lastError = IllegalStateException("Gemini Nano returned an empty response.")
+                delay(backoffMs)
+                backoffMs = min(backoffMs * 2, MAX_BACKOFF_MS)
             } else {
                 lastError = inference.exceptionOrNull()
                 if (!shouldRetry(lastError)) break
@@ -276,6 +278,8 @@ class MlKitGeminiNanoGateway @Inject constructor(
                     return Result.success(text)
                 }
                 lastError = IllegalStateException("Gemini Nano returned an empty response.")
+                delay(backoffMs)
+                backoffMs = min(backoffMs * 2, MAX_BACKOFF_MS)
             } else {
                 lastError = inference.exceptionOrNull()
                 if (!shouldRetry(lastError)) break

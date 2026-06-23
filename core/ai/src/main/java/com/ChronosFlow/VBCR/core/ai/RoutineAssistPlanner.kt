@@ -1564,7 +1564,7 @@ private val medicationMealTimingValues = setOf("Anytime", "With food", "Before b
 private fun parseMinutePair(value: String): Pair<Int, Int>? {
     val parts = value.split(',', ';').map(String::trim)
     val start = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 1425) ?: return null
-    val end = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(start + 15, 1440) ?: return null
+    val end = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(start + 15, 1439) ?: return null
     return start to end
 }
 

@@ -148,11 +148,19 @@ private fun MedicationPlan.toLocalAdherenceResult(
     return if (missedToday(today, currentMinute)) {
         MedicationAdherenceAssistResult(
             medicationPlanId = id,
-            suggestedReminderMinute = (currentMinute + 15).coerceAtMost(23 * 60),
+            suggestedReminderMinute = (currentMinute + 15).coerceAtMost(1439),
             reason = "Reminder at ${formatMinute(reminderMinuteOfDay)} passed without a logged dose",
             source = RoutineAssistSource.LOCAL
         )
     } else {
+        if (lateMinutes.isEmpty()) {
+            return MedicationAdherenceAssistResult(
+                medicationPlanId = id,
+                suggestedReminderMinute = (currentMinute + 15).coerceAtMost(1439),
+                reason = "Reminder at ${formatMinute(reminderMinuteOfDay)} passed without a logged dose",
+                source = RoutineAssistSource.LOCAL
+            )
+        }
         val typicalMinute = lateMinutes.sorted()[lateMinutes.size / 2]
         MedicationAdherenceAssistResult(
             medicationPlanId = id,

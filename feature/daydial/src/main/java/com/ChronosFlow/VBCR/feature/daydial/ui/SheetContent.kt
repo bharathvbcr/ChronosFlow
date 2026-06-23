@@ -199,8 +199,9 @@ internal fun SheetContent(
         startMinute: Int?,
         endMinute: Int?,
         interruptions: Int,
-        notes: String?
-    ) -> Unit = { _, _, _, _, _, _ -> }
+        notes: String?,
+        refreshed: Int?
+    ) -> Unit = { _, _, _, _, _, _, _ -> }
 ) {
     // Block editor renders its own scaffold: scrollable fields with the action
     // rows pinned below, so buttons stay reachable on short screens.
@@ -245,7 +246,7 @@ internal fun SheetContent(
                             Text(sheetBlockDeleteActionLabel(block), fontWeight = FontWeight.SemiBold)
                         }
                     } else {
-                    var calendarExpanded by rememberSaveable(block.id, showCalendarPermissionRationale) {
+                    var calendarExpanded by rememberSaveable(block.id, showCalendarPermissionRationale, calendarPermissionStatus.allGranted) {
                         mutableStateOf(showCalendarPermissionRationale && !calendarPermissionStatus.allGranted)
                     }
                     Column(
@@ -1451,8 +1452,8 @@ internal fun SheetContent(
             is SheetTarget.SleepLog -> SleepLogSheetContent(
                 date = target.date,
                 existing = sleepTrack,
-                onSave = { quality, startMinute, endMinute, interruptions, notes ->
-                    onSaveSleep(target.date, quality, startMinute, endMinute, interruptions, notes)
+                onSave = { quality, startMinute, endMinute, interruptions, notes, refreshed ->
+                    onSaveSleep(target.date, quality, startMinute, endMinute, interruptions, notes, refreshed)
                     showMessage("Sleep logged")
                     onDismiss()
                 }
@@ -1959,12 +1960,12 @@ private fun findGaps(blocks: List<TimeBlockUiModel>): List<TimeRangeUi> {
     val gaps = mutableListOf<TimeRangeUi>()
     var current = 0
     sorted.forEach { block ->
-        if (block.startMinuteOfDay > current + 15) {
+        if (block.startMinuteOfDay > current) {
             gaps.add(TimeRangeUi(current, block.startMinuteOfDay))
         }
-        current = block.startMinuteOfDay + block.durationMinutes
+        current = maxOf(current, block.startMinuteOfDay + block.durationMinutes)
     }
-    if (current < 1440 - 15) {
+    if (current < 1440) {
         gaps.add(TimeRangeUi(current, 1440))
     }
     return gaps

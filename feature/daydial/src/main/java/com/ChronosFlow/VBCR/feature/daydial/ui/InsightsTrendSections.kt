@@ -32,6 +32,7 @@ import com.ChronosFlow.VBCR.core.ui.components.formatDisplayMinute
 import com.ChronosFlow.VBCR.core.ui.components.formatDurationLabel
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
 import com.ChronosFlow.VBCR.feature.daydial.delegate.CompanionTrendSections
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -179,7 +180,7 @@ internal fun InsightsTrendSections(
             val goalMinutes = trends.screenTimeFocusGoalMinutes
             val daysMetGoal = if (goalMinutes > 0) activeDays.count { it.productiveMinutes >= goalMinutes } else 0
             // Subtle nudge: today's distraction is notably above the window's typical level.
-            val distractionNudge = distractionNudge(screenTime, screenTime.last().date)
+            val distractionNudge = distractionNudge(screenTime, LocalDate.now())
             val bestDay = bestFocusDay(screenTime)
             // Direction of focus across the window (recent half vs earlier half), if meaningful.
             val focusTrend = focusRatioTrend(screenTime)?.takeIf { kotlin.math.abs(it.deltaPercent) >= 3 }
@@ -338,6 +339,7 @@ internal fun InsightsTrendSections(
                 val qualityPoints = sleepTrend.loggedNights.mapNotNull { it.quality?.toFloat() }
                 val durationHourPoints =
                     sleepTrend.loggedNights.mapNotNull { it.durationMinutes?.let { minutes -> minutes / 60f } }
+                val refreshedPoints = sleepTrend.loggedNights.mapNotNull { it.refreshedRating?.toFloat() }
                 ChronosListCard(modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
                         Text(
@@ -376,6 +378,23 @@ internal fun InsightsTrendSections(
                                         points = durationHourPoints
                                     )
                                 )
+                            )
+                        }
+                        if (refreshedPoints.isNotEmpty()) {
+                            Text(
+                                text = "Refreshed (1–5)",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            ChronosTrendChart(
+                                series = listOf(
+                                    ChronosTrendSeries(
+                                        label = "Refreshed",
+                                        color = MaterialTheme.colorScheme.secondary,
+                                        points = refreshedPoints
+                                    )
+                                ),
+                                valueRange = 1f..5f
                             )
                         }
                         Text(
@@ -427,6 +446,13 @@ internal fun InsightsTrendSections(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        sleepTrack.refreshedRating?.let { rating ->
+                            Text(
+                                text = "Felt ${sleepRefreshedEmoji(rating)} ${sleepRefreshedLabel(rating)} on waking",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         if (sleepTrack.source == SleepSource.HEALTH_CONNECT) {
                             Text(
                                 text = "From Health Connect",
@@ -466,7 +492,8 @@ private fun SleepNightRow(night: SleepTrendNight) {
         )
         val detail = listOfNotNull(
             night.quality?.let { "$it/5" },
-            night.durationMinutes?.let(::formatDurationLabel)
+            night.durationMinutes?.let(::formatDurationLabel),
+            night.refreshedRating?.let(::sleepRefreshedEmoji)
         ).joinToString(" · ").ifBlank { "Logged" }
         Text(
             text = detail,
@@ -489,6 +516,7 @@ private fun sleepTrendSummary(trends: SleepTrends, windowDays: Int): String {
     val parts = mutableListOf<String>()
     trends.averageQuality?.let { parts += "Avg quality %.1f/5".format(it) }
     trends.averageDurationMinutes?.let { parts += "avg ${formatDurationLabel(it)}" }
+    trends.averageRefreshed?.let { parts += "avg refreshed %.1f/5".format(it) }
     val nights = trends.loggedNights.size
     parts += "$nights ${if (nights == 1) "night" else "nights"} logged in $windowDays days"
     return parts.joinToString(" · ")

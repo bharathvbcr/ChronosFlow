@@ -35,6 +35,16 @@ class NotificationLaunchIntentTest {
     }
 
     @Test
+    fun `reading reminder opens reading list page`() {
+        val launch = resolveNotificationLaunch(
+            requestId = "reading:item-123",
+            receiverClass = AlarmReceiver::class.java
+        )
+        assertEquals(SECTION_DAY, launch.section)
+        assertEquals(DAY_TARGET_READING, launch.dayTarget)
+    }
+
+    @Test
     fun `block reminder opens focus screen with block id`() {
         val launch = resolveNotificationLaunch(
             requestId = "daydial:2026-05-24:block-42:start",

@@ -84,7 +84,7 @@ internal fun taskActionIntentData(action: TaskAction): String = when (action.typ
     TaskActionType.CUSTOM_DEEP_LINK,
     TaskActionType.APP -> action.value
     TaskActionType.PHONE ->
-        if (action.value.startsWith("tel:")) action.value else "tel:${urlEncode(action.value)}"
+        if (action.value.startsWith("tel:")) action.value else "tel:${action.value}"
     TaskActionType.EMAIL ->
         if (action.value.startsWith("mailto:", ignoreCase = true)) action.value
         else "mailto:${urlEncode(action.value)}"

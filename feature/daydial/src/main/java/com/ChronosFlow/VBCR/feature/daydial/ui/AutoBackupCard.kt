@@ -69,10 +69,13 @@ class AutoBackupViewModel @Inject constructor(
         if (_isRunning.value) return
         _isRunning.value = true
         viewModelScope.launch {
-            val outcome = manager.runBackup()
-            _status.value = manager.status()
-            _isRunning.value = false
-            _backupOutcomes.emit(outcome)
+            try {
+                val outcome = manager.runBackup()
+                _status.value = manager.status()
+                _backupOutcomes.emit(outcome)
+            } finally {
+                _isRunning.value = false
+            }
         }
     }
 
@@ -85,13 +88,16 @@ class AutoBackupViewModel @Inject constructor(
         if (_isRestoring.value) return
         _isRestoring.value = true
         viewModelScope.launch {
-            val outcome = manager.restoreBackup(Uri.parse(uriString))
-            _restoreResult.value = when (outcome) {
-                is AutoBackupOutcome.Success -> outcome.fileName
-                is AutoBackupOutcome.Failure -> "Restore failed: ${outcome.message}"
+            try {
+                val outcome = manager.restoreBackup(Uri.parse(uriString))
+                _restoreResult.value = when (outcome) {
+                    is AutoBackupOutcome.Success -> outcome.fileName
+                    is AutoBackupOutcome.Failure -> "Restore failed: ${outcome.message}"
+                }
+                _backupOutcomes.emit(outcome)
+            } finally {
+                _isRestoring.value = false
             }
-            _isRestoring.value = false
-            _backupOutcomes.emit(outcome)
         }
     }
 }

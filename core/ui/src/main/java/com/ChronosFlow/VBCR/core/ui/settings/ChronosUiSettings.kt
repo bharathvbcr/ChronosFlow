@@ -48,6 +48,9 @@ object ChronosUiSettingsKeys {
     const val KEY_FEATURE_COMPANION_DEFAULTS_PROMOTED = "feature.companionDefaultsPromoted"
     const val KEY_ASSIST_AUTO_APPLY = "assist.autoApplySuggestions"
     const val KEY_ONBOARDING_COMPLETED = "onboarding.completed"
+
+    /** Auto-fetch reading-list metadata (title/favicon/read-time) over the network. On by default. */
+    const val KEY_READING_METADATA_AUTOFETCH = "reading.metadata.autofetch"
     const val APPEARANCE_LIGHT = "LIGHT"
     const val APPEARANCE_DARK = "DARK"
     const val APPEARANCE_SYSTEM = "SYSTEM"
@@ -517,7 +520,7 @@ internal fun SharedPreferences.registerChronosUiSettingsChangeListener(
 @Composable
 fun rememberChronosUiSettings(): ChronosUiSettingsSnapshot {
     val context = LocalContext.current.applicationContext
-    val snapshot by produceState(initialValue = defaultChronosUiSettingsSnapshot(), context) {
+    val snapshot by produceState(initialValue = context.readChronosUiSettingsSnapshot(), context) {
         context.chronosUiSettingsFlow().collect { storedSnapshot ->
             value = storedSnapshot
         }

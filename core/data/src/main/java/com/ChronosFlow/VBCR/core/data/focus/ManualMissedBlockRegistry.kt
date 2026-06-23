@@ -77,11 +77,8 @@ class ManualMissedBlockRegistry @Inject constructor(
     }
 
     private fun updateEntries(transform: (Set<String>) -> Set<String>) {
-        _entries.update { current ->
-            val next = transform(current)
-            persistEntries(next)
-            next
-        }
+        _entries.update(transform)
+        persistEntries(_entries.value)
     }
 
     private fun loadPersistedEntries(): Set<String> {

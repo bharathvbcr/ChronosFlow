@@ -12,6 +12,7 @@ import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.request.ChangesTokenRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import androidx.annotation.VisibleForTesting
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
 import javax.inject.Inject
@@ -63,6 +64,10 @@ class HealthConnectSleepDataSource @Inject constructor(
         const val HEALTH_CONNECT_PROVIDER_PACKAGE = "com.google.android.apps.healthdata"
         const val TAG = "HealthConnectSleepDataSource"
     }
+    /** Overrides the real HC SDK status check in unit tests (avoids mockkStatic on an inline fn). */
+    @VisibleForTesting
+    internal var sdkStatusOverride: Int? = null
+
     /** Grant required for the feature to function at all. */
     val requiredPermissions: Set<String> =
         setOf(HealthPermission.getReadPermission(SleepSessionRecord::class))
@@ -75,7 +80,7 @@ class HealthConnectSleepDataSource @Inject constructor(
         requiredPermissions + HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
 
     fun availability(): HealthConnectAvailability =
-        when (HealthConnectClient.getSdkStatus(context)) {
+        when (sdkStatusOverride ?: HealthConnectClient.getSdkStatus(context)) {
             HealthConnectClient.SDK_AVAILABLE -> HealthConnectAvailability.AVAILABLE
             HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED ->
                 HealthConnectAvailability.PROVIDER_UPDATE_REQUIRED

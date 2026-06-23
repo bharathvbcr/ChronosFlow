@@ -12,34 +12,34 @@ import java.util.Locale
  */
 object ChronosDateFormatters {
     /** "Mon, Jun 3" — short weekday + month + day with no year. */
-    val shortWeekdayDate: DateTimeFormatter =
-        DateTimeFormatter.ofPattern("EEE, MMM d", Locale.getDefault())
+    val shortWeekdayDate: DateTimeFormatter
+        get() = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.getDefault())
 
     /** "Monday, Jun 3" — full weekday + month + day, e.g. for AI plan reason strings. */
-    val fullWeekdayDate: DateTimeFormatter =
-        DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault())
+    val fullWeekdayDate: DateTimeFormatter
+        get() = DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault())
 
     /** "Jun 3" — short month + day only. */
-    val shortDate: DateTimeFormatter =
-        DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
+    val shortDate: DateTimeFormatter
+        get() = DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
 
     /** "June 3, 2026" — full month + day + year. */
-    val fullDate: DateTimeFormatter =
-        DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.getDefault())
+    val fullDate: DateTimeFormatter
+        get() = DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.getDefault())
 
     /** "Jun 3, 2026" — abbreviated month + day + year. */
-    val mediumDate: DateTimeFormatter =
-        DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault())
+    val mediumDate: DateTimeFormatter
+        get() = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault())
 
     /** "Mon, Jun 3, 2026" — weekday + abbreviated month + day + year (used by date pickers). */
-    val fullWeekdayMediumDate: DateTimeFormatter =
-        DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.getDefault())
+    val fullWeekdayMediumDate: DateTimeFormatter
+        get() = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.getDefault())
 
     /** "June 2026" — month + year for calendar headers. */
-    val monthYear: DateTimeFormatter =
-        DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())
+    val monthYear: DateTimeFormatter
+        get() = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())
 
     /** "3:45 PM" — 12-hour clock with AM/PM indicator. */
-    val time: DateTimeFormatter =
-        DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
+    val time: DateTimeFormatter
+        get() = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
 }

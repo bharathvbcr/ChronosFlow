@@ -56,8 +56,8 @@ class PrivacyPreferencesTest {
 
     @Test
     fun `widget and command defaults can be read back separately`() {
-        every { dataSource.getBoolean(PrivacyPreferences.KEY_REDACT_COMMAND_SEARCH, defaultValue = true) } returns true
-        every { dataSource.getBoolean(PrivacyPreferences.KEY_REDACT_WIDGET_MEDICATION, defaultValue = true) } returns false
+        every { dataSource.getBoolean(PrivacyPreferences.KEY_REDACT_COMMAND_SEARCH, defaultValue = false) } returns true
+        every { dataSource.getBoolean(PrivacyPreferences.KEY_REDACT_WIDGET_MEDICATION, defaultValue = false) } returns false
 
         assertTrue(preferences.redactCommandPaletteHistory())
         assertFalse(preferences.redactMedicationOnWidgets())

@@ -84,7 +84,7 @@ class AppLockAuthenticator @Inject constructor() {
             }
 
             override fun onAuthenticationFailed() {
-                onResult(AppLockAuthResult.Error("Authentication failed. Try again."))
+                // Per-attempt failure; the system prompt stays open for retry. Do nothing.
             }
         }
 

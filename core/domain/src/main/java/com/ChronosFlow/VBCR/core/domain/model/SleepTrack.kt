@@ -12,5 +12,7 @@ data class SleepTrack(
     val sleepQuality: Int,
     val windDownNotes: String?,
     val interruptedCount: Int,
+    /** How refreshed the sleeper felt on waking, 1–5; null when not self-reported (e.g. Health Connect imports). */
+    val refreshedRating: Int? = null,
     val source: SleepSource = SleepSource.MANUAL
 )

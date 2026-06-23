@@ -604,8 +604,9 @@ class TaskAssistPlanner @Inject constructor(
                 )
             }
         }
-        val genericLimit = MAX_SUGGESTIONS - actionSuggestions.size.coerceAtMost(MAX_SUGGESTIONS)
-        return genericSuggestions.take(genericLimit) + actionSuggestions.take(MAX_SUGGESTIONS)
+        val actionCount = actionSuggestions.size.coerceAtMost(MAX_SUGGESTIONS)
+        val genericCount = (MAX_SUGGESTIONS - actionCount).coerceAtLeast(0)
+        return genericSuggestions.take(genericCount) + actionSuggestions.take(actionCount)
     }
 
     private fun localTargetDateLabel(date: LocalDate): String {

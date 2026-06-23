@@ -65,7 +65,7 @@ internal fun chronosNowComplicationContent(
         }
         val label = if (focus.paused) "Paused" else "Focus"
         val progress = if (focus.totalSeconds > 0) {
-            (1f - secondsLeft.toFloat() / focus.totalSeconds).coerceIn(0f, 1f)
+            (secondsLeft.toFloat() / focus.totalSeconds).coerceIn(0f, 1f)
         } else null
         return ChronosComplicationContent(
             short = "${(secondsLeft + 59) / 60}m",

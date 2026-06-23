@@ -282,6 +282,8 @@ class MedicationViewModelTest {
         val eventSlot = slot<MedicationDoseEvent>()
         coEvery { medicationRepository.saveMedicationPlan(capture(saveSlot)) } returns Unit
         coEvery { medicationRepository.addMedicationDoseEvent(capture(eventSlot)) } returns Unit
+        // markDoseTaken re-fetches the plan to avoid stale-read decrement on rapid double-tap.
+        coEvery { medicationRepository.getMedicationPlanById("plan-5") } returns plan
 
         viewModel.markDoseTaken(plan)
         advanceUntilIdle()

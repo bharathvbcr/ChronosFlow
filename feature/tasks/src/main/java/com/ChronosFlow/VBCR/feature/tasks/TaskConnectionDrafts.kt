@@ -39,7 +39,7 @@ internal fun normalizeTaskActionDraft(draft: TaskActionDraft): TaskAction? {
 internal fun normalizeTaskActionDrafts(drafts: List<TaskActionDraft>): List<TaskAction> {
     val normalized = drafts.mapNotNull(::normalizeTaskActionDraft)
     val primaryIndex = normalized.indexOfFirst { it.isPrimary }
-    if (primaryIndex <= 0) return normalized
+    if (primaryIndex < 0) return normalized
     return normalized.mapIndexed { index, action ->
         action.copy(isPrimary = index == primaryIndex)
     }
@@ -69,5 +69,6 @@ private fun normalizePhoneValue(value: String): String? {
 }
 
 private fun normalizeEmailValue(value: String): String? {
-    return value.takeIf { '@' in it && !it.startsWith("mailto:", ignoreCase = true) }
+    val stripped = if (value.startsWith("mailto:", ignoreCase = true)) value.drop("mailto:".length) else value
+    return stripped.takeIf { '@' in it }
 }

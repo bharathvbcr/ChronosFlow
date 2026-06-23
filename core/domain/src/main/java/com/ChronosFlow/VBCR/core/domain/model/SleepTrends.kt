@@ -7,7 +7,8 @@ import kotlin.math.roundToInt
 data class SleepTrendNight(
     val date: LocalDate,
     val quality: Int?,
-    val durationMinutes: Int?
+    val durationMinutes: Int?,
+    val refreshedRating: Int? = null
 ) {
     val isLogged: Boolean get() = quality != null || durationMinutes != null
 }
@@ -33,6 +34,13 @@ data class SleepTrends(
             .takeIf { it.isNotEmpty() }
             ?.average()
             ?.roundToInt()
+
+    /** Average morning-refreshment rating across nights that self-reported it, or null. */
+    val averageRefreshed: Float?
+        get() = loggedNights.mapNotNull { it.refreshedRating }
+            .takeIf { it.isNotEmpty() }
+            ?.average()
+            ?.toFloat()
 }
 
 /**
@@ -53,7 +61,8 @@ fun deriveSleepTrends(
         SleepTrendNight(
             date = date,
             quality = track?.sleepQuality?.takeIf { it > 0 },
-            durationMinutes = track?.let(::sleepDurationMinutes)
+            durationMinutes = track?.let(::sleepDurationMinutes),
+            refreshedRating = track?.refreshedRating
         )
     }
     return SleepTrends(nights)

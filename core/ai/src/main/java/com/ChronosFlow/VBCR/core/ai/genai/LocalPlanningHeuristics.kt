@@ -16,6 +16,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.UUID
 
 /** Shared formatters for the local-planning heuristics layer (avoids repeated pattern compilation). */
 internal object PlannerDateFormatters {
@@ -23,7 +24,6 @@ internal object PlannerDateFormatters {
     val fullWeekdayDate: DateTimeFormatter =
         DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault())
 }
-import java.util.UUID
 
 internal object LocalPlanningHeuristics {
     fun generateIdealDayPlan(

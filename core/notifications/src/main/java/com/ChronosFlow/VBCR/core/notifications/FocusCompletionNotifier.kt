@@ -47,7 +47,10 @@ object FocusCompletionNotifier {
                 .setContentIntent(
                     buildFocusNotificationContentIntent(
                         context = context,
-                        requestCode = BOUNDARY_NOTIFICATION_ID
+                        requestCode = BOUNDARY_NOTIFICATION_ID,
+                        // Tapping the nudge IS "continue": carry the advance flag so the app
+                        // resumes into the next phase instead of just opening the Focus tab.
+                        focusAdvance = true
                     )
                 )
                 .build()

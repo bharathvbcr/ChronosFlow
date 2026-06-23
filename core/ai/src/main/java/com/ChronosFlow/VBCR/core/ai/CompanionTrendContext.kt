@@ -21,7 +21,7 @@ data class CompanionTrendContext(
 
     val habitCompletedLastWeek: Int get() = habitCompletion.takeLast(7).sumOf { it.completedCount }
 
-    val habitCompletedPriorWeek: Int get() = habitCompletion.dropLast(7).sumOf { it.completedCount }
+    val habitCompletedPriorWeek: Int get() = habitCompletion.dropLast(7).takeLast(7).sumOf { it.completedCount }
 
     /**
      * Last-week completions minus prior-week completions; null without a full

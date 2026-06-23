@@ -46,7 +46,6 @@ import com.ChronosFlow.VBCR.core.domain.planner.PlannerOperationResult
 import com.ChronosFlow.VBCR.core.notifications.NotificationPermissions
 import com.ChronosFlow.VBCR.core.ui.components.ChronosBackdrop
 import com.ChronosFlow.VBCR.core.ui.components.ChronosPredictiveBackHandlerWithProgress
-import com.ChronosFlow.VBCR.core.ui.settings.ChronosFeatureFlags
 import com.ChronosFlow.VBCR.core.ui.shell.ChronosSnackbarHost
 import com.ChronosFlow.VBCR.core.ui.shell.LocalChronosShellBottomInset
 import com.ChronosFlow.VBCR.feature.daydial.model.DayDialTab
@@ -161,7 +160,7 @@ private fun DayDialDataScreen(
     var calendarPermissionRequested by rememberSaveable { mutableStateOf(false) }
     var calendarPermissionRefreshKey by rememberSaveable { mutableIntStateOf(0) }
     var showCalendarPermissionRationale by rememberSaveable { mutableStateOf(false) }
-    var pendingCalendarAction by remember { mutableStateOf<PendingCalendarAction?>(null) }
+    var pendingCalendarAction by rememberSaveable(stateSaver = PendingCalendarActionSaver) { mutableStateOf(null) }
     val calendarPermissionStatus = remember(calendarPermissionRequested, calendarPermissionRefreshKey, activity) {
         resolveCalendarPermissionStatus(
             readGranted = context.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED,
@@ -294,7 +293,7 @@ private fun DayDialDataScreen(
     val launchTargetKey = "$launchTarget#$launchTargetGeneration"
     if (lastAppliedTarget.value != launchTargetKey) {
         lastAppliedTarget.value = launchTargetKey
-        applyLaunchTarget(launchTarget, uiState, viewModel, settings.featureFlags)
+        applyLaunchTarget(launchTarget, uiState, viewModel)
     }
 
     // `launchTarget` tracks the *live* requested Day target (re-applied on every
@@ -684,8 +683,7 @@ private fun DayDialDataScreen(
 private fun applyLaunchTarget(
     target: String?,
     uiState: DayDialScreenUiState,
-    viewModel: DayDialViewModel,
-    featureFlags: ChronosFeatureFlags
+    viewModel: DayDialViewModel
 ) {
     sidebarPageForLaunchTarget(target)?.let { page ->
         uiState.activeSidebarPage = page
@@ -708,19 +706,20 @@ private fun applyLaunchTarget(
             uiState.activeSidebarPage = null
             uiState.activeSheet = SheetTarget.NewBlock(title = "New Block")
         }
+        // No feature-flag guard here (mirrors "add-block" and the Today-tab card handlers that set
+        // these sheets directly): every entry point that produces a "journal"/"sleep" launch target
+        // is already gated on the feature being enabled (the Add-FAB item, command, and reminder).
+        // Re-reading the flag here regressed the Add-FAB path — its settings snapshot could resolve
+        // the flag to false even while the FAB item was shown — so the sheet silently never opened.
         "journal" -> {
             uiState.currentTab = DayDialTab.TODAY
             uiState.activeSidebarPage = null
-            if (featureFlags.journalEnabled) {
-                uiState.activeSheet = SheetTarget.Journal(LocalDate.now())
-            }
+            uiState.activeSheet = SheetTarget.Journal(LocalDate.now())
         }
         "sleep" -> {
             uiState.currentTab = DayDialTab.TODAY
             uiState.activeSidebarPage = null
-            if (featureFlags.sleepEnabled) {
-                uiState.activeSheet = SheetTarget.SleepLog(LocalDate.now())
-            }
+            uiState.activeSheet = SheetTarget.SleepLog(LocalDate.now())
         }
         // "review"/"review-sheet" are legacy aliases for pinned shortcuts and old
         // notifications; they now resolve to the unified Review page (the Insights tab),
@@ -744,6 +743,8 @@ internal fun sidebarPageForLaunchTarget(target: String?): SidebarPage? =
     when (target) {
         "day-tools" -> SidebarPage.DAY_TOOLS
         "tasks" -> SidebarPage.TASKS
+        "reading" -> SidebarPage.READING_LIST
+        "reading-inbox" -> SidebarPage.INBOX
         "habits" -> SidebarPage.HABITS
         "medication" -> SidebarPage.MEDICATION
         "templates" -> SidebarPage.TEMPLATES

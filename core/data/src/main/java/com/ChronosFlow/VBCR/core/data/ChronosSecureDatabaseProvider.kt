@@ -16,6 +16,8 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.inject.Inject
 import javax.inject.Singleton
+import net.zetetic.database.sqlcipher.SQLiteDatabase
+import net.zetetic.database.sqlcipher.SQLiteNotADatabaseException
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 /**
@@ -41,14 +43,61 @@ class ChronosSecureDatabaseProvider @Inject constructor(
         if (!ENCRYPTION_ENABLED) return builder.build()
         System.loadLibrary("sqlcipher")
         val passphrase = obtainPassphraseBytes()
-        return try {
-            builder
-                .openHelperFactory(SupportOpenHelperFactory(passphrase))
-                .build()
+        discardDatabaseIfUnopenable(passphrase)
+        // clearPassphrase = false is REQUIRED under WAL. Room's connection pool opens more than one
+        // connection (a writer plus concurrent readers), and SQLCipher re-keys each one from this
+        // same array. The single-argument SupportOpenHelperFactory(byte[]) defaults clearPassphrase
+        // to true, which zeroes the array right after the FIRST connection is keyed — so the second
+        // connection receives a blank passphrase and SQLCipher rejects the database with
+        // "file is not a database" (SQLITE_NOTADB). Keeping the passphrase intact lets every pooled
+        // connection open. For the same reason we must NOT zero the array ourselves afterwards: the
+        // factory retains it for the lifetime of the database to open further pooled connections.
+        // The key itself stays hardware-bound in the Keystore; only the derived passphrase remains
+        // resident in memory while the database is open, which is unavoidable for SQLCipher + WAL.
+        return builder
+            .openHelperFactory(SupportOpenHelperFactory(passphrase, null, false))
+            .build()
+    }
+
+    /**
+     * Guards against an encrypted database file that the current passphrase can no longer open.
+     *
+     * This happens when the passphrase the file was keyed with is gone: the Keystore key was
+     * permanently invalidated (see [databasePassphrase]), or — the bug this recovers from — an
+     * earlier build persisted the freshly generated passphrase with `SharedPreferences.apply()`
+     * (asynchronous) and the process was killed before that write reached disk, leaving an
+     * encrypted file keyed by a passphrase that was never saved. On the next launch a *new*
+     * passphrase is generated, and SQLCipher then fails the very first query with
+     * `SQLiteNotADatabaseException` ("file is not a database", code 26), crash-looping the app
+     * before any UI can run.
+     *
+     * The file's contents are cryptographically unrecoverable once the passphrase is lost, so the
+     * only safe recovery is to delete it and let Room recreate an empty database. We probe with a
+     * single read/write open before Room touches the file; if it cannot be opened, we reset it. A
+     * healthy database opens cleanly and is left untouched.
+     */
+    private fun discardDatabaseIfUnopenable(passphrase: ByteArray) {
+        val dbFile = context.getDatabasePath(resolvedName(DATABASE_NAME))
+        if (!dbFile.exists()) return
+        // Probe with a copy: SQLCipher's openDatabase zeroes the array it is handed, and the
+        // caller's passphrase must stay intact for the real open-helper factory.
+        val probe = passphrase.copyOf()
+        try {
+            SQLiteDatabase.openDatabase(
+                dbFile.absolutePath,
+                probe,
+                null,
+                SQLiteDatabase.OPEN_READWRITE,
+                null
+            ).close()
+        } catch (e: SQLiteNotADatabaseException) {
+            // Only this exception means "the passphrase does not decrypt this file" (code 26). We
+            // deliberately do NOT catch broader SQLiteExceptions so a transient I/O or lock error
+            // can never delete a healthy database.
+            Log.w(TAG, "Encrypted database cannot be opened with the current passphrase — resetting it.", e)
+            SQLiteDatabase.deleteDatabase(dbFile)
         } finally {
-            // Zero the passphrase immediately after handing it to the factory so it
-            // does not linger on the heap where a heap dump (rooted device) could recover it.
-            passphrase.fill(0)
+            probe.fill(0)
         }
     }
 
@@ -95,13 +144,14 @@ class ChronosSecureDatabaseProvider @Inject constructor(
         val passphrase = ByteArray(PASSPHRASE_BYTES)
         SecureRandom().nextBytes(passphrase)
         val encryptedPassphrase = encryptPassphrase(passphrase)
-        prefs.edit()
+        val committed = prefs.edit()
             .putString(
                 PREF_KEY_ENCRYPTED_PASSPHRASE,
                 Base64.encodeToString(encryptedPassphrase.cipherText, Base64.NO_WRAP)
             )
             .putString(PREF_KEY_IV, Base64.encodeToString(encryptedPassphrase.iv, Base64.NO_WRAP))
-            .apply()
+            .commit()
+        if (!committed) throw IllegalStateException("Failed to persist database passphrase — cannot open encrypted DB")
         return passphrase
     }
 

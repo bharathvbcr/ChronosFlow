@@ -1,6 +1,8 @@
 package com.ChronosFlow.VBCR.widget
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -24,6 +26,16 @@ object WidgetBackgroundSync {
 
     fun register(context: Context) {
         val appContext = context.applicationContext
+        // Lifecycle.addObserver is main-thread-only; hop to the main looper if called off-main.
+        val mainLooper = Looper.getMainLooper()
+        if (Looper.myLooper() == mainLooper) {
+            registerOnMain(appContext)
+        } else {
+            Handler(mainLooper).post { registerOnMain(appContext) }
+        }
+    }
+
+    private fun registerOnMain(appContext: Context) {
         val owner = ProcessLifecycleOwner.get()
         owner.lifecycle.addObserver(
             LifecycleEventObserver { _, event ->

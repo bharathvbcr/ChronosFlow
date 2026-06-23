@@ -85,10 +85,8 @@ class DayDialFocusDelegate @Inject constructor(
                     currentPhaseIndex = 0
                 )
             )
-            val startMinute = DialUtils.snapToIncrement(block.startMinuteOfDay)
-            val endMinute = DialUtils.snapToIncrement((startMinute + 15).coerceAtLeast(startMinute + 1))
-            plannerService.logActualWindow(block.id, startMinute, endMinute)
-            logActualTimeUseCase(block.toActualSegment(startMinute, endMinute))
+            // Actual time is logged on finish (finishFocusSession), not on start, to avoid a
+            // duplicate segment that overlaps the final elapsed-time record.
         }
     }
 
@@ -168,13 +166,17 @@ class DayDialFocusDelegate @Inject constructor(
 
     fun extendFocusSession(additionalMinutes: Int = 15) {
         val state = _focusExecutionState.value
-        if (state.status == FocusExecutionStatus.IDLE || state.status == FocusExecutionStatus.SKIPPED) return
+        if (state.status == FocusExecutionStatus.IDLE ||
+            state.status == FocusExecutionStatus.SKIPPED ||
+            state.status == FocusExecutionStatus.FINISHED) return
         applyState(state.withCurrentPhaseDuration((state.plannedDurationMinutes + additionalMinutes).coerceAtMost(480)))
     }
 
     fun shortenFocusSession(minutes: Int = 15) {
         val state = _focusExecutionState.value
-        if (state.status == FocusExecutionStatus.IDLE || state.status == FocusExecutionStatus.SKIPPED) return
+        if (state.status == FocusExecutionStatus.IDLE ||
+            state.status == FocusExecutionStatus.SKIPPED ||
+            state.status == FocusExecutionStatus.FINISHED) return
         applyState(state.withCurrentPhaseDuration((state.plannedDurationMinutes - minutes).coerceAtLeast(5)))
     }
 
@@ -320,12 +322,13 @@ class DayDialFocusDelegate @Inject constructor(
         val elapsedMinutes = consumedFocusMinutes(state)
         scope.launch {
             val block = repository.getTimeBlockById(state.blockId) ?: return@launch
+            val clampedEndMinute = (block.startMinuteOfDay + elapsedMinutes).coerceIn(0, 1440)
             plannerService.logActualWindow(
                 blockId = block.id,
                 actualStartMinute = block.startMinuteOfDay,
-                actualEndMinute = (block.startMinuteOfDay + elapsedMinutes).coerceIn(0, 1440)
+                actualEndMinute = clampedEndMinute
             )
-            logActualTimeUseCase(block.toActualSegment(block.startMinuteOfDay, block.startMinuteOfDay + elapsedMinutes))
+            logActualTimeUseCase(block.toActualSegment(block.startMinuteOfDay, clampedEndMinute))
             manualMissedBlockRegistry.clearMissed(block.id, block.date)
         }
         applyState(
@@ -376,6 +379,21 @@ class DayDialFocusDelegate @Inject constructor(
                     .toInt()
             } ?: 0
         return (completedFocus + currentFocus).coerceAtLeast(1)
+    }
+
+    /**
+     * Cold-start recovery for tap-to-continue: restores an interrupted split straight from the
+     * persisted [FocusSplitSessionStore] when the in-app layer is idle. The background service may
+     * have already transitioned the elapsed phase to COMPLETING (so the Room session no longer flags
+     * a recoverable session), yet the user is tapping the boundary notification to continue — this
+     * brings the full phase plan back so [advancePhase] has something to advance. No-op when a session
+     * is already active or no active split is stored.
+     */
+    fun restoreActiveSplitFromStore() {
+        if (!isIdle()) return
+        val snapshot = splitSessionStore.load() ?: return
+        if (!snapshot.isSplitSession) return
+        applyState(snapshot)
     }
 
     suspend fun restoreFromPersistedSession(session: FocusSessionState) {

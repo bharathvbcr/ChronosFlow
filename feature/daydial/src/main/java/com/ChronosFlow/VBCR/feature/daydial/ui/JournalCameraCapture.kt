@@ -179,6 +179,7 @@ private fun capturePhoto(
         ContextCompat.getMainExecutor(context),
         object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(results: ImageCapture.OutputFileResults) {
+                setCapturing(false)
                 onCaptured(results.savedUri ?: Uri.fromFile(file))
             }
 

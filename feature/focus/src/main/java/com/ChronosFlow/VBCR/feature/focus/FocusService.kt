@@ -77,6 +77,7 @@ class FocusService : Service() {
     // @Volatile so the write from refreshBlockTitle's IO coroutine (outside the mutex) is
     // immediately visible to the ticker loop which reads it via updateForegroundNotification (TS-003).
     @Volatile private var currentBlockTitle: String? = null
+    private var loadedTitleForBlockId: String? = null
     private var currentTotalSeconds: Int = DEFAULT_FOCUS_SECONDS
     // False while mirroring an intermediate phase of a split session: reaching
     // zero must not log actual time or fire the "session complete" notification.
@@ -235,9 +236,18 @@ class FocusService : Service() {
 
             ACTION_START,
             null -> {
+                val requestedSessionId = intent?.getStringExtra(EXTRA_SESSION_ID)
+                val loaded = runtime.snapshot()
+                // A split's next phase arrives as a START with a fresh session id while the
+                // just-finished phase may still be loaded (same service instance, not yet torn
+                // down). Honor the new id by starting that phase fresh instead of mirroring the
+                // elapsed one.
+                val supersedesLoaded = requestedSessionId != null &&
+                    loaded.sessionId != null &&
+                    requestedSessionId != loaded.sessionId
                 val snapshot = when {
-                    runtime.snapshot().isRunning -> runtime.snapshot()
-                    runtime.snapshot().isPaused -> runtime.resume()
+                    loaded.isRunning && !supersedesLoaded -> loaded
+                    loaded.isPaused && !supersedesLoaded -> runtime.resume()
                     else -> startNewSession(intent)
                 }
                 if (snapshot.isRunning) {
@@ -245,6 +255,10 @@ class FocusService : Service() {
                     sessionStartTimeLeftSeconds = snapshot.timeLeftSeconds
                 }
                 persistSession(snapshot.state)
+                // A split session persists one row per phase under a fresh session id; drop the
+                // earlier phases' rows so a completed split can't leave a stale RUNNING row behind
+                // that resurfaces as a phantom "recoverable" session on next launch.
+                snapshot.sessionId?.let { focusSessionDao.deleteSessionsExcept(it) }
                 updateForegroundNotification(snapshot)
                 startTicker()
             }
@@ -360,15 +374,17 @@ class FocusService : Service() {
         if (blockId == null) {
             blockTitleJob?.cancel()
             currentBlockTitle = null
+            loadedTitleForBlockId = null
             return
         }
-        if (blockId == currentBlockId && currentBlockTitle != null) {
+        if (blockId == loadedTitleForBlockId && currentBlockTitle != null) {
             return
         }
         blockTitleJob?.cancel()
         blockTitleJob = serviceScope.launch {
             val title = timeBlockRepository.getTimeBlockById(blockId)?.title
             currentBlockTitle = title
+            loadedTitleForBlockId = blockId
             val snapshot = runtime.snapshot()
             if (snapshot.isRunning || snapshot.isPaused) {
                 updateForegroundNotification(snapshot)
@@ -386,9 +402,18 @@ class FocusService : Service() {
         val snapshot = runtime.snapshot()
         if (snapshot.isRunning || snapshot.isPaused) return
 
-        val restoredEntity = currentSessionId?.let { focusSessionDao.getFocusSession(it) }
-            ?: focusSessionDao.observeRecoverableSession().first()
-            ?: return
+        // Only fall back to "the latest recoverable session" when the caller did not name one. A
+        // START/SYNC that explicitly carries a session id (e.g. the next phase of a split) must load
+        // exactly that session — never resurrect a different, already-finished phase that still
+        // lingers as RUNNING in the table, which would make the live notification mirror the wrong
+        // phase and overwrite currentSessionId.
+        val explicitSessionId = intent?.getStringExtra(EXTRA_SESSION_ID)
+        val byId = currentSessionId?.let { focusSessionDao.getFocusSession(it) }
+        val restoredEntity = when {
+            byId != null -> byId
+            explicitSessionId != null -> return
+            else -> focusSessionDao.observeRecoverableSession().first()
+        } ?: return
 
         val restoredState = restoredEntity.toDomain()
         if (restoredState !is FocusSessionState.Running && restoredState !is FocusSessionState.Paused) {
@@ -493,9 +518,11 @@ class FocusService : Service() {
                     val currentSnapshot = runtime.snapshot()
                     val drift = currentSnapshot.timeLeftSeconds - expectedTimeLeftSeconds
                     if (java.lang.Math.abs(drift) >= 2) {
-                        val adjustedSnapshot = runtime.adjustSeconds(-drift)
-                        persistSession(adjustedSnapshot.state)
-                        updateForegroundNotification(adjustedSnapshot)
+                        commandMutex.withLock {
+                            val adjustedSnapshot = runtime.adjustSeconds(-drift)
+                            persistSession(adjustedSnapshot.state)
+                            updateForegroundNotification(adjustedSnapshot)
+                        }
                     }
                 }
 
@@ -503,7 +530,7 @@ class FocusService : Service() {
                 if (!snapshot.isRunning) {
                     break
                 }
-                if (snapshot.timeLeftSeconds <= 0 && runtime.completeIfFinished()) {
+                if (snapshot.timeLeftSeconds <= 0 && commandMutex.withLock { runtime.completeIfFinished() }) {
                     persistSession(runtime.snapshot().state)
                     val redactSensitiveTitles = privacyPreferences.redactSensitiveNotifications()
                     val boundaryLabel = currentBoundaryLabel

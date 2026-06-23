@@ -2,6 +2,7 @@ package com.ChronosFlow.VBCR.core.data.sync
 
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 
 @Singleton
 class SyncRepository @Inject constructor(
@@ -24,6 +25,7 @@ class SyncRepository @Inject constructor(
                 timeBlockCount = batch.timeBlocks.size
             )
         }.getOrElse { error ->
+            if (error is CancellationException) throw error
             SyncResult.Failed(
                 retryable = error !is RemoteSyncUnavailableException,
                 message = error.message ?: error::class.java.simpleName

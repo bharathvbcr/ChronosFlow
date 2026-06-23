@@ -26,9 +26,9 @@ class ReviewRepositoryImpl @Inject constructor(
             reviewDao.observeDailyReview(date),
             reviewDao.observeReviewInsights(date)
         ) { review, insights ->
-            review?.toDomain()?.copy(
-                insights = insights.map { it.toDomain() }.ifEmpty { review.toDomain().insights }
-            )
+            review?.toDomain()?.let { base ->
+                base.copy(insights = insights.map { it.toDomain() }.ifEmpty { base.insights })
+            }
         }
 
     override suspend fun saveActualTimeSegment(segment: ActualTimeSegment) =

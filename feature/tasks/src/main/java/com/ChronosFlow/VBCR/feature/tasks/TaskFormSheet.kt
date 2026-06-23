@@ -3960,7 +3960,7 @@ private fun taskTranscriptPriority(normalized: String): Int? = when {
     Regex("""\b(urgent|asap|critical|important|deadline|due today|due tomorrow|p1)\b""")
         .containsMatchIn(normalized) -> 2
     Regex("""\b(high priority|high-priority|p2)\b""").containsMatchIn(normalized) -> 1
-    Regex("""\b(low priority|someday|whenever|optional|p3|p4)\b""").containsMatchIn(normalized) -> 0
+    Regex("""\b(low priority|someday|whenever|optional|p3|p4)\b""").containsMatchIn(normalized) -> null
     else -> null
 }
 
@@ -4653,15 +4653,11 @@ private fun defaultUrgentReminderMinute(): Int {
     return nextHour.hour * 60 + nextHour.minute
 }
 
-private fun minuteOfDayToInstant(minuteOfDay: Int): Instant {
+private fun minuteOfDayToInstant(minuteOfDay: Int): Instant? {
     val now = LocalDate.now()
     val scheduledLocal = now.atStartOfDay().plusMinutes(minuteOfDay.toLong())
     val scheduledFor = scheduledLocal.atZone(ZoneId.systemDefault()).toInstant()
-    return if (scheduledFor.isAfter(Instant.now())) {
-        scheduledFor
-    } else {
-        scheduledFor.plusSeconds(24 * 60 * 60)
-    }
+    return if (scheduledFor.isAfter(Instant.now())) scheduledFor else null
 }
 
 private fun minuteFromInstant(instant: Instant): Int? {

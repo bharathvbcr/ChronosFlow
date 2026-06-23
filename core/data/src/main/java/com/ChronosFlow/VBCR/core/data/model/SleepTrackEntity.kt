@@ -19,5 +19,6 @@ data class SleepTrackEntity(
     val sleepQuality: Int,
     val windDownNotes: String?,
     val interruptedCount: Int,
+    val refreshedRating: Int? = null,
     val source: String = "MANUAL"
 )

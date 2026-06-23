@@ -131,6 +131,7 @@ class HealthConnectSleepSyncManager @Inject constructor(
             }.fold(
                 onSuccess = { count -> recordSuccess(count) },
                 onFailure = { error ->
+                    if (error is kotlinx.coroutines.CancellationException) throw error
                     // A SecurityException means the read was rejected (e.g. background-read was not
                     // granted, or access was revoked) — retrying won't help, so fail rather than churn.
                     if (error is SecurityException) {
@@ -253,7 +254,7 @@ class HealthConnectSleepSyncManager @Inject constructor(
                 id = existing.id,
                 plannedStartMinute = existing.plannedStartMinute,
                 plannedEndMinute = existing.plannedEndMinute,
-                sleepQuality = existing.sleepQuality,
+                // sleepQuality is HC-measured, not user-authored — take the fresh incoming value
                 windDownNotes = existing.windDownNotes
             )
             else -> null

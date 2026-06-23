@@ -43,6 +43,8 @@ internal fun dayDialSidebarPageSubtitle(page: SidebarPage): String =
         SidebarPage.MEDICATION -> "Medication reminders and dose tracking"
         SidebarPage.REVIEW -> "Planned, actual, and missed time"
         SidebarPage.JOURNAL -> "Reflections, mood, and journaling insights"
+        SidebarPage.READING_LIST -> "Saved links to read later, with reminders"
+        SidebarPage.INBOX -> "Quick capture anything, triage it later"
         SidebarPage.TEMPLATES -> "Reusable day blueprints"
         SidebarPage.CALENDARS -> "Device events and linked exports"
         SidebarPage.AI_SETTINGS -> "Planner privacy, model status, and planning style"

@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -135,6 +136,27 @@ internal fun GoalFormSheet(
     }
     var detailsExpanded by rememberSaveable(targetKey) { mutableStateOf(false) }
     var customCategory by rememberSaveable(targetKey) { mutableStateOf("") }
+    var lastChipCategory by rememberSaveable(targetKey) {
+        mutableStateOf(existing?.category ?: GoalViewModel.DEFAULT_CATEGORY)
+    }
+
+    // GOALS-7: reset draft when a new Add session opens (each dismiss→reopen cycle).
+    // lastAddOpen uses rememberSaveable so config changes don't accidentally trigger a reset.
+    var lastAddOpen by rememberSaveable { mutableStateOf(false) }
+    val isAddOpen = target is GoalSheetTarget.Add
+    LaunchedEffect(target) {
+        if (isAddOpen && !lastAddOpen) {
+            title = prefillTitle.orEmpty()
+            description = ""
+            category = GoalViewModel.DEFAULT_CATEGORY
+            customCategory = ""
+            lastChipCategory = GoalViewModel.DEFAULT_CATEGORY
+            targetValueText = "1"
+            targetDateIso = null
+            detailsExpanded = false
+        }
+        lastAddOpen = isAddOpen
+    }
 
     val targetDate = targetDateIso?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
     val parsedTargetValue = targetValueText.toIntOrNull()?.coerceAtLeast(1) ?: 1
@@ -180,13 +202,21 @@ internal fun GoalFormSheet(
             label = "Category",
             options = categoryOptions,
             selected = category,
-            onSelected = { category = it }
+            onSelected = { selection ->
+                category = selection
+                lastChipCategory = selection
+                customCategory = ""
+            }
         )
         OutlinedTextField(
             value = customCategory,
             onValueChange = { input ->
                 customCategory = input
-                input.trim().takeIf { it.isNotBlank() }?.let { category = it }
+                val trimmed = input.trim()
+                when {
+                    trimmed.isBlank() -> category = lastChipCategory
+                    trimmed.length >= 2 -> category = trimmed
+                }
             },
             label = { Text("Custom category") },
             placeholder = { Text("e.g. Travel") },

@@ -36,6 +36,25 @@
         </intent>
     </shortcut>
     <shortcut
+        android:shortcutId="capture_inbox"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_capture_inbox_short"
+        android:shortcutLongLabel="@string/shortcut_capture_inbox_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.ChronosFlow.VBCR"
+            android:targetClass="com.ChronosFlow.VBCR.MainActivity">
+            <extra
+                android:name="com.ChronosFlow.VBCR.extra.INITIAL_SECTION"
+                android:value="day" />
+            <!-- Open the quick-capture Inbox page (DayDialScreen "reading-inbox" launch target). -->
+            <extra
+                android:name="com.ChronosFlow.VBCR.extra.DAY_TARGET"
+                android:value="reading-inbox" />
+        </intent>
+    </shortcut>
+    <shortcut
         android:shortcutId="command_palette"
         android:enabled="true"
         android:icon="@mipmap/ic_launcher"

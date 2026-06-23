@@ -14,7 +14,7 @@ class ChronosNowComplicationContentTest {
     private val twoPm = 14 * 60
 
     @Test
-    fun `running focus shows a minutes-left glance, elapsed progress, and taps to focus`() {
+    fun `running focus shows a minutes-left glance, remaining progress, and taps to focus`() {
         val content = chronosNowComplicationContent(
             summary = WearDaySummary(),
             focus = WearFocusStateStore.FocusState(
@@ -31,8 +31,8 @@ class ChronosNowComplicationContentTest {
         assertEquals("Focus", content.title)
         assertTrue(content.long.startsWith("Focus · "))
         assertEquals(WearStartPage.FOCUS, content.tapPage)
-        // 23 of 25 minutes remain -> ~8% elapsed.
-        assertEquals(0.08f, content.progress!!, 0.01f)
+        // 23 of 25 minutes remain -> 92% remaining (arc drains as time passes).
+        assertEquals(0.92f, content.progress!!, 0.01f)
         // A running session ticks live to its planned end.
         assertEquals(nowMillis + 23 * 60_000L, content.countDownToMillis)
     }

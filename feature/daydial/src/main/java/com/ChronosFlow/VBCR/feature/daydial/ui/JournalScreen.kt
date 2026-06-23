@@ -51,6 +51,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -210,12 +211,13 @@ internal fun JournalPageContent(
     val editingEntry: JournalEntry? = remember(entries, editingEntryId) {
         editingEntryId?.let { id -> entries.find { it.id == id } }
     }
-    var composeDate by remember { mutableStateOf(today) }
+    // LocalDate is not Saveable on Android; store as epoch day so the picked date survives rotation.
+    var composeDateEpochDay by rememberSaveable { mutableStateOf(today.toEpochDay()) }
     var query by rememberSaveable { mutableStateOf("") }
     // Tapped thumbnail to view full-size in a lightbox dialog.
     var previewUri by remember { mutableStateOf<String?>(null) }
 
-    val openNew: (LocalDate) -> Unit = { date -> editingEntryId = null; composeDate = date; composing = true }
+    val openNew: (LocalDate) -> Unit = { date -> editingEntryId = null; composeDateEpochDay = date.toEpochDay(); composing = true }
     val openEdit: (JournalEntry) -> Unit = { entry -> editingEntryId = entry.id; composing = true }
 
     val streak = remember(entries, today) { journalStreak(entries, today) }
@@ -395,7 +397,7 @@ internal fun JournalPageContent(
             ) {
                 JournalEntryComposer(
                     editing = editing,
-                    initialDate = composeDate,
+                    initialDate = LocalDate.ofEpochDay(composeDateEpochDay),
                     streak = streak,
                     attachments = attachments,
                     onRemoveAttachment = onRemoveAttachment,
@@ -699,8 +701,11 @@ internal fun JournalEntryComposer(
     val isNew = editing == null
     val parsedBody = remember(editing?.id) { journalParseBody(editing?.body.orEmpty()) }
     var mainNote by rememberSaveable(editing?.id) { mutableStateOf(parsedBody.mainNote) }
-    // Subtask-style sub-notes. Not Saveable across process death, but fine for a transient editor.
-    val subNotes = remember(editing?.id) { mutableStateListOf<String>().apply { addAll(parsedBody.subNotes) } }
+    // Subtask-style sub-notes. Survives rotation via listSaver; not persisted across process death.
+    val subNotes = rememberSaveable(
+        editing?.id,
+        saver = listSaver(save = { it.toList() }, restore = { mutableStateListOf(*it.toTypedArray()) })
+    ) { mutableStateListOf<String>().apply { addAll(parsedBody.subNotes) } }
     var timeText by rememberSaveable(editing?.id) {
         mutableStateOf(editing?.entryMinuteOfDay?.let(::formatDisplayMinute).orEmpty())
     }

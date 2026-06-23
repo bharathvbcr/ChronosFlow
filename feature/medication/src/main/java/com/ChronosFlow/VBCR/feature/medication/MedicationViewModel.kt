@@ -48,6 +48,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Immutable
@@ -352,14 +353,17 @@ class MedicationViewModel @Inject constructor(
                     doseAmount = plan.dosage
                 )
             )
-            val remaining = plan.safetyProfile?.supplyRemaining?.let { (it - 1).coerceAtLeast(0) }
-            val updated = plan.copy(
-                safetyProfile = plan.safetyProfile?.copy(supplyRemaining = remaining)
+            // Re-fetch to get the latest supplyRemaining; avoids a stale-read decrement
+            // when the user taps "Taken" twice in rapid succession.
+            val latestPlan = medicationRepository.getMedicationPlanById(plan.id) ?: plan
+            val remaining = latestPlan.safetyProfile?.supplyRemaining?.let { (it - 1).coerceAtLeast(0) }
+            val updated = latestPlan.copy(
+                safetyProfile = latestPlan.safetyProfile?.copy(supplyRemaining = remaining)
             )
             medicationRepository.saveMedicationPlan(updated)
 
             // Trigger low supply warning if remaining drops below/equals the refill threshold
-            val safetyProfile = plan.safetyProfile
+            val safetyProfile = latestPlan.safetyProfile
             val threshold = safetyProfile?.refillThreshold
             if (remaining != null && threshold != null && remaining <= threshold) {
                 alarmDeliveryCoordinator.deliverLowSupplyWarning(updated, remaining)
@@ -495,6 +499,7 @@ class MedicationViewModel @Inject constructor(
             _assistState.value = MedicationAssistUiState(isLoading = true, assistSnapshot = snapshot)
             val suggestions = runCatching { medicationAssistPlanner.suggest(request) }
                 .getOrElse { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     _assistState.value = MedicationAssistUiState(
                         message = throwable.message ?: "No suggestions available",
                         assistSnapshot = snapshot

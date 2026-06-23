@@ -45,7 +45,7 @@ fun HabitSchedule.toEntity(createdAt: Instant, updatedAt: Instant): HabitSchedul
                 quotaPeriodUnit = null
             )
             is HabitRecurrenceRule.Quota -> SchedulePersistencePayload(
-                recurrenceType = recurrence.type.name,
+                recurrenceType = resolvedRule.periodUnit.name,
                 intervalCount = resolvedRule.interval,
                 weekdaysCsv = null,
                 recurrenceRuleKind = HABIT_RULE_KIND_QUOTA,

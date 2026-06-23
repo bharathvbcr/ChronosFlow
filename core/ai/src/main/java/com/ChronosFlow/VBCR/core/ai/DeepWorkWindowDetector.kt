@@ -45,11 +45,12 @@ class DeepWorkWindowDetector {
             if (boundedEnd - cursor >= minimumDurationMinutes) add(cursor to boundedEnd)
         }
 
+        val sortedBlocks = blocks.sortedBy { it.startMinuteOfDay }
         return freeSegments
             .map { (start, end) ->
                 val duration = end - start
-                val previous = blocks.lastOrNull { it.startMinuteOfDay + it.durationMinutes <= start }
-                val next = blocks.firstOrNull { it.startMinuteOfDay >= end }
+                val previous = sortedBlocks.lastOrNull { it.startMinuteOfDay + it.durationMinutes <= start }
+                val next = sortedBlocks.firstOrNull { it.startMinuteOfDay >= end }
                 val score = scoreWindow(start, end, duration, previous, next)
                 DeepWorkWindow(
                     startMinuteOfDay = start,

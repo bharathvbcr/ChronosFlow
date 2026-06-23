@@ -48,7 +48,7 @@ internal fun DayDialNavigationRail(
                 // The outer combinedClickable handles the gestures (it carries the long-press),
                 // so the tap/long-press haptics live here — matching the shell's quick-add cues.
                 FloatingActionButton(
-                    onClick = onQuickCreate,
+                    onClick = {},
                     modifier = Modifier.combinedClickable(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.Confirm)

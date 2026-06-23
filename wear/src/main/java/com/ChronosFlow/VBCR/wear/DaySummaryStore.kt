@@ -108,11 +108,14 @@ object DaySummaryStore {
 
     // Persistence re-uses the on-wire packing so read() can lean on the shared parse helpers.
     private fun packBlock(b: WearBlock) = "${b.startMinute}$FIELD_SEP${b.endMinute}"
-    private fun packTask(t: WearTask) = "${t.id}$FIELD_SEP${t.title}"
+    private fun packTask(t: WearTask) = "${t.id}$FIELD_SEP${t.title.sanitize()}"
     private fun packHabit(h: WearHabit) =
-        "${h.id}$FIELD_SEP${if (h.done) 1 else 0}$FIELD_SEP${h.streak}$FIELD_SEP${h.title}"
+        "${h.id}$FIELD_SEP${if (h.done) 1 else 0}$FIELD_SEP${h.streak}$FIELD_SEP${h.title.sanitize()}"
     private fun packMed(m: WearMed) =
-        "${m.id}$FIELD_SEP${if (m.taken) 1 else 0}$FIELD_SEP${m.reminderMinute}$FIELD_SEP${m.doseLabel}$FIELD_SEP${m.name}"
+        "${m.id}$FIELD_SEP${if (m.taken) 1 else 0}$FIELD_SEP${m.reminderMinute}$FIELD_SEP${m.doseLabel.sanitize()}$FIELD_SEP${m.name.sanitize()}"
+
+    /** Strip newlines so a title with an embedded newline can't corrupt the line-per-record format. */
+    private fun String.sanitize() = replace('\n', ' ').replace('\r', ' ')
 
     private fun String?.toLines(): List<String> =
         this?.split(LINE_SEP)?.filter { it.isNotBlank() } ?: emptyList()

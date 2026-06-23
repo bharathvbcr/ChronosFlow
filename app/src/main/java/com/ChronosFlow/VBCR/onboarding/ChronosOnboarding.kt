@@ -43,6 +43,7 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -334,6 +335,9 @@ private fun OnboardingPermissionsPage(
     val sleepDataSource = remember(context) { HealthConnectSleepDataSource(context.applicationContext) }
     val sleepProviderAvailable = remember(sleepDataSource) { sleepDataSource.isAvailable() }
     var sleepGranted by remember { mutableStateOf(false) }
+    LaunchedEffect(sleepDataSource) {
+        sleepGranted = sleepDataSource.hasSleepReadPermission()
+    }
     val sleepLauncher = rememberLauncherForActivityResult(
         sleepDataSource.permissionRequestContract()
     ) { granted ->

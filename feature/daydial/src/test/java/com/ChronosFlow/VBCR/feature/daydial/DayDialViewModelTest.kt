@@ -241,7 +241,8 @@ class DayDialViewModelTest {
             genAiAssistCoordinator = mockk(relaxed = true),
             currentBlockNotificationCoordinator = mockk(relaxed = true),
             appEventLog = AppEventLog(),
-            deleteAllDataUseCase = mockk(relaxed = true)
+            deleteAllDataUseCase = mockk(relaxed = true),
+            focusPhaseAdvanceBus = com.ChronosFlow.VBCR.core.data.focus.FocusPhaseAdvanceBus()
         )
         viewModel.dataExportDispatcher = testDispatcher
         viewModel.cancelMinuteTickerForTest()

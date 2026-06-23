@@ -35,8 +35,10 @@ internal fun buildDayDialStateFlows(
     reviewDelegate: DayDialReviewDelegate,
     freeTimeCalculator: FreeTimeCalculator
 ): DayDialStateFlows {
-    val selectedFocusBlock = focusExecutionState.flatMapLatest { state ->
-        repository.getTimeBlocksByDate(selectedDate.value)
+    val selectedFocusBlock = combine(focusExecutionState, selectedDate) { state, date ->
+        Pair(state, date)
+    }.flatMapLatest { (state, date) ->
+        repository.getTimeBlocksByDate(date)
             .map { blocks -> blocks.find { it.id == state.blockId } }
     }.map { block ->
         block?.toDayDialUiModel(isSelected = true)

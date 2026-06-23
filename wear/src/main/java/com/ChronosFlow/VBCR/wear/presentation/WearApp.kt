@@ -227,6 +227,11 @@ private fun HomePager(
         initialPage = pages.indexOf(homePageFor(startPage)).coerceAtLeast(0),
         pageCount = { pageCount }
     )
+    // Clamp the current page when the meds page disappears to avoid an out-of-bounds crash.
+    LaunchedEffect(pages.size) {
+        val clamped = pagerState.currentPage.coerceAtMost((pages.size - 1).coerceAtLeast(0))
+        if (clamped != pagerState.currentPage) pagerState.scrollToPage(clamped)
+    }
     // Honour a tile launch that lands here (or returns from focus): glide to the requested page.
     // Keyed on routeNonce so a fresh tap re-routes even after the user has swiped to another page.
     LaunchedEffect(routeNonce) {

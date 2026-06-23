@@ -8,12 +8,36 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.work.ExistingWorkPolicy
+import androidx.work.WorkManager
 import com.ChronosFlow.VBCR.core.data.ChronosDatabase
 import com.ChronosFlow.VBCR.core.data.datastore.ChronosPreferencesDataSource
+import com.ChronosFlow.VBCR.core.data.reading.ReadingMetadataFetchWorker
+import com.ChronosFlow.VBCR.core.domain.model.AlarmDeliveryState
+import com.ChronosFlow.VBCR.core.domain.model.AlarmReliability
+import com.ChronosFlow.VBCR.core.domain.model.AlarmRequest
+import com.ChronosFlow.VBCR.core.domain.model.AlarmRequestType
+import com.ChronosFlow.VBCR.core.domain.model.CaptureSource
+import com.ChronosFlow.VBCR.core.domain.model.InboxItem
+import com.ChronosFlow.VBCR.core.domain.model.ReadingItem
+import com.ChronosFlow.VBCR.core.domain.model.ReadingMetadataState
+import com.ChronosFlow.VBCR.core.domain.model.ReadingUrls
+import com.ChronosFlow.VBCR.core.domain.model.Task
+import com.ChronosFlow.VBCR.core.domain.repository.InboxRepository
+import com.ChronosFlow.VBCR.core.domain.repository.ReadingListRepository
+import com.ChronosFlow.VBCR.core.domain.repository.TaskRepository
+import com.ChronosFlow.VBCR.core.notifications.AlarmScheduler
+import com.ChronosFlow.VBCR.core.notifications.ReadingReminderActionReceiver
+import com.ChronosFlow.VBCR.core.ui.settings.ChronosUiSettingsKeys
+import com.ChronosFlow.VBCR.core.ui.settings.readChronosUiBooleanSetting
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.runBlocking
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * Read-only provider exposing ChronosFlow's shareable data to DevTime. Authority is
@@ -34,7 +58,15 @@ class InteropProvider : ContentProvider() {
     interface InteropEntryPoint {
         fun chronosDatabase(): ChronosDatabase
         fun chronosPreferencesDataSource(): ChronosPreferencesDataSource
+        // Inbound handoff (write path) dependencies — all @Singleton in SingletonComponent.
+        fun readingListRepository(): ReadingListRepository
+        fun inboxRepository(): InboxRepository
+        fun taskRepository(): TaskRepository
+        fun alarmScheduler(): AlarmScheduler
     }
+
+    private fun entryPoint(ctx: Context): InteropEntryPoint =
+        EntryPointAccessors.fromApplication(ctx.applicationContext, InteropEntryPoint::class.java)
 
     private fun database(ctx: Context): ChronosDatabase =
         EntryPointAccessors.fromApplication(ctx.applicationContext, InteropEntryPoint::class.java)
@@ -54,6 +86,7 @@ class InteropProvider : ContentProvider() {
         matcher.addURI(authority, InteropContract.PATH_GOALS, CODE_GOALS)
         matcher.addURI(authority, InteropContract.PATH_ZONES, CODE_ZONES)
         matcher.addURI(authority, InteropContract.PATH_PEOPLE, CODE_PEOPLE)
+        matcher.addURI(authority, InteropContract.PATH_HANDOFF, CODE_HANDOFF)
         return true
     }
 
@@ -199,8 +232,156 @@ class InteropProvider : ContentProvider() {
         else -> "vnd.android.cursor.dir/vnd.${InteropContract.SELF_PACKAGE}.interop"
     }
 
-    // Read-only provider: mutations are not supported.
-    override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+    /**
+     * Inbound handoff write path ([InteropContract.PATH_HANDOFF]) — the ONLY writable path. A
+     * trusted peer (Curio) inserts a single row to create a reading-list item (with an optional
+     * "remind me to read later" alarm), an inbox capture, or a task inside ChronosFlow.
+     *
+     * Authorization, in order: only the handoff path is writable; the user's inbound kill-switch
+     * must be on; and the caller must be a pinned peer (signature-verified). Caller-supplied values
+     * are read by hardcoded column name and passed only as Room-parameterized arguments — never
+     * concatenated into SQL — so the read-path sanitization discipline holds here too.
+     */
+    override fun insert(uri: Uri, values: ContentValues?): Uri? {
+        val ctx = context ?: return null
+        if (matcher.match(uri) != CODE_HANDOFF) return null
+        // Dedicated inbound gate — NOT isInteropConsentGranted, which governs sharing data OUT.
+        if (!preferencesDataSource(ctx).isInboundHandoffAccepted()) {
+            throw SecurityException("Interop: inbound handoffs are disabled")
+        }
+        PeerVerifier.requireTrusted(ctx, callingPackage)
+        val v = values ?: return null
+        val caller = callingPackage ?: return null
+        val ep = entryPoint(ctx)
+        return when (v.getAsString(InteropContract.HANDOFF_KIND)?.trim()?.lowercase()) {
+            InteropContract.KIND_READING -> insertReading(ctx, ep, v, uri)
+            InteropContract.KIND_INBOX -> insertInbox(ep, v, uri)
+            InteropContract.KIND_TASK -> insertTask(ep, v, uri, caller)
+            else -> null
+        }
+    }
+
+    /** Saves a reading-list item (de-duping on URL) and schedules its reminder when one is given. */
+    private fun insertReading(ctx: Context, ep: InteropEntryPoint, v: ContentValues, uri: Uri): Uri? {
+        val rawUrl = v.getAsString(InteropContract.HANDOFF_URL) ?: v.getAsString(InteropContract.HANDOFF_TEXT)
+        val url = ReadingUrls.firstUrlIn(rawUrl) ?: return null // reading items require a link
+        val domain = ReadingUrls.domainOf(url)
+        val title = v.getAsString(InteropContract.HANDOFF_TITLE)?.trim()?.takeIf { it.isNotEmpty() } ?: domain
+        val notes = v.getAsString(InteropContract.HANDOFF_NOTES)?.trim()?.takeIf { it.isNotEmpty() }
+        val remindAt = v.getAsLong(InteropContract.HANDOFF_REMINDER_AT)?.let { Instant.ofEpochMilli(it) }
+        val autoFetch = ctx.readChronosUiBooleanSetting(
+            ChronosUiSettingsKeys.KEY_READING_METADATA_AUTOFETCH, true
+        )
+        val now = Instant.now()
+        val repo = ep.readingListRepository()
+        val scheduler = ep.alarmScheduler()
+        val id = runBlocking {
+            val existing = repo.findByUrl(url)
+            val item = existing?.copy(
+                // Only upgrade a placeholder (domain) title; don't clobber a fetched one.
+                title = if (existing.title == existing.domain && title != domain) title else existing.title,
+                notes = notes ?: existing.notes,
+                reminderAt = remindAt ?: existing.reminderAt,
+                updatedAt = now
+            ) ?: ReadingItem(
+                id = UUID.randomUUID().toString(),
+                url = url,
+                title = title,
+                domain = domain,
+                notes = notes,
+                metadataState = if (autoFetch) ReadingMetadataState.PENDING else ReadingMetadataState.SKIPPED,
+                reminderAt = remindAt,
+                addedAt = now,
+                updatedAt = now
+            )
+            repo.save(item)
+            if (existing == null && autoFetch) {
+                WorkManager.getInstance(ctx.applicationContext).enqueueUniqueWork(
+                    ReadingMetadataFetchWorker.uniqueName(item.id),
+                    ExistingWorkPolicy.REPLACE,
+                    ReadingMetadataFetchWorker.request(item.id)
+                )
+            }
+            if (remindAt != null) {
+                // Same path as the in-app reading reminder: schedule the OS alarm (id prefixed
+                // "reading:" so AlarmDeliveryCoordinator posts the reading notification) then
+                // persist the column. scheduleAlarmRequest degrades to an inexact window when
+                // exact-alarm permission is absent and no-ops if POST_NOTIFICATIONS is denied.
+                scheduler.scheduleAlarmRequest(
+                    AlarmRequest(
+                        id = ReadingReminderActionReceiver.readingReminderRequestId(item.id),
+                        type = AlarmRequestType.READING_REMINDER,
+                        scheduledFor = remindAt,
+                        title = item.title,
+                        message = "Time to read this",
+                        medicationPlanId = null,
+                        blockId = null,
+                        reliability = AlarmReliability.INEXACT,
+                        deliveryState = AlarmDeliveryState.PENDING,
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                )
+                repo.setReminder(item.id, remindAt)
+            }
+            item.id
+        }
+        return Uri.withAppendedPath(uri, id)
+    }
+
+    /** Drops a quick-capture note (or link) into the triage inbox. */
+    private fun insertInbox(ep: InteropEntryPoint, v: ContentValues, uri: Uri): Uri? {
+        val text = (v.getAsString(InteropContract.HANDOFF_TEXT) ?: v.getAsString(InteropContract.HANDOFF_URL))
+            ?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val now = Instant.now()
+        val id = UUID.randomUUID().toString()
+        runBlocking {
+            ep.inboxRepository().save(
+                InboxItem(
+                    id = id,
+                    text = text,
+                    url = ReadingUrls.firstUrlIn(text),
+                    source = CaptureSource.SHARE,
+                    createdAt = now
+                )
+            )
+        }
+        return Uri.withAppendedPath(uri, id)
+    }
+
+    /** Creates a follow-up task on today's plan. Tagged with the caller's package as [Task.origin]
+     * so it is never re-shared OUT through the read cursors (which serve only origin IS NULL). */
+    private fun insertTask(ep: InteropEntryPoint, v: ContentValues, uri: Uri, caller: String): Uri? {
+        val title = v.getAsString(InteropContract.HANDOFF_TITLE)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: v.getAsString(InteropContract.HANDOFF_TEXT)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return null
+        val body = v.getAsString(InteropContract.HANDOFF_TEXT)?.trim()?.takeIf { it.isNotEmpty() && it != title }
+        val url = v.getAsString(InteropContract.HANDOFF_URL)?.trim()?.takeIf { it.isNotEmpty() }
+        // Tasks have no url field; fold the link into the description so it isn't lost.
+        val description = listOfNotNull(body, url).joinToString("\n").takeIf { it.isNotEmpty() }
+        val now = Instant.now()
+        val id = UUID.randomUUID().toString()
+        runBlocking {
+            ep.taskRepository().saveTask(
+                Task(
+                    id = id,
+                    title = title,
+                    description = description,
+                    isCompleted = false,
+                    priority = 1,
+                    dueDate = null,
+                    createdAt = now,
+                    updatedAt = now,
+                    targetDate = LocalDate.now(),
+                    origin = caller,
+                    externalId = id
+                )
+            )
+        }
+        return Uri.withAppendedPath(uri, id)
+    }
+
+    // Update/delete remain unsupported — handoffs are insert-only.
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
 
@@ -212,5 +393,6 @@ class InteropProvider : ContentProvider() {
         const val CODE_GOALS = 5
         const val CODE_ZONES = 6
         const val CODE_PEOPLE = 7
+        const val CODE_HANDOFF = 8
     }
 }

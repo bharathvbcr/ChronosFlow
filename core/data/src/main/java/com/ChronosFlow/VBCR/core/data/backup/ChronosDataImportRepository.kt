@@ -62,7 +62,9 @@ class ChronosDataImportRepository @Inject constructor(
         val skippedNonEmptyTables = mutableListOf<String>()
 
         // Rows are restored in sqlite_master order, not dependency order, so defer
-        // foreign-key enforcement for the duration of the restore.
+        // foreign-key enforcement for the duration of the restore. The pragma must be set
+        // BEFORE the transaction begins — SQLite silently ignores PRAGMA foreign_keys
+        // changes issued from within an active transaction.
         db.setForeignKeyConstraintsEnabled(false)
         try {
             database.runInTransaction {

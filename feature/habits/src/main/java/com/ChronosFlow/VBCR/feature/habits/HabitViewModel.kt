@@ -33,6 +33,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.util.UUID
 import javax.inject.Inject
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +42,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 data class HabitRepairSuggestion(
@@ -88,10 +90,17 @@ class HabitViewModel @Inject constructor(
     private val _repairAssistSnapshot = MutableStateFlow<GenAiAssistUiSnapshot?>(null)
     val repairAssistSnapshot = _repairAssistSnapshot.asStateFlow()
 
+    /** Tracks the most recent repair-suggestion job so stale concurrent calls can be cancelled. */
+    private var repairSuggestionsJob: Job? = null
+
     init {
         viewModelScope.launch {
             activeHabits.collect { habits ->
-                refreshRepairSuggestions(habits)
+                if (habits.isEmpty()) return@collect
+                repairSuggestionsJob?.cancel()
+                repairSuggestionsJob = viewModelScope.launch {
+                    refreshRepairSuggestions(habits)
+                }
             }
         }
     }
@@ -375,6 +384,7 @@ class HabitViewModel @Inject constructor(
             _assistState.value = HabitAssistUiState(isLoading = true, assistSnapshot = snapshot)
             val suggestions = runCatching { habitAssistPlanner.suggest(request) }
                 .getOrElse { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     _assistState.value = HabitAssistUiState(
                         message = throwable.message ?: "No suggestions available",
                         assistSnapshot = snapshot

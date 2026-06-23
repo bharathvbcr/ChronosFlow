@@ -212,7 +212,7 @@ fun TimeBlockEntity.toDomain(): TimeBlock = TimeBlock(
     provenance = runCatching { BlockProvenance.valueOf(provenance.uppercase()) }.getOrElse {
         BlockProvenance.fromSource(provenance)
     },
-    flexibility = BlockFlexibility.valueOf(flexibility),
+    flexibility = runCatching { BlockFlexibility.valueOf(flexibility) }.getOrElse { BlockFlexibility.MOVABLE },
     energyLevel = EnergyIntensity.fromLevel(energyLevel),
     taskId = taskId,
     calendarEventId = calendarEventId,

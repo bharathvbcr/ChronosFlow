@@ -65,12 +65,14 @@ class CalendarBackgroundSyncWorker(
             CalendarBackgroundSyncEntryPoint::class.java
         ).calendarEventRepository()
 
-        return runCatching {
+        return try {
             val zone = ZoneId.systemDefault()
             val (start, end) = syncWindow(LocalDate.now(zone), zone)
             repository.syncFromDeviceCalendar(start, end)
             Result.success()
-        }.getOrElse {
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
             Result.retry()
         }
     }

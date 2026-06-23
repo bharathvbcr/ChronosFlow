@@ -110,14 +110,35 @@ fun MedicationScreen(
     val rewriteState by viewModel.rewriteState.collectAsStateWithLifecycle()
     val activePlans = plans.filter { it.isActive }
     val snackbarHostState = remember { SnackbarHostState() }
-    var sheetTarget by remember { mutableStateOf<MedicationSheetTarget?>(null) }
+    // Sheet target: store a discriminator+id pair so state survives rotation.
+    // "add" → Add sheet; "edit:<id>" → Edit sheet for that plan id.
+    var sheetTargetKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val sheetTarget: MedicationSheetTarget? = when {
+        sheetTargetKey == null -> null
+        sheetTargetKey == "add" -> MedicationSheetTarget.Add()
+        sheetTargetKey?.startsWith("edit:") == true -> {
+            val id = sheetTargetKey!!.removePrefix("edit:")
+            plans.firstOrNull { it.id == id }?.let { MedicationSheetTarget.Edit(it) }
+        }
+        else -> null
+    }
+    fun setSheetTarget(target: MedicationSheetTarget?) {
+        sheetTargetKey = when (target) {
+            null -> null
+            is MedicationSheetTarget.Add -> "add"
+            is MedicationSheetTarget.Edit -> "edit:${target.plan.id}"
+        }
+    }
     val normalizedInitialAddCapture = initialAddCapture?.trim()?.takeIf(String::isNotBlank)
-    var planToArchive by remember { mutableStateOf<MedicationPlan?>(null) }
-    var planContextTarget by remember { mutableStateOf<MedicationPlan?>(null) }
+    // Archive confirmation and context sheet: store plan ID so dialogs survive rotation.
+    var planToArchiveId by rememberSaveable { mutableStateOf<String?>(null) }
+    val planToArchive: MedicationPlan? = planToArchiveId?.let { id -> plans.firstOrNull { it.id == id } }
+    var planContextTargetId by rememberSaveable { mutableStateOf<String?>(null) }
+    val planContextTarget: MedicationPlan? = planContextTargetId?.let { id -> plans.firstOrNull { it.id == id } }
     val shellBottomInset = LocalChronosShellBottomInset.current
 
     OneShotNavTrigger(openAddSheet, navTargetGeneration, normalizedInitialAddCapture) {
-        sheetTarget = MedicationSheetTarget.Add(prefillName = normalizedInitialAddCapture)
+        setSheetTarget(MedicationSheetTarget.Add(prefillName = normalizedInitialAddCapture))
         normalizedInitialAddCapture?.let { capture ->
             viewModel.requestMedicationAssist(
                 MedicationAssistRequest(
@@ -186,7 +207,7 @@ fun MedicationScreen(
             }
             item {
                 ChronosFilledTonalButton(
-                    onClick = { sheetTarget = MedicationSheetTarget.Add() },
+                    onClick = { setSheetTarget(MedicationSheetTarget.Add()) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Add medication", fontWeight = FontWeight.SemiBold)
@@ -254,7 +275,7 @@ fun MedicationScreen(
                         label = "Start quickly",
                         options = listOf("Vitamin D", "Blood pressure", "Evening dose", "Inhaler"),
                         onSelect = { name ->
-                            sheetTarget = MedicationSheetTarget.Add(prefillName = name)
+                            setSheetTarget(MedicationSheetTarget.Add(prefillName = name))
                         },
                         modifier = Modifier.animateItem()
                     )
@@ -264,15 +285,15 @@ fun MedicationScreen(
                     MedicationRow(
                         modifier = Modifier.animateItem(),
                         plan = plan,
-                        onEdit = { sheetTarget = MedicationSheetTarget.Edit(plan) },
+                        onEdit = { setSheetTarget(MedicationSheetTarget.Edit(plan)) },
                         onTaken = { viewModel.markDoseTaken(plan) },
                         onMissed = { viewModel.markDoseMissed(plan) },
                         onSnooze = { minutes -> viewModel.snoozeReminder(plan, minutes) },
                         onSkip = { viewModel.skipDoseToday(plan) },
                         onPause = { viewModel.pausePlan(plan, days = 1) },
                         onResume = { viewModel.resumePlan(plan) },
-                        onArchive = { planToArchive = plan },
-                        onOpenContext = { planContextTarget = plan }
+                        onArchive = { planToArchiveId = plan.id },
+                        onOpenContext = { planContextTargetId = plan.id }
                     )
                 }
             }
@@ -281,7 +302,7 @@ fun MedicationScreen(
 
     MedicationFormSheet(
         target = sheetTarget,
-        onDismiss = { sheetTarget = null },
+        onDismiss = { setSheetTarget(null) },
         onConfirm = { name, dosage, unit, reminderMinute, takeWithFood, refillNeededAfterDoses, notes, schedule, safetyProfile ->
             when (val target = sheetTarget) {
                 is MedicationSheetTarget.Edit -> viewModel.updateMedication(
@@ -309,7 +330,7 @@ fun MedicationScreen(
                 )
                 null -> Unit
             }
-            sheetTarget = null
+            setSheetTarget(null)
         },
         historyTemplates = buildMedicationHistoryTemplates(
             plans = plans,
@@ -319,20 +340,20 @@ fun MedicationScreen(
         onHistoryTemplateSelected = viewModel::rememberHistoryTemplateSelection,
         onTaken = { plan ->
             viewModel.markDoseTaken(plan)
-            sheetTarget = null
+            setSheetTarget(null)
         },
         onMissed = { plan ->
             viewModel.markDoseMissed(plan)
-            sheetTarget = null
+            setSheetTarget(null)
         },
         onSnooze = { plan, minutes ->
             viewModel.snoozeReminder(plan, minutes)
-            sheetTarget = null
+            setSheetTarget(null)
         },
-        onArchive = { plan -> planToArchive = plan },
+        onArchive = { plan -> planToArchiveId = plan.id },
         onDuplicate = { plan ->
             viewModel.duplicateMedication(plan)
-            sheetTarget = null
+            setSheetTarget(null)
         },
         assistState = assistState,
         onRequestAssist = viewModel::requestMedicationAssist,
@@ -345,38 +366,38 @@ fun MedicationScreen(
     planContextTarget?.let { plan ->
         MedicationContextActionSheet(
             plan = plan,
-            onDismiss = { planContextTarget = null },
+            onDismiss = { planContextTargetId = null },
             onTaken = {
                 viewModel.markDoseTaken(plan)
-                planContextTarget = null
+                planContextTargetId = null
             },
             onMissed = {
                 viewModel.markDoseMissed(plan)
-                planContextTarget = null
+                planContextTargetId = null
             },
             onSnooze = { minutes ->
                 viewModel.snoozeReminder(plan, minutes)
-                planContextTarget = null
+                planContextTargetId = null
             },
             onSkip = {
                 viewModel.skipDoseToday(plan)
-                planContextTarget = null
+                planContextTargetId = null
             },
             onPause = {
                 viewModel.pausePlan(plan, days = 1)
-                planContextTarget = null
+                planContextTargetId = null
             },
             onResume = {
                 viewModel.resumePlan(plan)
-                planContextTarget = null
+                planContextTargetId = null
             },
             onEdit = {
-                sheetTarget = MedicationSheetTarget.Edit(plan)
-                planContextTarget = null
+                setSheetTarget(MedicationSheetTarget.Edit(plan))
+                planContextTargetId = null
             },
             onArchive = {
-                planToArchive = plan
-                planContextTarget = null
+                planToArchiveId = plan.id
+                planContextTargetId = null
             }
         )
     }
@@ -389,10 +410,10 @@ fun MedicationScreen(
             confirmLabel = "Archive",
             onConfirm = {
                 viewModel.archive(plan)
-                planToArchive = null
-                sheetTarget = null
+                planToArchiveId = null
+                setSheetTarget(null)
             },
-            onDismiss = { planToArchive = null }
+            onDismiss = { planToArchiveId = null }
         )
     }
 }

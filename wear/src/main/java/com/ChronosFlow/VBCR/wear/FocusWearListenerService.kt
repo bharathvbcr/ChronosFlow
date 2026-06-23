@@ -140,7 +140,7 @@ class FocusWearListenerService : WearableListenerService() {
         val remainingSeconds = if (paused) {
             pausedTimeLeftSeconds.coerceAtLeast(0)
         } else {
-            (runningRemainingMs / 1000L).toInt()
+            (runningRemainingMs / 1000L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         }
         val stateColor = focusOngoingActivityColor(paused, remainingSeconds, ChronosTileUi.accent(this))
 

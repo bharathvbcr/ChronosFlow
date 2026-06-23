@@ -694,6 +694,109 @@ class ChronosDatabaseMigrationTest {
     }
 
     @Test
+    fun testMigrate27To28DropsOrphanRecordedAtIndexes() {
+        // Reproduce the real on-device state: MIGRATION_25_26 created standalone recordedAt indexes
+        // that the v27 entities no longer declare, and no migration dropped them — so a migrated
+        // database carries orphan indexes that make Room abort at open. Inject them here, since the
+        // exported v27 schema (generated from the entities) does not contain them.
+        helper.createDatabase(TEST_DB, 27).apply {
+            execSQL("CREATE INDEX IF NOT EXISTS index_habit_events_recordedAt ON habit_events(recordedAt)")
+            execSQL("CREATE INDEX IF NOT EXISTS index_medication_dose_events_recordedAt ON medication_dose_events(recordedAt)")
+            close()
+        }
+
+        // validateDroppedTables = true also validates the final schema matches v28; this would fail
+        // if either orphan index survived.
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            28,
+            true,
+            ChronosDatabase.MIGRATION_27_28
+        ).apply {
+            query(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_habit_events_recordedAt'"
+            ).use { cursor ->
+                org.junit.Assert.assertFalse(cursor.moveToFirst())
+            }
+            query(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_medication_dose_events_recordedAt'"
+            ).use { cursor ->
+                org.junit.Assert.assertFalse(cursor.moveToFirst())
+            }
+        }
+    }
+
+    @Test
+    fun migrate28To29AddsRefreshedRatingColumnDefaultingToNull() {
+        helper.createDatabase(TEST_DB, 28).apply {
+            insert(
+                "sleep_tracks",
+                SQLiteDatabase.CONFLICT_NONE,
+                ContentValues().apply {
+                    put("id", "sleep-refresh-1")
+                    put("date", "2026-06-21")
+                    putNull("plannedStartMinute")
+                    putNull("plannedEndMinute")
+                    put("actualStartMinute", 1380)
+                    put("actualEndMinute", 420)
+                    put("sleepQuality", 4)
+                    put("windDownNotes", "Stretched")
+                    put("interruptedCount", 0)
+                    put("source", "MANUAL")
+                }
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            29,
+            true,
+            ChronosDatabase.MIGRATION_28_29
+        ).apply {
+            query("SELECT windDownNotes, refreshedRating FROM sleep_tracks WHERE id = 'sleep-refresh-1'").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("Stretched", cursor.getString(0))
+                org.junit.Assert.assertTrue(cursor.isNull(1))
+            }
+        }
+    }
+
+    @Test
+    fun migrate29To30CreatesReadingAndInboxTables() {
+        helper.createDatabase(TEST_DB, 29).close()
+
+        helper.runMigrationsAndValidate(
+            TEST_DB,
+            30,
+            true,
+            ChronosDatabase.MIGRATION_29_30
+        ).apply {
+            // Both additive tables exist and accept a row.
+            execSQL(
+                "INSERT INTO reading_items (id, url, title, domain, faviconPath, estimatedReadMinutes, " +
+                    "wordCount, status, metadataState, notes, reminderAt, addedAt, updatedAt, lastOpenedAt, sortOrder) " +
+                    "VALUES ('r1', 'https://example.com/a', 'Article A', 'example.com', NULL, 5, 900, " +
+                    "'UNREAD', 'PENDING', NULL, NULL, 1, 1, NULL, 0)"
+            )
+            execSQL(
+                "INSERT INTO inbox_items (id, text, url, source, createdAt, triaged, triagedTo, triagedRefId, sortOrder) " +
+                    "VALUES ('i1', 'Call the dentist', NULL, 'MANUAL', 1, 0, NULL, NULL, 0)"
+            )
+            query("SELECT title, status FROM reading_items WHERE id = 'r1'").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("Article A", cursor.getString(0))
+                org.junit.Assert.assertEquals("UNREAD", cursor.getString(1))
+            }
+            query("SELECT text, triaged FROM inbox_items WHERE id = 'i1'").use { cursor ->
+                org.junit.Assert.assertTrue(cursor.moveToFirst())
+                org.junit.Assert.assertEquals("Call the dentist", cursor.getString(0))
+                org.junit.Assert.assertEquals(0, cursor.getInt(1))
+            }
+        }
+    }
+
+    @Test
     fun migrate17To18RecreatesCalendarEventsWithCompositeKey() {
         helper.createDatabase(TEST_DB, 17).apply {
             insert(
@@ -763,7 +866,10 @@ class ChronosDatabaseMigrationTest {
             ChronosDatabase.MIGRATION_23_24,
             ChronosDatabase.MIGRATION_24_25,
             ChronosDatabase.MIGRATION_25_26,
-            ChronosDatabase.MIGRATION_26_27
+            ChronosDatabase.MIGRATION_26_27,
+            ChronosDatabase.MIGRATION_27_28,
+            ChronosDatabase.MIGRATION_28_29,
+            ChronosDatabase.MIGRATION_29_30
         )
     }
 }

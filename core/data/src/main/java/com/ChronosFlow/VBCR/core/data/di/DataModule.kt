@@ -16,6 +16,7 @@ import com.ChronosFlow.VBCR.core.data.dao.GoalDao
 import com.ChronosFlow.VBCR.core.data.dao.HabitEventDao
 import com.ChronosFlow.VBCR.core.data.dao.HabitDao
 import com.ChronosFlow.VBCR.core.data.dao.HabitScheduleDao
+import com.ChronosFlow.VBCR.core.data.dao.InboxItemDao
 import com.ChronosFlow.VBCR.core.data.dao.JournalAttachmentDao
 import com.ChronosFlow.VBCR.core.data.dao.JournalEntryDao
 import com.ChronosFlow.VBCR.core.data.dao.MedicationDoseEventDao
@@ -23,6 +24,7 @@ import com.ChronosFlow.VBCR.core.data.dao.MedicationDao
 import com.ChronosFlow.VBCR.core.data.dao.MedicationSafetyProfileDao
 import com.ChronosFlow.VBCR.core.data.dao.MedicationScheduleDao
 import com.ChronosFlow.VBCR.core.data.dao.MoodEnergyCheckInDao
+import com.ChronosFlow.VBCR.core.data.dao.ReadingItemDao
 import com.ChronosFlow.VBCR.core.data.dao.RecurrenceRuleDao
 import com.ChronosFlow.VBCR.core.data.dao.ReviewDao
 import com.ChronosFlow.VBCR.core.data.dao.RoutineDao
@@ -40,10 +42,12 @@ import com.ChronosFlow.VBCR.core.data.repository.GoalRepositoryImpl
 import com.ChronosFlow.VBCR.core.data.repository.AppUsageRepositoryImpl
 import com.ChronosFlow.VBCR.core.data.repository.AppUsageOverrideRepositoryImpl
 import com.ChronosFlow.VBCR.core.data.repository.HabitRepositoryImpl
+import com.ChronosFlow.VBCR.core.data.repository.InboxRepositoryImpl
 import com.ChronosFlow.VBCR.core.data.repository.JournalRepositoryImpl
 import com.ChronosFlow.VBCR.core.data.repository.MedicationRepositoryImpl
 import com.ChronosFlow.VBCR.core.data.repository.MoodEnergyRepositoryImpl
 import com.ChronosFlow.VBCR.core.data.repository.PlannerPreferencesRepositoryImpl
+import com.ChronosFlow.VBCR.core.data.repository.ReadingListRepositoryImpl
 import com.ChronosFlow.VBCR.core.data.repository.RecurrenceRuleRepositoryImpl
 import com.ChronosFlow.VBCR.core.data.repository.ReviewRepositoryImpl
 import com.ChronosFlow.VBCR.core.data.repository.RoutineRepositoryImpl
@@ -61,10 +65,12 @@ import com.ChronosFlow.VBCR.core.domain.repository.GoalRepository
 import com.ChronosFlow.VBCR.core.domain.repository.AppUsageRepository
 import com.ChronosFlow.VBCR.core.domain.repository.AppUsageOverrideRepository
 import com.ChronosFlow.VBCR.core.domain.repository.HabitRepository
+import com.ChronosFlow.VBCR.core.domain.repository.InboxRepository
 import com.ChronosFlow.VBCR.core.domain.repository.JournalRepository
 import com.ChronosFlow.VBCR.core.domain.repository.MedicationRepository
 import com.ChronosFlow.VBCR.core.domain.repository.MoodEnergyRepository
 import com.ChronosFlow.VBCR.core.domain.repository.PlannerPreferencesRepository
+import com.ChronosFlow.VBCR.core.domain.repository.ReadingListRepository
 import com.ChronosFlow.VBCR.core.domain.repository.RecurrenceRuleRepository
 import com.ChronosFlow.VBCR.core.domain.repository.ReviewRepository
 import com.ChronosFlow.VBCR.core.domain.repository.RoutineRepository
@@ -118,7 +124,10 @@ object DataModule {
                 ChronosDatabase.MIGRATION_23_24,
                 ChronosDatabase.MIGRATION_24_25,
                 ChronosDatabase.MIGRATION_25_26,
-                ChronosDatabase.MIGRATION_26_27
+                ChronosDatabase.MIGRATION_26_27,
+                ChronosDatabase.MIGRATION_27_28,
+                ChronosDatabase.MIGRATION_28_29,
+                ChronosDatabase.MIGRATION_29_30
             )
         )
             // Guard against opening a database written by a newer (uncommitted) schema:
@@ -366,5 +375,23 @@ object DataModule {
     @Singleton
     fun provideRoutineRepository(routineDao: RoutineDao): RoutineRepository {
         return RoutineRepositoryImpl(routineDao)
+    }
+
+    @Provides
+    fun provideReadingItemDao(db: ChronosDatabase) = db.readingItemDao()
+
+    @Provides
+    @Singleton
+    fun provideReadingListRepository(readingItemDao: ReadingItemDao): ReadingListRepository {
+        return ReadingListRepositoryImpl(readingItemDao)
+    }
+
+    @Provides
+    fun provideInboxItemDao(db: ChronosDatabase) = db.inboxItemDao()
+
+    @Provides
+    @Singleton
+    fun provideInboxRepository(inboxItemDao: InboxItemDao): InboxRepository {
+        return InboxRepositoryImpl(inboxItemDao)
     }
 }

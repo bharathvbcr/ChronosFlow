@@ -60,8 +60,13 @@ internal fun DayDialScreenEffects(
     settings: DayDialSettingsState,
     snackbarHostState: SnackbarHostState
 ) {
-    LaunchedEffect(vmState.selectedBlock, uiState.activeSheet) {
+    LaunchedEffect(vmState.selectedBlock) {
+        // Selecting a block auto-opens its editor on the timeline tabs (Today/Plan), but NOT on the
+        // Focus tab: starting a focus session selects its linked block, and we must not pop the block
+        // editor over the running timer (which also hid the in-session break controls). The Focus tab
+        // has no tap-to-edit affordance, so suppressing the auto-open there is safe.
         if (vmState.selectedBlock != null &&
+            uiState.currentTab != DayDialTab.FOCUS &&
             uiState.activeSheet !is SheetTarget.BlockEditor &&
             uiState.activeSheet !is SheetTarget.NewBlock
         ) {

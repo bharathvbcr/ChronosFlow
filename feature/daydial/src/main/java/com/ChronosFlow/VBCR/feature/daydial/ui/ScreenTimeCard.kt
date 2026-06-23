@@ -53,7 +53,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -85,7 +87,8 @@ class ScreenTimeViewModel @Inject constructor(
     private val overrideRepository: AppUsageOverrideRepository,
     appUsageRepository: AppUsageRepository
 ) : ViewModel() {
-    private val todayDate: LocalDate = LocalDate.now()
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val currentDateFlow = MutableStateFlow(LocalDate.now())
 
     private val _status = MutableStateFlow(manager.status())
     val status = _status.asStateFlow()
@@ -95,15 +98,19 @@ class ScreenTimeViewModel @Inject constructor(
     private val _syncOutcomes = MutableSharedFlow<ScreenTimeSyncOutcome>(extraBufferCapacity = 1)
     val syncOutcomes = _syncOutcomes.asSharedFlow()
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     val today: StateFlow<AppUsageDay?> =
-        appUsageRepository.observeForDate(todayDate)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        currentDateFlow.flatMapLatest { date ->
+            appUsageRepository.observeForDate(date)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** A nudge when today's distraction runs above the trailing-window usual (null otherwise). */
+    @OptIn(ExperimentalCoroutinesApi::class)
     val distractionNudge: StateFlow<DistractionNudge?> =
-        appUsageRepository.observeForDateRange(todayDate.minusDays(NUDGE_WINDOW_DAYS - 1L), todayDate)
-            .map { distractionNudge(it, todayDate) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        currentDateFlow.flatMapLatest { date ->
+            appUsageRepository.observeForDateRange(date.minusDays(NUDGE_WINDOW_DAYS - 1L), date)
+                .map { distractionNudge(it, date) }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // Raw per-app system samples for today (snapshot). The effective category is layered on by
     // combining with the live overrides, so a re-tag recolours the list instantly without a re-query.
@@ -149,6 +156,7 @@ class ScreenTimeViewModel @Inject constructor(
     fun usageAccessIntent(): Intent = manager.usageAccessSettingsIntent()
 
     fun refresh() {
+        currentDateFlow.value = LocalDate.now()
         _status.value = manager.status()
         reloadSamples()
     }
@@ -170,11 +178,14 @@ class ScreenTimeViewModel @Inject constructor(
         if (_isRunning.value) return
         _isRunning.value = true
         viewModelScope.launch {
-            val outcome = manager.runSync()
-            _status.value = manager.status()
-            _isRunning.value = false
-            loadSamplesNow()
-            _syncOutcomes.emit(outcome)
+            try {
+                val outcome = manager.runSync()
+                _status.value = manager.status()
+                loadSamplesNow()
+                _syncOutcomes.emit(outcome)
+            } finally {
+                _isRunning.value = false
+            }
         }
     }
 
@@ -184,7 +195,7 @@ class ScreenTimeViewModel @Inject constructor(
 
     private suspend fun loadSamplesNow() {
         _rawSamples.value = if (manager.status().hasAccess) {
-            manager.breakdownForDay(todayDate).map {
+            manager.breakdownForDay(LocalDate.now()).map {
                 AppUsageBreakdownItem(it.packageName, it.label, it.category, it.minutes)
             }
         } else {

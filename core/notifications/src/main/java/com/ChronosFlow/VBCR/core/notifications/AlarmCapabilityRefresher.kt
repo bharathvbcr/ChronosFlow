@@ -1,6 +1,8 @@
 package com.ChronosFlow.VBCR.core.notifications
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -24,7 +26,20 @@ class AlarmCapabilityRefresher @Inject constructor(
 
     private var registered = false
 
+    /**
+     * Safe to call from any thread: [Lifecycle.addObserver] is main-thread-only, so we hop to the
+     * main looper when invoked from a background dispatcher (e.g. the deferred-startup IO coroutine).
+     */
     fun register() {
+        val mainLooper = Looper.getMainLooper()
+        if (Looper.myLooper() == mainLooper) {
+            registerOnMain()
+        } else {
+            Handler(mainLooper).post(::registerOnMain)
+        }
+    }
+
+    private fun registerOnMain() {
         if (registered) return
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
         registered = true

@@ -112,6 +112,25 @@ class SleepLogSheetLogicTest {
     }
 
     @Test
+    fun `quality and refreshed emojis map to the rating and clamp out of range`() {
+        assertEquals("😖", sleepQualityEmoji(1))
+        assertEquals("😄", sleepQualityEmoji(5))
+        assertEquals("😄", sleepQualityEmoji(9))
+        assertEquals("😖", sleepQualityEmoji(0))
+        assertEquals("😵", sleepRefreshedEmoji(1))
+        assertEquals("😃", sleepRefreshedEmoji(5))
+        assertEquals("😃", sleepRefreshedEmoji(7))
+    }
+
+    @Test
+    fun `refreshed label and content description pair the number with its word`() {
+        assertEquals("Exhausted", sleepRefreshedLabel(1))
+        assertEquals("Energized", sleepRefreshedLabel(5))
+        assertEquals("Okay", sleepRefreshedLabel(3))
+        assertEquals("How refreshed you feel 4 of 5, Refreshed", sleepRefreshedContentDescription(4))
+    }
+
+    @Test
     fun `interruptions content description pluralises and floors at zero`() {
         assertEquals("0 interruptions", sleepInterruptionsContentDescription(0))
         assertEquals("1 interruption", sleepInterruptionsContentDescription(1))

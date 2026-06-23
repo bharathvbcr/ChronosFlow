@@ -246,11 +246,13 @@ fun GoalScreen(
             }
             sheetTarget = null
         },
-        onArchive = (sheetTarget as? GoalSheetTarget.Edit)?.let { edit ->
+        onArchive = if (sheetTarget is GoalSheetTarget.Edit) {
             {
-                viewModel.deleteGoal(edit.goal)
+                (sheetTarget as? GoalSheetTarget.Edit)?.let { viewModel.deleteGoal(it.goal) }
                 sheetTarget = null
             }
+        } else {
+            null
         }
     )
 

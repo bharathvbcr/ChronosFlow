@@ -134,7 +134,10 @@ fun deriveHabitAnalytics(
         ?.key
     val completionDates = completed14.map(HabitEvent::eventDate).toSet()
     var streak = 0
-    var cursor = today
+    // Grace period: if today has no completion yet, start the streak walk from yesterday.
+    // This prevents a 23:59 completion from dropping to streak=0 when queried at 00:01
+    // the next day — the user's LocalDate-based eventDate still counts as "yesterday".
+    var cursor = if (today in completionDates) today else today.minusDays(1)
     while (cursor in completionDates) {
         streak += 1
         cursor = cursor.minusDays(1)

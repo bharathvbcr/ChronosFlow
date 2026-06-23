@@ -125,8 +125,9 @@ internal fun DayDialSheetHost(
         startMinute: Int?,
         endMinute: Int?,
         interruptions: Int,
-        notes: String?
-    ) -> Unit = { _, _, _, _, _, _ -> }
+        notes: String?,
+        refreshed: Int?
+    ) -> Unit = { _, _, _, _, _, _, _ -> }
 ) {
     val resolvedActiveSheet = resolveDayDialSheetTarget(
         activeSheet = activeSheet,

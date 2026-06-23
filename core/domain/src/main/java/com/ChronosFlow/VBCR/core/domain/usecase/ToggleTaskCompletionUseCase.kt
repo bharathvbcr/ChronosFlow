@@ -29,7 +29,10 @@ class ToggleTaskCompletionUseCase @Inject constructor(
             )
             repository.saveTask(
                 task.copy(
-                    isCompleted = updatedSchedule?.nextOccurrenceDate == null,
+                    // Mark completed only when the schedule confirms no next occurrence.
+                    // If updatedSchedule is null (race: schedule removed between two reads),
+                    // leave it incomplete rather than falsely completing it forever.
+                    isCompleted = updatedSchedule != null && updatedSchedule.nextOccurrenceDate == null,
                     updatedAt = now
                 )
             )

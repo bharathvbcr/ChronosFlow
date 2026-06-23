@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Immutable
@@ -236,7 +237,7 @@ class TaskViewModel @Inject constructor(
                 title = title.trim(),
                 description = description?.trim()?.ifBlank { null },
                 priority = priority.coerceIn(0, 2),
-                dueDate = if (priority >= 2 && alarmEnabled) dueDate else null,
+                dueDate = dueDate,
                 preferredDurationMinutes = preferredDurationMinutes,
                 preferredStartMinuteOfDay = preferredStartMinuteOfDay,
                 targetDate = targetDate,
@@ -323,6 +324,7 @@ class TaskViewModel @Inject constructor(
             _assistState.value = TaskAssistUiState(isLoading = true, assistSnapshot = snapshot)
             val suggestions = runCatching { taskAssistPlanner.suggest(request) }
                 .onFailure { error ->
+                    if (error is CancellationException) throw error
                     _assistState.value = TaskAssistUiState(
                         message = error.message ?: "Task suggestions are unavailable",
                         assistSnapshot = snapshot

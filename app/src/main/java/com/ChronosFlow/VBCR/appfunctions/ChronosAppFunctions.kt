@@ -16,7 +16,12 @@ import com.ChronosFlow.VBCR.core.domain.model.HabitEventType
 import com.ChronosFlow.VBCR.core.domain.model.JournalEntry
 import com.ChronosFlow.VBCR.core.domain.model.MedicationDoseEvent
 import com.ChronosFlow.VBCR.core.domain.model.MedicationDoseEventType
+import com.ChronosFlow.VBCR.core.domain.model.CaptureSource
+import com.ChronosFlow.VBCR.core.domain.model.InboxItem
 import com.ChronosFlow.VBCR.core.domain.model.MoodEnergyCheckIn
+import com.ChronosFlow.VBCR.core.domain.model.ReadingItem
+import com.ChronosFlow.VBCR.core.domain.model.ReadingMetadataState
+import com.ChronosFlow.VBCR.core.domain.model.ReadingUrls
 import com.ChronosFlow.VBCR.core.domain.model.SleepSource
 import com.ChronosFlow.VBCR.core.domain.model.SleepTrack
 import com.ChronosFlow.VBCR.core.domain.model.Task
@@ -27,15 +32,22 @@ import com.ChronosFlow.VBCR.core.domain.repository.CalendarEventRepository
 import com.ChronosFlow.VBCR.core.domain.repository.FocusSessionRepository
 import com.ChronosFlow.VBCR.core.domain.repository.GoalRepository
 import com.ChronosFlow.VBCR.core.domain.repository.HabitRepository
+import com.ChronosFlow.VBCR.core.domain.repository.InboxRepository
 import com.ChronosFlow.VBCR.core.domain.repository.JournalRepository
 import com.ChronosFlow.VBCR.core.domain.repository.MedicationRepository
 import com.ChronosFlow.VBCR.core.domain.repository.MoodEnergyRepository
+import com.ChronosFlow.VBCR.core.domain.repository.ReadingListRepository
 import com.ChronosFlow.VBCR.core.domain.repository.ReviewRepository
 import com.ChronosFlow.VBCR.core.domain.repository.RoutineRepository
 import com.ChronosFlow.VBCR.core.domain.repository.SleepTrackRepository
 import com.ChronosFlow.VBCR.core.domain.repository.TaskRepository
 import com.ChronosFlow.VBCR.core.domain.repository.TimeBlockRepository
 import com.ChronosFlow.VBCR.core.data.focus.ManualMissedBlockRegistry
+import com.ChronosFlow.VBCR.core.data.reading.ReadingMetadataFetchWorker
+import com.ChronosFlow.VBCR.core.ui.settings.ChronosUiSettingsKeys
+import com.ChronosFlow.VBCR.core.ui.settings.readChronosUiBooleanSetting
+import androidx.work.ExistingWorkPolicy
+import androidx.work.WorkManager
 import com.ChronosFlow.VBCR.core.domain.usecase.ApplyRoutineToDateUseCase
 import com.ChronosFlow.VBCR.core.domain.usecase.RecordSleepUseCase
 import com.ChronosFlow.VBCR.feature.focus.FocusService
@@ -43,6 +55,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.ZoneId
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -64,6 +77,8 @@ class ChronosAppFunctions @Inject constructor(
     private val calendarEventRepository: CalendarEventRepository,
     private val goalRepository: GoalRepository,
     private val journalRepository: JournalRepository,
+    private val readingListRepository: ReadingListRepository,
+    private val inboxRepository: InboxRepository,
     private val routineRepository: RoutineRepository,
     private val sleepTrackRepository: SleepTrackRepository,
     private val recordSleepUseCase: RecordSleepUseCase,
@@ -117,6 +132,83 @@ class ChronosAppFunctions @Inject constructor(
             )
             withContext(Dispatchers.IO) {
                 taskRepository.saveTask(task)
+            }
+            true
+        }
+    }
+
+    /**
+     * Saves a link to the ChronosFlow reading list ("read later").
+     * Call this when the user wants to save, bookmark, or remember an article, page, or link to read later.
+     *
+     * @param url The link to save (an http/https URL).
+     * @param title Optional title for the saved link; the site domain is used when omitted.
+     * @return True if the link was saved, false if no valid URL was provided.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun addToReadingList(
+        appFunctionContext: AppFunctionContext,
+        url: String? = null,
+        title: String? = null
+    ): Boolean {
+        return runAppFunction {
+            val resolvedUrl = ReadingUrls.firstUrlIn(url) ?: return@runAppFunction false
+            val context = appFunctionContext.context
+            val domain = ReadingUrls.domainOf(resolvedUrl)
+            val autoFetch = context.readChronosUiBooleanSetting(
+                ChronosUiSettingsKeys.KEY_READING_METADATA_AUTOFETCH, true
+            )
+            val now = Instant.now()
+            val id = UUID.randomUUID().toString()
+            withContext(Dispatchers.IO) {
+                readingListRepository.save(
+                    ReadingItem(
+                        id = id,
+                        url = resolvedUrl,
+                        title = title?.trim()?.takeIf { it.isNotEmpty() } ?: domain,
+                        domain = domain,
+                        metadataState = if (autoFetch) ReadingMetadataState.PENDING else ReadingMetadataState.SKIPPED,
+                        addedAt = now,
+                        updatedAt = now
+                    )
+                )
+            }
+            if (autoFetch) {
+                WorkManager.getInstance(context).enqueueUniqueWork(
+                    ReadingMetadataFetchWorker.uniqueName(id),
+                    ExistingWorkPolicy.REPLACE,
+                    ReadingMetadataFetchWorker.request(id)
+                )
+            }
+            true
+        }
+    }
+
+    /**
+     * Captures a quick note or link into the ChronosFlow inbox for later triage.
+     * Call this when the user wants to quickly jot down, capture, or remember a thought to deal with later.
+     *
+     * @param text The note or link to capture.
+     * @return True if the item was captured, false if the text was empty.
+     */
+    @AppFunction(isDescribedByKDoc = true)
+    suspend fun captureToInbox(
+        appFunctionContext: AppFunctionContext,
+        text: String? = null
+    ): Boolean {
+        return runAppFunction {
+            val normalized = text.requiredText() ?: return@runAppFunction false
+            val now = Instant.now()
+            withContext(Dispatchers.IO) {
+                inboxRepository.save(
+                    InboxItem(
+                        id = UUID.randomUUID().toString(),
+                        text = normalized,
+                        url = ReadingUrls.firstUrlIn(normalized),
+                        source = CaptureSource.SHARE,
+                        createdAt = now
+                    )
+                )
             }
             true
         }
@@ -464,7 +556,7 @@ class ChronosAppFunctions @Inject constructor(
             val segment = ActualTimeSegment(
                 id = UUID.randomUUID().toString(),
                 blockId = null,
-                date = LocalDate.now(),
+                date = start.atZone(ZoneId.systemDefault()).toLocalDate(),
                 startInstant = start,
                 endInstant = end,
                 source = ActualTimeSource.MANUAL_ENTRY,

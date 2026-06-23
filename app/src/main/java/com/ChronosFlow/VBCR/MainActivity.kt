@@ -64,19 +64,30 @@ import com.ChronosFlow.VBCR.feature.goals.goalCommandProvider
 import com.ChronosFlow.VBCR.feature.habits.habitCommandProvider
 import com.ChronosFlow.VBCR.feature.medication.medicationCommandProvider
 import com.ChronosFlow.VBCR.feature.tasks.taskCommandProvider
+import com.ChronosFlow.VBCR.core.domain.model.ReadingUrls
+import com.ChronosFlow.VBCR.core.notifications.DAY_TARGET_READING
+import com.ChronosFlow.VBCR.core.notifications.DAY_TARGET_READING_INBOX
+import com.ChronosFlow.VBCR.core.notifications.EXTRA_DAY_TARGET
 import com.ChronosFlow.VBCR.core.notifications.EXTRA_INITIAL_SECTION
 import com.ChronosFlow.VBCR.core.notifications.NotificationLaunch
+import com.ChronosFlow.VBCR.core.notifications.SECTION_DAY
 import com.ChronosFlow.VBCR.core.notifications.consumeNotificationLaunchExtras
 import com.ChronosFlow.VBCR.core.notifications.parseNotificationLaunch
 import com.ChronosFlow.VBCR.core.notifications.parseSharedTextLaunch
+import androidx.lifecycle.lifecycleScope
 import com.ChronosFlow.VBCR.navigation.ChronosNavigationShell
 import com.ChronosFlow.VBCR.navigation.ChronosRoute
 import com.ChronosFlow.VBCR.navigation.quickCreateCommandProvider
 import com.ChronosFlow.VBCR.navigation.guardedMedicationOpener
 import com.ChronosFlow.VBCR.navigation.navigateFromNotificationLaunch
 import com.ChronosFlow.VBCR.navigation.navigateToMedication
+import com.ChronosFlow.VBCR.core.data.focus.FocusPhaseAdvanceBus
 import com.ChronosFlow.VBCR.security.AppLockLifecycleObserver
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
 import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -87,10 +98,19 @@ import kotlinx.coroutines.withContext
 internal const val LOCKED_APP_AUTH_DEFER_MILLIS = 700L
 internal const val SHELL_BADGE_DATA_DEFER_MILLIS = 30_000L
 
+/** Exposes the [FocusPhaseAdvanceBus] singleton to the composable launch handler. */
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface FocusPhaseAdvanceEntryPoint {
+    fun focusPhaseAdvanceBus(): FocusPhaseAdvanceBus
+}
+
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
 
     @Inject lateinit var appLockLifecycleObserver: AppLockLifecycleObserver
+
+    @Inject lateinit var readingShareCaptureHandler: ReadingShareCaptureHandler
 
     private val launchIntentState = mutableStateOf<Intent?>(null)
     private val launchGeneration = mutableIntStateOf(0)
@@ -108,6 +128,7 @@ class MainActivity : FragmentActivity() {
             !showFullShellState.value || !com.ChronosFlow.VBCR.core.ui.settings.ChronosUiSettingsCache.isSeeded
         }
         super.onCreate(savedInstanceState)
+        intent = rerouteReadingShareIfNeeded(intent)
         launchIntentState.value = intent
         appLockLifecycleObserver.register()
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -184,9 +205,45 @@ class MainActivity : FragmentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        setIntent(intent)
-        launchIntentState.value = intent
+        val effective = rerouteReadingShareIfNeeded(intent)
+        setIntent(effective)
+        launchIntentState.value = effective
         launchGeneration.intValue++
+    }
+
+    /**
+     * The "Save to ChronosFlow" share target (an activity-alias) lands here. Persist the shared
+     * link/text via [readingShareCaptureHandler] and rewrite the intent into an inbox deep-link so
+     * the normal launch routing opens the Inbox page — distinct from the task-share path on
+     * [MainActivity]'s own SEND/PROCESS_TEXT filters.
+     */
+    private fun rerouteReadingShareIfNeeded(incoming: Intent): Intent {
+        val isReadingShare = incoming.component?.className?.endsWith("ReadingShareAlias") == true &&
+            (incoming.action == Intent.ACTION_SEND || incoming.action == Intent.ACTION_PROCESS_TEXT)
+        if (!isReadingShare) return incoming
+        val text = (incoming.getCharSequenceExtra(Intent.EXTRA_TEXT)
+            ?: incoming.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)
+            ?: incoming.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT_READONLY))
+            ?.toString()
+        if (!text.isNullOrBlank()) {
+            lifecycleScope.launch { readingShareCaptureHandler.capture(text) }
+        }
+        // Land on the page where the item was actually saved: a link goes to the reading list,
+        // anything else to the inbox (mirrors ReadingShareCaptureHandler's URL split).
+        val landingTarget = if (ReadingUrls.firstUrlIn(text) != null) {
+            DAY_TARGET_READING
+        } else {
+            DAY_TARGET_READING_INBOX
+        }
+        return Intent(incoming).apply {
+            action = Intent.ACTION_MAIN
+            putExtra(EXTRA_INITIAL_SECTION, SECTION_DAY)
+            putExtra(EXTRA_DAY_TARGET, landingTarget)
+            removeExtra(Intent.EXTRA_TEXT)
+            removeExtra(Intent.EXTRA_SUBJECT)
+            removeExtra(Intent.EXTRA_PROCESS_TEXT)
+            removeExtra(Intent.EXTRA_PROCESS_TEXT_READONLY)
+        }
     }
 
     private fun consumeNotificationLaunch() {
@@ -474,6 +531,14 @@ private fun ChronosFlowApp(
             navState.navigateToMedication(activity, appLockViewModel)
         } else {
             navState.navigateFromNotificationLaunch(launch, featureFlags)
+        }
+        // "Tap to continue" on a split-session boundary notification: after routing to the Focus
+        // tab, signal the Day Dial layer to advance the held session to its next phase.
+        if (launch.focusAdvance) {
+            EntryPointAccessors.fromApplication(
+                appContext.applicationContext,
+                FocusPhaseAdvanceEntryPoint::class.java
+            ).focusPhaseAdvanceBus().requestAdvance()
         }
         onNotificationLaunchHandled()
     }

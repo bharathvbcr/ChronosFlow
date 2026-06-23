@@ -7,6 +7,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.runtime.saveable.Saver
 
 internal data class CalendarPermissionStatus(
     val readGranted: Boolean,
@@ -25,6 +26,32 @@ internal sealed interface PendingCalendarAction {
     data class RefreshBlock(val blockId: String) : PendingCalendarAction
     data class RemoveBlock(val blockId: String) : PendingCalendarAction
 }
+
+internal val PendingCalendarActionSaver = Saver<PendingCalendarAction?, String>(
+    save = { action ->
+        when (action) {
+            null -> null
+            PendingCalendarAction.SyncDeviceEvents -> "sync"
+            PendingCalendarAction.EnableExports -> "enable_exports"
+            is PendingCalendarAction.ExportBlock -> "export_block:${action.blockId}"
+            is PendingCalendarAction.RefreshBlock -> "refresh_block:${action.blockId}"
+            is PendingCalendarAction.RemoveBlock -> "remove_block:${action.blockId}"
+        }
+    },
+    restore = { encoded ->
+        val colon = encoded.indexOf(':')
+        val type = if (colon < 0) encoded else encoded.substring(0, colon)
+        val blockId = if (colon < 0) null else encoded.substring(colon + 1)
+        when (type) {
+            "sync" -> PendingCalendarAction.SyncDeviceEvents
+            "enable_exports" -> PendingCalendarAction.EnableExports
+            "export_block" -> blockId?.let { PendingCalendarAction.ExportBlock(it) }
+            "refresh_block" -> blockId?.let { PendingCalendarAction.RefreshBlock(it) }
+            "remove_block" -> blockId?.let { PendingCalendarAction.RemoveBlock(it) }
+            else -> null
+        }
+    }
+)
 
 internal enum class CalendarPermissionResolution {
     READY,

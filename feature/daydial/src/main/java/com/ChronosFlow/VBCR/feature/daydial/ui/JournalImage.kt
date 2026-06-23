@@ -23,7 +23,7 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun rememberContentThumbnail(uri: String, targetPx: Int = 320): ImageBitmap? {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var bitmap by remember(uri) { mutableStateOf<ImageBitmap?>(null) }
+    var bitmap by remember(uri, targetPx) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(uri, targetPx) {
         bitmap = withContext(Dispatchers.IO) { decodeThumbnail(context, uri, targetPx) }
     }

@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,15 +37,12 @@ fun AppLockOverlay(
     onUnlock: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var didAutoUnlock by remember { mutableStateOf(false) }
+    var didAutoUnlock by rememberSaveable { mutableStateOf(false) }
     val uiSettings = rememberChronosUiSettings()
     val darkTheme = resolveChronosDarkTheme(uiSettings.appearanceMode)
 
     LaunchedEffect(canAuthenticate) {
-        if (!canAuthenticate) {
-            didAutoUnlock = false
-            return@LaunchedEffect
-        }
+        if (!canAuthenticate) return@LaunchedEffect
         if (didAutoUnlock) return@LaunchedEffect
         didAutoUnlock = true
         onUnlock()

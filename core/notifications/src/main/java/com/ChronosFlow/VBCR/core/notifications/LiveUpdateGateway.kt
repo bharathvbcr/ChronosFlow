@@ -295,7 +295,6 @@ class LiveUpdateGateway @Inject constructor(
 
     private fun canPostPromotedNotifications(sdkInt: Int): Boolean {
         if (sdkInt < 37) return false
-        if (Build.VERSION.SDK_INT < 37) return true
         val manager = context.getSystemService(NotificationManager::class.java)
         return manager?.canPostPromotedNotifications() == true
     }

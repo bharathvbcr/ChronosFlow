@@ -45,6 +45,9 @@ class AlarmDeliveryCoordinator @Inject constructor(
 
         val alarmRequest = requestId?.let { alarmRequestRepository.getAlarmRequest(it) }
 
+        // Suppress cancelled alarms (de-listed after the owning task/rule changed) without posting.
+        if (alarmRequest?.deliveryState == AlarmDeliveryState.CANCELLED) return
+
         // Unified "now" surface: a plain planner-block start refreshes the live current-block
         // notification (which alerts once as the block begins) instead of posting a separate
         // transient reminder + group summary. Habit/task/medication reminders are untouched, and
@@ -73,7 +76,7 @@ class AlarmDeliveryCoordinator @Inject constructor(
                 buildAppLaunchPendingIntent(
                     context = context,
                     target = target,
-                    requestCode = requestId?.hashCode() ?: target.value.hashCode()
+                    requestCode = (requestId?.hashCode() ?: target.value.hashCode()) and Int.MAX_VALUE
                 )
             }
             ?: buildTaskNotificationContentIntent(
@@ -83,7 +86,7 @@ class AlarmDeliveryCoordinator @Inject constructor(
                 receiverClass = receiverClass
             )
 
-        val notificationId = requestId?.hashCode() ?: System.currentTimeMillis().toInt()
+        val notificationId = (requestId?.hashCode() ?: System.currentTimeMillis().toInt()) and Int.MAX_VALUE
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_chronosflow_notification)
             .setContentTitle(title)
@@ -196,6 +199,40 @@ class AlarmDeliveryCoordinator @Inject constructor(
             notification.addAction(R.drawable.ic_notif_skip, "Skip", skipPendingIntent)
         }
 
+        // "Remind me to read later": offer Mark read + Snooze straight from the notification.
+        // Keyed off the requestId convention ("reading:<itemId>") rather than the persisted type,
+        // because reading reminders schedule the OS alarm without saving an AlarmRequest row.
+        val readingItemId = requestId?.takeIf { it.startsWith("reading:") }?.removePrefix("reading:")
+        if (readingItemId != null) {
+            val markReadIntent = Intent(context, ReadingReminderActionReceiver::class.java).apply {
+                action = ReadingReminderActionReceiver.ACTION_MARK_READ
+                putExtra(ReadingReminderActionReceiver.EXTRA_READING_ITEM_ID, readingItemId)
+                putExtra(ReadingReminderActionReceiver.EXTRA_REQUEST_ID, requestId)
+                putExtra(ReadingReminderActionReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+            }
+            val markReadPendingIntent = PendingIntent.getBroadcast(
+                context,
+                notificationId + 501,
+                markReadIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val snoozeReadingIntent = Intent(context, ReadingReminderActionReceiver::class.java).apply {
+                action = ReadingReminderActionReceiver.ACTION_SNOOZE
+                putExtra(ReadingReminderActionReceiver.EXTRA_READING_ITEM_ID, readingItemId)
+                putExtra(ReadingReminderActionReceiver.EXTRA_REQUEST_ID, requestId)
+                putExtra(ReadingReminderActionReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+                putExtra(ReadingReminderActionReceiver.EXTRA_TITLE, title)
+            }
+            val snoozeReadingPendingIntent = PendingIntent.getBroadcast(
+                context,
+                notificationId + 502,
+                snoozeReadingIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            notification.addAction(R.drawable.ic_notif_check, "Mark read", markReadPendingIntent)
+            notification.addAction(R.drawable.ic_notif_snooze, "Snooze 2h", snoozeReadingPendingIntent)
+        }
+
         // Plain planner-block reminders (not a habit/task/medication) carry a one-tap recovery
         // action so a slipping day can be reflowed from the lock screen without opening the app.
         val isPlannerBlockReminder = blockId != null && habitId == null && task == null && !isMedication
@@ -253,7 +290,7 @@ class AlarmDeliveryCoordinator @Inject constructor(
         val channelId = ReminderNotificationChannels.CRITICAL_CHANNEL_ID
         ReminderNotificationChannels.ensureCreated(context)
 
-        val notificationId = plan.id.hashCode() + 200
+        val notificationId = plan.id.hashCode().and(Int.MAX_VALUE) + 200
         val message = "Only $remaining ${plan.unit}(s) left of ${plan.name}. Please request a refill soon."
         val builtNotification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_chronosflow_notification)

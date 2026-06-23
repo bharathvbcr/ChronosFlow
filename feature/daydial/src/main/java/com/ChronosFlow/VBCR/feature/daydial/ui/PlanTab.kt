@@ -1093,7 +1093,7 @@ internal fun findGaps(blocks: List<TimeBlockUiModel>): List<TimeRangeUi> {
         val current = sorted[index]
         val next = sorted[index + 1]
         val currentEnd = current.startMinuteOfDay + current.durationMinutes
-        if (next.startMinuteOfDay > currentEnd + 15) {
+        if (next.startMinuteOfDay > currentEnd) {
             gaps.add(TimeRangeUi(currentEnd, next.startMinuteOfDay))
         }
     }

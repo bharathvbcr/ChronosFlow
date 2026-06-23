@@ -626,7 +626,7 @@ internal fun MedicationFormSheet(
                 mealTiming = mealTiming,
                 supplyRemaining = if (hasRefillTracking) parsedRefillCount else null,
                 refillThreshold = if (hasRefillTracking) {
-                    parsedRefillCount?.let { count -> minOf(count, 7) }
+                    parsedRefillCount?.let { count -> if (count > 7) 7 else maxOf(1, count / 2) }
                 } else {
                     null
                 },

@@ -410,7 +410,7 @@ internal fun HabitFormSheet(
 
     val launchTargetInvalid = launchAppEnabled && normalizedLaunchTarget == null
     val isValid = habitTitle.isNotBlank() && endAfterStart && !launchTargetInvalid
-    val nowMinute = LocalTime.now().hour * 60 + LocalTime.now().minute
+    val nowMinute = LocalTime.now().let { it.hour * 60 + it.minute }
     val validationHint = when {
         habitTitle.isBlank() -> "Enter a habit name to continue."
         parsedStart == null || parsedEnd == null -> "Use a valid time like 9:00 AM or 09:00."
@@ -2111,15 +2111,12 @@ internal fun contextualHabitDayPlanOptions(
         }
     }
 
-    val contextualOptions = suggestedOptions + contextOptions
-    val optionLimit = if (contextualOptions.isNotEmpty()) 1 else 2
-    return (
-        contextualOptions +
-            habitDayPlanOptionLabel(isBundled) +
-            listOf(habitDayPlanOptionLabel(true), habitDayPlanOptionLabel(false))
-        )
-        .distinct()
-        .take(optionLimit)
+    // Suggestions take highest priority; context signals second; current+other as fallback.
+    return when {
+        suggestedOptions.isNotEmpty() -> suggestedOptions.distinct().take(2)
+        contextOptions.isNotEmpty() -> contextOptions.distinct().take(2)
+        else -> listOf(habitDayPlanOptionLabel(isBundled), habitDayPlanOptionLabel(!isBundled)).distinct()
+    }
 }
 
 internal fun habitDayPlanOptionLabel(isBundled: Boolean): String {
@@ -2505,7 +2502,9 @@ internal fun buildHabitHistoryTemplates(
         )
     }
     .sortedWith(
-        compareBy<HabitHistoryTemplate>({ !it.isArchived }, { it.startMinute }, { it.title.lowercase() })
+        compareByDescending<HabitHistoryTemplate> { it.isArchived }
+            .thenBy { it.startMinute }
+            .thenBy { it.title.lowercase() }
     )
     .distinctBy { template ->
         listOf(
@@ -2627,7 +2626,7 @@ private inline fun applyHabitHistoryTemplate(
 
 internal fun Habit.statusLabel(nowMinute: Int, today: LocalDate = LocalDate.now()): String? = when {
     lastCompletedDate == today -> withStreakSuffix("Done today")
-    nowMinute in windowStartMinute..windowEndMinute -> withStreakSuffix("Due now")
+    nowMinute in windowStartMinute until windowEndMinute -> withStreakSuffix("Due now")
     nowMinute < windowStartMinute -> withStreakSuffix("Starts ${formatDisplayMinute(windowStartMinute)}")
     else -> withStreakSuffix("Window ended")
 }
@@ -2668,6 +2667,10 @@ private fun resolveHabitRecurrenceQuickPreset(state: HabitRecurrenceEditorState)
     state.kind == HabitRecurrenceEditorKind.SCHEDULED &&
         state.scheduleMode == HabitRecurrenceScheduleMode.EVERY_N_DAYS &&
         state.interval == 2 -> "Every 2 days"
+    state.kind == HabitRecurrenceEditorKind.QUOTA &&
+        state.quotaCompletions == 1 &&
+        state.quotaPeriodUnit == HabitRecurrencePeriodUnit.WEEK &&
+        state.quotaInterval == 1 -> "1x / week"
     state.kind == HabitRecurrenceEditorKind.QUOTA &&
         state.quotaCompletions == 2 &&
         state.quotaPeriodUnit == HabitRecurrencePeriodUnit.WEEK &&
@@ -2734,6 +2737,12 @@ private fun recurrenceStateForQuickPreset(preset: String): HabitRecurrenceEditor
     "Every 2 days" -> HabitRecurrenceEditorState(
         scheduleMode = HabitRecurrenceScheduleMode.EVERY_N_DAYS,
         interval = 2
+    )
+    "1x / week" -> HabitRecurrenceEditorState(
+        kind = HabitRecurrenceEditorKind.QUOTA,
+        quotaCompletions = 1,
+        quotaPeriodUnit = HabitRecurrencePeriodUnit.WEEK,
+        quotaInterval = 1
     )
     "2x / week" -> HabitRecurrenceEditorState(
         kind = HabitRecurrenceEditorKind.QUOTA,

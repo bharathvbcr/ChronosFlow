@@ -26,7 +26,9 @@ enum class AlarmRequestType {
     // Evening nudge to log the night's sleep and capture the day's journal. Kept distinct from
     // DAILY_REVIEW so its call-to-action copy isn't replaced by the cached review digest.
     LOG_REMINDER,
-    URGENT_TASK
+    URGENT_TASK,
+    // "Remind me to read later" nudge for a saved reading-list item. Taps open the reading list.
+    READING_REMINDER
 }
 
 enum class AlarmDeliveryState {

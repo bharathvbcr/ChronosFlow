@@ -117,6 +117,58 @@ class DayDialFocusDelegateSplitPersistenceTest {
         assertEquals("block-1", delegate.focusExecutionState.value.blockId)
     }
 
+    @Test
+    fun `restoreActiveSplitFromStore recovers a stored split when idle`() = runTest {
+        val store = FakeSplitStore()
+        store.saved = FocusExecutionState(
+            blockId = "block-1",
+            plannedDurationMinutes = 5,
+            startedEpochMs = System.currentTimeMillis() - 30_000,
+            status = FocusExecutionStatus.PAUSED,
+            phases = pomodoroPhases,
+            currentPhaseIndex = 0,
+            awaitingPhaseAdvance = true
+        )
+        val delegate = DayDialFocusDelegate(
+            mockk(relaxed = true), mockk(relaxed = true), testManualMissedBlockRegistry(), store
+        )
+
+        delegate.restoreActiveSplitFromStore()
+
+        val state = delegate.focusExecutionState.value
+        assertTrue(state.isSplitSession)
+        assertTrue(state.awaitingPhaseAdvance)
+        assertEquals(4, state.phases.size)
+    }
+
+    @Test
+    fun `restoreActiveSplitFromStore is a no-op when a session is already active`() = runTest {
+        val today = LocalDate.parse("2026-05-25")
+        val repository = mockk<TimeBlockRepository>()
+        coEvery { repository.getTimeBlockById("active-block") } returns sampleBlock("active-block", today)
+        val store = FakeSplitStore()
+        val delegate = DayDialFocusDelegate(
+            repository, mockk(relaxed = true), testManualMissedBlockRegistry(), store
+        )
+        val plannerService = PlannerService(repository)
+        delegate.startFocusSession(this, plannerService, "active-block")
+        advanceUntilIdle()
+
+        // A different split lurking in the store must not clobber the live flat session.
+        store.saved = FocusExecutionState(
+            blockId = "stale-block",
+            plannedDurationMinutes = 25,
+            startedEpochMs = System.currentTimeMillis(),
+            status = FocusExecutionStatus.RUNNING,
+            phases = pomodoroPhases,
+            currentPhaseIndex = 0
+        )
+
+        delegate.restoreActiveSplitFromStore()
+
+        assertEquals("active-block", delegate.focusExecutionState.value.blockId)
+    }
+
     private fun runningSession(blockId: String): FocusSessionState.Running {
         val now = Instant.now()
         return FocusSessionState.Running(

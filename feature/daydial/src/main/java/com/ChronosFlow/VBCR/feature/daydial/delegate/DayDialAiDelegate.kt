@@ -408,7 +408,7 @@ class DayDialAiDelegate @Inject constructor(
 
     private fun GapFillBlock.toUiSuggestion(): TimeBlockUiModel {
         return TimeBlockUiModel(
-            id = UUID.randomUUID().toString(),
+            id = taskId ?: habitId ?: "gapfill_${category}_${startMinute}_${durationMinutes}",
             title = title,
             startMinuteOfDay = startMinute,
             durationMinutes = durationMinutes,

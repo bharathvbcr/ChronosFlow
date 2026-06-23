@@ -34,11 +34,12 @@ class MedicationRepositoryImpl @Inject constructor(
             medicationDao.observeMedicationPlans(),
             medicationScheduleDao.observeAllSchedules(),
             medicationSafetyProfileDao.observeAllProfiles(),
-            medicationDoseEventDao.observeAllEvents(System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000)
+            medicationDoseEventDao.observeAllEvents(0L)
         ) { plans, schedules, profiles, events ->
+            val cutoff = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000
             val schedulesByPlan = schedules.associateBy { it.medicationPlanId }
             val profilesByPlan = profiles.associateBy { it.medicationPlanId }
-            val eventsByPlan = events.groupBy { it.medicationPlanId }
+            val eventsByPlan = events.filter { it.recordedAt.toEpochMilli() >= cutoff }.groupBy { it.medicationPlanId }
             plans.map { planEntity ->
                 val base = planEntity.toDomain()
                 val secondaryReminder = legacySecondaryReminderMinute(planEntity.notes)
@@ -209,7 +210,7 @@ class MedicationRepositoryImpl @Inject constructor(
                 legacyTiming != null -> legacyTiming
                 else -> "Anytime"
             },
-            supplyRemaining = refillNeededAfterDoses,
+            supplyRemaining = null,  // actual supply unknown at migration time; only the threshold is known
             refillThreshold = refillNeededAfterDoses
         )
     }

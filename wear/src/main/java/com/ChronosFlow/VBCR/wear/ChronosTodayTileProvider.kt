@@ -130,7 +130,7 @@ class ChronosTodayTileProvider : TileService() {
             ((state.plannedEndAtMillis - System.currentTimeMillis()) / 1000L).toInt()
         }.coerceAtLeast(0)
         val progress = if (state.totalSeconds > 0) {
-            1f - remainingSeconds.toFloat() / state.totalSeconds.toFloat()
+            remainingSeconds.toFloat() / state.totalSeconds.toFloat()
         } else {
             0f
         }.coerceIn(0f, 1f)

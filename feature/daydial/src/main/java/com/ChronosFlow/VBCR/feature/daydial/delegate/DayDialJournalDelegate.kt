@@ -48,6 +48,7 @@ class DayDialJournalDelegate @Inject constructor(
         actualEndMinute: Int?,
         interruptions: Int,
         windDownNotes: String?,
+        refreshed: Int? = null,
         existing: SleepTrack?
     ) {
         val base = existing?.takeIf { it.date == date } ?: SleepTrack(
@@ -67,6 +68,7 @@ class DayDialJournalDelegate @Inject constructor(
                 actualStartMinute = actualStartMinute,
                 actualEndMinute = actualEndMinute,
                 interruptedCount = interruptions.coerceAtLeast(0),
+                refreshedRating = refreshed?.coerceIn(1, 5),
                 windDownNotes = windDownNotes?.trim()?.takeIf { it.isNotBlank() },
                 // A hand-edit claims the night as user-owned, so the Health Connect sync won't overwrite it.
                 source = SleepSource.MANUAL

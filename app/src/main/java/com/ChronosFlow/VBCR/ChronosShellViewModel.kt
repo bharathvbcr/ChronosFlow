@@ -34,7 +34,8 @@ class ChronosShellViewModel @Inject constructor(
     }.distinctUntilChanged()
     private val minuteTicker = flow {
         while (true) {
-            emit(LocalTime.now().hour * 60 + LocalTime.now().minute)
+            val t = LocalTime.now()
+            emit(t.hour * 60 + t.minute)
             delay(60_000)
         }
     }

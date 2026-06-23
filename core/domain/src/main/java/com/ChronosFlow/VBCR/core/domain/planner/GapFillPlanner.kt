@@ -83,12 +83,16 @@ class GapFillPlanner @Inject constructor(
                 val habit = habitQueue.firstOrNull { candidate ->
                     cursor < candidate.windowEndMinute && gap.endMinute > candidate.windowStartMinute
                 }
-                val block = when {
-                    habit != null -> {
-                        habitQueue.remove(habit)
-                        habitBlockFor(habit, cursor, gap.endMinute)
+                val block: GapFillBlock? = run {
+                    if (habit != null) {
+                        val b = habitBlockFor(habit, cursor, gap.endMinute)
+                        if (b != null) {
+                            habitQueue.remove(habit)
+                            return@run b
+                        }
+                        // habit can't fit at this cursor — fall through to task placement
                     }
-                    taskQueue.isNotEmpty() -> {
+                    if (taskQueue.isNotEmpty()) {
                         val task = taskQueue.removeAt(0)
                         GapFillBlock(
                             title = task.title,
@@ -97,8 +101,7 @@ class GapFillPlanner @Inject constructor(
                             category = "TASK",
                             taskId = task.id
                         )
-                    }
-                    else -> null
+                    } else null
                 }
                 if (block == null) {
                     if (

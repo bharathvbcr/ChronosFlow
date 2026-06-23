@@ -50,7 +50,7 @@ class DayDialMoodEnergyDelegate @Inject constructor(
                     stressScore = stressScore.coerceIn(1, 5),
                     energyScore = normalizedEnergy,
                     focusScore = focusScore.coerceIn(1, 5),
-                    notes = notes?.trim()?.takeIf { it.isNotEmpty() },
+                    notes = notes?.trim()?.takeIf { it.isNotBlank() },
                     recordedAt = LocalDateTime.now(),
                     checkInDate = date
                 )

@@ -15,6 +15,9 @@ private const val MAX_PLAUSIBLE_MINUTES = 12 * 60
 private const val DISRUPTED_INTERRUPTIONS = 3
 
 private val sleepQualityLabels = listOf("Poor", "Fair", "Okay", "Good", "Great")
+private val sleepQualityEmojis = listOf("😖", "😕", "😐", "🙂", "😄")
+private val sleepRefreshedLabels = listOf("Exhausted", "Groggy", "Okay", "Refreshed", "Energized")
+private val sleepRefreshedEmojis = listOf("😵", "😪", "😐", "🙂", "😃")
 
 /** Minutes asleep from [bedMinute] to [wakeMinute], wrapping past midnight; 0 when they match. */
 internal fun sleepDurationMinutes(bedMinute: Int, wakeMinute: Int): Int =
@@ -54,6 +57,22 @@ internal fun sleepDurationHint(bedMinute: Int?, wakeMinute: Int?): String? {
 /** Word label for a 1–5 quality rating, clamping out-of-range input. */
 internal fun sleepQualityLabel(quality: Int): String =
     sleepQualityLabels[quality.coerceIn(1, 5) - 1]
+
+/** Emoji face for a 1–5 quality rating, clamping out-of-range input. */
+internal fun sleepQualityEmoji(quality: Int): String =
+    sleepQualityEmojis[quality.coerceIn(1, 5) - 1]
+
+/** Word label for a 1–5 morning-refreshment rating, clamping out-of-range input. */
+internal fun sleepRefreshedLabel(refreshed: Int): String =
+    sleepRefreshedLabels[refreshed.coerceIn(1, 5) - 1]
+
+/** Emoji face for a 1–5 morning-refreshment rating, clamping out-of-range input. */
+internal fun sleepRefreshedEmoji(refreshed: Int): String =
+    sleepRefreshedEmojis[refreshed.coerceIn(1, 5) - 1]
+
+/** Screen-reader description pairing the refreshment rating with its word label. */
+internal fun sleepRefreshedContentDescription(refreshed: Int): String =
+    "How refreshed you feel $refreshed of 5, ${sleepRefreshedLabel(refreshed)}"
 
 /** "11:00 PM → 7:00 AM (next day)" once both ends are set, else null. */
 internal fun sleepWindowLabel(bedMinute: Int?, wakeMinute: Int?): String? {

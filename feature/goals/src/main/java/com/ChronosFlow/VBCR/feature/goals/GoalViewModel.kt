@@ -109,7 +109,7 @@ class GoalViewModel @Inject constructor(
     fun adjustProgress(goal: Goal, delta: Int) {
         viewModelScope.launch {
             runCatching {
-                val next = (goal.progressValue + delta).coerceIn(0, goal.targetValue)
+                val next = (goal.progressValue + delta).coerceIn(0, goal.targetValue.coerceAtLeast(1))
                 goalRepository.saveGoal(goal.copy(progressValue = next))
             }.onFailure { e -> _errorState.value = e.message }
         }

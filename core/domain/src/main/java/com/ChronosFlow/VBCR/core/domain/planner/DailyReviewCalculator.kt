@@ -7,6 +7,7 @@ import com.ChronosFlow.VBCR.core.domain.model.ReviewInsightSeverity
 import com.ChronosFlow.VBCR.core.domain.model.ReviewInsightType
 import com.ChronosFlow.VBCR.core.domain.model.TimeBlock
 import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import javax.inject.Inject
@@ -65,7 +66,7 @@ class DailyReviewCalculator @Inject constructor() {
     }
 
     private fun ActualTimeSegment.durationMinutes(): Int {
-        val end = endInstant ?: startInstant
+        val end = endInstant ?: Instant.now()
         return Duration.between(startInstant, end).toMinutes().coerceAtLeast(0).toInt()
     }
 

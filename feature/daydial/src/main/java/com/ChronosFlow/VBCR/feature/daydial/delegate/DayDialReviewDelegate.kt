@@ -282,22 +282,21 @@ class DayDialReviewDelegate @Inject constructor(
         missed: Boolean
     ) {
         scope.launch {
-            val blockDate = repository.getTimeBlockById(blockId)?.date ?: LocalDate.now()
+            val source = repository.getTimeBlockById(blockId)
+            val blockDate = source?.date ?: LocalDate.now()
             if (missed) {
                 manualMissedBlockRegistry.markMissed(blockId, blockDate)
             } else {
                 manualMissedBlockRegistry.clearMissed(blockId, blockDate)
-            }
-        }
-        if (!missed) {
-            scope.launch {
-                val source = repository.getTimeBlockById(blockId) ?: return@launch
-                val cleared = source.copy(
-                    actualStartMinuteOfDay = null,
-                    actualEndMinuteOfDay = null,
-                    updatedAt = Instant.now()
-                )
-                repository.saveTimeBlock(cleared)
+                if (source != null) {
+                    repository.saveTimeBlock(
+                        source.copy(
+                            actualStartMinuteOfDay = null,
+                            actualEndMinuteOfDay = null,
+                            updatedAt = Instant.now()
+                        )
+                    )
+                }
             }
         }
     }
@@ -451,7 +450,7 @@ class DayDialReviewDelegate @Inject constructor(
             date = date,
             startInstant = start,
             endInstant = end,
-            source = ActualTimeSource.FOCUS_SESSION,
+            source = ActualTimeSource.MANUAL_ENTRY,
             confidence = 1f
         )
     }
@@ -558,7 +557,7 @@ class DayDialReviewDelegate @Inject constructor(
         val startInstant = block.date.atStartOfDay(ZoneId.systemDefault())
             .plusMinutes(start.toLong())
             .toInstant()
-        val duration = ((end - start + 1440) % 1440).let { if (it == 0) 1440 else it }
+        val duration = ((end - start + 1440) % 1440).let { if (it == 0) return null else it }
         return ActualTimeSegment(
             id = "legacy-${block.id}-$start-$end",
             blockId = block.id,

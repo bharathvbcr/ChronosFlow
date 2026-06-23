@@ -36,7 +36,7 @@ class CompleteTimeBlockUseCase @Inject constructor(
                 blockId = block.id,
                 date = block.date,
                 startInstant = dayStart.plusMinutes(startMinute.toLong()).toInstant(),
-                endInstant = dayStart.plusMinutes((block.startMinuteOfDay + block.durationMinutes).toLong()).toInstant(),
+                endInstant = dayStart.plusMinutes(endMinute.toLong()).toInstant(),
                 source = ActualTimeSource.FOCUS_SESSION,
                 confidence = 1f
             )

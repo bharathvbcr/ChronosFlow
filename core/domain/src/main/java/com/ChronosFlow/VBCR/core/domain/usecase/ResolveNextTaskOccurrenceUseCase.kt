@@ -20,7 +20,8 @@ class ResolveNextTaskOccurrenceUseCase @Inject constructor() {
         val maxOccurrences = rule.maxOccurrences
         var candidate = rule.startsOn
         var matchedOccurrences = 0
-        while (hardEnd == null || !candidate.isAfter(hardEnd)) {
+        val safetyBound = hardEnd ?: candidateStart.plusYears(5)
+        while (!candidate.isAfter(safetyBound)) {
             if (rule.matches(candidate)) {
                 matchedOccurrences += 1
                 if (maxOccurrences != null && matchedOccurrences > maxOccurrences) {
@@ -98,7 +99,8 @@ class ResolveNextTaskOccurrenceUseCase @Inject constructor() {
         return if (ordinal > 0) {
             firstDay.with(TemporalAdjusters.dayOfWeekInMonth(ordinal, weekday))
         } else {
-            firstDay.with(TemporalAdjusters.lastInMonth(weekday))
+            // ordinal == -1: last; ordinal == -2: second-to-last; etc. (iCal BYDAY semantics)
+            firstDay.with(TemporalAdjusters.lastInMonth(weekday)).minusWeeks((-ordinal - 1).toLong())
         }
     }
 

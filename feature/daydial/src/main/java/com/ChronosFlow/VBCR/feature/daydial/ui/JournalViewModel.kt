@@ -28,6 +28,8 @@ import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -77,6 +79,8 @@ class JournalViewModel @Inject constructor(
 
     private val _today = MutableStateFlow(LocalDate.now())
     val today: StateFlow<LocalDate> = _today.asStateFlow()
+
+    private val saveMutex = Mutex()
 
     private val _writeError = MutableStateFlow<String?>(null)
     val writeError: StateFlow<String?> = _writeError.asStateFlow()
@@ -153,12 +157,17 @@ class JournalViewModel @Inject constructor(
                 // Photos buffered while editing are flushed once the row is persisted.
                 if (photoUris.isNotEmpty()) addPhotos(entryId, photoUris)
             } else {
-                val created = dates.distinct().map { date ->
-                    newEntry(date, now, trimmed, promptType, rating, minute)
-                }
-                created.forEach { entry ->
-                    runCatching { journalRepository.save(entry) }
-                        .onFailure { e -> _writeError.value = e.message }
+                // Mutex ensures concurrent saves don't both read dayHasPrimary=false and
+                // create two isPrimary=true entries for the same date.
+                val created = saveMutex.withLock {
+                    dates.distinct().map { date ->
+                        newEntry(date, now, trimmed, promptType, rating, minute)
+                    }.also { entries ->
+                        entries.forEach { entry ->
+                            runCatching { journalRepository.save(entry) }
+                                .onFailure { e -> _writeError.value = e.message }
+                        }
+                    }
                 }
                 // Photos buffered before the first save attach to the (primary) entry just created.
                 if (photoUris.isNotEmpty()) created.firstOrNull()?.let { addPhotos(it.id, photoUris) }
@@ -175,18 +184,20 @@ class JournalViewModel @Inject constructor(
         val trimmed = body.trim()
         if (trimmed.isBlank()) return
         viewModelScope.launch {
-            runCatching {
-                journalRepository.save(
-                    newEntry(
-                        date = date,
-                        now = Instant.now(),
-                        body = trimmed,
-                        promptType = null,
-                        rating = null,
-                        minute = minuteOfDay?.coerceIn(0, MAX_MINUTE_OF_DAY)
+            saveMutex.withLock {
+                runCatching {
+                    journalRepository.save(
+                        newEntry(
+                            date = date,
+                            now = Instant.now(),
+                            body = trimmed,
+                            promptType = null,
+                            rating = null,
+                            minute = minuteOfDay?.coerceIn(0, MAX_MINUTE_OF_DAY)
+                        )
                     )
-                )
-            }.onFailure { e -> _writeError.value = e.message }
+                }.onFailure { e -> _writeError.value = e.message }
+            }
         }
     }
 

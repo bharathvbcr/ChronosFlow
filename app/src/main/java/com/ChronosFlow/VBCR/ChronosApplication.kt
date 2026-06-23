@@ -78,6 +78,8 @@ class ChronosApplication : Application(), AppFunctionConfiguration.Provider, Con
         // other potentially blocking calls never run on the main Looper (STARTUP-008).
         applicationScope.launch(Dispatchers.IO) {
             kotlinx.coroutines.delay(APPLICATION_STARTUP_WORK_DEFER_MILLIS)
+            // register() is thread-safe (each registrar hops to the main looper for addObserver),
+            // so this stays on IO to keep blocking calls off the main Looper (STARTUP-008).
             alarmCapabilityRefresher.get().register()
             ReminderReconcileScheduler.enqueue(this@ChronosApplication)
             portableBackupInitializer.get().start()
