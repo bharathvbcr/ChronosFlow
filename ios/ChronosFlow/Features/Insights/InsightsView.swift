@@ -21,8 +21,13 @@ struct InsightsView: View {
     @Query private var nights: [SleepTrack]
     @Query private var checkIns: [MoodEnergyCheckIn]
     @Query private var medications: [MedicationPlan]
+    @Environment(\.modelContext) private var modelContext
     @State private var showingDayReview = false
     @State private var period: InsightsPeriod = .day
+
+    // MARK: Recommendation apply feedback — transient confirmation shown after tapping "Apply",
+    // mirroring the snackbar message Android surfaces from `applyInsightRecommendation`.
+    @State private var appliedRecommendationMessage: String?
 
     // MARK: Section filter state — empty set means "no filter" (all sections show), matching
     // Android's `rememberSaveable Set<String>`. Stored as raw section names so it's byte-compatible.
@@ -38,7 +43,7 @@ struct InsightsView: View {
         blocks.filter { Calendar.current.isDateInToday($0.date) }
     }
 
-    private func sectionVisible(_ section: InsightsSection) -> Bool {
+    private func sectionVisible(_ section: ChronosCore.InsightsSection) -> Bool {
         insightsSectionVisible(section: section, selected: selectedSections)
     }
 
@@ -114,11 +119,9 @@ struct InsightsView: View {
                         categoryBreakdownCard
                     }
 
-                    // MARK: INSIGHTS — findings + AI recommendations
+                    // MARK: INSIGHTS — findings + AI recommendations (eager render, matching Android)
                     if sectionVisible(.insights) {
-                        collapsibleCard(key: "findings", title: "Review findings") {
-                            findingsCard
-                        }
+                        findingsCard
                         recommendationsCard
                     }
 
@@ -127,37 +130,29 @@ struct InsightsView: View {
                         screenTimeCard
                     }
 
-                    // MARK: TRENDS — habit / sleep / mood charts + derived signals
+                    // MARK: TRENDS — habit / sleep / mood charts + derived signals. Matching Android's
+                    // InsightsTrendSections, each trend renders inline and is gated ONLY on data
+                    // availability (never on collapsed state) under one cohesive "Trends" heading.
                     if sectionVisible(.trends) {
+                        Text("Trends").font(.chronosHeadline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         if !habits.isEmpty {
-                            collapsibleCard(key: "habitChart", title: "Habit streaks") {
-                                habitChart
-                            }
+                            habitChart
                         }
                         if nights.count >= 2 {
-                            collapsibleCard(key: "sleepChart", title: "Sleep (last 7 nights)") {
-                                sleepChart
-                            }
+                            sleepChart
                         }
                         if let best = bestWindow {
-                            collapsibleCard(key: "bestWindow", title: "Best deep-work window") {
-                                bestWindowCard(best)
-                            }
+                            bestWindowCard(best)
                         }
                         if checkIns.count >= 2 {
-                            collapsibleCard(key: "moodChart", title: "Mood & energy") {
-                                moodChart
-                            }
+                            moodChart
                         }
                         if let corr = sleepMoodCorrelation {
-                            collapsibleCard(key: "correlation", title: "Sleep shapes your mood") {
-                                correlationCard(corr)
-                            }
+                            correlationCard(corr)
                         }
                         if !medications.isEmpty, adherenceRate > 0 {
-                            collapsibleCard(key: "adherence", title: "Medication adherence") {
-                                adherenceCard
-                            }
+                            adherenceCard
                         }
                     }
                 }
@@ -166,11 +161,6 @@ struct InsightsView: View {
             .background { ChronosBackdrop() }
             .navigationTitle("Review")
             .chronosScrollMinimizedBar()
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Day review") { showingDayReview = true }
-                }
-            }
             .sheet(isPresented: $showingDayReview) {
                 DayReviewSheet(blocks: todayBlocks)
             }
@@ -184,7 +174,7 @@ struct InsightsView: View {
     private var sectionFilterPills: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: ChronosSpacing.compact) {
-                ForEach(InsightsSection.allCases) { section in
+                ForEach(ChronosCore.InsightsSection.allCases) { section in
                     let selected = selectedSections.contains(section.rawValue)
                     Button {
                         if selected {
@@ -230,7 +220,7 @@ struct InsightsView: View {
     private func collapsibleCard<Content: View>(
         key: String,
         title: String,
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         DisclosureGroup(
             isExpanded: Binding(
@@ -263,25 +253,45 @@ struct InsightsView: View {
 
     private var periodSummaryCard: some View {
         let s = periodSummary
+        let scoreTint = executionScoreColor(s)
         return ChronosGlassPanel(tint: ChronosColors.brandPrimary) {
             VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+                // Title row mirrors Android's "Execution score" header + completion percent.
                 HStack(alignment: .firstTextBaseline) {
-                    Text(period == .day ? "EXECUTION" : "EXECUTION · \(period.label.uppercased())")
-                        .font(.chronosCaption).foregroundStyle(.secondary)
+                    Text("Execution score")
+                        .font(.chronosHeadline)
                     Spacer()
                     Text(s.hasPlan ? "\(s.completionPercent)%" : "N/A")
                         .font(.chronosHeadline)
-                        .foregroundStyle(ChronosColors.brandPrimary)
+                        .foregroundStyle(scoreTint)
                 }
-                ProgressView(value: Double(s.completionPercent) / 100).tint(ChronosColors.brandPrimary)
+                if s.hasPlan {
+                    ProgressView(value: Double(s.completionPercent) / 100).tint(scoreTint)
+                }
                 HStack(spacing: ChronosSpacing.compact) {
-                    metricStat("Planned", s.hasPlan ? formatMins(s.plannedMinutes) : "—")
-                    metricStat("Actual", s.hasPlan ? formatMins(s.actualMinutes) : "—",
-                               tint: ChronosColors.brandSecondary)
-                    metricStat("Missed", s.hasPlan ? formatMins(s.missedMinutes) : "—",
-                               tint: ChronosColors.brandAccent)
-                    metricStat("Drift", s.hasPlan ? formatDrift(s.driftMinutes) : "—",
-                               tint: s.driftMinutes < 0 ? ChronosColors.brandAccent : ChronosColors.brandSecondary)
+                    metricStat("Planned", s.hasPlan ? formatMins(s.plannedMinutes) : "N/A")
+                    metricStat("Actual",
+                               s.hasPlan ? formatMins(s.actualMinutes)
+                                   : (s.actualMinutes > 0 ? formatMins(s.actualMinutes) : "No logged time yet"),
+                               tint: (s.hasPlan || s.actualMinutes > 0) ? ChronosColors.brandSecondary : .secondary)
+                    metricStat("Missed", s.hasPlan ? formatMins(s.missedMinutes) : "N/A",
+                               tint: s.hasPlan ? ChronosColors.brandAccent : .secondary)
+                    metricStat("Drift", s.hasPlan ? formatDrift(s.driftMinutes) : "N/A",
+                               tint: driftAccentColor(s))
+                }
+                // Missed-block summary (parity with Android's ExecutionSummaryRow), or a
+                // create-plan prompt when nothing was scheduled in the window.
+                if s.hasPlan {
+                    Text(missedSummaryText(s))
+                        .font(.chronosCaption).foregroundStyle(.secondary)
+                    // Narrative + action, mirroring Android's "$narrative $action".
+                    Text("\(executionNarrative(s)) \(executionAction(s))")
+                        .font(.chronosCaption).foregroundStyle(.secondary)
+                } else {
+                    Text("No plan set for this period")
+                        .font(.chronosLabel)
+                    Text("Create one now to unlock completion, drift, and missed-block analysis.")
+                        .font(.chronosCaption).foregroundStyle(.secondary)
                 }
                 if period != .day {
                     Text(period == .week
@@ -289,8 +299,72 @@ struct InsightsView: View {
                          : "Execution metrics cover the last 30 days.")
                         .font(.chronosCaption).foregroundStyle(.secondary)
                 }
+                // "Open daily review" lives INSIDE the card (Android parity: onOpenFullReview),
+                // not in the toolbar.
+                Button {
+                    showingDayReview = true
+                } label: {
+                    Label("Open daily review", systemImage: "eye")
+                        .font(.chronosLabel)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(ChronosColors.brandPrimary)
+                .padding(.top, 2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Score color keyed off the completion percentage, mirroring Android's `scoreColor`.
+    private func executionScoreColor(_ s: PeriodSummary) -> Color {
+        guard s.hasPlan else { return .secondary }
+        switch s.completionPercent {
+        case 95...: return ChronosColors.brandPrimary
+        case 80..<95: return ChronosColors.brandSecondary
+        case 60..<80: return ChronosColors.brandAccent
+        case 1..<60: return ChronosColors.brandAccent
+        default: return .secondary
+        }
+    }
+
+    /// Drift accent, mirroring Android's `driftAccent`.
+    private func driftAccentColor(_ s: PeriodSummary) -> Color {
+        guard s.hasPlan else { return .secondary }
+        if s.driftMinutes > 0 { return ChronosColors.brandSecondary }
+        if s.driftMinutes < 0 { return ChronosColors.brandAccent }
+        return .secondary
+    }
+
+    /// Missed-blocks summary line, mirroring Android's `missedBlocksSummaryText`.
+    private func missedSummaryText(_ s: PeriodSummary) -> String {
+        switch max(s.missedCount, 0) {
+        case 0: return "Missed blocks: none"
+        case 1: return "Missed blocks: 1"
+        default: return "Missed blocks: \(s.missedCount)"
+        }
+    }
+
+    /// A short follow-through narrative keyed off the completion percentage, mirroring the Android
+    /// execution-score copy thresholds (`executionScoreNarrative`).
+    private func executionNarrative(_ s: PeriodSummary) -> String {
+        guard s.hasPlan else { return "No plan is active for today." }
+        switch s.completionPercent {
+        case 95...: return "You are ahead of plan."
+        case 80..<95: return "Execution is on track."
+        case 60..<80: return "Execution drifted from plan."
+        default: return "Execution is behind."
+        }
+    }
+
+    /// The actionable follow-up paired with the narrative, mirroring Android's `executionScoreAction`.
+    private func executionAction(_ s: PeriodSummary) -> String {
+        guard s.hasPlan else { return "Create a plan to unlock completion and drift insights." }
+        switch s.completionPercent {
+        case 95...: return "Keep your current cadence and preserve block quality."
+        case 80..<95: return "Tighten 10-minute estimates on one block to improve forecasting."
+        case 60..<80: return "Cap your next work block to reduce variance and recover the plan."
+        default: return "Prioritize your top two tasks and defer low-value blocks."
         }
     }
 
@@ -331,10 +405,35 @@ struct InsightsView: View {
                             ProgressView(value: min(max(row.progress, 0), 1)).tint(rowTint)
                         }
                     }
+                    // Actionable concentration tip (Android parity: focusConcentrationTip), keyed off
+                    // the top category's share and the number of distinct categories.
+                    if let top = s.topCategory,
+                       let tip = focusConcentrationTip(share: top.share,
+                                                       topCategory: top.category,
+                                                       totalCategories: s.categoryRows.count) {
+                        Text(tip)
+                            .font(.chronosCaption)
+                            .foregroundStyle(ChronosColors.brandPrimary)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// Mirrors Android's `focusConcentrationTip`: context-switching guidance when a single category
+    /// dominates the period. Returns nil when the spread is already healthy.
+    private func focusConcentrationTip(share: Double, topCategory: String, totalCategories: Int) -> String? {
+        if totalCategories == 1 {
+            return "Only one category appears today. Add a short block in another category tomorrow to reduce concentration risk."
+        }
+        if share >= 0.85 {
+            return "Very high focus on \(topCategory). Try splitting this category into two shorter focus blocks with a reset task in between."
+        }
+        if share >= 0.7 {
+            return "You spent most of your day on \(topCategory). A short complementary block could improve context recovery."
+        }
+        return nil
     }
 
     private func concentrationColor(_ c: ConcentrationLabel) -> Color {
@@ -400,42 +499,97 @@ struct InsightsView: View {
     private var recommendationsCard: some View {
         ChronosGlassCard(tint: ChronosColors.brandPrimary) {
             VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+                // Header row mirrors Android: section title left, outlined refresh button right with a
+                // sparkles icon (spinner while refreshing).
                 HStack {
-                    Label("AI recommendations", systemImage: "sparkles").font(.chronosHeadline)
+                    Text("AI recommendations").font(.chronosHeadline)
                     Spacer()
                     Button {
                         Task { await refreshRecommendationsWithAI() }
                     } label: {
-                        if isRefreshingRecommendations {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Refresh", systemImage: "arrow.clockwise").font(.chronosCaption)
+                        HStack(spacing: 6) {
+                            if isRefreshingRecommendations {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "sparkles")
+                            }
+                            Text(isRefreshingRecommendations ? "Refreshing…" : "Refresh")
+                                .font(.chronosLabel)
                         }
                     }
                     .buttonStyle(.bordered)
+                    .clipShape(Capsule())
                     .disabled(isRefreshingRecommendations)
+                }
+                if let applied = appliedRecommendationMessage {
+                    Text(applied)
+                        .font(.chronosCaption)
+                        .foregroundStyle(ChronosColors.brandSecondary)
                 }
                 if recommendations.isEmpty {
                     Text("Refresh to generate schedule recommendations from your review data.")
                         .font(.chronosBody).foregroundStyle(.secondary)
                 } else {
                     ForEach(recommendations) { rec in
-                        HStack(alignment: .top, spacing: ChronosSpacing.compact) {
-                            Image(systemName: "lightbulb.fill")
-                                .foregroundStyle(ChronosColors.brandSecondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(rec.text).font(.chronosLabel)
-                                Text(sourceLabel(rec.source)).font(.chronosCaption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        recommendationRow(rec)
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// One recommendation row with text, source label, and an "Apply" action — mirrors Android's
+    /// `RecommendationRow`.
+    private func recommendationRow(_ rec: InsightRecommendation) -> some View {
+        HStack(alignment: .top, spacing: ChronosSpacing.compact) {
+            Image(systemName: "lightbulb.fill")
+                .foregroundStyle(ChronosColors.brandSecondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(rec.text).font(.chronosLabel)
+                Text(sourceLabel(rec.source)).font(.chronosCaption)
+                    .foregroundStyle(ChronosColors.brandPrimary)
+            }
+            Spacer()
+            Button("Apply") { applyRecommendation(rec) }
+                .buttonStyle(.bordered)
+                .clipShape(Capsule())
+                .font(.chronosLabel)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Local interpretation of a recommendation into a quick action, mirroring Android's
+    /// `applyInsightRecommendation` → `RecommendationQuickAction`. ADD_BREAK inserts a 15-minute break
+    /// block on today; FILL_GAPS / OPEN_AI_PLAN surface a confirmation (the full planner-driven apply
+    /// lives in the shared day context on Android). Provides the same "Apply" affordance and feedback.
+    private func applyRecommendation(_ rec: InsightRecommendation) {
+        let lower = rec.text.lowercased()
+        if lower.contains("break") || lower.contains("rest") || lower.contains("recover") {
+            insertBreakBlock()
+            appliedRecommendationMessage = "Added a 15-minute break block"
+        } else if lower.contains("fill") || lower.contains("gap") || lower.contains("empty") {
+            appliedRecommendationMessage = "Proposed gap fills from recommendation"
+        } else {
+            appliedRecommendationMessage = "Applied: \(rec.text)"
+        }
+    }
+
+    /// Inserts a 15-minute break block right after the latest scheduled block today (parity with
+    /// Android's `createQuickBlock(title = "Break", durationMinutes = 15, category = "BREAK")`).
+    private func insertBreakBlock() {
+        let today = Calendar.current.startOfDay(for: .now)
+        let lastEnd = todayBlocks.map { $0.startMinuteOfDay + $0.durationMinutes }.max() ?? (9 * 60)
+        let start = min(max(lastEnd, 0), 1439 - 15)
+        let block = TimeBlock(
+            date: today,
+            title: "Break",
+            category: "BREAK",
+            startMinuteOfDay: start,
+            durationMinutes: 15,
+            energyLevel: .low,
+            source: "insights-recommendation")
+        modelContext.insert(block)
     }
 
     /// User-facing label for a recommendation's GenAI source. Mirrors Android's

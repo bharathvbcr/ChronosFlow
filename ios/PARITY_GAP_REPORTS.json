@@ -1,0 +1,1163 @@
+[
+  {
+    "area": "Navigation shell & information architecture",
+    "androidFlow": "Android uses a dial-centric in-place tab model. The compact bottom bar (ChronosCompactFloatingBottomBar) displays only 3 shell destination tabs: Plan, Today, Focus (plus Quick-Add FAB). These three are IN-PLACE tabs that don't change the back stack - they surface different targets (Day.TARGET_PLAN, Day.TARGET_TODAY, Day.TARGET_FOCUS_PLANNER) inside DayDialScreen via selectDayTarget(). Secondary destinations (Tasks, Habits, Goals, Medication, Review) are NOT bottom-bar tabs; they're reached via Quick-Add FAB menu, command palette, or on tablets a navigation rail. The FAB (ChronosQuickAddButton + ChronosQuickAddMenu) expands into action buttons (New block/task/med/habit/goal/Journal/Sleep) plus a natural-language typed quick-capture field. On tablets, the navigation rail (ChronosAdaptiveNavigationRail) shows all destinations as a sidebar. Back navigation is hierarchical: sub-sections (Tasks/Habits/Goals/Meds) push on top of Day, and system back exits them.",
+    "iosFlow": "iOS uses a flat TabView(.sidebarAdaptable) listing every screen as a top-level tab: Plan, Today, Focus, Tasks, Track (a TabSection grouping Habits, Goals, Meds, Routines, Sleep, Journal), Review, Settings. The floating QuickAddButton (56x56 FAB) overlays the tab bar bottom-trailing, and tapping it presents QuickAddSheet (a NavigationStack with a List showing the same action buttons as Android plus typed input). There is no command palette. On iPad, .sidebarAdaptable converts the tabs into a sidebar, but the structure remains flat - all screens are sibling top-level destinations, not in-place tabs. Back navigation is per-screen; there's no cross-screen hierarchical back stack like Android.",
+    "severity": "critical",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "Bottom bar has 3 primary tabs (Plan/Today/Focus) that stay in-place with sub-targets, vs iOS flat 12+ tabs. Android's secondary destinations (Tasks/Habits/Goals/Meds/Review) are NOT bottom-bar tabs; iOS lists them as top-level tabs alongside primaries.",
+        "androidBehavior": "Plan, Today, Focus are physical tabs that route to Day(target=Plan/Today/Focus) in-place inside DayDialScreen; no back stack change. selectDayTarget() updates requestedDayTarget and dayTargetGeneration without navigating. Secondary destinations exist as shell destinations but showInCompact=false, so they never appear in the 3-tab pill.",
+        "iosBehavior": "All 12 destinations (Plan, Today, Focus, Tasks, Habits, Goals, Meds, Routines, Sleep, Journal, Review, Settings) are equally-weighted top-level tabs in TabView. Switching between any two tabs is equivalent; there's no 'in-place' concept.",
+        "fix": "Restructure RootView.swift to have only Plan, Today, Focus as primary tabs in the TabView, keeping all other screens reachable ONLY via the Quick-Add FAB menu (tapping them closes the FAB and shows an inline editor in the current tab context) or via command palette. Alternatively, keep secondary destinations accessible but hidden from the tab bar by making them non-tab sheets/modals triggered from the FAB or by navigation within a tab."
+      },
+      {
+        "aspect": "organization",
+        "description": "Quick-Add is a FAB that expands a menu with action buttons + typed input (Android) vs iOS sheet that lists actions without in-line menu expansion.",
+        "androidBehavior": "ChronosQuickAddButton is a 56dp FAB with a rotating +. Tapping it sets quickAddExpanded=true, which reveals ChronosQuickAddMenu below it (animated scale + fade). Menu shows all quickAddActionsFor(featureFlags) (6-7 buttons) and a ChronosQuickCaptureInput field. Tapping an action routes navState.navigate(action.route) and closes the menu. Typing text triggers onQuickCapturePreview (runs previewQuickCaptureCommand) for live-preview label.",
+        "iosBehavior": "QuickAddButton is a 56x56 circle with a + image, positioned absolute bottom-trailing. Tapping it presents QuickAddSheet, a NavigationStack with List sections (typed input + Create buttons). Selecting an action sets editor state, which then presents the appropriate editor sheet. Typed input parses with parseSmartFill locally; no live preview is shown, only a helper label below the input.",
+        "fix": "Change QuickAddSheet to use a ZStack with the same animated expansion/collapse as Android: toggle an isExpanded state on the button, and conditionally show the menu above it with scale+fade animation. Implement the live-preview callback (onQuickCapturePreview) same as Android \u2014 parse input, return a label like 'Add task \"...\"', show it in the footer. Route selections directly via navigation instead of setting an editor state."
+      },
+      {
+        "aspect": "navigation",
+        "description": "Android has a command palette (Ctrl+K) accessible from anywhere. iOS has no command palette.",
+        "androidBehavior": "Ctrl+K opens CommandPaletteDialog (MainActivity.kt). It lists quickCreateCommandProvider (New block/task/med/habit/goal/journal/sleep), dayDialCommandProvider (Today/Plan/Focus/Review/tools), focusCommandProvider, taskCommandProvider, habitCommandProvider, goalCommandProvider, medicationCommandProvider. User can type to filter. Selecting an item executes its command (navigate to a route or run a function). There's also an Ask Assistant option.",
+        "iosBehavior": "No equivalent. All creation and navigation is via tabs or the Quick-Add sheet.",
+        "fix": "Add a CommandPaletteView to iOS (similar to Android's CommandPaletteDialog). Trigger it with a keyboard shortcut (Cmd+K on iPhone, likely a Menu button on iPad) or a dedicated toolbar button. Populate it with the same command providers. Implement a simple filter/search UI that matches the Android version. Call the same command callbacks (navigate to screens, open sheets, etc.)."
+      },
+      {
+        "aspect": "function",
+        "description": "Android: Double-tap Today tab resets the dial to today's date (TARGET_TODAY_RESET). iOS: TodayView has no equivalent reset behavior.",
+        "androidBehavior": "onShellDestinationDoubleClick checks if destination.id == SHELL_TODAY and calls navState.selectDayTarget(ChronosRoute.Day.TARGET_TODAY_RESET). DayDialScreen applies this target by snapping selectedDate back to today.",
+        "iosBehavior": "TodayView is always today; there's no date picker like Plan. Double-tapping the Today tab doesn't reset anything because TodayView is not a date-picker screen.",
+        "fix": "Add a double-tap gesture to the Today tab indicator. On double-tap, ensure the selected date in the active day view (if the user had browsed to another day in Plan) resets to today. Alternatively, add a 'Jump to today' button in TodayView if it ever shows an off-today state."
+      },
+      {
+        "aspect": "visual",
+        "description": "Bottom-bar selection indicator: Android has a single animated sliding pill (iOS-style) that glides between tab items. iOS uses the native TabView indicator, which varies by iOS version and style.",
+        "androidBehavior": "ChronosCompactFloatingBottomBar draws a single RoundRect (indicatorColor = primaryContainer) that animates its x position and width as the user taps tabs. The pill is drawn in drawBehind; both x and width animate with ChronosValueAnimationFactory.navIndicator(reducedMotion).",
+        "iosBehavior": "TabView(.sidebarAdaptable) uses the native iOS tab-bar styling (underline or background highlight that varies by OS). No custom sliding pill.",
+        "fix": "Implement a custom TabView-like container with the same animated sliding pill as Android. Use Canvas or custom layout + animateAsState to track the selected tab's frame and draw the pill. This is a visual refinement; the core functionality works with native TabView but doesn't match Android's aesthetic."
+      },
+      {
+        "aspect": "navigation",
+        "description": "Android: Back stack is hierarchical (Day at root, sub-sections push on top). iOS: All tabs are siblings; no hierarchical back.",
+        "androidBehavior": "ChronosNavigationState.backStack is flattened: Day always anchors it, and at most one sub-section sits on top. goBack() exits the sub-section and returns to Day. On-screen back handlers route back through the sub-section's NavDisplay first, then to the system back event.",
+        "iosBehavior": "Each tab is a NavigationStack, but tab-switching doesn't interact with back stacks. Pressing back within a tab (iPad sidebar back button or swipe) navigates within that tab's stack. Switching to another tab is independent.",
+        "fix": "Model the back stack as Android does: track the current section and sub-section in a state holder (similar to ChronosNavigationState). When the user taps a secondary destination (Tasks/Habits/Goals/Meds/Review) in the Quick-Add menu or command palette, push it onto a back stack and show it as an overlay or as the active screen, with a back button returning to the Day section. OR keep tabs flat but add a global back handler that routes back through the command palette or Quick-Add history."
+      },
+      {
+        "aspect": "navigation",
+        "description": "Android: Adaptive layout shows a navigation rail on tablets (ChronosAdaptiveNavigationRail). iOS: .sidebarAdaptable flattens to a sidebar but structure is identical (all tabs become sidebar items).",
+        "androidBehavior": "rememberChronosShellLayout() returns ADAPTIVE on tablets (WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND). If showNavigationChrome=true, a vertical ChronosAdaptiveNavigationRail appears on the left with all expandedShellDestinations(featureFlags). The rail has a 'Navigate' header, each destination as a NavigationRailItem with icon+label+badge.",
+        "iosBehavior": ".sidebarAdaptable automatically switches to a sidebar on iPad. The sidebar is just the flattened list of tabs (Plan, Today, Focus, Tasks, Track \u2192 Habits/Goals/..., Review, Settings), each with its own icon. No 'Navigate' header or badge support (badges don't appear in the sidebar naturally).",
+        "fix": "Implement a custom adaptive layout that shows a sidebar on iPad but preserves the 3-primary / many-secondary structure: sidebar shows Plan/Today/Focus as primary items, and then a 'Track' section or 'Destinations' section listing Tasks/Habits/Goals/Meds/Review. Implement badge support (show badge count next to each destination). Ensure tapping a secondary destination in the sidebar routes it correctly (either as a new top-level view or as an overlay)."
+      },
+      {
+        "aspect": "function",
+        "description": "Android: Shell destinations and Day tabs are aware of feature flags (showInCompact, isAvailable). iOS: Feature flags gate which tabs appear, but the logic is scattered in RootView.",
+        "androidBehavior": "ChronosRoute.compactShellDestinations(featureFlags) filters by showInCompact && isAvailable(featureFlags). ChronosRoute.expandedShellDestinations(featureFlags) filters by isAvailable(featureFlags). Each ShellDestination checks its featureFlags at render time and appears/disappears as flags change.",
+        "iosBehavior": "RootView uses if settings.habitsEnabled { Tab(...) } etc. The logic is inline in the TabView body, duplicated for each conditional feature.",
+        "fix": "Extract the feature-flag logic into a structure like Android's ShellDestination (a computed property that returns only enabled destinations). Pass this to the tab builder so future feature additions only need to be added once."
+      },
+      {
+        "aspect": "navigation",
+        "description": "Android: Deep links are routed via ChronosRoute.routeForNotificationLaunch(). iOS: Deep links use handleDeepLink(url) which maps URL hosts to tab selections.",
+        "androidBehavior": "parseNotificationLaunch(intent) returns a NotificationLaunch. MainActivity.ChronosFlowApp checks featureFlags before navigating, routing disabled features back to Day(). RootView never shows disabled-feature screens.",
+        "iosBehavior": "handleDeepLink(url) is a simple switch on url.host(), mapping 'today' \u2192 selection=.today, etc. It doesn't check feature flags; a link to a disabled feature will just switch to that tab and show a blank screen.",
+        "fix": "Modify handleDeepLink() to check featureFlags and route disabled features back to Today. OR prevent disabled features from appearing in deep links by filtering them at the point of link generation (e.g., widgets, shortcuts)."
+      },
+      {
+        "aspect": "navigation",
+        "description": "Android: In-place sheets (Add block, Journal, Log sleep) open via Day targets (TARGET_ADD_BLOCK, TARGET_JOURNAL, TARGET_SLEEP), not as separate nav destinations. iOS: These are part of the create flow via Quick-Add, but not modeled as Day targets.",
+        "androidBehavior": "daySheetLaunchTargets = {TARGET_ADD_BLOCK, TARGET_JOURNAL, TARGET_SLEEP}. selectDayTarget(target) sets requestedDayTarget, and dayLaunchTargetForRoute() applies the target, opening the sheet inside DayDialScreen. The sheet is in-place (doesn't change the back stack or the active destination).",
+        "iosBehavior": "Quick-Add sheet has an editor state (case .block, .task, .sleep). Selecting one of these actions sets editor state, which then presents the editor sheet. There's no tie to Day targets; it's just the Quick-Add flow.",
+        "fix": "Model in-place Day sheets as routes within Quick-Add (or add a dedicated 'openInPlace' callback that DayDialScreen can listen to). When the user selects 'New block' from the Quick-Add menu, instead of pushing a new sheet, pass a Day target callback that tells DayDialScreen to open the block editor overlay."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android: Shell badges show on navigation items (Today shows missed-block count or off-today date; Review shows unread-insights count; Focus shows active indicator). iOS: No badges on tabs.",
+        "androidBehavior": "badgeValueFor(destinationId, shellState, dayDialViewedDate) returns a string or null. ChronosCompactNavigationItem and ChronosAdaptiveNavigationRail both render BadgedBox with ChronosAnimatedBadge. Badges animate in/out with scale+fade.",
+        "iosBehavior": "TabView doesn't natively support badges. The tabs have no visual indicator of missed blocks, unread insights, or active focus.",
+        "fix": "Add badge support to the custom tab bar or sidebar: show a small red badge with a number (e.g., '3') next to Today if there are missed blocks, next to Review if there are unread insights, and a filled circle next to Focus if active. Use Shell-state data (ChronosShellState / ChronosShellViewModel equivalent) to drive the badge values."
+      }
+    ],
+    "iosFilesToChange": [
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/App/RootView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/App/QuickAdd.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/ChronosFlowApp.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/DayDial/DayDialScreen.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Today/TodayView.swift"
+    ]
+  },
+  {
+    "area": "DayDial central screen (dial canvas + Plan/Today/Focus/Insights tabs + top bar)",
+    "androidFlow": "Android uses a DIAL-CENTRIC single-screen architecture (DayDialScreen.kt, DayDialScreenChrome.kt, DayDialMainContent.kt):\n- Single DayDialScreen composable houses ALL 4 primary tabs: Plan, Today, Focus, Insights\n- These tabs are IN-PLACE (co-locate on one screen with a shared dial, date scrubber, top bar)\n- DayDialTab enum defines the 4 primary tabs with shared context (sortedBlocks, date selection, etc.)\n- Compact bottom bar shows only 3 tabs: Plan, Today, Focus (with Insights accessible via top-bar Review button or end-of-day sheet)\n- Sidebar menu (floating pill) provides quick access to secondary pages (Tasks, Habits, Goals, Meds, Settings) which open as in-app sidebar pages, NOT separate destinations\n- Date navigation via top bar date picker (DayDialTopBar.kt) affects ALL tabs' data simultaneously\n- A single QuickAdd FAB expands to menu (New block/task/med/habit/goal, Journal, Sleep, command palette)\n- All tab content (TodayTab, PlanTab, FocusTab, InsightsTab) shares: blocks, date state, focus session, undo/redo, snackbar host\n- AnimatedContent transitions between tabs horizontally with predictable back to Today",
+    "iosFlow": "iOS uses a FLAT TabView architecture (RootView.swift):\n- 12+ separate top-level Tab destinations in a TabView(.sidebarAdaptable): Plan, Today, Focus, Tasks, Habits, Goals, Meds, Routines, Sleep, Journal, Review (Insights), Settings\n- Plan tab = DayDialScreen.swift (dial + conflict banner + free windows + block list)\n- Today tab = TodayView.swift (separate view with \"NOW\" card, \"NEXT\" card, tasks, habits)\n- Focus tab = FocusView.swift (separate view with timer ring + phase controls)\n- Review tab = InsightsView.swift (separate view with period rollups + trends + recommendations)\n- Each tab is independently routed and maintains its own @State; no shared date picker across tabs\n- Date is hardcoded to TODAY in DayDialScreen.swift (selectedDate = Calendar.current.startOfDay(for: .now)) \u2014 no date navigation\n- No shared dial across tabs; Today has its own \"NOW\" card, Focus has its own timer ring\n- Quick-Add is a separate floating button (QuickAddButton) in RootView, presents QuickAddSheet\n- Tasks/Habits/Goals/Meds/Routines are full-screen separate tabs, not in-app sidebar pages\n- Back gesture behavior differs: iOS tabs are independent; Android tabs fallback to Today",
+    "severity": "critical",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "Android groups 4 primary tabs (Plan/Today/Focus/Insights) inside one DayDialScreen with in-place tab switching and shared state. iOS spreads them across separate TabView destinations, each with independent state and no shared dial.",
+        "androidBehavior": "DayDialScreen.kt composes DayDialScreenChrome \u2192 DayDialMainContent \u2192 AnimatedContent over DayDialTab enum with TodayTab, PlanTab, FocusTab, InsightsTab all in-place. Tabs share sortedBlocks, selectedDate, focus session, undo/redo, snackbar. Switching tabs updates uiState.currentTab; back from non-Today tabs returns to Today.",
+        "iosBehavior": "RootView.swift uses TabView(selection: $selection) with separate Tab { DayDialScreen() }, Tab { TodayView() }, Tab { FocusView() }, Tab { InsightsView() }. Each is a standalone NavigationStack. Date is hardcoded in each; no shared scrubber. Back gestures are independent per tab.",
+        "fix": "Restructure iOS to match Android: (1) Create a single DayDialUnifiedScreen.swift that wraps all 4 tabs (Plan/Today/Focus/Insights) in one TabView or custom TabBar. (2) Extract shared state (selectedDate, sortedBlocks, focusSession, undo/redo) into a @Observable ViewModel. (3) Move date picker from individual views to the top bar. (4) Make back fallback to Today from Plan/Focus/Insights. (5) For iPad, promote the 3 primary tabs to main sidebar, secondary pages (Tasks/Habits etc) to a submenu/section. (6) Remove individual TodayView, FocusView, InsightsView; composite them as tabs inside DayDialUnifiedScreen."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android's bottom bar is compact (3 tabs) with overflow handled by sidebar menu for Tasks/Habits/Goals/Meds. iOS's TabView lists all 12+ as flat siblings (Tasks, Habits, Goals, Meds grouped under 'Track', plus Review, Settings). Missing in iOS: in-app sidebar pages, collapsible navigation, feature-gated tab filtering.",
+        "androidBehavior": "Bottom nav shows Plan, Today, Focus only (DayDialTab.primary). Sidebar menu (DayDialSidebar.kt) is a floating pill opened by menu button; it lists Day-Tools, Tasks, Habits, Goals, Meds, Templates, Settings, Appearance, Notifications, Sync, etc. Tapping a menu item either opens an in-app sidebar page (e.g. TASKS \u2192 SidebarPage.TASKS) or routes to a full screen (e.g. TASKS \u2192 onOpenTasks()). Feature flags (habitsFeatureEnabled, etc.) determine which pages appear.",
+        "iosBehavior": "TabView lists every screen as a peer tab. Tasks/Habits/Goals/Meds are separate Tab destinations, not menu items. No sidebar menu. All tabs are always present (or filtered by feature flags post-hoc). No in-app sidebar pages.",
+        "fix": "Reorganize iOS tabs to match Android's primary/secondary split: (1) Main tier: Plan, Today, Focus (+ break them out of their separate TabView destinations). (2) 'Track' section (TabSection in iOS 18+): Habits, Goals, Meds, Routines, Sleep, Journal (collapsed/subcollection on iPhone compact, sidebar on iPad). (3) Review and Settings as trailing items. (4) Implement a floating sidebar menu (or sheet) for secondary pages (Tasks, Habits as in-app pages, not full tabs) mirroring Android's SidebarPage enum. (5) Gate tabs by feature flags at the shell level, not downstream. (6) Convert in-app sidebar pages (Habits, Tasks entry points) to reusable components so they can appear both as tabs and as in-app pages."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's Today tab has rich live data (current block, next block, quick items for tasks/habits/meds, sleep readiness banner, quick actions to Plan/Focus). iOS's TodayView has some (NOW/NEXT cards, habits summary, quick actions) but no live dial, no undo/redo (only on Plan tab), no shared focus session state across tabs.",
+        "androidBehavior": "TodayTab (DayDialMainContent.kt line 379) receives: activeBlock, nextBlock, missedBlocks, quickItems (tasks/habits/meds), sleepTrack, journalEntry, focusSession, focusRemainingSeconds, currentMinute. It renders a dial (ChronosDial) + active/next blocks + quick items (onQuickTaskDone, onQuickHabitDone, onQuickMedicationTaken). Links to Plan/Focus via callbacks (onOpenPlanTab, onOpenFocusScreen). Undo/redo available in top bar.",
+        "iosBehavior": "TodayView.swift queries blocks/tasks/habits independently, renders NOW/NEXT cards, habit summary, quick action buttons (new task, new block, mood check-in, log sleep). No dial. No access to focusSession or focus timer. Undo/redo only appear in DayDialScreen (Plan tab). Quick actions pop sheets, not navigate to full tabs.",
+        "fix": "(1) Promote focusSession state from DayDialViewModel to the unified screen's ViewModel so all tabs can read/write it. (2) Surface activeBlock and nextBlock in TodayView, not hardcoded to today. (3) Add a mini dial to TodayView (or share ChronosDialCanvas from Plan tab). (4) Surface quick items (tasks/habits/meds) across all tabs, not just Today. (5) Add undo/redo buttons to top bar in all tabs, not just Plan. (6) Route quick actions (new task, new block) to full tabs (Tasks, Plan) instead of inline sheets where appropriate."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android dial (ChronosDial.kt) is the central visual element, shared across all 4 tabs. Today shows the dial with current/next block overlays. Plan shows blocks + suggested AI blocks. Focus shows a focus ring timer. Insights shows an empty dial. iOS Today has custom NOW/NEXT cards, Plan has its own dial (ChronosDialCanvas.swift), Focus has its own timer ring. No visual consistency across tabs.",
+        "androidBehavior": "DayDialMainContent.kt composes DayDialPrimaryTabLayer for each tab, rendering a shared transition (AnimatedContent). All tabs receive the same sortedBlocks, currentMinute, selectedDate. The dial (ChronosDial) is only composed in TodayTab and PlanTab; FocusTab and InsightsTab have different visual hierarchies but the same layout/padding/top bar structure.",
+        "iosBehavior": "DayDialScreen has ChronosDialCanvas (custom dial rendering, block dragging, conflict overlay). TodayView has custom VStack layout (NOW card, NEXT card, task list, habit summary), no dial. FocusView has a custom timerRing (Circle with progress stroke). InsightsView has period cards, charts, no dial.",
+        "fix": "(1) Extract ChronosDialCanvas into a reusable component visible in Plan, Today, and optionally Focus tabs. (2) Share the same dial data (blocks, conflicts, free windows) across tabs via the unified ViewModel. (3) Add a compact dial or block timeline to TodayView. (4) Standardize the top bar (date picker, undo/redo, menu button) across all tabs. (5) Use the same AnimatedContent transition pattern for tab switching. (6) Compose each tab's content inside a consistent frame/padding/scroll structure."
+      },
+      {
+        "aspect": "navigation",
+        "description": "Android date picker (top bar, DayDialTopBar.kt) affects all 4 tabs simultaneously and syncs with the single selectedDate state. iOS date picker only appears in DayDialScreen (Plan tab); Today is hardcoded to today; Focus has no date picker; Insights has no date picker.",
+        "androidBehavior": "DayDialTopBar composes a date picker that calls viewModel.selectDate(). This updates vmState.selectedDate, which flows to ALL 4 tabs (TodayTab, PlanTab, FocusTab, InsightsTab) at once. Blocks, free windows, journal entry, sleep track, etc. all re-derive from the selected date.",
+        "iosBehavior": "DayDialScreen has a DatePicker in toolbar (selection: $selectedDate). TodayView has no date picker (hardcoded to Calendar.current.startOfDay(for: .now)). FocusView and InsightsView have no date picker.",
+        "fix": "(1) Move the date picker to the top bar of the unified screen so it's visible in all 4 tabs. (2) Bind the date picker to the unified ViewModel's selectedDate, not local @State. (3) In TodayView, subscribe to the ViewModel's selectedDate and re-fetch today's data (or default to .now if the selected date == today). (4) Add a date picker to InsightsView's toolbar to allow period drilling. (5) Mirror Android's date navigation flow: one picker, one state, all tabs update."
+      },
+      {
+        "aspect": "function",
+        "description": "Android focus session state (focusSession: FocusSession?, focusRemainingSeconds, focusElapsedSeconds, focusSession.blockId) is held in the DayDialViewModel and accessible from all 4 tabs. iOS FocusView has a separate FocusTimerModel.shared singleton; other tabs (Today, Plan, Insights) have no reference to active focus session.",
+        "androidBehavior": "DayDialScreen receives focusSession from the ViewModel. FocusTab renders a focus ring and phase controls, updating focusSession via viewModel callbacks (onStart, onPause, onResume, onFinish, etc.). TodayTab's nextBlock can show a 'Start focus' button. PlanTab can show focus-locked blocks. All tabs can see the active session.",
+        "iosBehavior": "FocusView uses FocusTimerModel.shared (a singleton @Observable). TodayView and PlanTab have no reference to the active focus session. If focus is running on the Focus tab, switching to Today doesn't show the session state. No 'Start focus' button in Today.",
+        "fix": "(1) Move FocusTimerModel state into the unified ViewModel (not a singleton). (2) Expose focusSession, focusRemainingSeconds, focusElapsedSeconds as @Published properties. (3) Pass these to all 4 tab components (TodayTab, PlanTab, FocusTab, InsightsTab). (4) Update TodayView to show a 'Start/Resume focus' action for the current block if a session is active. (5) Update PlanTab to highlight focus-protected blocks differently if a session is running. (6) Keep the FocusTimerModel for internal timer logic, but expose its state via the unified ViewModel."
+      },
+      {
+        "aspect": "function",
+        "description": "Android has a unified undo/redo stack (PlannerCommandHistory in the ViewModel) shared by all 4 tabs. iOS undo/redo only works in DayDialScreen (Plan tab); other tabs have no undo/redo.",
+        "androidBehavior": "vmState.canUndo and vmState.canRedo are derived from the ViewModel's undo/redo stack. Top bar shows undo/redo buttons when actionable. All 4 tabs contribute to the same stack: Plan tab can undo block moves, Today tab can undo quick-item completions, Focus tab can undo session ends, etc.",
+        "iosBehavior": "DayDialScreen.swift has a local @State private var history = PlannerCommandHistory(). TodayView, FocusView, InsightsView have no undo/redo. Undo/redo buttons only appear in DayDialScreen's toolbar.",
+        "fix": "(1) Move the PlannerCommandHistory into the unified ViewModel. (2) Expose canUndo/canRedo as @Published properties. (3) Add undo/redo toolbar buttons to the unified top bar (visible in all tabs). (4) Clear the history when selectedDate changes. (5) Wire up undo/redo callbacks from all tabs (Today's quick-item actions, Focus's session edits, etc.) to push commands onto the shared stack."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's Quick-Add FAB and command palette are global (feature/daydial/DayDialCommandProvider.kt). The FAB expands to: New block/task/med/habit/goal, Journal entry, Log sleep, typed quick-capture command. iOS Quick-Add is also global (RootView) but only covers: New task, New time block, Log sleep, Mood check-in.",
+        "androidBehavior": "DayDialScreen receives onOpenCommandPalette callback. The FAB expands (SidebarMenu animation) to a menu with 8+ items. Selecting an item either opens a sheet (New block \u2192 SheetTarget.NewBlock(title)) or routes to a full screen (New task \u2192 onOpenTasks()). Some items (journal, sleep) trigger launch targets (applyLaunchTarget \u2192 SheetTarget.Journal, SheetTarget.SleepLog).",
+        "iosBehavior": "QuickAddButton in RootView is a simple '+' button. Tapping it shows QuickAddSheet (Menu: New task, New time block, Log sleep, Mood check-in, + AI planning). Each action is a button that sets a local @State or routes via NavigationLink.",
+        "fix": "(1) Expand iOS Quick-Add menu to include: New habit, New goal, New medication, Journal entry (if enabled), Sleep log (if enabled), typed quick-capture command. (2) Wire menu items to the same sheet/route handlers as Android (open Tasks full screen for new task, open DayDial for new block on today's date). (3) Add a command palette (text input + search) for quick commands (e.g. 'add 1h focus' parses to a block creation). (4) Gate menu items by feature flags (habitsEnabled, journalEnabled, etc.)."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android distinguishes between sidebar pages (in-app, navigated within Day) and full screens (Tasks, Habits, Goals, Meds). iOS conflates them: Tasks/Habits/Goals/Meds are full-screen tabs. This breaks the Android mental model where secondary pages are closable/dismissible sheets/slides, not separate destinations.",
+        "androidBehavior": "SidebarPage enum (SidebarPage.TASKS, SidebarPage.HABITS, etc.) defines pages opened from the Day screen's sidebar menu. They are composed inside SidebarPageContent (Feature/daydial/ui/SidebarPageContent.kt) and backed by live data (viewModel.routines, etc.). Tapping a Tasks item while on the sidebar page routes to the full Tasks screen (onOpenTasks()). The sidebar page is dismissible via back gesture; the full screen is not.",
+        "iosBehavior": "RootView's TabView lists Tasks, Habits, Goals, Meds as peer tabs (not subordinate pages). No distinction between in-app pages and full screens.",
+        "fix": "(1) On iPad: move Tasks/Habits/Goals/Meds from main sidebar to a submenu/TabSection. Make them open as in-app sidebar pages (not separate tabs) when selected from the primary Day menu. (2) On iPhone: implement a NavigationSplitView or custom modal slide for secondary pages so they feel like overlays, not separate destinations. (3) Implement the SidebarPage pattern: render in-app pages inside the Day screen's content area, not as top-level tabs. (4) Add a dismiss/back button to in-app pages so users can return to the dial without leaving the Day section."
+      }
+    ],
+    "iosFilesToChange": [
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/App/RootView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/DayDial/DayDialScreen.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Today/TodayView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Focus/FocusView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Insights/InsightsView.swift"
+    ]
+  },
+  {
+    "area": "Quick-Add menu, command palette & quick-capture (typed natural-language parsing into task/med/habit/goal)",
+    "androidFlow": "Android shell (ChronosNavigationShell.kt) floats a FAB above bottom bar. Tapping it expands ChronosQuickAddMenu showing: (1) quickAddActionsFor() menu items (New block/task/meds/habits/goals, Journal, Log sleep) gated by feature flags; (2) ChronosQuickCaptureInput\u2014a text field accepting natural language parsed by quickCaptureCreateCommands() (via CaptureIntentClassifier), which intelligently routes \"call mom tomorrow\" \u2192 task with detected action/date, \"take vitamin d daily\" \u2192 med with dose/frequency, etc. Preview shows \"Ready to add [entity type] [parsed details]\". Submission calls onQuickCaptureCommand. Additionally, MainActivity exposes a global CommandPaletteDialog (CommandSearchViewModel.kt) callable via onOpenCommandPalette, which surfaces: Assistant rows (\"Ask the assistant\" for questions, \"Today at a glance\" digest), Quick-capture create commands, semantic search (ChronosAppSearchBridge), and conversational assistant integration (ConversationalAssistant)\u2014all prioritized by AI (CommandAssistPlanner) and merged with recent commands. The palette is accessed from screens (DayDialScreen receives onOpenCommandPalette callback, e.g. via \u2318K on Android).",
+    "iosFlow": "iOS RootView presents a native TabView(.sidebarAdaptable). A separate floating QuickAddButton (positioned bottom-trailing, 56dp FAB) presents QuickAddSheet modally. The sheet has: (1) A text field (\"Type a task, med, habit, or goal\") that calls parseSmartFill() for preview (same ChronosCore parsing as Android); (2) A \"Create\" section with rows for each type (New block/task/meds/habits/goals, Journal, Log sleep) gated by settings.xxxEnabled flags. Tapping a row or submitting text opens an editor sheet. **iOS has NO global command palette**\u2014no global search, no \"Ask the assistant\" discovery row, no conversational command suggestions, no semantic search, no recent commands boost, no AI-assisted command ranking. The AssistantSheet exists but is buried in Today tab with manual access, not surface-level discovery.",
+    "severity": "critical",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "iOS has no global command palette or command menu. Android has two entry points for rapid task creation: (1) Quick-Add FAB with expanded menu + typed capture, and (2) a full-featured CommandPaletteDialog with semantic search, AI ranking, recent commands, and conversational assistant. iOS only has the FAB\u2192sheet, plus AssistantSheet as a separate tab.",
+        "androidBehavior": "MainActivity maintains commandPaletteVisible state and openCommandPalette callback; screens (DayDialScreen, TaskScreen, etc.) receive onOpenCommandPalette to summon CommandPaletteDialog. Keyboard shortcut (\u2318K implied) or menu access triggers CommandPaletteDialog, presenting CommandSearchViewModel with query-driven semantic results, AI-ranked captures, and assistant panel.",
+        "iosBehavior": "RootView has no global command palette or search entry point. QuickAddSheet is modal-only, triggered by floating button. AssistantSheet is a tab in Today (JournalView references 'sheet' for assistant, but no global triggering mechanism). No keyboard shortcut or menu action opens a command palette.",
+        "fix": "Add a CommandPaletteView (iOS analogue of CommandPaletteDialog) to ios/ChronosFlow/App/, integrated into RootView via a sheet(isPresented:) binding. Expose it via: (1) a 'Search' or 'Commands' tab-bar button (or menu action) that opens the palette sheet, (2) a keyboard shortcut (.keyDown with .command/.search), and (3) a callback passed to screens like DayDialScreen so they can summon it. Implement CommandSearchViewModel-like logic using ChronosCore's SemanticIndex / AI ranking. Wire QuickCaptureCommandPreview and conversational assistant into the palette results."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's quick-capture input field supports real-time preview of inferred entity type + parsed details (task with action/due-date, med with dose/frequency, etc.) plus full-sentence conversational queries routed to the assistant. iOS quick-capture only shows a generic 'Keep typing' helper text and does not offer the assistant 'Ask' row for questions.",
+        "androidBehavior": "ChronosQuickCaptureInput calls onQuickCapturePreview(capture) \u2192 previewQuickCaptureCommand(query, assistantActions) which returns QuickCaptureCommandPreview with label, title, subtitle (e.g., 'Create task from \"call mom tomorrow\"' \u2014 'Looks like a call task \u2014 prefills action \u00b7 tomorrow.'). Helper text dynamically shows 'Ready to add task', 'Keep typing for a task, med, or habit' (quickCaptureInputState). The CommandSearchViewModel.askAssistant() routes question-shaped queries to ConversationalAssistant for in-palette reasoning.",
+        "iosBehavior": "QuickAddSheet.smartFill calls parseSmartFill(capture) and shows previewLabel only if result.detections is non-empty; helper text is static 'Keep typing for a task, med, or habit.' The modal sheet only supports create-action rows; no 'Ask the assistant' option is presented for question-shaped input.",
+        "fix": "Enhance QuickAddSheet to: (1) mirror Android's previewLabel logic\u2014show 'Add task \"title\" \u00b7 [parsed details]' with formatting matching quickCaptureInputState; (2) detect question-shaped queries (isAssistantQuestionQuery pattern from CommandSearchViewModel) and surface an 'Ask the assistant' row offering to route the query to ChronosAssistant for real-time response in a sub-view; (3) store the preview label's parsed details (action, date, frequency, etc.) for form prefill if the user taps 'Create task'."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's CommandSearchViewModel integrates semantic search (SemanticPlanningIndex, AppSearchBridge), AI command ranking (CommandAssistPlanner), recent-command boosting, and a proactive daily digest row. iOS has no equivalent\u2014just the quick-capture FAB and manual AssistantSheet navigation.",
+        "androidBehavior": "CommandPaletteDialog dynamically merges: (1) recent commands (recentCommandBoosts, stored in preferences), (2) semantic search hits (semanticIndex.query, appSearchBridge.query), (3) AI-ranked quick-capture creates (commandAssistPlanner.rankCommandIds, assistIds ranking), (4) assistant suggestions (askAssistantCommand if query is question-shaped, proactiveDigestCommand if palette opens with empty query), (5) local keyword-filtered commands. Each call to dispatch(OnQueryChanged) re-ranks results by AI assistance.",
+        "iosBehavior": "iOS has no semantic search, no recent-command tracking, no AI ranking, no proactive digest row. The QuickAddSheet is static\u2014menu items appear only if enabled, with no dynamic ranking or discovery based on user history.",
+        "fix": "In ios/ChronosFlow/App/, build a SearchViewModel (Swift equivalent of CommandSearchViewModel) that: (1) wraps SemanticPlanningIndex from ChronosCore (if ported) or mirrors Android's search logic, (2) tracks recent creates in UserDefaults or Core Data (analogous to KEY_RECENT_COMMAND_IDS in Android), (3) integrates CommandAssistPlanner ranking via ChronosCore's AI model, (4) caches and displays the ProactiveDigest on palette open, (5) offers conversational 'ask the assistant' rows for question-shaped queries. Bind this into CommandPaletteView and QuickAddSheet improvements."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android surfaces quick-capture and command discovery as two integrated surfaces (FAB\u2192menu vs. Cmd+K palette). iOS separates them: FAB is quick-capture-only, AssistantSheet is a buried tab, and no command palette exists at all.",
+        "androidBehavior": "ChronosNavigationShell.COMPACT layout: bottom bar with FAB (ChronosCompactFloatingBottomBar + ChronosQuickAddMenu). ChronosNavigationShell.ADAPTIVE layout: side rail + FAB (ChronosQuickAddFab). MainActivity also hosts CommandPaletteHost at top level, callable from anywhere via openCommandPalette. Both surfaces (quick-add FAB and command palette) coexist and complement each other.",
+        "iosBehavior": "RootView: floating QuickAddButton (FAB analogue) + QuickAddSheet modal. AssistantSheet is in the Tab structure (implicitly accessed from Today or via AssistantSheet() instantiation). No single unified discovery surface for commands, searches, or assistant asks.",
+        "fix": "Reorganize RootView to: (1) keep QuickAddButton + QuickAddSheet as the quick-capture surface (equivalent to Android's FAB), (2) add a 'Search' or 'Commands' tab or toolbar button that opens CommandPaletteSheet, (3) consolidate AssistantSheet into CommandPaletteSheet as a conversational row/panel (mirroring Android's assistantPanel integration in CommandPaletteDialog). This mirrors Android's two-surface design: quick FAB for fast capture, global palette for discovery + AI suggestions."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android's ChronosQuickAddMenu is a floating glass-morphism pill (rounded surface at bottom-trailing, 260\u2013320dp wide, animated expand/collapse). iOS's QuickAddSheet is a standard modal sheet. Neither is visually styled consistently with the other\u2014they are fundamentally different presentation modes.",
+        "androidBehavior": "ChronosQuickAddMenu: surface with chronosFrostedGlass when enabled, RoundedCornerShape(28.dp), scaleIn/fadeOut animation, graphicsLayer with translationX for predictive-back gesture. Floating above bottom bar. ChronosQuickAddButton: 56dp FAB with rotation animation on the + icon.",
+        "iosBehavior": "QuickAddButton: 56dp circle with .continuous rounding (18dp), shadow. QuickAddSheet: NavigationStack \u2192 List with standard iOS styling, no glass morphism, no custom animation transitions.",
+        "fix": "In CommandPaletteSheet, apply glass-morphism styling to match iOS design language (if ChronosCore provides it) or use SwiftUI's .thinMaterial / .thickMaterial. For Quick-Add FAB, consider matching Android's animated + rotation (`.rotationEffect(quickAddExpanded ? 45 : 0)`) to signal state. Use bottom-sheet presentation (`.presentationDetents([.medium, .large])`) for CommandPaletteSheet to let users drag-dismiss, matching native iOS momentum. Sync animation timings (ChronosMotion) between sheets for parity."
+      }
+    ],
+    "iosFilesToChange": [
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/App/RootView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/App/QuickAdd.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/App/CommandPaletteView.swift (NEW FILE)",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/AI/CommandSearchViewModel.swift (NEW FILE, port from Android)",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosCore/Sources/ChronosCore/CommandSearch.swift (NEW FILE if semantic search not yet ported)"
+    ]
+  },
+  {
+    "area": "Tasks",
+    "androidFlow": "Android TaskScreen (feature/tasks/TaskScreen.kt) presents: (1) Page header with icon and subtitle; (2) Three metric tiles (Open/Urgent/Done counts); (3) Full-width \"Add task\" button; (4) TaskStatsCard for AI assistant triage summary; (5) Permission alert cards for notifications/alarms; (6) Three filter chips (Open/All/Done) with DayDial link; (7) LazyColumn list of TaskItem rows, each with checkbox, title, description, priority badge, metadata badges (alarm state, dial gap, schedule summary, connections), action cue, and footer buttons (Schedule, external action, Duplicate, Edit, Delete); (8) TaskBulkImportSheet modal for reviewing multi-line shares; (9) TaskFormSheet modal for add/edit with extensive fields; (10) TaskContextCommandSheet modal for quick actions on a task. All screens accessed via dedicated in-app screens or modals from the dial's Quick-Add menu.",
+    "iosFlow": "iOS TasksView (ios/ChronosFlow/Features/Tasks/TasksView.swift) presents: (1) NavigationStack with List; (2) Two sections only: \"Open\" and \"Completed\" (hardcoded, no filter chips); (3) ForEach loop over filtered tasks calling TaskRow; (4) Plus button (+) in toolbar opens TaskEditorSheet; (5) TaskEditorSheet for add/edit (Form-based, not a bottom sheet); (6) TaskBulkImportSheet for bulk import (modal, similar structure to Android); (7) Empty state via overlay. Missing: page header, metric tiles, stats card, permission alerts, filter chips, DayDial link button, task action cues, schedule/external-action buttons on rows, duplicate button, comprehensive metadata badges, context command sheet. List rows are minimal (checkbox, title, metadata labels only).",
+    "severity": "critical",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "Android shows Tasks as an in-app feature destination (via dial's Quick-Add menu or nav rail); iOS presents Tasks as a flat TabView member alongside other screens. Android has a dedicated TaskScreen component with header/subtitle. iOS has TasksView as a plain List view.",
+        "androidBehavior": "Tasks reached via in-app menu or navigation rail; full-featured standalone screen with back button, command palette action, and snackbar support.",
+        "iosBehavior": "Tasks is a top-level tab in TabView(.sidebarAdaptable); NavigationStack with List; no back button, no command palette integration, no snackbar host.",
+        "fix": "On iOS: Convert TasksView to match Android's full-screen shell (ChronosScreenScaffold equivalent). Add back/dismiss button, title/subtitle header, snackbar host for status messages. Integrate with command palette."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android displays three metric tiles (Open count, Urgent count, Done count) prominently below the header as row of ChronosMetricTile components; iOS TasksView has no metrics display at all.",
+        "androidBehavior": "Lines 291-305 in TaskScreen.kt: Row with three ChronosMetricTile widgets showing task counts with colored accents; refreshed every time tasks list changes.",
+        "iosBehavior": "TasksView.swift: No metric tiles; counts are implicit in the section names only.",
+        "fix": "Add a metrics row to iOS TasksView after the header, displaying Open/Urgent/Done counts with colored badges matching Android's design. Update counts reactively via computed properties."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android has a dedicated TaskStatsCard (line 318) showing 'Assistant triage' with AI-generated headline and next-step guidance; iOS has no equivalent.",
+        "androidBehavior": "TaskStatsCard composable (lines 317-379) renders a ChronosListCard with AI-generated task summary and actionable next step; located between permission alerts and filter chips.",
+        "iosBehavior": "No stats or assistant triage section in TasksView.",
+        "fix": "Add a TaskStatsCard equivalent to iOS TasksView that computes and displays task triage info (e.g., 'You have 5 open + 2 urgent' with a suggested next action). Call buildTaskAssistantSummary() or iOS equivalent on the task list."
+      },
+      {
+        "aspect": "function",
+        "description": "Android shows permission alert cards (TaskAttentionCard) for notifications and exact alarms when permissions are missing or urgent tasks exist; iOS does not surface these alerts in the task list.",
+        "androidBehavior": "Lines 322-346: Two conditional TaskAttentionCard blocks for notification and exact-alarm permissions; auto-dismiss or user-dismissible; appear above filter chips.",
+        "iosBehavior": "TasksView.swift has no permission alerts; no alarm/notification flow shown in task list.",
+        "fix": "Add iOS TaskAttentionCard equivalents (or a dedicated permission banner) to TasksView that detect alarm/notification permissions and show alerts when urgent tasks exist and permissions are missing. Add toggle actions to enable permissions."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android provides three filter chips (Open/All/Done) to dynamically filter the displayed task list; iOS only shows two hardcoded List sections (Open/Completed) with no filter mechanism.",
+        "androidBehavior": "Lines 386-393: FlowRow with ChronosFilterChip for each TaskFilter enum; selected state toggles filter; shown just before task list.",
+        "iosBehavior": "TasksView.swift lines 31-40: Hardcoded Section(\"Open\") and Section(\"Completed\"); no dynamic filter UI.",
+        "fix": "Add filter chips row above the task List in iOS (Open/All/Done); wire selection to a @State var and filter tasks accordingly. Dismiss/rehide Done section when filter == .open."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskScreen includes a 'DayDial' button (line 396-400) next to filter chips that opens the day-planning dial; iOS has no equivalent.",
+        "androidBehavior": "ChronosOutlinedButton with Today icon labeled 'DayDial' conditionally shown if onOpenDayDial callback is provided; taps it to launch the dial.",
+        "iosBehavior": "No DayDial button in TasksView; no dial integration from Tasks screen.",
+        "fix": "Add a DayDial button to iOS TasksView (next to or below filter chips) that navigates to the day dial. Pass onOpenDayDial callback from parent shell."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android TaskItem rows are rich, with: priority badge, description text, alarm state badge, dial gap badge, schedule summary badge, connection summary badge, action cue text, and footer buttons (Schedule, external action, Duplicate, Edit, Delete). iOS TaskRow is minimal: checkbox, title, and small labels (priority, due date, recurrence, checklist progress).",
+        "androidBehavior": "TaskItem composable (lines 628-859) renders full metadata and action buttons on each task.",
+        "iosBehavior": "TaskRow (lines 101-169) shows only: checkbox, title, priority label, due date label, recurrence label, and checklist count \u2014 no descriptions, no action buttons, no badge colors.",
+        "fix": "Expand iOS TaskRow layout to mirror Android: add description text (3-line ellipsis), priority badge with color, add full metadata badges (schedule, connections, alarm state) using colored containers, add footer buttons (Schedule, Edit, Delete, Duplicate). Use HStack/VStack for proper layout. Apply strikethrough and opacity for completed tasks."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskItem displays a formatted 'action cue' (line 761-766) below metadata badges telling the user what happens when they tap the task (e.g., 'Tap for actions \u00b7 Call John' or 'Tap for actions \u00b7 Edit and schedule'). iOS has no action cue.",
+        "androidBehavior": "Lines 1140-1158: taskContextCue() function returns a human-readable prompt based on task state, external commands, and schedule; rendered in labelSmall font at bottom of task row.",
+        "iosBehavior": "No action cue in TaskRow.",
+        "fix": "Compute and display an action cue at the bottom of each iOS TaskRow (e.g., 'Tap to schedule' or 'Tap for actions'). Port taskContextCue() logic to iOS."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskItem includes a Schedule button (line 780-800) that is always visible for open tasks and shows contextual text ('Schedule' or 'Add occurrence' if recurring). iOS TaskRow has no Schedule button at all.",
+        "androidBehavior": "ChronosFilledTonalButton with EventAvailable icon and label from taskScheduleActionLabel(); onSchedule callback fires when tapped.",
+        "iosBehavior": "No schedule/occurrence button in TaskRow.",
+        "fix": "Add a Schedule button (or 'Add occurrence' for recurring tasks) to iOS TaskRow footer, visible only for open tasks. Call the viewModel's scheduleTaskToday() or equivalent on tap."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskItem includes an External Action button (line 803-814) that displays the primary external command's shortLabel (e.g., 'Call', 'Email') for open tasks with linked actions. iOS has no such button.",
+        "androidBehavior": "ChronosOutlinedButton conditionally shown if primaryExternalCommand != null && !task.isCompleted; label = primaryExternalCommand.shortLabel; onOpenContext callback.",
+        "iosBehavior": "No external action button in TaskRow.",
+        "fix": "Port taskExternalCommandSet() logic to iOS and add an External Action button to TaskRow footer. Button label = primary command shortLabel (e.g., 'Call'). Tap opens the TaskContextCommandSheet (or port Android's logic to iOS)."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android TaskItem footer has a three-button row (Schedule + optional external action, on left; Duplicate, Edit, Delete on right) arranged to balance space. iOS TaskRow is tap-to-edit-only with swipe-delete; no action buttons visible.",
+        "androidBehavior": "Lines 770-856: Two Row sections \u2014 left has buttons (Schedule, external action), right has icon buttons (Duplicate, Edit, Delete).",
+        "iosBehavior": "TaskRow: onTapGesture opens edit sheet; .onDelete modifier on the ForEach provides swipe-to-delete.",
+        "fix": "Add a footer button row to iOS TaskRow with Schedule, External Action (if applicable), Duplicate, Edit, and Delete buttons. Use .swipeActions if preferred for Delete, or add visible button. Ensure layout matches Android's two-column arrangement."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskItem displays up to 4 metadata badges: alarm state (if urgent), dial gap (if unscheduled), schedule summary (if scheduled), and connection summary (if contact/action/attachment). iOS TaskRow shows only simple labels (priority, due date, recurrence, checklist count) with no colors or icons.",
+        "androidBehavior": "Lines 709-758: FlowRow of TaskMetadataBadge components with icons and colored containers (error, primary, secondary, tertiary).",
+        "iosBehavior": "Lines 119-136: Simple Text labels in HStack; no colors, no icons, no containers.",
+        "fix": "Port taskScheduleSummary(), taskConnectionSummary(), taskDialGapLabel(), and alarmStateLabel() functions to iOS. Render each as a colored Surface/capsule badge with icon and text, matching Android's visual design. Use appropriate colors (error, primary, secondary, tertiary) for each badge type."
+      },
+      {
+        "aspect": "function",
+        "description": "Android shows a description field (2-3 line preview) in each TaskItem row; iOS shows none.",
+        "androidBehavior": "Lines 699-707: task.description rendered as bodyMedium text with 3-line max and ellipsis.",
+        "iosBehavior": "TaskRow has no description display.",
+        "fix": "Add an optional description preview (3-line, ellipsized) to iOS TaskRow below the title, using bodyMedium style and onSurfaceVariant color."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet includes a 'Suggest details with AI' button (line 1258-1286) that calls onRequestAssist with context; iOS TaskEditorSheet has no AI assist button in the main form.",
+        "androidBehavior": "ChronosFilledTonalButton with label 'Suggest details with AI' (or 'Refresh suggestions') that triggers AI assist; shows loading state and suggestion chips below.",
+        "iosBehavior": "TaskEditorSheet.swift has only textTools.isAvailable menu for AI rewrite of the notes field (line 86-96); no AI assist for task details (title, priority, schedule, checklist, etc.).",
+        "fix": "Add an 'Suggest details with AI' button to iOS TaskEditorSheet that calls the Assist API with title/detail/priority/date context and surfaces suggestion chips for applying individual suggestions or all at once. Port the Android suggestion chip UI."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet surfaces AI suggestion chips below the 'Suggest details with AI' button (lines 1306-1317) for title, action, schedule, checklist, and priority; iOS TaskEditorSheet has no such chip UI.",
+        "androidBehavior": "ChronosAssistSuggestionChips composable shows ranked suggestions with reasons and a 'Apply all' action; individual chips apply their suggestion on tap.",
+        "iosBehavior": "No suggestion chip display in TaskEditorSheet.",
+        "fix": "Port ChronosAssistSuggestionChips to iOS and display below the Assist button. Each suggestion should show label, reason, and apply/dismiss state. Support Apply All action."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet shows a TaskTitleSmartFillCard (lines 1099-1104) for the offline title parser detections (date, time, priority, duration, recurrence, action); iOS TaskEditorSheet has no equivalent card.",
+        "androidBehavior": "Card appears below the title field when smart-fill detections are made; user can apply all or dismiss; applies all fields to the draft.",
+        "iosBehavior": "TaskEditorSheet.swift has SmartFillPreviewCard (lines 99-109) but it's in a separate Section and styled differently (glassy card).",
+        "fix": "Ensure iOS SmartFillPreviewCard is positioned and styled to match Android's placement and visual treatment (below title field, with Apply All / Dismiss buttons). Verify all detection types (date, time, priority, duration, recurrence, action) are shown and applicable."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet has a 'Shared from [App]' filter chip (line 1129-1133) showing the source app when the task was pre-filled via share intent; iOS TaskEditorSheet shows this as a Label in the form (lines 78-83).",
+        "androidBehavior": "ChronosFilterChip(selected=false) with label 'Shared from [AppName]'; positioned in Essentials section above title field.",
+        "iosBehavior": "Label(\"Shared from \\(source)\") styled with .chronosCaption; positioned in the same section as title/notes fields.",
+        "fix": "Convert iOS 'Shared from' Label to a pill/chip-style Surface (or use ChronosFilterChip equivalent) to match Android's visual treatment."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet shows a gentle duplicate-task warning (lines 1108-1123) when a new task's title matches an existing task, with a button to open the existing task. iOS has no such warning.",
+        "androidBehavior": "Conditional Text + Button('Open the existing task instead') shown if duplicateTaskWarning != null.",
+        "iosBehavior": "No duplicate warning in TaskEditorSheet.",
+        "fix": "Add duplicate-task detection and warning UI to iOS TaskEditorSheet. When a new task title matches an existing one (case-insensitive), show a warning label and an 'Open existing' button."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet has an 'Add & new' toggle and button (lines 1395-1401 for the toggle, lines 1024 for the button logic); iOS TaskEditorSheet shows 'Add & new' as a button in the toolbar (lines 192-199) only when creating a new task, but no persistent toggle.",
+        "androidBehavior": "ChronosFormSwitchRow titled 'Keep adding after this' with subtitle; when checked, the confirm button label changes to 'Add & new' and the form resets.",
+        "iosBehavior": "Button(label: 'Add & new') in toolbar; taps it to call saveDraft() and resetDraft() directly.",
+        "fix": "Move the 'Add & new' button to a toggle/switch in the form body (or keep as toolbar button but ensure state persists across multiple adds). Verify iOS saveDraft() + resetDraft() flow mirrors Android's behavior."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet displays a 'Keep adding after this' description below the toggle: 'Stay here and reset the form so you can add several tasks in a row.' iOS has no such explainer.",
+        "androidBehavior": "ChronosFormSwitchRow with subtitle (line 1398).",
+        "iosBehavior": "iOS button has no subtitle/context.",
+        "fix": "If iOS uses a toggle, add a subtitle explaining the behavior. If a button, consider a brief inline label or help text."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet has a rich schedule section (lines 1421-1536) with contextual duration/date/time pickers, a 'Scheduling summary' card, and recurrence UI. iOS TaskEditorSheet has toggle-based date/repeat pickers (lines 128-150) but no contextual chip suggestions or summary card.",
+        "androidBehavior": "ChronosOptionChips for Duration/TargetDay/PreferredStart with context-aware suggestions; summary card showing 'Targeting today \u2022 1h block \u2022 Start around 9:00 AM \u2192 ends ~10:00 AM'; recurrence section with cadence, interval, weekdays, ordinal, etc.",
+        "iosBehavior": "Toggle 'Has due date' + DatePicker; Toggle 'Repeats' + Picker(Frequency) + Stepper + WeekdaySelector. No summary card, no contextual suggestions.",
+        "fix": "Significantly expand iOS schedule section to include: (1) ChronosOptionChips for duration/date/time suggestions (port contextualTask[Duration|Date|Time]PickerOptions logic), (2) Add 'Scheduling summary' card showing formatted time block and end time, (3) Expand recurrence UI to support monthly ordinal weekday, start/end dates, and recurring reminders, (4) Add summary card for recurrence showing 'Every 2 Mondays' or similar."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet has full recurrence support (lines 1538-1798) including daily/weekly/monthly (day-of-month), monthly (ordinal weekday), weekday selection, start/end dates, and recurring reminders with AT_TIME or BEFORE_OCCURRENCE triggers. iOS TaskEditorSheet only supports daily/weekly/monthly (no ordinal), no weekday selection UI, no start/end dates, no reminders.",
+        "androidBehavior": "Full TaskRecurringConfig model with cadence, interval, weekdays, dayOfMonth, ordinal, ordinalWeekday, startsOn, endsOn, reminderDrafts[]. UI includes Stepper, ChronosOptionChips, FlowRow, and nested reminder cards.",
+        "iosBehavior": "RecurrenceSpec with frequency (daily/weekly/monthly), interval, weekdays (for weekly only). No UI for ordinal, start/end dates, or reminders.",
+        "fix": "Expand iOS TaskItem.recurrence to match Android's TaskRecurringConfig fields. Add UI sections for: (1) Ordinal selection (1st, 2nd, 3rd, 4th, last) + weekday picker for monthly-ordinal recurrence, (2) Start and end date pickers, (3) Recurring reminders section with AT_TIME vs. BEFORE_OCCURRENCE toggle and time/offset picker, with Add/Remove buttons."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet has a collapsible 'Connected files' section (lines 916-920) showing attachment previews, pick buttons, and featured image display. iOS TaskEditorSheet has no attachment/file management UI.",
+        "androidBehavior": "Sections for linked contact, actions (email, phone, link, etc.), and attachments (images, documents) with picker launchers and preview cards.",
+        "iosBehavior": "No contact picker, action list, or attachment management in TaskEditorSheet.",
+        "fix": "Add iOS equivalent sections for: (1) Linked contact with picker button, (2) Task actions (email, phone, link, map) with add/remove UI, (3) Attachments/images with picker and featured image selector. Port TaskActionDraft and TaskAttachmentDraft models to iOS if not already present."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet includes goal detection and linking (lines 1319-1335) that detects a goal from task title/description and offers a one-tap 'Link to goal: [GoalName]' button. iOS has no goal detection.",
+        "androidBehavior": "detectGoalIdFromText() scans title+description against goal options; conditional button shown if a goal is detected and not yet linked.",
+        "iosBehavior": "TaskEditorSheet has no goal linking UI at all.",
+        "fix": "Add a Goal section to iOS TaskEditorSheet with a Picker or Link button. Implement goal detection (port detectGoalIdFromText logic) and show a detection prompt if a goal matches the typed title/description."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet displays checklist items with reorder/delete (lines within the Checklist section); iOS TaskEditorSheet supports reorder (.onMove) and delete (.onDelete) but no visual feedback for reordering other than the swipe gestures.",
+        "androidBehavior": "List of checklist items with drag-handle icons and delete swipe; items are reorderable via list gestures.",
+        "iosBehavior": "ForEach($checklist) { $item in HStack { toggle, TextField } } with .onMove and .onDelete; implicit drag reorder (iOS List default).",
+        "fix": "Ensure iOS checklist reorder is visually clear (add drag-handle icon or show reorder state). Consider adding visual feedback (slight opacity/offset) during drag."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet has a button to add checklist items from the description text (lines within Checklist section): 'Add [N] step(s) from notes'. iOS has a similar button (lines 170-177) but it's labeled differently and positioned in the same checklist section.",
+        "androidBehavior": "ChronosFilledTonalButton conditionally shown if descriptionChecklistCandidates.isNotEmpty(); label includes count.",
+        "iosBehavior": "Button(\"Add \\(count) step(s) from notes\") styled inline in the Checklist section.",
+        "fix": "Ensure iOS button styling matches Android (FilledTonalButton equivalent) and positioning is consistent."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet includes a voice/speech input button (lines 1160-1255) labeled 'Dictate task' that triggers speech-to-text and parses the transcript for scheduling, priority, actions, and contacts. iOS TaskEditorSheet has no voice input.",
+        "androidBehavior": "ChronosSpeechInputButton with custom prompt; onTranscript callback parses and applies suggestions.",
+        "iosBehavior": "No speech input in TaskEditorSheet.",
+        "fix": "Add a speech input button to iOS TaskEditorSheet that transcribes spoken input and applies detected scheduling, priority, actions, and contacts to the draft (port Android's parsing logic)."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet shows description rewrite UI (lines 1146-1158) with a ChronosTextRewriteRow offering styles (improve, shorten, expand, professional, casual, fun). iOS TaskEditorSheet has a simple 'AI rewrite' menu in the notes field (lines 86-96) with ChronosTextOp choices.",
+        "androidBehavior": "ChronosTextRewriteRow composable with style selection and Apply/Dismiss buttons.",
+        "iosBehavior": "Menu { ForEach(ChronosTextOp.allCases) { Button { rewriteNotes(op) } } }.",
+        "fix": "Ensure iOS rewrite UI is styled and positioned similarly to Android. If iOS uses a menu, verify all rewrite styles are available and the UI is discoverable."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskScreen includes a TaskContextCommandSheet (lines 555-562, 899-977) that displays quick actions available for a task (call, email, link, map, app, files, schedule, edit, complete). iOS has no equivalent quick-action sheet.",
+        "androidBehavior": "Bottom sheet shows task title, count of quick actions, a primary command (emphasized), and remaining options. Tapping a command fires the action (internal or external).",
+        "iosBehavior": "No context command sheet; task actions are not visible or accessible from the task list.",
+        "fix": "Port Android's TaskContextCommandSheet to iOS. Display as a BottomSheetModifier or ConfirmationDialog. Show primary action emphasized and remaining actions listed. Support internal actions (Schedule, Edit, Complete) and external actions (Call, Email, Link, Map, etc.)."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskScreen automatically requests AI assist on context capture (lines 799-828); iOS has no auto-assist on task entry.",
+        "androidBehavior": "LaunchedEffect monitors taskTitle/description/taskCaptureContext and debounces a request to onRequestAssist if conditions are met.",
+        "iosBehavior": "User must manually tap 'Suggest details' (if implemented) to trigger assist.",
+        "fix": "Implement auto-assist detection in iOS TaskEditorSheet (monitor title/detail changes and auto-request after a debounce delay if assist is available)."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet has auto-apply assist suggestions for new tasks (lines 892-906) if a UI setting enables it; iOS has no auto-apply setting or logic.",
+        "androidBehavior": "If autoApplyAssistEnabled && target is Add, automatically apply applicable suggestions (e.g., title, priority, schedule).",
+        "iosBehavior": "All suggestions require manual taps to apply (via SmartFillPreviewCard 'Apply all').",
+        "fix": "Add an optional auto-apply assist setting to iOS (if iOS supports such settings) and implement logic to automatically apply non-destructive suggestions."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskBulkImportSheet runs each candidate title through the smart-fill parser (line 441-449 in TaskScreen.kt onImport logic) to pre-fill scheduling, priority, and recurrence before creating tasks. iOS TaskBulkImportSheet does the same (lines 88-105 in TaskBulkImportSheet.swift).",
+        "androidBehavior": "Each selected title is parsed by taskTitleSmartFill or equivalent; detected fields are set on the new task.",
+        "iosBehavior": "Each selected title is parsed by parseSmartFill (line 95); detected fields populate dueDate, priority, recurrence.",
+        "fix": "Verify both implementations are in sync. Ensure iOS applies all detected fields (priority, due date, target date, recurrence) consistently with Android."
+      },
+      {
+        "aspect": "function",
+        "description": "Android TaskFormSheet shows 'Open the existing task instead' button (line 1119-1123) when a duplicate task name is detected; iOS has no such convenience action.",
+        "androidBehavior": "onOpenExistingTask callback passed to sheet; button taps it with the title string.",
+        "iosBehavior": "No button or flow to open existing task.",
+        "fix": "Add callback to iOS TaskEditorSheet to open an existing task by title. Button should trigger this callback."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android TaskItem rows are visually distinct from each other with spacing and ChronosListCard containers; iOS TaskRow items have no container or visual separation (just list rows).",
+        "androidBehavior": "Each TaskItem wrapped in ChronosListCard with spacing/padding.",
+        "iosBehavior": "List rows with default separator.",
+        "fix": "Wrap iOS TaskRow in a card-like Surface or use list row custom styling to provide visual separation matching Android's ChronosListCard appearance."
+      }
+    ],
+    "iosFilesToChange": [
+      "ios/ChronosFlow/Features/Tasks/TasksView.swift",
+      "ios/ChronosFlow/Features/Tasks/TaskEditorSheet.swift",
+      "ios/ChronosFlow/Features/Tasks/TaskBulkImportSheet.swift",
+      "ios/ChronosFlow/Features/Tasks/TaskTemplate.swift",
+      "ios/ChronosFlow/Models/TaskItem.swift"
+    ]
+  },
+  {
+    "area": "Habits \u2014 streak tracking, consistency cards, missed-habit repair, habit lifecycle (complete/pause/skip/defer), list organization",
+    "androidFlow": "Android (feature/habits/HabitScreen.kt): Main habits list is a scrollable LazyColumn. At top: header + 3 metric tiles (Active / Best streak / Done today) + Add button. Then HabitConsistencyCard (14-day bar chart with headline), HabitStreakChart (top-5 habits by streak as horizontal bars), HabitRepairPanel (AI suggestions card), then list of HabitRows. Each HabitRow: title + action icons (Edit/Archive) + status pills (Due/Paused/Cadence/Streak/Adherence/BestTime) + 7-day week strip (dots M\u2013S) + deferred status + actions (Complete button, More button). HabitContextActionSheet modal for full lifecycle: Complete, Defer (1hr), Skip, Pause/Resume, Edit, Duplicate, Archive. HabitRepairPanel shows reason + time slot + source label (Smart/AI) + Complete button.",
+    "iosFlow": "iOS (ios/ChronosFlow/Features/Habits/HabitsView.swift): Identical list structure (ScrollView + LazyVStack). Metric tiles at top (Active / Best streak / Done today). Habits present when non-empty. HabitCard: title + subtitle row (flame icon + streak, cadence, window, difficulty) + optional deferred note + 7-day week strip + status pills + Quick-complete circle button. Repair panel uses ChronosGlassCard (vs Android's ChronosListCard), shows \"Schedule at\" label + time range + source label (On-device AI / Smart). Actions differ: HabitCard has inline circle-complete button visible; full lifecycle (defer/skip/pause) accessible via HabitContextActionSheet (.medium/.large sheet). Editor uses List form (Form, Picker sections) \u2014 not a bottom sheet.",
+    "severity": "high",
+    "divergences": [
+      {
+        "aspect": "organization",
+        "description": "HabitCard structure and visual hierarchy differ. Android displays status as inline pills below a text summary. iOS shows flame icon + streak + cadence + window + difficulty in one subtitle row, then separate status pills row. iOS adds visible circle-complete button inline, Android keeps it in action row below.",
+        "androidBehavior": "HabitRow displays title, then FlowRow of status pills (Due/Paused/Cadence/Streak/Adherence), then window info and difficulty as separate Text line, then weekstrip, then action buttons (Complete, More) at bottom.",
+        "iosBehavior": "HabitCard shows title, then one subtitle row with flame+streak, cadence, window, difficulty all inline with labels+icons. Status pills displayed separately below weekstrip. Large circular complete button (doneToday ? filled checkmark : empty circle) always visible top-right, alongside ellipsis menu.",
+        "fix": "Restructure iOS HabitCard subtitle to match Android's text-only format: remove the flame icon and integrated labels from the subtitle row. Move streak display to status pills row. Make complete action (filled pill or dedicated button below title) not a large circle button. Keep the icons and inline completeness indication, but restructure the visual organization to primary-text\u2192pills\u2192weekstrip\u2192actions pattern matching Android."
+      },
+      {
+        "aspect": "function",
+        "description": "Missed-habit repair suggestion text layout differs. Android shows reason + time range in one line ('${reason}. HH:MM-HH:MM'). iOS shows reason on separate line, then time range on its own line prefixed with 'Schedule at'.",
+        "androidBehavior": "Text combines reason and suggested time in a single bodySmall line: '${suggestion.reason}. ${formatDisplayMinute(suggestedStartMinute)}-${formatDisplayMinute(suggestedEndMinute)}'. Source label displayed separately below on a third line (labelSmall, primary color).",
+        "iosBehavior": "Suggestion laid out vertically: title, reason, then HStack with 'Schedule at HH:MM\u2013HH:MM' label (systemImage: calendar.badge.plus) and source label on same line right-aligned.",
+        "fix": "iOS repair suggestion layout should condense to Android's pattern: combine reason + time on one line ('${reason}. ${startMinute}-${endMinute}'), remove the 'Schedule at' prefix and calendar icon, and place source label on its own line below, matching Android's label styling."
+      },
+      {
+        "aspect": "visual",
+        "description": "Repair panel container styling: Android uses ChronosListCard (opaque card), iOS uses ChronosGlassCard with primary tint. The card styling and surrounding visual treatment differs.",
+        "androidBehavior": "HabitRepairPanel wrapped in ChronosListCard with standard card styling. Header row: AutoFixHigh icon + 'Missed-habit repair' title.",
+        "iosBehavior": "HabitRepairPanel wrapped in ChronosGlassCard(tint: brandPrimary) with glass/frosted appearance and tint coloring. Header uses wand.and.stars icon instead of AutoFixHigh.",
+        "fix": "Change iOS repair panel container from ChronosGlassCard to ChronosListCard (or equivalent opaque card). Change icon from 'wand.and.stars' to 'AutoFixHigh' (or equivalent Material icon). Remove the tint parameter so the card matches Android's neutral styling."
+      },
+      {
+        "aspect": "function",
+        "description": "Habit editor surface and interaction model: Android shows an expanded bottom sheet (ChronosFormBottomSheet, large compact expandable form). iOS shows a NavigationStack inside a sheet with List-based Form, supporting edit mode for existing habits. iOS supports edit mode (passing existing habit), Android uses separate Edit vs Add sheet targets.",
+        "androidBehavior": "HabitFormSheet is a composable that receives HabitSheetTarget (Add with optional prefillTitle, or Edit with habit). Displays a full bottom sheet with cadence picker, difficulty slider, time window picker, linked goal, schedule recurrence picker, templates, history hints, etc.",
+        "iosBehavior": "HabitEditorSheet receives optional habit (for editing) or initialTitle (for adding). Uses NavigationStack \u2192 Form with DatePicker (for times), Slider, Toggle, Picker sections. When habit is non-nil, edits existing; when nil, creates new. Uses .presentationDetents([.medium, .large]).",
+        "fix": "iOS HabitEditorSheet's edit mode and date/time picker need alignment check: verify that Android's time-window picker (ChronosTimeWindowControls showing minute-of-day intervals) matches iOS's DatePicker (hour + minute). Ensure both support the same cadence/recurrence presets and schedule options. iOS appears to have edit support but Android's code paths should be verified to match; if iOS supports edit and Android does via separate edit target, that's compatible but document the difference."
+      },
+      {
+        "aspect": "navigation",
+        "description": "Habit lifecycle access pattern: Android shows all actions in a context-action-sheet modal (Complete, Defer, Skip, Pause/Resume, Edit, Archive). iOS shows same actions but in a List-based sheet with separate sections (lifecycle actions, edit/duplicate/archive). Context menu accessed via 'More' button on Android, ellipsis + onMore callback on iOS.",
+        "androidBehavior": "HabitRow displays 'More' button that opens HabitContextActionSheet (ChronosModalBottomSheet). Actions laid out as full-width buttons: Complete, Defer, Skip, Pause/Resume, Edit, Archive.",
+        "iosBehavior": "HabitCard displays ellipsis button top-right that sets contextHabit, triggering HabitContextActionSheet (NavigationStack + List with Sections). Same actions but in List rows with structured sections (lifecycle, edit, destructive archive).",
+        "fix": "iOS structure is functionally equivalent but uses List UI instead of stacked buttons. This is acceptable iOS convention, but ensure all actions (Complete, Defer, Skip, Pause/Resume, Edit, Archive, Duplicate) are present and functional. Verify button order and grouping match Android's mental model (actions on top, edit/manage in middle, archive at bottom as destructive)."
+      },
+      {
+        "aspect": "visual",
+        "description": "Week-strip dot sizing and layout: Android uses Box (16dp x 16dp, RoundedCornerShape(6.dp)) with filled/empty background. iOS uses Circle (10x10) with optional strokeBorder overlay for today. Visual appearance is subtly different (square-ish vs circular).",
+        "androidBehavior": "HabitWeekStrip displays 7 days as a Row of Boxes (16dp size, 6dp corner radius, filled with primary/todayEmpty/empty colors). Day initial shown below as Text (labelSmall, black/gray).",
+        "iosBehavior": "Displays 7 days as VStacks of Circles (10dp diameter) with optional strokeBorder (1.5pt primary color when today). Day initial shown below as Text (system size 9pt).",
+        "fix": "iOS week strip should use 16dp squares with 6dp corner radius (RoundedRectangle) instead of 10dp circles. This matches the visual density and squarer aesthetic of Android's week strip. Ensure color values (filled=brandSecondary, todayEmpty=brandSecondary.opacity(0.28), empty=outline.opacity(0.22)) align with Android's primary/todayEmpty/empty palette."
+      },
+      {
+        "aspect": "visual",
+        "description": "Consistency card and streak chart cards: Android uses ChronosListCard, iOS uses ChronosGlassCard. The card container styling differs significantly (opaque vs frosted glass).",
+        "androidBehavior": "ConsistencyCard and StreakChart both wrapped in ChronosListCard. Standard opaque card appearance.",
+        "iosBehavior": "ConsistencyCard and StreakChartCard both wrapped in ChronosGlassCard. Frosted glass appearance with semi-transparency.",
+        "fix": "Change iOS ConsistencyCard and StreakChartCard from ChronosGlassCard to ChronosListCard to match Android's opaque card styling. This is a visual consistency change across the habits list."
+      }
+    ],
+    "iosFilesToChange": [
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Habits/HabitsView.swift"
+    ]
+  },
+  {
+    "area": "Goals",
+    "androidFlow": "Android (feature/goals/): Goals is a full standalone screen route (ChronosRoute.Goals) opened via cross-section navigation from the shell. It's NOT a tab inside DayDialScreen. Accessed via: (1) QuickAdd menu \u2192 \"New goal\" command, or (2) bottom-bar shell navigation (when expanded via navigation rail on tablets). The feature is module-optional (goalsEnabled flag) and fully managed by GoalViewModel with reactive updates to goal list and linked-work counts via composable state management.",
+    "iosFlow": "iOS (ios/ChronosFlow/Features/Goals/): Goals is a TabSection member under \"Track\" inside a flat Tab(View).sidebarAdaptable structure. It is a top-level navigation destination (equivalent to Tasks, Habits, etc.), NOT integrated into DayDialScreen. Accessed via: RootView tabShell \u2192 .goals tab selection. Feature toggles on/off in Settings (settings.goalsEnabled). Linked work is queried live via @Query on TaskItem/Habit filtered by goalID; goal list via @Query<Goal>; no formal ViewModel layer \u2014 SwiftData models directly expose save/delete via modelContext.",
+    "severity": "high",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "Android: Goals is a cross-section destination (accessed via shell navigation or QuickAdd command). iOS: Goals is a TabSection member nested under 'Track' in a flat TabView, with no integration into the Plan/Today/Focus triad.",
+        "androidBehavior": "Goals opened via ChronosRoute.Goals from the shell's back-stack navigation. Can be launched with prefilled data (e.g., capture text from QuickAdd).",
+        "iosBehavior": "Goals accessed via $selection = .goals in RootView.tabShell. No support for pre-filled launch data from QuickAdd.",
+        "fix": "Lift Goals to a dedicated tab in RootView.tabShell (not nested in TabSection), so it becomes a primary shell destination. Accept a 'prefill' state in GoalsView via .onOpenURL or environment injection to mirror Android's initialAddCapture parameter. Route QuickAdd 'New goal' \u2192 selection = .goals (already works for tab switch, but lacks capture prefill). Files: ios/ChronosFlow/App/RootView.swift, ios/ChronosFlow/Features/Goals/GoalsView.swift."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android: Goal list is a single scrollable screen with Active/Completed sections, metric tiles, optional overdue banner, and optional category filter row. iOS: Same layout, but accessed as a separate TabSection member instead of a primary shell destination.",
+        "androidBehavior": "GoalScreen renders in-place with all sections (metrics, filter, active list, completed section with show/hide toggle). The screen is a full destination so the back stack can push/pop it.",
+        "iosBehavior": "GoalsView renders the same layout (metrics, filter, sections), but as part of a tab (not a back-stack destination). No explicit 'back' button; tab switch is the navigation mechanism.",
+        "fix": "Move Goals from TabSection('Track') to a top-level Tab at the same level as Plan/Today/Focus/Tasks. Preserve the existing GoalsView layout. This aligns iOS with Android's 'Goals is a full destination' model. File: ios/ChronosFlow/App/RootView.swift lines 88-98."
+      },
+      {
+        "aspect": "function",
+        "description": "Android: +1 increment button in GoalCard calls onIncrement, which triggers viewModel.adjustProgress(goal, 1). iOS: +1 and -1 buttons directly mutate goal.progressValue in the onTapGesture closure. No validation that the adjusted value stays within 0...targetValue bounds during the edit.",
+        "androidBehavior": "GoalCard onClick \u2192 onIncrement callback \u2192 GoalViewModel.adjustProgress(goal, delta) \u2192 clamps to 0..targetValue in the ViewModel, then saves via goalRepository.",
+        "iosBehavior": "GoalCard button \u2192 adjust() closure \u2192 goal.progressValue = max(0, min(next, max(targetValue, 0))) \u2192 try? context.save(). The clamping logic is identical to Android, but happens inline in the View, not in a ViewModel.",
+        "fix": "No change needed \u2014 the iOS implementation correctly clamps progress. However, for consistency with Android's ViewModel-driven pattern, optionally lift the adjust() logic into a computed property or a lightweight ViewModel so it's testable and consistent with Android architecture. If this is low-priority, the current GoalCard implementation is functionally correct. Files: ios/ChronosFlow/Features/Goals/GoalsView.swift lines 221-228 (adjust function)."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android: Goal metric tiles show 'Active' and 'Completed' counts in a 2-column row. iOS: Same layout (MetricTile with value/label), but uses ChronosGlassCard tone/tint instead of Android's ChronosMetricTile component styling.",
+        "androidBehavior": "ChronosMetricTile (from core/ui/components) renders count and label with a specific design. iOS MetricTile is a custom local struct inside GoalsView.",
+        "iosBehavior": "MetricTile is a private struct in GoalsView using ChronosGlassCard(tone: .quiet, tint:...). Visual style differs from Android's shared component.",
+        "fix": "Extract the iOS MetricTile into a shared ChronosCore component (ios/ChronosCore/Sources/.../MetricTile.swift) and mirror the Android ChronosMetricTile's appearance so reuse is consistent across screens. Alternatively, confirm both implementations' visual output are equivalent via screenshots. Current implementation is functionally equivalent. Files: ios/ChronosFlow/Features/Goals/GoalsView.swift lines 233-246 (MetricTile)."
+      },
+      {
+        "aspect": "function",
+        "description": "Android: Category filter row only shows once 2+ categories are in use (checked via remember(goals) { goalCategoriesInUse(goals) }). iOS: Same logic, but the filter chip selection works differently \u2014 clicking 'All' clears selectedCategory, and re-clicking a category toggles it off.",
+        "androidBehavior": "ChronosOptionChips with selected / onSelected callback. Filter is exclusive: selecting a category sets it, 'All' clears the filter.",
+        "iosBehavior": "FilterChip is a toggle: tapping 'All' sets selectedCategory = nil, tapping a category toggles selectedCategory = (category == selected) ? nil : category. This means tapping a category twice deselects it (toggle), not re-filtering.",
+        "fix": "Change the FilterChip toggle logic in iOS to match Android's exclusive selection (no toggle-off on re-tap). Replace lines 126-130 in GoalsView.swift: change `selectedCategory = (selectedCategory == cat) ? nil : cat` to `selectedCategory = cat` so re-tapping the same category does NOT deselect it. This matches Android's ChronosOptionChips behavior. File: ios/ChronosFlow/Features/Goals/GoalsView.swift lines 126-130."
+      },
+      {
+        "aspect": "function",
+        "description": "Android: GoalFormSheet accepts a prefillTitle parameter on add and can suggest a category/target from keywords/numbers in the title. iOS: GoalEditorSheet uses SwiftUI Form and supports category suggestions and target extraction. Both have nearly identical logic, but iOS's implementation is inside GoalsView as a struct instead of a shared module.",
+        "androidBehavior": "GoalFormSheet is a composable in the feature module. Keyword suggestions and target extraction live in GoalFormSheet.kt helpers (suggestGoalCategory, goalTargetFromTitle, etc.). iOS port mirrors this via GoalLabels in ChronosCore.",
+        "iosBehavior": "GoalEditorSheet is defined inside GoalsView.swift and uses GoalLabels (from ChronosCore) for all helpers. The form layout matches Android exactly (title, description, category chips with custom entry, target with quick picks, collapsible Details for date/notes). Feature parity is complete.",
+        "fix": "No change needed \u2014 iOS has full feature parity with Android via GoalLabels. Both support: category suggestions (suggestGoalCategory), target extraction from title (goalTargetFromTitle), deadline presets (goalDeadlinePresets), and warnings (goalTargetBelowProgressWarning, goalTargetDateWarning). All helpers are shared in ChronosCore."
+      },
+      {
+        "aspect": "function",
+        "description": "Android: GoalDetailSheet shows linked tasks/habits fetched via GoalViewModel.detailLinkedWork (a StateFlow<GoalLinkedWork>). iOS: GoalDetailView uses @Query filters on TaskItem/Habit by goalID and recomputes counts live.",
+        "androidBehavior": "GoalViewModel.detailLinkedWork emits GoalLinkedWork with tasks/habits. Detail sheet opens when detailGoalId is set; closing clears it. Use case: ObserveGoalLinkedWorkUseCase(goalId).",
+        "iosBehavior": "GoalDetailView's init sets up @Query filters (goalID == goal.id). Linked tasks/habits update reactively as TaskItem/Habit rows change. No explicit ViewModel needed; SwiftData handles the live refresh.",
+        "fix": "No change needed \u2014 iOS correctly queries linked work reactively. iOS's @Query approach is equivalent to Android's observeGoalLinkedWorkUseCase (both re-run when linked data changes). Both show the same detail header (progress bar, total, linked-work hint) and task/habit rows with completion/streak state."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android: Completed goals are behind a show/hide toggle (rememberSaveable { mutableStateOf(false) }). iOS: showCompleted toggle is also present (line 21), but defaults to true instead of false, so completed goals are visible by default.",
+        "androidBehavior": "Completed goals section has a Show/Hide button that defaults to hidden (false).",
+        "iosBehavior": "Completed goals section has a Show/Hide button that defaults to visible (true).",
+        "fix": "Change iOS default from true to false to match Android. File: ios/ChronosFlow/Features/Goals/GoalsView.swift line 21, change `@State private var showCompleted = true` to `@State private var showCompleted = false`."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android: Empty state for a goal with no linked work shows via ChronosEmptyState in GoalDetailSheet. iOS: Uses a ChronosGlassCard with Label + Icon instead of the screen-level ChronosEmptyState.",
+        "androidBehavior": "GoalDetailSheet shows ChronosEmptyState (title, message) when linkedWork.isEmpty is true.",
+        "iosBehavior": "GoalDetailView's emptyState var renders a ChronosGlassCard with Label('No linked work yet', systemImage: 'link').",
+        "fix": "Ensure the iOS empty-state visual matches Android's style. Current iOS version (Label + ChronosGlassCard) is visually distinct from Android's ChronosEmptyState. For consistency, update iOS to use a matching component or confirm both convey the same information. No functional change needed. File: ios/ChronosFlow/Features/Goals/GoalDetailView.swift lines 94-105 (emptyState)."
+      }
+    ],
+    "iosFilesToChange": [
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/App/RootView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Goals/GoalsView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Goals/GoalDetailView.swift"
+    ]
+  },
+  {
+    "area": "Medication",
+    "androidFlow": "Android's medication access is routed via `ChronosNavigationState.navigateToMedication()` (app/src/main/java/com/ChronosFlow/VBCR/navigation/MedicationAccess.kt), which delegates to `ChronosRoute.Medication()` in the nav stack. The medication screen itself is wrapped in `SensitiveRouteGate` (app/src/main/java/com/ChronosFlow/VBCR/navigation/SensitiveRouteGate.kt) that gates access behind biometric/passcode auth when `SensitiveArea.MEDICATION` protection is enabled. The gate handles canAuthenticate=false by failing open (rendering content with a warning banner) rather than permanently locking the user out. The MedicationScreen is a single full-screen composable displaying an ordered list of active plans via LazyColumn, with medication-specific actions (mark taken/missed, snooze, skip, pause/resume, archive) accessible both inline in each card and via a context action sheet. The screen integrates AI-assisted suggestion panels (adherence suggestions, auto-assist for new entries), adherence analytics (7/14-day trend, on-track days), and refill warnings.",
+    "iosFlow": "iOS's medication access is implemented via a `.medicationLock()` view modifier on MedicationView (ios/ChronosFlow/Features/Medication/MedicationView.swift:53), which calls `sensitiveGate(.medication)` to delegate to `SensitiveAreaGate` (ios/ChronosFlow/Security/AppLock.swift). The gate is identical in intent (biometric/passcode + fail-open) and uses the same `SensitiveArea` enum. However, MedicationView is not a standalone screen \u2014 it is embedded as one of many tabs in the root `TabView(.sidebarAdaptable)` within RootView (ios/ChronosFlow/App/RootView.swift:88-101). The medication list is a scrollable LazyVStack with per-plan cards (MedicationCard) and per-plan adherence cards (MedicationAdherenceCard) stacked sequentially, rather than a single unified layout. The view lacks several Android features: no adherence suggestion panel (AI-driven reminder optimization), no quick-add chips for empty state, no explicit multi-time reminder UI (though the data model supports reminderMinutes array), and dose/refill actions are surfaced via context menu rather than an explicit context action sheet. The editor is a modal sheet (MedicationEditorSheet) rather than inline form handling.",
+    "severity": "high",
+    "divergences": [
+      {
+        "aspect": "organization",
+        "description": "Android's MedicationScreen is a single cohesive page (LazyColumn) with cards for metrics, add button, next-dose card, refill card, adherence chart, adherence suggestion panel, and medication list \u2014 all vertically ordered. iOS's MedicationView is a single scrollable stack (LazyVStack) but splits adherence data into per-plan `MedicationAdherenceCard` items stacked after each `MedicationCard`, creating a 2N layout (medication + adherence per plan) instead of a unified metric/list structure.",
+        "androidBehavior": "MedicationScreen renders: (1) header, (2) metric tiles (Active, Taken 7d, Missed), (3) Add button, (4) next-dose card (if plans exist), (5) refill card (if any low supply), (6) adherence chart (if any history), (7) adherence suggestion panel (if suggestions exist), (8) per-plan MedicationRow cards in a list.",
+        "iosBehavior": "MedicationView renders: (1) refill summary card (if any low supply), (2) alternating MedicationCard + MedicationAdherenceCard pairs for each plan. No unified metric tiles, no add button in the hierarchy, no next-dose card, no adherence suggestion panel. Metric tiles and add button are handled at the toolbar level (navigationTitle, toolbar items).",
+        "fix": "Reorganize iOS MedicationView to match Android's layout: (1) Add ChronosPageHeader equivalent (title + subtitle), (2) Insert metric tiles (Active count, Taken 7d from aggregated doseEvents, Missed count) as a single HStack of ChronosMetricTile equivalents, (3) Add a FilledTonalButton for 'Add Medication', (4) Add MedicationNextDoseCard (if plans not empty) showing upcoming dose across all plans, (5) Keep RefillSummaryCard in place, (6) Add MedicationAdherenceChart showing aggregated 14-day trend, (7) Add AdherenceSuggestionPanel when suggestions exist (currently missing), (8) List only MedicationCard items (remove per-plan adherence stacking; surface adherence inline via pills/info within each card). File: ios/ChronosFlow/Features/Medication/MedicationView.swift."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's `MedicationViewModel.adherenceSuggestions` flow and `MedicationAdherencePanel` compose a proactive AI-driven suggestion UI that recommends reminder time adjustments based on adherence patterns. iOS MedicationView has NO adherence suggestion panel at all \u2014 the model supports the data structures (MedicationAdherence tracking) but the UI does not surface suggestions.",
+        "androidBehavior": "MedicationScreen conditionally renders `MedicationAdherencePanel` when `adherenceSuggestions.isNotEmpty()`, displaying up to 3 suggestions with 'Apply' / 'Dismiss' buttons. Suggestions come from `medicationAdherenceAssistPlanner.suggestAdjustments()` (line 145 in MedicationViewModel.kt), which scores reminder times against actual adherence patterns and proposes a better minute-of-day. ApplyAdherenceSuggestion() updates the reminder time via the standard updateMedication() path.",
+        "iosBehavior": "MedicationView has no suggestion panel. No calls to adherence assistant, no UI to surface or apply suggestions. The capability simply does not exist.",
+        "fix": "Implement adherence suggestion panel in iOS. (1) Add a property to store suggestions (e.g., [MedicationAdherenceSuggestion]) computed or observed from adherence analysis (mirror Android's `medicationAdherenceAssistPlanner`). (2) Render a suggestion card in MedicationView's LazyVStack (after the metric tiles, before the plan list) when suggestions are non-empty, matching the visual style of Android's MedicationAdherencePanel. (3) Wire 'Apply' to call an update on the selected plan's reminderMinuteOfDay, and 'Dismiss' to remove that suggestion from the list. This requires either a new assistant module or stub logic that mirrors the Android planner's interface. File: ios/ChronosFlow/Features/Medication/MedicationView.swift."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android's medication list shows per-plan adherence metrics inline as small pill-shaped info badges (MedicationInfoPill: Reminder, Adherence %, Form, Paused/Refill status), with an expandable details section. iOS's MedicationCard is simpler \u2014 it shows a single 'Take' button and summary text (dose \u00b7 times), plus a separate MedicationAdherenceCard per plan with a 7/14-day rate breakdown. Android also renders a low-supply warning banner inline within the expanded section; iOS splits this into a RefillSummaryCard at the top.",
+        "androidBehavior": "Per-plan card (MedicationRow): header (icon, name, form icon, optional 'Low Supply' badge), dosage, FlowRow of info pills (Reminder time emphasized, Adherence %, Form, Status/Refill with optional alert styling), Edit/Archive/Expand icons. Expanded section adds: refill details, notes, recent dose event, Skip/Pause-Resume buttons. Low-supply inline warning banner (red border, error color) renders conditionally within the card.",
+        "iosBehavior": "Per-plan card (MedicationCard): HStack of icon, VStack of name, schedule summary (dose \u00b7 times), meal timing label, max-doses label, paused-until label, refill-in-N-days label, and a simple 'Take' button. Separate MedicationAdherenceCard per plan: 7/14-day rates, on-track count, adherence trend chart, recent dose history list. Refill warning is a top-level RefillSummaryCard listing all low-supply plans.",
+        "fix": "Consolidate iOS MedicationCard to match Android's visual density and pill-based metadata: (1) Add MedicationInfoPill (or equivalent) components to show Reminder, Adherence %, Form, Status, and Refill status inline (not in a separate card). (2) Add an expand/collapse toggle to reveal Skip/Pause-Resume buttons and notes (currently in context menu). (3) Inline the low-supply warning banner (red border, conditional rendering) within the expanded card section. (4) Move adherence rate/chart into the expanded section or into the pill metadata to avoid stacking a full adherence card per medication. This reduces vertical scroll and matches Android's per-plan card density. Files: ios/ChronosFlow/Features/Medication/MedicationView.swift (MedicationCard and MedicationAdherenceCard)."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's MedicationScreen supports quick-add chips for empty state (quick preset medications like 'Vitamin D', 'Blood pressure'). iOS MedicationView displays a standard ContentUnavailableView but has no quick-add chips.",
+        "androidBehavior": "When activePlans.isEmpty, MedicationScreen renders ChronosQuickAddChips with preset options ('Vitamin D', 'Blood pressure', 'Evening dose', 'Inhaler'). Tapping a chip calls setSheetTarget(MedicationSheetTarget.Add(prefillName: name)), which pre-fills the editor.",
+        "iosBehavior": "When plans.isEmpty, MedicationView renders ContentUnavailableView('No medication', ...). No quick-add presets.",
+        "fix": "Add quick-add chips to iOS empty state. (1) After ContentUnavailableView, conditionally render a VStack with preset options (same as Android). (2) Tapping a chip opens MedicationEditorSheet(prefillName:), pre-filling the medication name. Files: ios/ChronosFlow/Features/Medication/MedicationView.swift."
+      },
+      {
+        "aspect": "function",
+        "description": "Android explicitly renders a 'Next Dose' card (MedicationNextDoseCard) showing the upcoming dose across active plans. iOS has no equivalent card \u2014 only per-plan schedule summaries in MedicationCard.",
+        "androidBehavior": "If activePlans.isNotEmpty(), MedicationScreen renders MedicationNextDoseCard showing the earliest upcoming dose (medication name, time, dosage) across all active plans.",
+        "iosBehavior": "No next-dose card. Each MedicationCard shows its schedule summary (dose \u00b7 times) but no unified next-occurring-dose view.",
+        "fix": "Add a MedicationNextDoseCard to iOS MedicationView, displayed after the metric tiles and add button, showing the next upcoming dose across all plans. This requires computing the earliest scheduled dose time from the reminderMinutes of each plan and rendering a prominent card. Files: ios/ChronosFlow/Features/Medication/MedicationView.swift."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's MedicationRow includes an expand/collapse toggle showing detailed metadata (notes, recent dose events, Skip/Pause-Resume buttons) in an animated section. iOS's MedicationCard has a simpler 'Take' button, and destructive/pause actions are in the context menu; no expand/collapse.",
+        "androidBehavior": "MedicationRow has an ExpandMore/ExpandLess icon button (line 673-678). Tapping toggles the expanded state, which reveals: notes section (if present), recent dose event summary, Skip today button, Pause/Resume button via AnimatedContent.",
+        "iosBehavior": "MedicationCard has no expand toggle. Context menu provides Skip/Pause options; no inline expanded section.",
+        "fix": "Add expand/collapse to iOS MedicationCard to match Android. (1) Add @State private var expanded = false. (2) Add an expand toggle icon button (chevron.down / chevron.up). (3) Conditionally render an AnimatedVisibility section (or just conditional View rendering) with notes, recent dose events, and Skip/Pause/Resume buttons. This mirrors Android's MedicationRow expansion. Files: ios/ChronosFlow/Features/Medication/MedicationView.swift."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's MedicationRow shows multiple info pills: Reminder (emphasized), Adherence %, Form, Paused status, and Refill doses \u2014 each with optional alert styling. iOS's MedicationCard has a simple text summary and schedule line; adherence is hidden in a separate card.",
+        "androidBehavior": "Line 632-663 (MedicationRow): FlowRow of MedicationInfoPill (label + value + optional emphasized/alert styling). Reminder pill is emphasized (primary color). Adherence % is shown. Form (from safetyProfile) is shown. Paused/Refill status pills have alert styling when refillIsUrgent.",
+        "iosBehavior": "MedicationCard shows: medication name, schedule summary (dose \u00b7 times), meal timing label, max-doses label, paused-until label, refill-in-days label. All text-based; no pill-style badges.",
+        "fix": "Add MedicationInfoPill components to iOS MedicationCard to match Android's visual density and metadata organization. Create a SwiftUI struct for MedicationInfoPill (Surface with label + value, optional tinting for emphasis/alert). Populate a FlowRow with pills for Reminder, Adherence, Form, Paused, and Refill. This provides the same information hierarchy as Android. Files: ios/ChronosFlow/Features/Medication/MedicationView.swift."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's MedicationScreen integrates multiple AI-assist features (medication name refinement, dosage suggestions via MedicationAssistPlanner) surfaced in the add/edit form. iOS's MedicationEditorSheet has no AI-assist or form suggestions.",
+        "androidBehavior": "MedicationViewModel.requestMedicationAssist() (line 496) calls medicationAssistPlanner.suggest() and medicationAssistPlanner.refineName() to provide on-device suggestions for dosage, frequency, form, meal timing, refill needs, and notes. MedicationFormSheet renders these as selectable suggestion cards. The form also supports AI-rewritten notes via rewriteMedicationNotes().",
+        "iosBehavior": "MedicationEditorSheet is a simple Form with TextField/Picker inputs (name, dosage, unit, reminders, with-food, refill tracking, safety notes). No suggestions, no AI refinement, no rewrite.",
+        "fix": "This is a lower-priority feature divergence (AI-assist is a bonus, not core). If porting AI features is needed: (1) Add a view property to display suggestions (e.g., @State var suggestedAssistance: MedicationAssistSuggestion?). (2) Wire a call to a medication-assist planner (iOS equivalent or stub) on initial capture or name change. (3) Render selectable suggestion cards within the form (or a collapsible section). (4) Wire suggestion application to update form fields. This requires designing the iOS medication-assist planner interface (or porting from Android). Files: ios/ChronosFlow/Features/Medication/MedicationView.swift."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's MedicationScreen integrates with the quick-add/command palette (onOpenCommandPalette callback, initialAddCapture parameter) to enable direct medication capture from the command palette. iOS has no equivalent.",
+        "androidBehavior": "MedicationScreen accepts onOpenCommandPalette callback and initialAddCapture string. When a user types a medication command in the command palette, it routes to MedicationScreen with the capture text pre-filled in the add form via OneShotNavTrigger.",
+        "iosBehavior": "MedicationView has no command palette integration or capture routing.",
+        "fix": "This depends on iOS's command palette / quick-add architecture. If iOS has a similar quick-capture mechanism, integrate it: add a route from the quick-add UI to MedicationEditorSheet with a prefillName parameter. Files: ios/ChronosFlow/Features/Medication/MedicationView.swift (and potentially app-wide quick-add routing)."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android's MedicationFormSheet is a bottom sheet with multi-step form sections (basic info, reminders, safety, assist panel). iOS's MedicationEditorSheet is a NavigationStack-based sheet with a Form grouped by sections (basic, reminders, refill, safety & details, notes). The visual presentation and section grouping differ.",
+        "androidBehavior": "MedicationFormSheet is a bottom sheet (ChronosModalBottomSheet) with animated reveal of assist suggestions, collapsible history templates, and multi-field forms for name/dosage/unit, reminder time(s), take-with-food, refill tracking, safety profile, and notes.",
+        "iosBehavior": "MedicationEditorSheet is a NavigationStack-based full modal sheet with a Form that groups sections: basic (name/dosage/unit), Reminders (with add/delete buttons), Toggle for with-food, Refill section (toggle supply tracking, threshold), Safety & details (disclosure group with daily cap and cautions), and Notes. Uses DatePicker for reminder times rather than a single minute picker.",
+        "fix": "Minor visual alignment: (1) Consider re-ordering iOS form sections to match Android's grouping (basic \u2192 reminders \u2192 meal timing \u2192 refill \u2192 safety/details). (2) iOS's DatePicker for reminders is correct (user-friendly), but ensure the reminder-time list shows readable 12-hour times (with AM/PM) consistent with Android's formatMinute() output. Files: ios/ChronosFlow/Features/Medication/MedicationView.swift (MedicationEditorSheet)."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's context menu (MedicationContextActionSheet) is a dedicated bottom sheet with buttons for Taken/Missed, snooze options (15/30/60 min), Skip, Pause/Resume, Edit, Archive. iOS's context menu is a native .contextMenu with compact labels (Skip, Mark missed, Snooze, Pause/Resume, Edit, Archive).",
+        "androidBehavior": "MedicationContextActionSheet is a ChronosModalBottomSheet with large, tappable buttons organized as: (1) Taken/Missed row, (2) Snooze row (15/30/60 min buttons), (3) Skip/Pause-Resume row, (4) Edit (outlined button), (5) Archive (text button).",
+        "iosBehavior": "MedicationCard.contextMenu is a native iOS context menu with compact Label items: Edit, Skip, Mark missed, Snooze, Pause/Resume, Duplicate, Archive. No discrete snooze time options (single 'Snooze 15 min' label).",
+        "fix": "Enhance iOS context menu to match Android's layout and options. (1) Replace the native contextMenu with a custom bottom sheet or action panel showing the same button layout as Android. (2) Add discrete snooze time buttons (15/30/60 min) instead of a single 'Snooze 15 min' option. (3) Ensure Taken/Missed are prominent (possibly pull them out of context into the card itself, as Android does). Files: ios/ChronosFlow/Features/Medication/MedicationView.swift (MedicationCard.contextMenu)."
+      }
+    ],
+    "iosFilesToChange": [
+      "ios/ChronosFlow/Features/Medication/MedicationView.swift",
+      "ios/ChronosFlow/Security/AppLock.swift (if SensitiveAreaGate needs iOS-specific adjustments)",
+      "ios/ChronosFlow/Models/MedicationPlan.swift (if adherence suggestion properties need to be added)"
+    ]
+  },
+  {
+    "area": "Focus timer & sessions (block-bounded split phases, Live Activity, preset configs)",
+    "androidFlow": "Android enters focus from Plan tab (on-block chips start focus with presets) or Today tab (current-block start). The in-app FocusDayDialFocusDelegate manages FocusExecutionState with phases list, currentPhaseIndex, awaitingPhaseAdvance. At each phase boundary, the session PAUSES (awaitingPhaseAdvance=true) and holds until user taps \"Continue\" (advancePhase()). Split presets: No breaks (flat), 25\u00b75, 50\u00b710, 30\u00b75. FocusPhasePlanner divides block into cycles then fills remainder. Phase indicator shows dots (active/done/upcoming). Live Activity mirrors per-phase state via segmented bars, controls (Pause/Stop/+5m), and phase count. Split sessions persisted via FocusSplitSessionStore (SharedPreferences) so a kill mid-phase restores full plan.",
+    "iosFlow": "iOS enters focus ONLY from Today tab (prefilledBlockID), never from Plan\u2014users must navigate out of Plan, into Focus, then manually start. No direct \"Start Focus\" button on Plan blocks. FocusTimerModel is a singleton with planFocusPhases(blockMinutes:preset:) that builds phase list on start(). Holds at phase boundary (awaitingPhaseAdvance=true) but UI shows \"Phase complete\" / \"Block complete\" text, not prompting the next phase name (no \"Time for a 5m break \u2014 tap to continue\" copy like Android). Presets: noBreaks (flat), p25_5 (25\u00b75), p50_10 (50\u00b710), p30_5 (30\u00b75)\u2014same denominators but different enum names. Phase dots rendered with simple 12pt / 8pt size swap, no \"pulse on active\" bounce animation. Live Activity via FocusSegmentedBar renders color-coded segments. Split snapshots persisted in SwiftData (via saveSnapshot() \u2192 ChronosStore). Extend-only (+5m / +15m) controls, no -5m shorten (clamped to min(5)). Mid-session break injection offers 5/10/15m presets. No \"Skip phase\" affordance in UI (skipPhase() exists in model but not exposed).",
+    "severity": "high",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "iOS can only enter focus from Today tab (via prefilledBlockID when tapping a current block). Android allows entry from BOTH Plan tab (inline chips on blocks) AND Today tab (quick-action on current block). On iOS, Plan tab blocks have no direct Focus start\u2014users must leave Plan, open Focus tab, then manually pick a block.",
+        "androidBehavior": "Plan tab blocks show 'Start focus' / 'Mark complete' buttons inline. User can choose split preset and launch focus immediately from the dial or list. Today tab current block also has quick-launch.",
+        "iosBehavior": "Plan tab block editor (tap block) has no focus entry\u2014only edit/delete/context. Must navigate to Focus tab (separate destination), then manually select a block and start.",
+        "fix": "Add a 'Start Focus' button or secondary action on Plan-tab blocks (inline in BlockRow or via context menu) that navigates to Focus tab and pre-fills the blockID, mirroring Android's DayDialFocusTab.onStart() bridge."
+      },
+      {
+        "aspect": "function",
+        "description": "Android FocusTab shows boundary prompts naming the NEXT phase ('Time for a 5m break \u2014 tap to continue' / 'Back to focus for 25m \u2014 tap to continue'). iOS FocusTimerModel computes a generic boundary prompt but FocusView shows only 'Phase complete' / 'Block complete', losing semantic guidance about what's next.",
+        "androidBehavior": "When awaitingPhaseAdvance: focusBoundaryPrompt() renders 'Time for {minutes}m {kind} \u2014 tap to continue', computed from focusSession.nextPhase.",
+        "iosBehavior": "boundaryPrompt computed in FocusTimerModel (focusPhaseBoundaryText) but FocusView displays only hardcoded 'Phase complete' / 'Block complete' if timer.nextPhase != nil.",
+        "fix": "Replace hardcoded text in FocusView.boundaryControls with timer.boundaryPrompt ?? 'Phase complete' to surface the Android prompt copy (mirrors focusPhaseBoundaryText from ChronosCore)."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android phase dots scale smoothly (10dp \u2192 8dp inactive, animated with navIndicator easing) and pulse on active. iOS dots swap 12pt \u2194 8pt with a bouncy animation, but no continuous pulse on the current phase. The visual emphasis is weaker.",
+        "androidBehavior": "FocusPhaseIndicator renders 10.dp size, animates active \u2192 0.8 scale, with color alpha transitions. Active dot stays full brightness.",
+        "iosBehavior": "FocusView.phaseDots renders 12pt current / 8pt other, animates with .bouncy timing. No pulse or continuous glow on the current phase.",
+        "fix": "Add a .symbolEffect(.pulse, isActive: true) modifier to the active phase dot in FocusView.phaseDots, and adjust sizing to match Android (10dp slot, 0.8 scale inactive) for consistency."
+      },
+      {
+        "aspect": "function",
+        "description": "Android expose skipFocusSession() via Skip button on the Play/Pause row (when linked to a block). iOS FocusView has skipPhase() in FocusTimerModel but no UI button to invoke it. Users cannot skip phases on iOS.",
+        "androidBehavior": "Skip button (\u23ed) shown when session is linked to a block and not awaiting phase advance. Calls onSkip \u2192 viewModel.skipFocusSession().",
+        "iosBehavior": "skipPhase() method exists but unreachable. FocusView.runningControls has no skip button.",
+        "fix": "Add a skip button to FocusView.runningControls (icon: 'forward.fill', label: 'Skip phase') that calls timer.skipPhase(), visible only when timer.isSplitSession && timer.phase != .idle && !timer.awaitingPhaseAdvance."
+      },
+      {
+        "aspect": "function",
+        "description": "Android allows both extending (+15m) and shortening (-15m) the current phase via onExtend/onShorten. iOS FocusTimerModel.extend() clamps to positive, so shorten is a silent no-op; FocusView only shows +5m / +15m controls, no -5m option.",
+        "androidBehavior": "FocusTab renders two rows: '+5m' and '-5m' buttons (onAdjustByMinutes), both functional. onExtend(15) and onShorten(15) change the active phase and update Live Activity.",
+        "iosBehavior": "adjustControls shows +5m and +15m only. No minus buttons. extend(minutes: -5) would clamp to 5 (no-op), so -5m is intentionally hidden.",
+        "fix": "Add '-5m' and '-15m' buttons to FocusView.adjustControls, wired to timer.extend(minutes: -5) and timer.extend(minutes: -15) with clamping in FocusTimerModel.extend() to max(5, current + delta)."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android FocusSplitSessionStore persists split snapshots in SharedPreferences (keyed 'chronos_focus_split_session') so a process kill mid-phase restores the full plan. iOS saves snapshots via saveSnapshot() \u2192 SwiftData (ChronosStore), but the persistence mechanism is less explicit and lacks the same cold-start recovery flow (restoreActiveSplitFromStore).",
+        "androidBehavior": "SharedPreferencesFocusSplitSessionStore.save() encodes phases as 'F25,B5' string, persists on every state change when RUNNING/PAUSED. On app restart, DayDialFocusDelegate.restoreActiveSplitFromStore() checks if idle, loads snapshot, and restores phase plan.",
+        "iosBehavior": "FocusTimerModel.saveSnapshot() encodes the same 'F25,B5' format and writes via UserDefaults(appGroup). No explicit restoreActiveSplitFromStore() hook. Snapshot is queried lazily (if active and has context).",
+        "fix": "Add an explicit restoreActiveSplitFromStoreonAppear hook in FocusView (or FocusTimerModel.init) that checks if idle and snapshotContext != nil, loads the saved snapshot, and restores the full phasePlan before presenting idle UI\u2014mirrors Android's restoreActiveSplitFromStore() pattern."
+      },
+      {
+        "aspect": "function",
+        "description": "Android includes checkPhaseBoundary() called on each timer tick to auto-detect when the current phase elapses and transition to awaitingPhaseAdvance. iOS reachPhaseBoundary() is private and triggered only from the ticker's tick() method. No explicit hook for recovering mid-phase if the app is backgrounded and returns after phase boundary.",
+        "androidBehavior": "DayDialFocusDelegate.checkPhaseBoundary() is called per tick, checks focusRemainingSeconds() > 0, and auto-pauses at boundary.",
+        "iosBehavior": "FocusTimerModel.tick() checks remaining <= 0 and calls reachPhaseBoundary(), but there's no recovery hook if the app was backgrounded across a boundary.",
+        "fix": "Add a .onAppear hook in FocusView that calls a new FocusTimerModel.recoverBoundaryIfNeeded() method, which checks if the phase should have elapsed while backgrounded and calls reachPhaseBoundary() to re-sync."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android Live Activity shows phase count ('Phase 2/4') in both expanded and compact/minimal regions. iOS FocusLiveActivityWidget shows 'Phase N/M' in compact-trailing and dynamic-island expanded, but omits it from the lock-screen HStack, losing phase context on the main lock-screen widget.",
+        "androidBehavior": "Live Activity displays phase progress persistently ('2 of 4', 'Phase 2/4').",
+        "iosBehavior": "Lock screen shows block title + timer + segmented bar, but no phase count. Phase count appears only in Dynamic Island expanded.",
+        "fix": "Add phase count to the iOS lock-screen tile in FocusLiveActivityWidget (after or below the timer), e.g., 'Phase \\(context.state.phaseNumber)/\\(context.state.totalPhases)' as a smaller caption."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android FocusTab displays 'Paused \u00b7 tap play to resume' label when status == PAUSED && !awaitingPhaseAdvance. iOS shows 'Paused' label but lacks the 'tap play to resume' helper text when the session is paused.",
+        "androidBehavior": "Text('Paused \u00b7 tap play to resume') shown below the timer ring when paused (but not at a boundary).",
+        "iosBehavior": "FocusView shows Label('Paused', ...) with .transition(.opacity) but no 'tap play to resume' text.",
+        "fix": "Change FocusView's pause label to match Android: 'Paused \u00b7 tap play to resume' or expand the pause affordance with an explanatory caption."
+      }
+    ],
+    "iosFilesToChange": [
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Focus/FocusView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Focus/FocusTimerModel.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/DayDial/DayDialScreen.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/LiveActivity/FocusLiveActivityView.swift",
+      "/Users/bharath/Code/ChronosCore/Sources/ChronosCore/FocusPhasePlan.swift"
+    ]
+  },
+  {
+    "area": "Sleep",
+    "androidFlow": "Android: Sleep logging initiated from the quick-add FAB (in the dial shell) or from within the Today tab's \"Log sleep\" button. Tapping either opens SleepLogSheet (a modal sheet in the dial). The sheet displays: (1) Health Connect sync button at top, (2) Sleep quality slider (1-5 with emoji label), (3) Bed/wake time pickers, (4) Sleep duration with overnight tag/warnings, (5) Interruptions slider (0-10), (6) \"Refreshed\" rating (1-5 emoji selector), (7) Wind-down notes field, (8) Save button. Health Connect sync can run one-time from the sheet without enabling background import. Manually logged nights are never overwritten by imports.",
+    "iosFlow": "iOS: Sleep logging is accessed three ways: (1) From the Quick-Add menu (select \"Log sleep\"), (2) From the Sleep tab (tap the + button), or (3) Inline from the Sleep tab's readiness banner (implied). It opens SleepLogSheet (a sheet modal) with a Form containing: (1) DatePicker for bedtime/wake (not minute sliders), (2) In-sheet one-time Apple Health sync button, (3) Live validation hints (window label, overnight tag, duration vs 8h target, short/long warnings), (4) Quality slider (1-5 with label), (5) Interruptions stepper (0-10), (6) Wind-down notes field. iOS is missing: the \"Refreshed\" rating (1-5 emoji selector), the readiness-derived quality pre-fill, and the emoji quality label in the same presentation style. The Sleep tab itself shows a readiness banner (derived from latest night's quality/interruptions/times), Apple Health card with toggle for background import, trends (last 14 nights), and a list of recent logged nights.",
+    "severity": "high",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "iOS Sleep is a top-level tab in the sidebar/tab bar, not accessed via dial quick-add menu alone. The quick-add menu has a 'Log sleep' option, but the entry point is ambiguous vs Android's clear FAB \u2192 Sleep Log Sheet.",
+        "androidBehavior": "Sleep log is a modal sheet triggered only from quick-add FAB or Today tab's button, always modal and in-focus.",
+        "iosBehavior": "Sleep log is both a tab AND reachable via quick-add menu. Users can approach it from multiple entry points: the Sleep tab itself, or via Quick-Add. The tab-first design means sleep tracking surfaces at top level, competing with block planning.",
+        "fix": "iOS should NOT have Sleep as a top-level tab. Instead, demote it to the Track submenu (like Habits/Goals), and ensure Quick-Add \u2192 Log sleep is the primary modal entry point, mirroring Android's dial-centric model. Remove the Sleep tab from RootView.swift's TabView and keep it only in the Track TabSection."
+      },
+      {
+        "aspect": "organization",
+        "description": "iOS SleepLogSheet uses a Form with DatePicker (hour + minute selectors), while Android uses ChronosTimePickerField (explicit minute-of-day input). Android's approach is more direct for sleep logging.",
+        "androidBehavior": "SleepLogSheet has ChronosTimePickerField for bed and wake times, displaying minute-of-day and allowing direct entry or scrolling selection.",
+        "iosBehavior": "SleepLogSheet uses SwiftUI's DatePicker with .hourAndMinute components. This is less explicit for sleep tracking (no minute-of-day context) and doesn't visually mirror Android.",
+        "fix": "Replace the DatePicker in SleepLogSheet with a custom time-picker component that shows minute-of-day (like Android's ChronosTimePickerField), allowing the user to see/edit the minute value directly alongside hour/minute selectors. Alternatively, add minute-of-day labels next to the DatePickers."
+      },
+      {
+        "aspect": "function",
+        "description": "iOS is missing the 'Refreshed' rating field (1-5 emoji selector). Android's SleepLogSheetContent includes a 'How refreshed do you feel?' emoji row (RefreshedEmojiSelector) with 5 tappable emoji faces. iOS SleepLogSheet does not collect this data at all.",
+        "androidBehavior": "RefreshedEmojiSelector displays 5 emoji faces (1-5 rating) below the interruptions slider. Users tap one to record how refreshed they feel the next morning. Data is saved as `refreshedRating` and flows to SleepTrack.",
+        "iosBehavior": "SleepLogSheet has no refreshed rating collection. iOS SleepTrack model has no `refreshedRating` field (it has `windDownNotes` instead, which Android also has).",
+        "fix": "Add a 'How refreshed do you feel?' row to the Quality section in SleepLogSheet (after the Interruptions stepper). Create an emoji selector matching Android's RefreshedEmojiSelector (5 tappable emoji buttons). Add a `refreshedRating: Int` field to ios/ChronosFlow/Models/Wellbeing.swift::SleepTrack. Save the rating when the sheet commits."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android's sleep quality is labeled with emoji + text (e.g. '\ud83d\ude34 3 of 5 \u00b7 Light sleep') and matches the Android design pattern. iOS shows only a numeric slider without the emoji quality label in the same visual prominence.",
+        "androidBehavior": "Quality slider is paired with a row displaying `sleepQualityEmoji(quality) + ' $quality of 5 \u00b7 ' + sleepQualityLabel(quality)`, e.g. '\ud83d\ude34 3 of 5 \u00b7 Light sleep'.",
+        "iosBehavior": "Quality slider displays as 'Quality: 3/5' and a separate Text with `SleepLogHints.qualityLabel(Int(quality))`, e.g. 'Light sleep'. The emoji is not shown in the quality row.",
+        "fix": "Update the Quality slider row in SleepLogSheet to display emoji + label inline, matching Android: 'sleepQualityEmoji(Int(quality)) \u00b7 3/5 \u00b7 qualityLabel(Int(quality))'. Use ChronosCore's quality label helpers (already being used) and add an emoji function to SleepLogHints or the quality label logic."
+      },
+      {
+        "aspect": "function",
+        "description": "iOS SleepLogSheet's health sync button does NOT auto-populate fields after a successful sync in all cases. Android's HealthConnectSleepSyncButton fills in quality, start, and end times immediately when a night is synced.",
+        "androidBehavior": "HealthConnectSleepSyncButton syncs last night from Health Connect, and the reactive sleepTrack stream populates the sheet's bed/wake/quality fields automatically when the import lands. Manual edits are preserved.",
+        "iosBehavior": "SleepLogSheet has a one-time sync button. After sync, if a newer night is imported, it triggers autoPopulateFromLatestImport() which mirrors bed/wake/quality/interruptions. However, the Refreshed rating (when added) is not auto-populated from imports (Android doesn't do this either, but iOS should at least match the existing auto-fill scope).",
+        "fix": "Ensure auto-population in SleepLogSheet::autoPopulateFromLatestImport() populates quality and interruptions the same way bed/wake are populated. Verify the one-time sync flow matches the reactive Android behavior (already appears to do so)."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android's main dial view includes an in-place readiness banner (derived from latest night's quality/interruptions/times via SleepReadinessCore). iOS has a readiness card on the Sleep tab, not on the main Today/Plan view.",
+        "androidBehavior": "The dial's Today tab or main view likely surfaces a readiness banner derived from the latest night, informing the user's daily plan (e.g. 'Depleted' tints the view or shows lighter tasks).",
+        "iosBehavior": "Readiness is surfaced only on the Sleep tab itself (via SleepView's readiness card), not on Today or Plan. The user must navigate to Sleep to see readiness status.",
+        "fix": "Add a readiness card or banner to TodayView (the iOS analogue of Android's Today tab) showing the latest night's readiness (derived via SleepReadinessCore, already in the codebase). This allows the user to see their readiness state without navigating to the Sleep tab. Position it above or near the focus/task section."
+      },
+      {
+        "aspect": "function",
+        "description": "Android's HealthConnectSleepCard in the Export Data / Settings panel has a toggle 'Import sleep automatically' and a button 'Import now', with a result message. iOS's SleepView has a toggle 'Enable Health import', a summary line 'Last imported <date>', a result summary, and a button 'Import from Health'. The wording and organization differ.",
+        "androidBehavior": "AvailableControls shows: text row 'Import sleep automatically' with ChronosSwitch, optional lastResult text, and 'Import now' button. Both toggle and button are in the same card. Settings-owned toggle; button is on-demand.",
+        "iosBehavior": "SleepView's Apple Health card shows: toggle 'Enable Health import' (only when not already enabled), 'Last imported <date>' line, optional result summary, and 'Import from Health' button. When enabled, the toggle vanishes and only button remains visible.",
+        "fix": "Restructure the Apple Health card in SleepView to always show both the toggle and button (like Android), not conditionally hide the toggle. Ensure the result message and last-import timestamp are always visible (they are now, good). Align button label to 'Import now' for consistency with Android."
+      }
+    ],
+    "iosFilesToChange": [
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/App/RootView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Sleep/SleepView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Models/Wellbeing.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Today/TodayView.swift"
+    ]
+  },
+  {
+    "area": "Journal (entry composition, history, guided prompts, mood, dictation, fitness tracking)",
+    "androidFlow": "Android (DayDialScreen + DayDial navigation shell):\n- Journal is a SHEET target, not a screen tab. Quick-Add FAB \u2192 \"Journal entry\" menu item \u2192 opens JournalComposerSheet as a modal bottom sheet within DayDialScreen (ChronosRoute.Day.TARGET_JOURNAL).\n- Separate sidebar page access: DayDialScreen sidebar \u2192 SidebarPage.JOURNAL \u2192 JournalPageRoute (full page).\n- Composer lives in the same JournalEntryComposer component whether called from sheet or sidebar.\n- History shows \"X of Y reflections\" when filtered (journalHistoryPageSummary).\n- Entry lists collapse/expand via ChronosCollapsibleSection (the \"Add details\" disclosure group) with live summaries like \"1 highlight \u00b7 8:00 AM \u00b7 2 photos\".\n- Calendar overview is inline in the history (not a separate card).\n- Multi-day range creation for new entries (checkbox: \"Apply to a range of days\").\n- AI insight card with modal-style interface (generate/regenerate/dismiss buttons in a card, not a sheet).\n- Workouts imported from Health Connect as secondary points with id prefix \"hc-workout-\".\n- Dictation: not prominently featured; on-device AI for grammar/expand is via a dropdown \u2728 menu button on fields.",
+    "iosFlow": "iOS (RootView tab shell):\n- Journal is a TAB in the \"Track\" section of TabView (.sidebarAdaptable), not a modal sheet or sidebar page.\n- Quick-Add sheet routes to this tab via selection = .journal (no separate sheet composer).\n- Composer is inline in the full JournalView (state-based; no separate sheet component).\n- History shows \"X of Y\" badge only when a search is active; no expand/collapse affordance per day group.\n- Entry lists are always expanded; sub-notes render as bullet lists within the card; no collapsible sections.\n- Calendar overview is a prominent card with month nav, mood/workout filters, and a recap line below the grid.\n- No multi-day range creation option for new entries.\n- AI insight card opened via a toolbar button \u2192 full-screen sheet (AssistantSheet), not inline.\n- Workouts imported from HealthKit with the same \"hc-workout-\" id prefix convention.\n- Dictation: prominent DictationController with recording UI, button in the composer card (not a secondary menu).",
+    "severity": "high",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "Journal is accessed as a top-level Tab in iOS (in Track group), but on Android it is reached via a modal sheet (Quick-Add \u2192 'Journal entry') or a sidebar page within DayDial. These are fundamentally different navigation trees.",
+        "androidBehavior": "Quick-Add FAB menu \u2192 'Journal entry' \u2192 ChronosRoute.Day.TARGET_JOURNAL \u2192 sheet over DayDialScreen. Or DayDialScreen sidebar \u2192 SidebarPage.JOURNAL \u2192 JournalPageRoute (full sidebar page). The composer (JournalComposerSheet / JournalPageRoute) uses the same JournalEntryComposer component.",
+        "iosBehavior": "Tab bar \u2192 'Journal' tab (in Track section) \u2192 JournalView is the full screen. Quick-Add sheet has no separate journal action; selecting 'Journal entry' just routes to the tab.",
+        "fix": "Remove Journal from the Track TabSection in RootView. Create a separate sheet component (e.g., JournalEditorSheet) that mirrors Android's JournalComposerSheet behavior. Route Quick-Add 'Journal entry' action to present this sheet over the current tab rather than navigating to a new tab. Keep an optional sidebar/full-screen mode for tablets/landscape but make the default entry point a modal sheet for parity."
+      },
+      {
+        "aspect": "organization",
+        "description": "iOS shows all features (composer, history, calendar, insights) in one long scrollable view, while Android separates the composer (when from Quick-Add) as a modal sheet and reserves the full page for history.",
+        "androidBehavior": "JournalComposerSheet is a ChronosModalBottomSheet containing only JournalEntryComposer (mood, reflection, time, photos, AI assist buttons). JournalPageRoute wraps JournalPageContent, which layers: header, new-entry card, calendar, insight card, point-adder card, workout-import card, and a full history list.",
+        "iosBehavior": "JournalView is one unified view: header (Today's reflection + streak), composerCard (mood, reflection, highlights, time, photos, dictation, 'Save' button), pointsSection, workoutImportCard, aiInsightCard, calendarOverview, and historySection \u2014 all in a single ScrollView.",
+        "fix": "Extract composerCard, pointsSection, workoutImportCard, and aiInsightCard into a separate modal sheet component (JournalEditorSheet). The root JournalView should show: header (stats), calendar overview, and history only. The editor sheet overlays the root view when creating/editing an entry."
+      },
+      {
+        "aspect": "function",
+        "description": "iOS calls out to dictation as a first-class feature in the composer (DictationController, prominent mic button), while Android handles it as part of the text field + offers AI polish as a secondary menu (\u2728 button).",
+        "androidBehavior": "JournalEntryComposer renders a main-note TextField with no built-in mic button. AI transforms (grammar fix, expand/rewrite) are offered via a dropdown \u2728 menu on the reflection field and on each sub-note. Dictation is not visible in the composer UI.",
+        "iosBehavior": "JournalView.composerCard includes a dictationButton that toggles DictationController recording. The button shows 'Listening...' when active and appends transcripts to the draft. No inline \u2728 polish button; AI is accessed via a separate Assistant toolbar button that opens a full sheet.",
+        "fix": "Add a dictationButton to the Android JournalEntryComposer that mirrors iOS behavior (toggle DictationController state, show recording indicator, append to draft on completion). Move AI transforms (grammar/expand) from the \u2728 dropdown into a separate on-device assist facility (e.g., a bottom sheet or toolbar action), not inline with field editing."
+      },
+      {
+        "aspect": "visual",
+        "description": "iOS history list uses a simple header per day with no expand/collapse control and shows entry count only during search. Android uses an always-visible ChronosCollapsibleSection with a summary line ('1 highlight \u00b7 8:00 AM \u00b7 2 photos') under the day label.",
+        "androidBehavior": "journalHistoryPageSummary returns a label like '5 reflections match'. Day groups are rendered with a day-label row, per-entry cells, and inline point-adder below the group. No collapsible sections; the entire history is always visible.",
+        "iosBehavior": "historySection shows 'History' title + a search box. Each day group has a header showing the day name, emoji mood (if set), entry count (only if writtenCount > 1 and not during search). Each entry is a JournalHistoryCard in a loop. No collapsible sections, no inline point adders per day.",
+        "fix": "Remove the day-group headers and day-level point adders from the history section. Keep the per-entry cards flat. Add a search result count ('X of Y') that matches Android's journalHistoryPageSummary. For consistency with Android's collapsible 'Add details' pattern, the history should not have expand/collapse affordances at the day level \u2014 iOS is already correct here."
+      },
+      {
+        "aspect": "function",
+        "description": "iOS has no multi-day range option for new entries. Android's JournalEntryComposer offers a checkbox 'Apply to a range of days' that generates one entry per day from a start to end date.",
+        "androidBehavior": "JournalEntryComposer: when composing a new entry (isNew == true), a checkbox 'Apply to a range of days' unlocks an end-date picker and displays a summary ('Adds 5 entries, one per day'). The save button text updates to 'Save N entries'.",
+        "iosBehavior": "JournalView.save() always creates one entry for the current day (.now). No range picker, no multiday option.",
+        "fix": "Add a toggle 'Apply to a range of days' in the iOS composer's disclosure group. When enabled, show an end-date picker. On save, create one entry per day from today to the selected end date by calling context.insert() in a loop and then save() once."
+      },
+      {
+        "aspect": "visual",
+        "description": "iOS shows the AI insight card inline with a toolbar button to open a separate full-screen sheet (AssistantSheet). Android shows the insight card inline in the history section with a 'Reflect on my recent entries' button that toggles the card's state.",
+        "androidBehavior": "JournalInsightCard is a ChronosListCard that lives inside JournalPageContent. States: Idle (show 'Reflect on my recent entries' button), Loading (spinner), Ready (text + 'Regenerate' / 'Dismiss' buttons). All inline.",
+        "iosBehavior": "aiInsightCard is inline and shows similar states, but the 'Reflect on recent entries' action calls generateInsight() which populates insight.state. There is also a toolbar aiInsightsToolbarItem button that sets showAIInsights = true, opening AssistantSheet in a separate full-screen sheet.",
+        "fix": "Remove the toolbar button and AssistantSheet from RootView. Keep the aiInsightCard inline as in Android. The 'Reflect on recent entries' and 'Regenerate' buttons should only appear in the card, not in a separate sheet. The card itself can remain dismissable with a 'Dismiss' button."
+      },
+      {
+        "aspect": "function",
+        "description": "iOS does not expose an 'Add a point' inline adder below each day group in history. Android offers a quick-capture field below each day's entries in the history list.",
+        "androidBehavior": "JournalPageContent history list: after each day's entries (inside grouped.forEach), there is a JournalPointAdder(compact=true) that lets the user add a timed point to that specific day without opening the full composer.",
+        "iosBehavior": "historySection loops through groupedHistory and renders JournalHistoryCard for each entry, but there is no inline adder. The only point-adder is the separate pointsSection card at the top of the view.",
+        "fix": "Add a JournalPointAdder (or equivalent inline subtask-style input) below the last entry of each day group in the history loop (inside the VStack for each group). This should accept a body and optional time, then call addPoint() with the day's date."
+      },
+      {
+        "aspect": "visual",
+        "description": "iOS history entries always show a full expanded view of sub-notes, main note, and photos. Android entries in the history can be collapsed or expanded (via an expand/collapse button when the entry is long, showing 'Show more' / 'Show less').",
+        "androidBehavior": "JournalHistoryRow: when the entry body is long (> 220 chars or 4+ newlines), a 'Show more' / 'Show less' button appears and toggles the expanded state, using maxLines = 3 vs. maxLines = nil.",
+        "iosBehavior": "JournalHistoryCard: renders mainNote with lineLimit(expanded ? nil : 4), so it does show a collapsible button via isLong check. This is already correct and matches Android.",
+        "fix": "No change needed; iOS already implements the expand/collapse behavior. Verify the threshold logic (220 chars, 4 newlines) is consistent with Android."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android displays the calendar and recap inline in the history page (JournalCalendarCard + recap line). iOS shows a prominent calendar card with month navigation, mood/workout filter pills, and a recap line \u2014 but also groups history entries by day with headers showing the mood emoji and entry count.",
+        "androidBehavior": "JournalPageContent: calendar is shown in JournalCalendarCard before the history. Each day in the history has a row showing 'Mon, Jun 16 \u00b7 2 entries' and no per-day recap.",
+        "iosBehavior": "calendarOverview is a prominent ChronosGlassCard with month nav, filter pills, weekday headers, a grid, and a recap line ('avg \ud83d\ude04 Great \u00b7 8 days journaled \u00b7 3 workouts'). History day headers show dayLabel (Today or weekday/month/day) and writtenCount (only if > 1).",
+        "fix": "No major change needed. iOS's calendar and recap are actually richer than Android's. Keep them as-is, but ensure the recap line logic matches Android's journalMonthRecapLabel (if it exists; verify against ChronosCore). The day-group headers in the history (with mood emoji and entry count) are a good iOS enhancement and do not conflict with Android semantics."
+      }
+    ],
+    "iosFilesToChange": [
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/App/RootView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Journal/JournalView.swift"
+    ]
+  },
+  {
+    "area": "Insights / Review (Day/Week/Month rollups, category breakdown, severity-ranked findings, execution score, AI recommendations)",
+    "androidFlow": "On Android, the Insights tab IS a primary in-dial tab (DayDialTab.INSIGHTS, labeled \"Review\" to users). It sits alongside Plan, Today, Focus within the DayDialMainContent (feature/daydial/src/main/java/com/ChronosFlow/VBCR/feature/daydial/DayDialMainContent.kt, lines 627-673). The tab renders InsightsTab which aggregates: day/week/month period switchable execution metrics (planned/actual/missed/drift), category breakdown with concentration analysis, severity-ranked findings from ChronosCore, AI recommendations (local + cloud), trends (mood/energy/habits/medication/sleep/screen-time via InsightsTrendSections), and a button to open the detailed DayReviewSheet. The period selector + section-filter pills allow users to narrow scope. Everything is in-place within the dial, swipeable alongside other primary tabs.",
+    "iosFlow": "On iOS, Review is a separate top-level TabView destination (ShellTab.review in ios/ChronosFlow/App/RootView.swift, line 122), grouped under \"Track\" in the sidebar on iPad or flattened into the tab bar on iPhone. It is NOT part of the DayDialScreen (ios/ChronosFlow/Features/DayDial/DayDialScreen.swift). InsightsView.swift is a standalone NavigationStack with its own UI that duplicates Android's insights logic (period rollups, findings, recommendations, trends) but is rendered as an independent surface, not as a tab within the day context. There is a floating \"Day review\" button in the toolbar (line 171 of InsightsView) that opens a separate DayReviewSheet, but this is modal and outside the main insights surface. The entire Insights experience is decoupled from the Plan/Today/Focus tabs.",
+    "severity": "critical",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "Android: Review is a primary tab (INSIGHTS) within DayDialScreen, rendered as one of the 4 swipeable in-dial tabs. iOS: Review is a separate top-level shell destination, not nested in DayDialScreen.",
+        "androidBehavior": "DayDialTab.INSIGHTS is one of DayDialTab.primary (Plan, Today, Focus) + INSIGHTS. Lines 888\u2013891 in DayDialMainContent.kt assign tab indices 0\u20133. InsightsTab is composed directly inside the DayDialMainContent layout alongside Plan/Today/Focus (lines 627\u2013673).",
+        "iosBehavior": "ShellTab.review is a sibling to ShellTab.today, ShellTab.plan, ShellTab.focus at the top level of TabView (RootView.swift line 122). InsightsView is a standalone NavigationStack rendered outside DayDialScreen.",
+        "fix": "Move InsightsView content into DayDialScreen as a fourth primary tab. Create an enum DayDialTab variant for INSIGHTS (already exists in Android, map to it). Render InsightsView as a @ViewBuilder closure passed to DayDialScreen, composed via an AnimatedContent or TabView within DayDialScreen to mirror DayDialMainContent's four swipeable tabs. Update RootView to render DayDialScreen hosting all four tabs, with Review no longer a separate shell destination."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android: The Insights page is a unified scrollable surface with period selector, section-filter pills, and all insights sections (Execution, Categories, Findings, AI Recommendations, Trends, Screen Time) inline and togglable. iOS: Insights page mirrors the top-level structure but several key trends (Habit Streaks, Sleep Chart, Best Deep-Work Window, Mood & Energy, Sleep\u2192Mood Correlation, Medication Adherence) are wrapped in collapsible DisclosureGroups via collapsibleCard helper, making them secondarily discoverable instead of always-visible.",
+        "androidBehavior": "InsightsTab composes sections in a single Column with verticalScroll. Section visibility is driven by insightsSectionVisible() + selectedSections Set<String>. All content (except trends on certain gates) renders inline. Trends section always visible in the layout, with nested charts for Mood, Habit, Medication, Screen Time, Sleep, Journal\u2014each auto-gated on data availability (e.g., habit trend only shows if trends.habitTrend.any { it.completedCount > 0 || it.missedCount > 0 }). Lines 196\u2013457 of InsightsTab.kt show all sections rendered top-to-bottom with in-page filtering.",
+        "iosBehavior": "InsightsView uses a ScrollView with VStack and inline rendering, BUT collapsibleCard helper (lines 229\u2013249) wraps many trend cards in DisclosureGroup with collapsed state persisted via ChronosSettings.insightsCardCollapsed. Habit streaks (line 133), Sleep chart (line 138), Best deep-work window (line 143), Mood & energy (line 148), Sleep\u2192mood correlation (line 152), Medication adherence (line 157) are all collapsible and default-collapsed. This hides valuable trend insights from first-glance, deviating from Android's eager-render-with-optional-filter approach.",
+        "fix": "Remove collapsible wrappers from trend cards. Render them inline like Android: habitChart, sleepChart, moodChart, bestWindowCard, correlationCard, adherenceCard should always be visible (or gated only on data availability like Android, never on collapsed state). Remove the collapsibleCard helper usage for trends. Preserve the collapsible behavior only for the 'balance' card (day balance) if desired, as it mirrors Android's optional deep dive, but unfold findings and recommendations cards by default to match Android's eager rendering."
+      },
+      {
+        "aspect": "function",
+        "description": "Android: The execution card shows a completion percentage with a visual progress bar, four metric stats (Planned/Actual/Missed/Drift with color-coded accents), a narrative + missed-block count, and an 'Open daily review' button triggering the end-of-day detailed review sheet. iOS: The execution metric card (periodSummaryCard) shows similar elements but the 'Day review' button is in the toolbar (top-right) instead of inside the card, and the narrative is inline without the detail-sheet affordance.",
+        "androidBehavior": "InsightsTab execution section (lines 196\u2013269): ChronosFilledTonalButton 'Open daily review' at line 258 calls onOpenFullReview, which launches the detailed DayReviewSheet showing planned-vs-actual breakdown per block. The card foregrounds the full-review action. onOpenFullReview callback is passed down from DayDialScreen.",
+        "iosBehavior": "InsightsView execution summary (lines 264\u2013308) shows metrics + narrative but has no 'Open daily review' button inline. Instead, RootView toolbar (line 170) has a Button('Day review') { showingDayReview = true }, which opens DayReviewSheet modally. The full-review action is topbar-owned, not card-owned.",
+        "fix": "Add a button inside the execution-metric card (periodSummaryCard) that calls a callback to open the day-review sheet. Pass the callback down from the parent DayDialScreen. Change the toolbar button to be DayDialScreen-internal or remove the toolbar button entirely, keying the sheet open off the card button instead. This surfaces the detail-review action inline, matching Android's UX priority."
+      },
+      {
+        "aspect": "function",
+        "description": "Android: The 'AI recommendations' section has a refresh button (with spinner during load) inline at line 388, next to the title. Recommendations are fed by InsightsRecommendationsPlanner (local heuristics) + optional GenAI. iOS: The recommendations card (line 424) has a refresh button at top-right, but it is NOT inside a DisclosureGroup\u2014it is always expanded. However, the card structure and refresh UX differ: iOS button is smaller/styled differently, and recommendations are not wrapped in a collapsible.",
+        "androidBehavior": "Lines 387\u2013416 in InsightsTab.kt: Row with ChronosSectionTitle('AI recommendations') on the left, ChronosOutlinedButton with refresh icon + 'Refresh' label on the right (enabled only if !isRefreshing). Button shows a spinner while isRefreshing=true. RecommendationRow (lines 715\u2013740) renders each recommendation with text, source label, and 'Apply' button.",
+        "iosBehavior": "Lines 424\u2013463 in InsightsView.swift: HStack with Label('AI recommendations') and a refresh button at trailing. The button is styled .bordered and disabled while isRefreshingRecommendations=true. RecommendationRow is absent; instead, recommendations are iterated via ForEach, each showing a lightbulb icon, text, source, but no explicit 'Apply' action\u2014the recommendation is read-only.",
+        "fix": "On iOS: Add an 'Apply' button to each recommendation row (mirroring Android's RecommendationRow). The callback should be wired up to the recommendation planner's apply logic. Ensure the refresh button styling and placement match Android more closely (same scale, same visual hierarchy)."
+      },
+      {
+        "aspect": "function",
+        "description": "Android: Review insights (severity-ranked findings) are always shown in a separate card with a list of ReviewInsightRow entries, each with a severity icon (Visibility/Analytics/Schedule), title, detail, type label, and optional GenAI source label. The list is sorted by severity (CRITICAL \u2192 WARNING \u2192 INFO) then type name. iOS: Findings are collapsible (wrapped in collapsibleCard, line 119) and rendered with similar icons + styling but the collapsible state defaults to collapsed, hiding findings from the initial view.",
+        "androidBehavior": "Lines 336\u2013354 in InsightsTab.kt: If insightsSectionVisible(InsightsSection.INSIGHTS), render orderedInsights (sorted by severity then type) in a ChronosListCard. ReviewInsightRow (lines 537\u2013585) renders each with icon (Info/Warning/Critical mapped to Visibility/Analytics/Schedule), title, detail, severity label, and optional source. No collapsible wrapping.",
+        "iosBehavior": "Lines 119\u2013121 in InsightsView.swift: collapsibleCard(key: 'findings', title: 'Review findings') wraps findingsCard, which may be initially collapsed. findingRow (lines 392\u2013404) has similar icon + styling but defaults hidden if the DisclosureGroup is folded.",
+        "fix": "Remove the collapsibleCard wrapper from the findings card. Render findingsCard always expanded, mirroring Android's eager display. If user preference for collapsible state is desired, add a toggle elsewhere (e.g., in settings) but default to expanded."
+      },
+      {
+        "aspect": "function",
+        "description": "Android: The category breakdown card shows the top category with a \u2605 star and concentration label, then lists all categories with progress bars, minutes, and percentage share. A concentration tip (suggesting context switching if focus is too high) is shown inline below the list. iOS: The concentration tip is missing; the category breakdown does not provide actionable guidance on focus variety.",
+        "androidBehavior": "Lines 271\u2013334 in InsightsTab.kt: categoryRows are iterated, the top row gets a \u2605 prefix and secondary color. focusConcentrationTip (lines 880\u2013892) generates a tip based on share % and category count (e.g., 'Very high focus on X. Try splitting...'). Tip is shown at line 324 in the column.",
+        "iosBehavior": "Lines 331\u2013362 in InsightsView.swift: categoryBreakdownCard shows topCategory with \u2605 and concentration color, but no tip is calculated or displayed. The actionable guidance is absent.",
+        "fix": "Implement focusConcentrationTip logic in iOS and render the tip text below the category rows, using the same thresholds as Android (share >= 0.85f for 'very high focus', >= 0.7f for 'most of day', etc.)."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android: The InsightsTrendSections component is a standalone, comprehensive trends section with day-balance insights, habit streaks, medication adherence, screen-time focus analysis (including distractions + nudges), journal history, evening reflection, sleep trends, and a sleep-log button. Each is a distinct ChronosListCard. iOS: The trends section is fragmented: habit streaks, sleep chart, best window, mood chart, and correlation card are separate collapsible sections (hidden by default). Sleep log entry has its own card at the bottom of the trends area. Journal and mood trends are less visually cohesive.",
+        "androidBehavior": "InsightsTrendSections (InsightsTrendSections.kt, lines 52\u2013477) composes all trends in a single Column with ChronosSpacing.Compact gaps. Each trend (mood, habit, medication, screen-time, journal, sleep) is gated on data availability but always rendered when data exists. The section is self-contained and placed at lines 445\u2013457 in InsightsTab.kt.",
+        "iosBehavior": "InsightsView trends (lines 131\u2013162) are spread across multiple collapsibleCard helpers, each governing a single trend. The visual organization is scattered, and the user must expand each card to see the trend.",
+        "fix": "Consolidate iOS trends into a single 'Trends' section (mirroring Android's structure). Render all trend charts and insights in a cohesive column, gated by data availability rather than collapsed state. If iPad layout requires restructuring, use a multi-column grid, but preserve the eager-render-on-data approach on iPhone."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android: Screen time section is rendered as a single inline card (ScreenTimeCard, part of InsightsTrendSections). iOS: Screen time is rendered as a standalone ChronosGlassCard with a hourglass icon and informational message; it does not include real tracking data (as Screen Time data access requires DeviceActivity authorization on iOS).",
+        "androidBehavior": "ScreenTimeCard (feature/daydial/src/main/java/com/ChronosFlow/VBCR/feature/daydial/ScreenTimeCard.kt) is composed at line 441 in InsightsTab.kt. The card displays focused vs. distracting app usage over the trend window (via trends.screenTimeTrend), focus percentage, goal tracking, best focus day, and distraction nudges.",
+        "iosBehavior": "screenTimeCard (lines 552\u2013565 in InsightsView.swift) is a placeholder: hourglass icon, 'Screen time' heading, and static message 'Track focused vs. distracting app time...'. No actual screen time data is shown.",
+        "fix": "Integrate Screen Time framework (requires DeviceActivity + AppIntents authorization on iOS 15+) to fetch real screen time data on supported devices. Mirror Android's display: total focused %, focus goal tracking, best focus day, top distracting apps. If authorization is not granted, show the current placeholder. This aligns the iOS surface with Android's rich screen-time insights."
+      }
+    ],
+    "iosFilesToChange": [
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/App/RootView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/DayDial/DayDialScreen.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Insights/InsightsView.swift"
+    ]
+  },
+  {
+    "area": "Routines",
+    "androidFlow": "Android (DayDial-centric): Routines = \"Templates\" (TemplateBlueprint in-memory) accessed as a sidebar page (SidebarPage.TEMPLATES) within the DayDial screen. A routine exists both as a reusable in-day template (edited/applied within day context) and as a persisted Routine model. Access: (1) sidebar \"Routines\" tab \u2192 lists all templates + \"Apply today/tomorrow/Seed day\" actions + \"Edit\" + \"Copy\" + \"Save current day as routine\"; (2) right-side menu \u2192 onApplyTemplate (passes template ID to viewModel.applyRoutineToDate). No separate \"Routines\" destination. Apply uses ApplyRoutineToDateUseCase(routineId, date, startMinute) to instantiate all steps as TimeBlocks. Complete via CompleteRoutineForDateUseCase (marks routine.lastCompletedDate). Completion status derived from TimeBlocks carrying routineId + actualEndMinuteOfDay. Routines are NOT in the Quick-Add FAB menu (only new blocks/tasks/meds/habits/goals/journal/sleep).",
+    "iosFlow": "iOS (tab-based): Routines = a standalone TabSection(\"Track\") \u2192 \"Routines\" tab within RootView (ShellTab.routines). RoutinesView is a full-screen tab showing all routines as cards. Each card has: \"Mark complete\" (markComplete -> lastCompletedDate) + \"Edit\" + \"Apply to day\" (ApplyRoutineSheet). Apply opens a sheet with date/start-time pickers, previews instantiated blocks, calls apply() to insert TimeBlocks. Separate from Android's in-day template context entirely \u2014 routines never appear in DayDial, and there is no \"save current day as routine\" action. Routines are also NOT in the Quick-Add menu (QuickAdd.swift only lists block/task/med/habit/goal/journal/sleep). iOS instantiation logic mirrors Android exactly (ChronosCore.instantiateRoutine; uses floorDiv/floorMod).",
+    "severity": "critical",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "Android routines = sidebar page within DayDial (accessed via SidebarPage.TEMPLATES in a modal sidebar). iOS routines = standalone tab in the main TabView.",
+        "androidBehavior": "User opens DayDial \u2192 clicks sidebar \u2192 clicks \"Routines\" \u2192 sees templates inline within the DayDial context. Routines are a layer of the DayDial, not a separate destination.",
+        "iosBehavior": "User taps the \"Routines\" tab in the main tab bar. Presents RoutinesView as its own full-screen tab (via ShellTab.routines).",
+        "fix": "Remove ShellTab.routines from RootView's TabView. Move RoutinesView to be a sidebar page (new case in SidebarPage enum, e.g., SidebarPage.ROUTINES or reuse SidebarPage.TEMPLATES). Present RoutinesView as a sheet/navigation from DayDialScreen, not as a top-level tab. Update ios/ChronosFlow/App/RootView.swift: delete the Tab(\"Routines\", ..., value: .routines) entry and the ShellTab.routines case. Create/reuse a RoutinesSheetTarget or extend DayDialScreen to navigate to routines within its sidebar context."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android groups routines under 'morePages' with Journal, Reading List, Calendars, etc. (bottom of sidebar navigation). iOS places routines in 'Track' TabSection alongside Habits, Goals, Meds, Sleep, Journal.",
+        "androidBehavior": "SidebarPage.TEMPLATES appears in .morePages list, accessed via a scrollable sidebar drill-down. Not a primary/root page like Tasks or Habits.",
+        "iosBehavior": "Routines is a first-class tab in the Track section, peer to Habits/Goals/Meds/Sleep/Journal, which conflates 'long-lived tracking' with 'routine templates'. Android keeps routines in a distinct 'tools' tier.",
+        "fix": "Move Routines out of TabSection(\"Track\") in RootView. Either: (a) remove from TabView entirely and surface only via DayDial sidebar, or (b) create a new TabSection(\"Tools\") or place under a different IA tier. If keeping it visible, place it below Review or alongside Settings, not in Track. Update ios/ChronosFlow/App/RootView.swift lines 104\u2013108."
+      },
+      {
+        "aspect": "function",
+        "description": "Android routines support in-day seeding (\"Seed day\" = ApplyRoutineToDateUseCase with anchor minute 0 to fill the current day with routine blocks) + save-current-day-as-routine action. iOS has only apply-to-date (with chosen start time) and no save-as-routine.",
+        "androidBehavior": "SidebarPageContent.kt lines 501\u2013535: three apply actions (Apply today, Apply tomorrow, Seed day) + button to save current day's plan as a new routine. The seeding instantly populates today with blocks at their default offsets. Routines act as both templates-in-context and saveable blueprints.",
+        "iosBehavior": "RoutinesView + ApplyRoutineSheet: only date + start-time picker, then instantiate and save. No \"seed day\" (apply-with-anchor-0) + no \"save this day\" feature. Routines are immutable collections, not derived from the day's actual plan.",
+        "fix": "(a) Add 'seed day' action to RoutineCard in ios/ChronosFlow/Features/Routines/RoutinesView.swift: insert a 4th button (alongside Edit, Mark complete, Apply to day) that applies the routine with start minute = 0, today, no sheet. (b) Add 'save current day as routine' button to DayDialScreen (where the day's blocks are available). This requires DayDialScreen to expose a callback (e.g., onSaveAsRoutine: (List<TimeBlock>) -> Void) that RoutinesView can receive. Instantiate a new Routine with the blocks' attributes and save to context. Mirror SidebarPageContent.kt lines 535 & appfunctions applyRoutine()."
+      },
+      {
+        "aspect": "function",
+        "description": "Android exposes routines as AI Assistant (AppFunction) targets: applyRoutine(routineName, dayOptional) is callable via natural-language commands. iOS has no AppFunction equivalent.",
+        "androidBehavior": "ChronosAppFunctions.kt lines 808\u2013829: @AppFunction suspend fun applyRoutine(...). Users can tell the AI \"apply my morning routine tomorrow\" and the system calls applyRoutineToDateUseCase. No iOS equivalent.",
+        "iosBehavior": "No AppFunction metadata or AI-callable routine actions. Routines are UI-only; assistants cannot trigger them programmatically.",
+        "fix": "Add a custom ShortCut intent to ios/ChronosFlow/AppIntents/ChronosAppIntents.swift that exposes 'Apply Routine' to Siri + Shortcuts. Define an intent that takes routine name + optional date, then calls the same instantiation logic. Mirror the Android AppFunction behavior (case-insensitive routine lookup, default to today, return success/failure)."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android's routine completion status (in sidebar) shows a completion summary (\"X/Y blocks done\") derived from TimeBlocks with routineId + actualEndMinuteOfDay. iOS shows lastCompletedDate in RoutineCard but no per-routine block completion tracking.",
+        "androidBehavior": "SidebarPageContent.kt lines 485\u2013492: deriveRoutineCompletions(blocks) groups all TimeBlocks by routineId and counts those with actualEndMinuteOfDay != null. Completion label shows \"2/5 blocks done\" inline.",
+        "iosBehavior": "RoutineCard shows lastCompletedDate (e.g., \"Completed today\" or \"Last completed X days ago\"), not a count of completed blocks. No per-block tracking; only a binary \"done today\" state.",
+        "fix": "Update RoutineCard in ios/ChronosFlow/Features/Routines/RoutinesView.swift to derive and display block completion like Android. Query TimeBlocks with routineId == routine.id for the viewed date (today), count those with actualEndMinuteOfDay != null, show \"X/Y blocks done\" label alongside lastCompletedDate. Requires passing the viewed date to RoutineCard (or having it read from an environment key @Environment(\\.viewedDate))."
+      }
+    ],
+    "iosFilesToChange": [
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/App/RootView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Routines/RoutinesView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Routines/RoutineEditorSheet.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Planner/DayDialScreen.swift"
+    ]
+  },
+  {
+    "area": "Settings & Onboarding",
+    "androidFlow": "Android accesses settings through the sidebar navigation model. Android has discrete sidebar pages (4 separate settings screens):\n- AI_SETTINGS (privacy mode, preview model, auto-apply plan, planning style)\n- PRIVACY_SYNC (app lock, sensitive content redaction, cloud sync, Wear link, companion app interop)\n- NOTIFICATIONS (block/break reminders, meditation/habit/review reminders, quiet hours, sleep/journal reminder)\n- APPEARANCE (theme mode, backdrop theme, dynamic color, glass, reduce motion, increase contrast)\n\nAll four are reachable via the sidebar navigation (feature/daydial/model/SidebarPage.kt) and accessed by routing to Day(target=TARGET_AI_SETTINGS/PRIVACY_SYNC/NOTIFICATIONS/APPEARANCE).\n\nFeature flags (Habits, Medication, Goals, Journal, Sleep, Review, AI Advisor) are controlled in the Developer panel within the sidebar (implemented in SidebarPageContent.kt as a developer section listing 7 toggles).\n\nOnboarding flow (app/.../onboarding/ChronosOnboarding.kt) is 3 paged screens: intro \u2192 feature selector \u2192 permissions priming. Feature selection persists to the same flags used in the day-targets. After onboarding, the user can reach settings via the sidebar navigation or command palette/FAB menu.",
+    "iosFlow": "iOS accesses settings as a single monolithic tab in the TabView shell (RootView.swift). All settings (appearance, AI, notifications, privacy, feature flags) are on one SettingsView (Settings/SettingsView.swift) using a grouped Form with multiple sections in order: Appearance \u2192 AI & Planning \u2192 Notifications \u2192 Privacy & Sync \u2192 Connected Apps (Meridian) \u2192 Screen Time \u2192 Features \u2192 Data \u2192 About.\n\nThere is no sidebar or multi-page navigation \u2014 all settings sections are within one scrollable form. Feature flags appear in a single \"Features\" section listing 7 toggles (identical list to Android).\n\nOnboarding (ios/.../Features/Onboarding/OnboardingView.swift) is a 6-page TabView: 4 info pages \u2192 feature selector \u2192 permissions priming. Feature selection binds directly to ChronosSettings.shared and persists immediately via UserDefaults, same as Android.\n\nBoth Android and iOS use feature graduation (promotion markers) to ensure off-by-default features ship on by default without stranding old installs with stale false values.",
+    "severity": "high",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "Android has discrete sidebar pages for settings (4 screens: AI Settings, Privacy & Sync, Notifications, Appearance), accessed via targeted deep links. iOS has all settings in a single monolithic scrollable Form view with no multi-page navigation.",
+        "androidBehavior": "User taps sidebar, selects settings section (AI_SETTINGS/PRIVACY_SYNC/NOTIFICATIONS/APPEARANCE), routes to Day(target=...) which renders SidebarPageContent for that page",
+        "iosBehavior": "User taps Settings tab in TabView, sees one SettingsView with 9 grouped sections stacked in a Form",
+        "fix": "Break iOS SettingsView.swift into separate views per section. Create a navigation stack within the Settings tab that routes to sub-pages: SettingsAppearanceView, SettingsAIView, SettingsNotificationsView, SettingsPrivacySyncView (with collapsible groups). Use NavigationLink or NavigationStack to mirror Android's sidebar page model. This requires refactoring ios/ChronosFlow/Settings/SettingsView.swift to use NavigationStack and creating 4 new view files."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android groups settings into 4 logical pages (each is a full screen); iOS piles them all into one vertically scrollable Form. The cognitive load and scroll distance are fundamentally different.",
+        "androidBehavior": "Each settings category (AI, Privacy/Sync, Notifications, Appearance) is its own full-screen section in the sidebar, with its own header, collapsible groups where needed, and dedicated real estate.",
+        "iosBehavior": "All settings stack in one Form: 9 sections scroll past each other vertically. No spatial separation, no navigation breadcrumbs.",
+        "fix": "Reorganize iOS to present settings as a tiered navigation: top-level Settings tab shows a list of 4 settings pages (Appearance, AI & planning, Notifications, Privacy & Sync) with their icons and descriptions, each as a NavigationLink. Create 4 separate view files (SettingsAppearanceView.swift, SettingsAIView.swift, SettingsNotificationsView.swift, SettingsPrivacySyncView.swift) that each render their section as a Form. This matches Android's 4-page model."
+      },
+      {
+        "aspect": "function",
+        "description": "Android has collapsible sections in Privacy & Sync and Notifications (with persisted expand-state keys like privacy.appPermissions.expanded). iOS has some DisclosureGroups (sensitive content, cloud sync, wear link, companion app) but NOT in Notifications or the top-level Appearance settings.",
+        "androidBehavior": "Notifications page has always-visible toggles; Privacy & Sync has 5 collapsible sections (App lock always visible, then Sensitive content / Cloud sync / Wear link / Companion app as DisclosureGroups with expand state persisted in DataStore).",
+        "iosBehavior": "Notifications has all toggles always visible; Privacy & Sync has DisclosureGroups for Sensitive content / Cloud sync / Wear link / Connected apps, but misses the explicit 'App Permissions' collapsible that Android shows.",
+        "fix": "In SettingsPrivacySyncView, add a DisclosureGroup for 'App Permissions' (always-visible on Android but still collapsible on iOS) that wraps the medication lock + HealthKit sleep toggles. Persist its expanded state via ChronosSettings just like the others (add privacyAppPermissionsExpanded to ChronosSettings if missing, which ios/ChronosFlow/Settings/ChronosSettings.swift already has at line 85). Wrap in DisclosureGroup(isExpanded: $settings.privacyAppPermissionsExpanded) { Toggle(...) }."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android separates settings into 4 full-screen sidebars, each with its own visual hierarchy and header. iOS shows 9 sections in one scrollable Form, with the same importance/visual weight. No breadcrumb or 'back' affordance on iOS.",
+        "androidBehavior": "Each sidebar page (AI_SETTINGS, PRIVACY_SYNC, etc.) renders as a full screen with a header saying 'AI Settings' / 'Privacy & Sync' / etc., then collapsible groups and controls below. User can back out via the sidebar.",
+        "iosBehavior": "SettingsView is one Form with section headers ('Appearance', 'AI & planning', 'Notifications', etc.) but no affordance to navigate between them or collapse the entire section \u2014 everything is in one scroll view.",
+        "fix": "Replace the single-Form SettingsView with a NavigationStack that shows a list view of 4 settings category tiles (each with an icon and label, matching the Android sidebar icons). Tapping a tile routes to its dedicated view. Add a back button or use NavigationStack's automatic back affordance. This gives iOS the same visual/navigation separation as Android."
+      },
+      {
+        "aspect": "navigation",
+        "description": "Android onboarding has 3 pages (intro, feature selector, permissions). iOS onboarding has 6 pages (4 info pages, feature selector, permissions). The total page count and flow is different.",
+        "androidBehavior": "3-page HorizontalPager: Page 0 = dial intro, Page 1 = feature selector, Page 2 = permissions. User sees 3 dots, can skip early, gets 'Next' button advancing pages sequentially.",
+        "iosBehavior": "6-page TabView: Pages 0\u20133 are info pages ('Your day as a dial', 'Plan and protect time', 'Learn and improve', 'Stay on track'), Page 4 = feature selector, Page 5 = permissions. More intro, but identical feature/permission logic.",
+        "fix": "Consolidate iOS onboarding to 3 pages: merge the 4 info pages into a single pager that cycles through them (maybe show 1 per tab, or keep 4 but acknowledge that Android shows only 1 intro). Alternatively, add a 4th page to Android to match iOS's 'Plan and protect' and 'Learn and improve' messages (but the brief says do not modify Android). Keep iOS as-is: it's a superset UX, not a divergence in *function*. No fix needed here unless you want parity down to page count."
+      },
+      {
+        "aspect": "function",
+        "description": "Android Notifications settings has 'Sleep & Journal log reminder' (logReminderEnabled). iOS has the same toggle, but the naming is slightly different: iOS calls it 'Evening log reminder (20:00)' while Android context suggests it's bound to the sleep/journal flow. Both are present and functional.",
+        "androidBehavior": "onSleepJournalLogReminderChanged callback in SidebarPageContent; label is 'Sleep & journal log reminder'.",
+        "iosBehavior": "Toggle(\"Evening log reminder (20:00)\", isOn: $settings.logReminderEnabled) in notificationsSection. Exact same underlying flag (logReminderEnabled in ChronosSettings, notif.logReminder in UserDefaults).",
+        "fix": "No critical fix needed. Both are synced. If you want exact label parity, rename iOS's toggle from 'Evening log reminder (20:00)' to 'Log sleep & journal reminder' to match Android's grouping with the sleep/journal features."
+      },
+      {
+        "aspect": "function",
+        "description": "Android has explicit 'Protect focus blocks' / 'Add breaks automatically' / 'Preserve manual blocks' toggles in AI_SETTINGS under Planning. iOS does not expose these in the AI & planning section \u2014 they are missing entirely.",
+        "androidBehavior": "SidebarPageContent.kt lines 961\u2013963: CheckboxSetting for 'Protect focus blocks', 'Add breaks automatically', 'Preserve manual blocks', each with callbacks onProtectFocusChanged, onAddBreaksAutomaticallyChanged, onPreserveManualBlocksChanged.",
+        "iosBehavior": "SettingsView has only aiEnabled, planningStyle, and autoApplyPlan toggles. No toggles for focus protection or auto-break insertion.",
+        "fix": "Add 3 new properties to ChronosSettings (ios/ChronosFlow/Settings/ChronosSettings.swift): protectFocusBlocks, addBreaksAutomatically, preserveManualBlocks, each with UserDefaults persistence (e.g., planningStyle.protectFocus, planningStyle.autoBreaks, planningStyle.preserveManual). Then add 3 Toggle rows to SettingsAIView under the Planning style picker, bound to these properties. Wire up the iOS app to respect these flags in the planner (requires coordination with the ML model layer to read the flags on plan generation)."
+      }
+    ],
+    "iosFilesToChange": [
+      "ios/ChronosFlow/Settings/SettingsView.swift",
+      "ios/ChronosFlow/Settings/ChronosSettings.swift",
+      "ios/ChronosFlow/Features/Onboarding/OnboardingView.swift (minor label unification)"
+    ]
+  },
+  {
+    "area": "Calendar import, sync, and interop (DevTime integration)",
+    "androidFlow": "Android implements calendar via multiple layers: (1) DayDialScreen shows calendar-permission flow with rationale dialogs, foreground-sync, and export-to-calendar actions on individual blocks. (2) SidebarPage.CALENDARS provides a dedicated calendar management page with month picker, sync status, permission flows, and a detailed-calendar section that filters imported events by preset (All/Schedule/Calendar) and per-source checkboxes. (3) Calendar overlay on dial shows device events as ghost arcs. (4) InteropSync handles DevTime peer-sync as a background worker with 6h cadence, mirroring tasks deterministically and scheduling reminders. Surfaces in Settings > Connected apps section.",
+    "iosFlow": "iOS has minimal, fragmented calendar surface: (1) DayDialScreen toggles a calendar overlay (hidden in plan menu) that draws readonly event arcs via CalendarOverlayProvider/EventKit. (2) Calendar permissions are silently requested in background. (3) No dedicated calendar management page. (4) SettingsView has no calendar section. (5) InteropSync works but surfaces no UI: no sync timestamp, no failure message, no Connected apps card, no consent toggle. (6) No calendar ring presets, no per-source filters, no Calendar-only mode.",
+    "severity": "critical",
+    "divergences": [
+      {
+        "aspect": "navigation",
+        "description": "Android has SidebarPage.CALENDARS dedicated full page with month picker, sync status, permission flows, and detailed calendar list. iOS has no calendar management page; overlay is hidden in a menu.",
+        "androidBehavior": "User navigates to Settings > More (sidebar) > Calendars page, sees calendar month picker, sync status banner, connection summary, and Detailed Calendar section with event timeline.",
+        "iosBehavior": "User navigates to Plan tab, opens menu (wand icon), finds Show/Hide calendar overlay toggle buried in a list with AI plan, fill gaps, fix schedule, and repair with AI options. No dedicated calendar page.",
+        "fix": "Create ios/ChronosFlow/Features/Calendar/CalendarManagementView.swift as a new SettingsView section. Mirror the Android Calendars sidebar page structure with: (1) MonthPicker for date navigation (2) CalendarSyncStatusCard showing connection state and last-sync timestamp (3) Detailed timeline list of imported events with per-source filtering via segmented buttons (All/Schedule/Calendar) and a filter menu for per-source checkboxes. Add to SettingsView.swift as a new NavigationLink or DisclosureGroup in privacySyncSection."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android consolidates calendar UI in SidebarPageContent (dedicated page) and DayDialScreen (permissions/export). iOS scatters calendar across DayDialScreen overlay toggle, CalendarOverlay.swift provider, and no SettingsView section.",
+        "androidBehavior": "Calendar management in one sidebar page (SidebarPage.CALENDARS). Export/import via PendingCalendarAction enums. Permission flow unified in DayDialCalendarPermissions.kt.",
+        "iosBehavior": "Calendar overlay in DayDialScreen. Interop sync runs in background with no UI. Permission requests implicit. No permission-rationale dialog.",
+        "fix": "Consolidate iOS surfaces into CalendarManagementView + CalendarPermissionsHandler. Move overlay toggle from plan menu to CalendarManagementView. Expose interop sync status (last sync, result, consent toggle) in new ConnectedAppsView within privacySyncSection. Add calendar-permissions dialog in SettingsView mirroring Android's rationale + resolution logic."
+      },
+      {
+        "aspect": "function",
+        "description": "Android shows calendar events in detailed-calendar section with preset filters (All 6 sources, Schedule 4, Calendar 2) and per-source toggles. iOS shows no calendar event list.",
+        "androidBehavior": "SidebarPageContent.kt lines 750-905: Three segmented-button presets map to CalendarTimelinePreset enum. Filter menu shows Hide Completed, Connected Calendar Only, and per-source checkboxes. List renders SidebarTimelineItems grouped by source.",
+        "iosBehavior": "DayDialScreen only shows overlay events as ghost arcs. No event list, filtering, or per-source visibility controls.",
+        "fix": "In CalendarManagementView, add timeline section mirroring Android's Detailed Calendar. Import CalendarTimelinePreset enum and filter logic (SidebarPageContent.kt lines 1533-1557). Render segmented buttons for All/Schedule/Calendar. Add filter menu with Hide Completed toggle and per-source checkboxes. Query imported TimeBlock and quick-item records for selected date and render grouped by source label."
+      },
+      {
+        "aspect": "visual",
+        "description": "Android renders calendar events inline in sidebar with detail cards showing source label, time, category, and quick-action buttons. iOS shows no calendar event list UI.",
+        "androidBehavior": "Lines 750-905 in SidebarPageContent.kt render scrollable list of SidebarTimelineItems with title, source label, time, category detail, status, and optional action buttons. Events grouped by source with section headers showing count.",
+        "iosBehavior": "No timeline list for calendar events.",
+        "fix": "Create CalendarTimelineView mirroring Android's SidebarTimelineItem rendering. Display filtered events as scrollable list with Section headers for source labels with counts. Render rows with title, time, category/detail, and status. For quick items include action buttons (Complete, Take, Missed)."
+      },
+      {
+        "aspect": "function",
+        "description": "Android exposes calendar permissions flow (READ and WRITE) with rationale dialogs, permission check on app resume, and actionable error states in sidebar. iOS silently requests EventKit access; no user-facing flow or status.",
+        "androidBehavior": "DayDialCalendarPermissions.kt defines CalendarPermissionStatus (readGranted, writeGranted, permanentlyDenied, shouldShowRationale), PendingCalendarAction enum, and resolution logic. DayDialScreen.kt has calendarPermissionLauncher/state. SidebarPageContent.kt lines 637-744 render collapsible Calendar Sync section with status and actionable buttons.",
+        "iosBehavior": "CalendarOverlayProvider.requestAccess() silently requests in background. No rationale dialog, permission state UI, or error messages.",
+        "fix": "Add calendar-permission handling to CalendarManagementView and SettingsView. Port CalendarPermissionStatus and PendingCalendarAction patterns from Android. Add requestCalendarAccess() with a dialog (like HealthKitSleepImporter.swift). Render permission status card in CalendarManagementView showing current state (all granted / read-only / denied), actionable buttons (Request, Open Settings, Enable Write), and status messages matching Android's copy."
+      },
+      {
+        "aspect": "function",
+        "description": "Android surfaces interop peer sync (DevTime import) prominently in Settings > Connected apps with last-sync timestamp, result message, and consent toggle. iOS has working InteropSync but zero UI.",
+        "androidBehavior": "InteropSyncManager.kt and InteropContract.kt define sync pipeline. SidebarPageContent.kt lines 1068-1076 render CompanionAppStatusCard with sync status and Connected Apps section.",
+        "iosBehavior": "InteropSync.swift implements full pipeline. InteropSync.lastSyncDate and lastResult stored in App-Group defaults but never displayed. No consent toggle.",
+        "fix": "Create ConnectedAppsView in SettingsView showing interop status. Add to privacySyncSection as new DisclosureGroup (like wearLinkGroup). Render: (1) Last sync timestamp via InteropSync.lastSyncDate using formatLastSyncedLabel, (2) Last result message (InteropSync.lastResult), (3) Sync Now button, (4) Consent toggle bound to ChronosSettings.interopConsentGranted. Add ChronosSettings.interopConsentGranted boolean (default false) that gates InteropSync.runSync()."
+      },
+      {
+        "aspect": "organization",
+        "description": "Android surfaces block-level calendar export actions (ExportBlock, RefreshBlock, RemoveBlock) in sidebar's Detailed Calendar section. iOS has no such UI.",
+        "androidBehavior": "PendingCalendarAction enum includes ExportBlock(blockId), RefreshBlock(blockId), RemoveBlock(blockId). These map to viewModel methods. Action buttons in sidebar timeline rows trigger these.",
+        "iosBehavior": "TimeBlockEditorSheet has no export-to-calendar button or action.",
+        "fix": "Add Calendar Export field to TimeBlockEditorSheet. Show linked-calendar-event indicator when block.externalCalendarEventID != nil. Add buttons to Refresh, Remove, or (if not linked) Export to Calendar. Wire to viewModel methods matching Android's exportBlockToCalendar/refreshCalendarExport/removeCalendarExport semantics."
+      }
+    ],
+    "iosFilesToChange": [
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Settings/SettingsView.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/DayDial/DayDialScreen.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Calendar/CalendarOverlay.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Settings/ChronosSettings.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Interop/InteropSync.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Models/TimeBlock.swift",
+      "/Users/bharath/Code/ChronosFlow/ios/ChronosFlow/Features/Editor/TimeBlockEditorSheet.swift"
+    ]
+  }
+]

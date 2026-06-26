@@ -13,7 +13,7 @@ struct TodayView: View {
     @State private var activeSheet: TodaySheet?
 
     private enum TodaySheet: String, Identifiable {
-        case assistant, checkIn, data, newTask, newBlock, logSleep, journal
+        case assistant, checkIn, data, newTask, newBlock, logSleep, journal, planDay, fillGaps
         var id: String { rawValue }
     }
 
@@ -66,6 +66,7 @@ struct TodayView: View {
                     VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
                         if readiness != .unknown && readiness != .normal { readinessBanner }
                         nowCard
+                        dayActionStrip
                         if !hasTodayJournalEntry { journalActionCard }
                         if !hasTodaySleepLog { sleepActionCard }
                         if let upNext { upNextCard(upNext) }
@@ -76,7 +77,7 @@ struct TodayView: View {
                 }
             }
             .navigationTitle(Date.now.formatted(.dateTime.weekday(.wide).month().day()))
-            .toolbarTitleDisplayMode(.inlineLarge)
+            .chronosCommandPaletteToolbar()
             .chronosScrollMinimizedBar()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -113,6 +114,8 @@ struct TodayView: View {
                 case .newBlock: TimeBlockEditorSheet(block: nil)
                 case .logSleep: SleepLogSheet()
                 case .journal: JournalView()
+                case .planDay: AIPlannerSheet(date: .now, existingBlocks: todayBlocks)
+                case .fillGaps: GapFillSheet(date: .now, existingBlocks: todayBlocks)
                 }
             }
         }
@@ -150,6 +153,7 @@ struct TodayView: View {
                         .buttonStyle(.borderedProminent)
                         .padding(.top, ChronosSpacing.small)
                     }
+                    blockDoneButton(current)
                 } else {
                     Text("Open time").font(.chronosTitle)
                     Text("Nothing scheduled right now").font(.chronosBody).foregroundStyle(.secondary)
@@ -157,6 +161,58 @@ struct TodayView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// Mark the current block done / not-done. Completion is recorded as actual start/end times
+    /// (planned values), which the dial's actual ring and the Insights planned/actual/missed rollups
+    /// already read — previously a scheduled block could never be marked complete on iOS.
+    @ViewBuilder
+    private func blockDoneButton(_ block: TimeBlock) -> some View {
+        let done = block.actualEndMinuteOfDay != nil
+        Button {
+            withAnimation(ChronosMotion.bouncy) {
+                if done {
+                    block.actualStartMinuteOfDay = nil
+                    block.actualEndMinuteOfDay = nil
+                } else {
+                    block.actualStartMinuteOfDay = block.startMinuteOfDay
+                    block.actualEndMinuteOfDay = block.plannedEndMinuteOfDay
+                }
+                try? context.save()
+            }
+        } label: {
+            Label(done ? "Completed" : "Mark done",
+                  systemImage: done ? "checkmark.circle.fill" : "circle")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .tint(done ? ChronosColors.brandSecondary : ChronosColors.brandPrimary)
+        .padding(.top, ChronosSpacing.small)
+    }
+
+    /// State-driven quick-action strip (parity with the Android Today "daily action strip"): an empty
+    /// day nudges planning; a populated day offers gap-fill. Both always offer "Add block".
+    private var dayActionStrip: some View {
+        HStack(spacing: ChronosSpacing.small) {
+            if todayBlocks.isEmpty {
+                actionChip("Plan my day", "sparkles") { activeSheet = .planDay }
+            } else {
+                actionChip("Fill gaps", "wand.and.stars") { activeSheet = .fillGaps }
+            }
+            actionChip("Add block", "calendar.badge.plus") { activeSheet = .newBlock }
+        }
+    }
+
+    private func actionChip(_ title: String, _ icon: String, _ tap: @escaping () -> Void) -> some View {
+        Button(action: tap) {
+            Label(title, systemImage: icon)
+                .font(.chronosLabel)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, ChronosSpacing.small)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .tint(ChronosColors.brandPrimary)
     }
 
     private func upNextCard(_ block: TimeBlock) -> some View {

@@ -93,32 +93,40 @@ struct DayDialScreen: View {
                 }
             }
             .navigationTitle("Plan")
-            .toolbarTitleDisplayMode(.inlineLarge)
             // iOS 27: collapse the nav bar as the day's block list scrolls up, giving the dial room.
             // Routed through the single helper so the new-API signature has one fix point.
             .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     DatePicker("Day", selection: $selectedDate, displayedComponents: .date)
                         .labelsHidden()
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { undo() } label: { Image(systemName: "arrow.uturn.backward") }
-                        .disabled(!history.canUndo)
-                        .accessibilityLabel("Undo")
-                    Button { redo() } label: { Image(systemName: "arrow.uturn.forward") }
-                        .disabled(!history.canRedo)
-                        .accessibilityLabel("Redo")
-                    Button {
-                        showCalendar.toggle()
-                        if showCalendar { Task { await loadOverlay() } }
-                    } label: {
-                        Image(systemName: showCalendar ? "calendar.circle.fill" : "calendar.circle")
+                    // Undo/redo appear only when actionable. Permanently-present (greyed) buttons here
+                    // overflowed the iPhone bar and pushed the leading DatePicker into the system "…"
+                    // menu; surfacing them on demand keeps the day selector visible.
+                    if history.canUndo {
+                        Button { undo() } label: { Image(systemName: "arrow.uturn.backward") }
+                            .accessibilityLabel("Undo")
                     }
-                    .accessibilityLabel("Toggle calendar overlay")
+                    if history.canRedo {
+                        Button { redo() } label: { Image(systemName: "arrow.uturn.forward") }
+                            .accessibilityLabel("Redo")
+                    }
                     Menu {
                         Button { activeSheet = .ai } label: { Label("AI day plan", systemImage: "sparkles") }
                         Button { activeSheet = .gapFill } label: { Label("Fill free time", systemImage: "rectangle.compress.vertical") }
+                        Divider()
+                        // Calendar overlay toggle lives in the menu (was a standalone bar button that
+                        // contributed to the overflow); the filled icon still signals the on state.
+                        Button {
+                            showCalendar.toggle()
+                            if showCalendar { Task { await loadOverlay() } }
+                        } label: {
+                            Label(showCalendar ? "Hide calendar overlay" : "Show calendar overlay",
+                                  systemImage: showCalendar ? "calendar.circle.fill" : "calendar.circle")
+                        }
                         if !conflicts.isEmpty {
                             Divider()
                             // Deterministic, undoable conflict repair (Android "Fix schedule").

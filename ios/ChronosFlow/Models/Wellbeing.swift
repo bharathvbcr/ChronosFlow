@@ -106,6 +106,10 @@ final class SleepTrack {
     var sleepQuality: Int
     var windDownNotes: String?
     var interruptedCount: Int
+    /// How refreshed the user felt the next morning. 0 = unrated, 1..5 otherwise. Mirrors Android
+    /// `SleepTrack.refreshedRating` (the "How refreshed do you feel?" 1–5 emoji selector). Defaulted
+    /// so existing SwiftData rows migrate without a manual migration.
+    var refreshedRating: Int
     var source: SleepSource
 
     init(
@@ -118,6 +122,7 @@ final class SleepTrack {
         sleepQuality: Int = 0,
         windDownNotes: String? = nil,
         interruptedCount: Int = 0,
+        refreshedRating: Int = 0,
         source: SleepSource = .manual
     ) {
         self.id = id
@@ -129,6 +134,7 @@ final class SleepTrack {
         self.sleepQuality = sleepQuality
         self.windDownNotes = windDownNotes
         self.interruptedCount = interruptedCount
+        self.refreshedRating = refreshedRating
         self.source = source
     }
 

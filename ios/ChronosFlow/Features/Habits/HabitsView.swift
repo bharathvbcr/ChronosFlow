@@ -13,8 +13,14 @@ struct HabitsView: View {
     @Query(filter: #Predicate<Habit> { $0.isActive }, sort: \Habit.title) private var habits: [Habit]
     @Query private var allBlocks: [TimeBlock]
     @State private var creating = false
+    /// Title to prefill the add sheet with when launched from an empty-state quick-start chip.
+    @State private var prefillTitle: String?
     @State private var repair = HabitRepairAssistant()
     @State private var contextHabit: Habit?
+    /// Habit opened for inline editing from a row's Edit icon (Android `HabitRow` onEdit).
+    @State private var editingHabit: Habit?
+    /// Habit pending archive confirmation from a row's Archive icon (Android `HabitRow` onArchive).
+    @State private var archivingHabit: Habit?
 
     private var todayBusy: [(start: Int, end: Int)] {
         allBlocks
@@ -47,7 +53,9 @@ struct HabitsView: View {
                         HabitCard(
                             habit: habit,
                             busy: todayBusy,
-                            onMore: { contextHabit = habit }
+                            onMore: { contextHabit = habit },
+                            onEdit: { editingHabit = habit },
+                            onArchive: { archivingHabit = habit }
                         )
                     }
                 }
@@ -58,22 +66,45 @@ struct HabitsView: View {
             .chronosScrollMinimizedBar()
             .overlay {
                 if habits.isEmpty {
-                    ContentUnavailableView("No habits", systemImage: "heart",
-                                           description: Text("Build a routine that fits your day"))
+                    VStack(spacing: ChronosSpacing.standard) {
+                        ContentUnavailableView("No habits", systemImage: "heart",
+                                               description: Text("Build a routine that fits your day"))
+                        // Quick-start chips that prefill the add sheet (Android `ChronosQuickAddChips`).
+                        FlowChips(titles: ["Morning walk", "Meditation", "Read 20 min", "Hydrate"]) { title in
+                            prefillTitle = title
+                            creating = true
+                        }
+                        .padding(.horizontal, ChronosSpacing.standard)
+                    }
                 }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { creating = true } label: { Image(systemName: "plus") }
+                    Button { prefillTitle = nil; creating = true } label: { Image(systemName: "plus") }
                 }
             }
-            .sheet(isPresented: $creating) { HabitEditorSheet() }
+            .sheet(isPresented: $creating) { HabitEditorSheet(initialTitle: prefillTitle) }
             .sheet(item: $contextHabit) { habit in
                 HabitContextActionSheet(
                     habit: habit,
                     onDuplicate: { duplicate(habit); contextHabit = nil },
                     onArchive: { archive(habit); contextHabit = nil }
                 )
+            }
+            .sheet(item: $editingHabit) { habit in HabitEditorSheet(habit: habit) }
+            .confirmationDialog(
+                archivingHabit.map { "Archive \"\($0.title)\"?" } ?? "Archive this habit?",
+                isPresented: Binding(get: { archivingHabit != nil },
+                                     set: { if !$0 { archivingHabit = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("Archive", role: .destructive) {
+                    if let habit = archivingHabit { archive(habit) }
+                    archivingHabit = nil
+                }
+                Button("Cancel", role: .cancel) { archivingHabit = nil }
+            } message: {
+                Text("Archived habits are hidden and stop reminding you. Streak history stays saved.")
             }
             .task(id: habits.map(\.id)) { refreshRepair() }
             .onChange(of: todayBusy.count) { refreshRepair() }
@@ -147,6 +178,24 @@ struct HabitsView: View {
     }
 }
 
+// MARK: - Opaque card
+
+/// iOS analogue of Android's `ChronosListCard` — a flat, opaque (non-glass) card surface used for
+/// the habit rows, consistency / streak cards, and repair panel. Android draws these on an opaque
+/// `surfaceContainer` rather than the frosted-glass panels, so this matches that neutral styling
+/// (no `.glassEffect`, no tint) while keeping the same corner radius and padding as ChronosGlassCard.
+private struct ChronosOpaqueCard<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: ChronosRadius.large, style: .continuous)
+        content()
+            .padding(ChronosSpacing.standard)
+            .background(.regularMaterial, in: shape)
+            .overlay(shape.strokeBorder(.separator.opacity(0.5), lineWidth: 1))
+    }
+}
+
 // MARK: - Metric tile
 
 /// A compact card-like metric, mirroring Android's ChronosMetricTile (label + big value + accent).
@@ -198,7 +247,7 @@ private struct ConsistencyCard: View {
     private var missedDays: Int { windowDays - activeDays }
 
     var body: some View {
-        ChronosGlassCard {
+        ChronosOpaqueCard {
             VStack(alignment: .leading, spacing: ChronosSpacing.small) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Consistency").font(.chronosHeadline)
@@ -245,7 +294,7 @@ private struct StreakChartCard: View {
     var body: some View {
         if !rows.isEmpty {
             let maxStreak = max(rows.first?.streak ?? 1, 1)
-            ChronosGlassCard {
+            ChronosOpaqueCard {
                 VStack(alignment: .leading, spacing: ChronosSpacing.small) {
                     Text("Top streaks").font(.chronosHeadline)
                     ForEach(rows, id: \.id) { row in
@@ -281,48 +330,122 @@ private struct HabitCard: View {
     @Bindable var habit: Habit
     var busy: [(start: Int, end: Int)]
     var onMore: () -> Void
+    /// Edit / archive callbacks for the inline header icon buttons (Android `HabitRow` shows Edit +
+    /// Archive icons in the title row). Defaulted so existing call sites keep compiling.
+    var onEdit: () -> Void = {}
+    var onArchive: () -> Void = {}
 
     private var doneToday: Bool { habit.isCompleted(on: .now) }
     private var skippedToday: Bool { habit.isSkipped(on: .now) }
     private var paused: Bool { habit.isPaused() }
     private var analytics: HabitAnalytics { habit.analytics(today: .now) }
 
+    /// Whether the Complete button should be enabled — disabled once done, paused, or skipped today,
+    /// mirroring Android's `enabled = !isDone && !isPaused && !skippedToday`.
+    private var canComplete: Bool { !doneToday && !paused && !skippedToday }
+
     var body: some View {
-        ChronosGlassCard(tint: doneToday ? ChronosColors.brandSecondary : nil) {
+        // Opaque card to match Android's `ChronosListCard`; the whole card is tappable to open the
+        // context action sheet (Android wraps the row in `chronosHapticClick(onClick = onOpenContext)`).
+        ChronosOpaqueCard {
             VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-                HStack(spacing: ChronosSpacing.compact) {
-                    VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
-                        Text(habit.title).font(.chronosHeadline)
-                        HStack(spacing: ChronosSpacing.small) {
-                            Label("\(analytics.currentStreak)", systemImage: "flame.fill")
-                                .foregroundStyle(ChronosColors.brandAccent)
-                            Text(cadenceLabel)
-                            Text("·")
-                            Text("\(habit.windowStartMinute.clockTime)–\(habit.windowEndMinute.clockTime)")
+                // Title row + inline Edit / Archive icon buttons (Android HabitRow header).
+                HStack(alignment: .firstTextBaseline, spacing: ChronosSpacing.compact) {
+                    Text(habit.title)
+                        .font(.chronosHeadline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: ChronosSpacing.micro) {
+                        Button(action: onEdit) {
+                            Image(systemName: "pencil").foregroundStyle(.secondary)
                         }
-                        .font(.chronosCaption).foregroundStyle(.secondary)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Edit \(habit.title)")
+                        Button(action: onArchive) {
+                            Image(systemName: "archivebox").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Archive \(habit.title)")
                     }
-                    Spacer()
+                }
+                // Status pills row (Due / On day plan / Cadence / Streak|Milestone / Adherence /
+                // Best time / Paused / Skipped) — primary content per Android's FlowRow.
+                statusPills
+                // Window + difficulty summary line (Android: "HH:MM – HH:MM · difficulty N/5").
+                Text("\(habit.windowStartMinute.clockTime) – \(habit.windowEndMinute.clockTime) · difficulty \(habit.difficulty)/5")
+                    .font(.chronosCaption).foregroundStyle(.secondary)
+                weekStrip
+                if let deferUntil = habit.deferUntilMinuteOfDay {
+                    Text("Deferred until \(deferUntil.clockTime)")
+                        .font(.chronosCaption)
+                        .foregroundStyle(.secondary)
+                }
+                // Action row: Complete + More (Android: Complete + Resume/More).
+                HStack(spacing: ChronosSpacing.small) {
                     Button {
                         withAnimation(ChronosMotion.bouncy) {
                             habit.toggleCompletion(on: .now); try? context.save()
                         }
                     } label: {
-                        Image(systemName: doneToday ? "checkmark.circle.fill" : "circle")
-                            .font(.largeTitle)
-                            .foregroundStyle(doneToday ? ChronosColors.brandSecondary : .secondary)
+                        Label(doneToday ? "Completed today" : "Complete", systemImage: "checkmark")
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.plain)
-                    Button { onMore() } label: {
-                        Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(.secondary)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canComplete && !doneToday)
+                    .accessibilityLabel(doneToday ? "\(habit.title) completed today" : "Complete \(habit.title)")
+
+                    if paused {
+                        Button {
+                            withAnimation(ChronosMotion.smooth) { habit.resume(); try? context.save() }
+                        } label: {
+                            Text("Resume").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Resume \(habit.title)")
+                    } else {
+                        Button(action: onMore) {
+                            Text("More").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("More actions for \(habit.title)")
                     }
-                    .buttonStyle(.plain)
                 }
-                statusPills
+                .buttonBorderShape(.capsule)
             }
             .frame(maxWidth: .infinity)
         }
+        .contentShape(Rectangle())
+        .onTapGesture { onMore() }
         .pressable()
+    }
+
+    // MARK: 7-day week strip (parity with Android `HabitWeekStrip`).
+
+    /// Trailing 7 days (today rightmost): a filled 16dp rounded square on completed days, weekday
+    /// initial below, today highlighted. Matches Android's `HabitWeekStrip` (16dp Box, 6dp corner
+    /// radius, filled / today-empty / empty palette). Derived from `habit.completionDates`.
+    private var weekStrip: some View {
+        let cal = Calendar.current
+        let days: [Date] = (0..<7).reversed().compactMap { cal.date(byAdding: .day, value: -$0, to: .now) }
+        // Android palette: filled = primary, todayEmpty = primary @28%, empty = outline @22%.
+        let filled = ChronosColors.brandPrimary
+        let todayEmpty = ChronosColors.brandPrimary.opacity(0.28)
+        let empty = Color.secondary.opacity(0.22)
+        return HStack(spacing: ChronosSpacing.small) {
+            ForEach(days, id: \.timeIntervalSince1970) { day in
+                let done = habit.isCompleted(on: day)
+                let isToday = cal.isDateInToday(day)
+                VStack(spacing: 4) {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(done ? filled : (isToday ? todayEmpty : empty))
+                        .frame(width: 16, height: 16)
+                    Text(cal.veryShortStandaloneWeekdaySymbols[cal.component(.weekday, from: day) - 1])
+                        .font(.chronosCaption)
+                        .fontWeight(isToday ? .semibold : .regular)
+                        .foregroundStyle(isToday ? .primary : .secondary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
     }
 
     /// Friendly cadence display reusing the raw string (DAILY/WEEKLY/3x/week…).
@@ -349,32 +472,42 @@ private struct HabitCard: View {
 
     private struct Pill { let text: String; let tint: Color; let emphasized: Bool }
 
+    /// Pills, in Android `HabitRow` FlowRow order: status (Due/Done) → On day plan → cadence →
+    /// milestone-or-streak → adherence → best time → paused → skipped.
     private var computedPills: [Pill] {
         var pills: [Pill] = []
         let now = nowMinuteOfDay()
-        let dueNow = !doneToday && !skippedToday && !paused
-            && now >= habit.windowStartMinute && now <= habit.windowEndMinute
-        if dueNow { pills.append(Pill(text: "Due now", tint: ChronosColors.brandPrimary, emphasized: true)) }
-        if paused { pills.append(Pill(text: "Paused", tint: .secondary, emphasized: false)) }
-        if skippedToday { pills.append(Pill(text: "Skipped today", tint: .secondary, emphasized: false)) }
+        // Android surfaces a single status pill: "Done" (success) when completed, else "Due now"
+        // (emphasized) while inside the window.
+        if doneToday {
+            pills.append(Pill(text: "Done", tint: ChronosColors.brandSecondary, emphasized: true))
+        } else if !skippedToday && !paused
+                    && now >= habit.windowStartMinute && now <= habit.windowEndMinute {
+            pills.append(Pill(text: "Due now", tint: ChronosColors.brandPrimary, emphasized: true))
+        }
         if habit.isBundled { pills.append(Pill(text: "On day plan", tint: ChronosColors.brandSecondary, emphasized: false)) }
-        if let milestone = habitStreakMilestoneLabel(analytics.currentStreak) {
+        // Cadence pill (Android always shows the raw cadence label).
+        pills.append(Pill(text: cadenceLabel, tint: .secondary, emphasized: false))
+        // Milestone celebration pill, else a plain streak pill (Android: milestone OR "Streak N").
+        let currentStreak = analytics.currentStreak
+        if let milestone = habitStreakMilestoneLabel(currentStreak) {
             pills.append(Pill(text: milestone, tint: ChronosColors.brandAccent, emphasized: true))
+        } else {
+            pills.append(Pill(text: "Streak \(currentStreak)",
+                              tint: currentStreak > 0 ? ChronosColors.brandSecondary : .secondary,
+                              emphasized: currentStreak > 0))
         }
-        // Adherence is over the trailing 14 days; only surface it once there's signal.
-        let hasAdherenceSignal = analytics.adherenceRate > 0
-            || analytics.skippedCountLast14Days > 0
-            || analytics.completedCountLast7Days > 0
-        if hasAdherenceSignal {
-            let pct = Int((analytics.adherenceRate * 100).rounded())
-            let emphasized = analytics.adherenceRate >= 0.8
-            pills.append(Pill(text: "\(pct)% adherence",
-                              tint: emphasized ? ChronosColors.brandSecondary : .secondary,
-                              emphasized: emphasized))
-        }
+        // Adherence pill (Android always shows "Adherence N%").
+        let pct = Int((analytics.adherenceRate * 100).rounded())
+        let adherenceStrong = pct >= 80
+        pills.append(Pill(text: "Adherence \(pct)%",
+                          tint: adherenceStrong ? ChronosColors.brandSecondary : .secondary,
+                          emphasized: adherenceStrong))
         if let best = analytics.bestCompletionMinuteOfDay {
             pills.append(Pill(text: "Best \(best.clockTime)", tint: .secondary, emphasized: false))
         }
+        if paused { pills.append(Pill(text: "Paused", tint: .secondary, emphasized: false)) }
+        if skippedToday { pills.append(Pill(text: "Skipped today", tint: .secondary, emphasized: false)) }
         return pills
     }
 }
@@ -406,26 +539,28 @@ private struct HabitRepairPanel: View {
     var onComplete: (HabitRepairAssistant.Suggestion) -> Void
 
     var body: some View {
-        ChronosGlassCard(tint: ChronosColors.brandPrimary) {
+        // Opaque card (Android `ChronosListCard`), neutral styling — no glass tint.
+        ChronosOpaqueCard {
             VStack(alignment: .leading, spacing: ChronosSpacing.small) {
                 HStack(spacing: ChronosSpacing.small) {
+                    // SF Symbol analogue of Material's AutoFixHigh (wand + sparkles).
                     Image(systemName: "wand.and.stars").foregroundStyle(ChronosColors.brandPrimary)
                     Text("Missed-habit repair").font(.chronosHeadline)
                     Spacer()
                 }
                 banner
                 ForEach(assistant.suggestions.prefix(3)) { suggestion in
-                    VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
-                        Text(suggestion.title).font(.chronosLabel)
-                        Text(suggestion.reason).font(.chronosCaption).foregroundStyle(.secondary)
-                        HStack {
-                            Label("Schedule at \(suggestion.startMinute.clockTime)–\(suggestion.endMinute.clockTime)",
-                                  systemImage: "calendar.badge.plus")
+                    HStack(alignment: .center, spacing: ChronosSpacing.compact) {
+                        VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
+                            Text(suggestion.title).font(.chronosLabel)
+                            // Android: "${reason}. HH:MM-HH:MM" on a single body line.
+                            Text("\(suggestion.reason). \(suggestion.startMinute.clockTime)–\(suggestion.endMinute.clockTime)")
                                 .font(.chronosCaption).foregroundStyle(.secondary)
-                            Spacer()
+                            // Source label on its own line below, primary-tinted (Android labelSmall).
                             Text(suggestion.source.label)
-                                .font(.chronosCaption).foregroundStyle(.tertiary)
+                                .font(.chronosCaption).foregroundStyle(ChronosColors.brandPrimary)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         Button { onComplete(suggestion) } label: {
                             Label("Complete", systemImage: "checkmark").font(.chronosCaption)
                         }
@@ -470,6 +605,7 @@ private struct HabitContextActionSheet: View {
     var onArchive: () -> Void
 
     @State private var confirmingArchive = false
+    @State private var editing = false
 
     private var doneToday: Bool { habit.isCompleted(on: .now) }
     private var skippedToday: Bool { habit.isSkipped(on: .now) }
@@ -514,12 +650,14 @@ private struct HabitContextActionSheet: View {
                     }
                 }
                 Section {
+                    Button { editing = true } label: { Label("Edit", systemImage: "pencil") }
                     Button { onDuplicate() } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
                     Button(role: .destructive) {
                         confirmingArchive = true
                     } label: { Label("Archive", systemImage: "archivebox") }
                 }
             }
+            .sheet(isPresented: $editing) { HabitEditorSheet(habit: habit) }
             .navigationTitle("Habit")
             .toolbarTitleDisplayMode(.inline)
             .toolbar {
@@ -543,11 +681,37 @@ private struct HabitContextActionSheet: View {
 struct HabitEditorSheet: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
-    @State private var title = ""
-    @State private var cadence = "DAILY"
-    @State private var difficulty = 2.0
-    @State private var windowStart = Date.now
-    @State private var windowEnd = Calendar.current.date(byAdding: .hour, value: 16, to: .now) ?? .now
+    /// Active goals to link a habit to (parity with Android's goal-link picker in the habit form).
+    @Query(filter: #Predicate<Goal> { !$0.isCompleted }, sort: \Goal.title) private var goals: [Goal]
+
+    /// When non-nil the sheet edits an existing habit; otherwise it creates a new one. Tapping a
+    /// habit card / "Edit" in the context sheet now opens this in edit mode (previously the editor
+    /// was create-only, so existing habits could never be edited — the Android parity bug).
+    private let editing: Habit?
+
+    @State private var title: String
+    @State private var cadence: String
+    @State private var difficulty: Double
+    @State private var windowStart: Date
+    @State private var windowEnd: Date
+    @State private var isBundled: Bool
+    @State private var goalID: String?
+
+    init(habit: Habit? = nil, initialTitle: String? = nil) {
+        editing = habit
+        let cal = Calendar.current
+        func date(fromMinute minute: Int) -> Date {
+            cal.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: .now) ?? .now
+        }
+        _title = State(initialValue: habit?.title ?? initialTitle ?? "")
+        _cadence = State(initialValue: habit?.cadence ?? "DAILY")
+        _difficulty = State(initialValue: Double(habit?.difficulty ?? 2))
+        _windowStart = State(initialValue: habit.map { date(fromMinute: $0.windowStartMinute) } ?? .now)
+        _windowEnd = State(initialValue: habit.map { date(fromMinute: $0.windowEndMinute) }
+            ?? (cal.date(byAdding: .hour, value: 16, to: .now) ?? .now))
+        _isBundled = State(initialValue: habit?.isBundled ?? false)
+        _goalID = State(initialValue: habit?.goalID)
+    }
 
     var body: some View {
         NavigationStack {
@@ -565,22 +729,50 @@ struct HabitEditorSheet: View {
                 }
                 DatePicker("Window start", selection: $windowStart, displayedComponents: .hourAndMinute)
                 DatePicker("Window end", selection: $windowEnd, displayedComponents: .hourAndMinute)
+
+                Section {
+                    Toggle("On day plan", isOn: $isBundled)
+                    if !goals.isEmpty {
+                        Picker("Goal", selection: $goalID) {
+                            Text("None").tag(String?.none)
+                            ForEach(goals) { goal in
+                                Text(goal.title).tag(String?.some(goal.id))
+                            }
+                        }
+                    }
+                } footer: {
+                    Text("“On day plan” lets this habit be scheduled as a block. Linking a goal counts completions toward it.")
+                }
             }
-            .navigationTitle("New habit")
+            .navigationTitle(editing == nil ? "New habit" : "Edit habit")
             .toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        context.insert(Habit(
-                            title: title, cadence: cadence, windowStartMinute: minute(windowStart),
-                            windowEndMinute: minute(windowEnd), difficulty: Int(difficulty)))
-                        try? context.save(); dismiss()
-                    }.disabled(title.isEmpty)
+                    Button("Save") { saveHabit() }.disabled(title.isEmpty)
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+    }
+
+    private func saveHabit() {
+        if let habit = editing {
+            habit.title = title
+            habit.cadence = cadence
+            habit.difficulty = Int(difficulty)
+            habit.windowStartMinute = minute(windowStart)
+            habit.windowEndMinute = minute(windowEnd)
+            habit.isBundled = isBundled
+            habit.goalID = goalID
+        } else {
+            context.insert(Habit(
+                title: title, cadence: cadence, windowStartMinute: minute(windowStart),
+                windowEndMinute: minute(windowEnd), difficulty: Int(difficulty),
+                isBundled: isBundled, goalID: goalID))
+        }
+        try? context.save()
+        dismiss()
     }
 
     private func minute(_ date: Date) -> Int {
@@ -707,6 +899,27 @@ private func nowMinuteOfDay() -> Int {
 
 /// Minimal flowing wrap layout for status pills (iOS 16+ `Layout`). Lays children left-to-right,
 /// wrapping when the proposed width is exceeded.
+/// A wrapping row of tappable suggestion chips, reused for the empty-state quick-start prompts.
+private struct FlowChips: View {
+    let titles: [String]
+    let onTap: (String) -> Void
+
+    var body: some View {
+        PillFlowLayout(spacing: ChronosSpacing.small) {
+            ForEach(titles, id: \.self) { title in
+                Button { onTap(title) } label: {
+                    Text(title)
+                        .font(.chronosCaption)
+                        .padding(.horizontal, ChronosSpacing.compact)
+                        .padding(.vertical, ChronosSpacing.small)
+                        .background(ChronosColors.brandPrimary.opacity(0.14), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
 private struct PillFlowLayout: Layout {
     var spacing: CGFloat = 8
 

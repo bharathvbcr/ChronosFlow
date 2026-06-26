@@ -39,6 +39,11 @@ struct RoutineEditorSheet: View {
                             }
                             Stepper("Offset: +\(step.offsetMinute)m", value: $step.offsetMinute, in: 0...720, step: 5)
                             Stepper("Duration: \(step.durationMinutes)m", value: $step.durationMinutes, in: 5...240, step: 5)
+                            Picker("Energy", selection: $step.energyLevel) {
+                                ForEach(EnergyIntensity.allCases, id: \.rawValue) { e in
+                                    Text(e.label).tag(e.rawValue)
+                                }
+                            }
                         }
                         .padding(.vertical, ChronosSpacing.micro)
                     }

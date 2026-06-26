@@ -18,7 +18,9 @@ struct GoalsView: View {
     @State private var creating = false
     @State private var detail: Goal?
     @State private var selectedCategory: String?
-    @State private var showCompleted = true
+    // Completed goals stay tucked behind a toggle so active work leads the page (mirrors
+    // Android's `rememberSaveable { mutableStateOf(false) }` default in GoalScreen.kt).
+    @State private var showCompleted = false
 
     // MARK: Derived collections
 
@@ -47,20 +49,32 @@ struct GoalsView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: ChronosSpacing.compact) {
-                    if overdueCount > 0 { overdueBanner }
+                    // Top descriptive header (mirrors Android's ChronosSectionHeader with subtitle).
+                    sectionHeader("Goals",
+                                  subtitle: "Long-term objectives that your daily tasks and habits roll up into.")
+
                     if !goals.isEmpty { metricTiles }
+                    if overdueCount > 0 { overdueBanner }
+                    addGoalButton
                     if categoriesInUse.count >= 2 { categoryFilter }
 
                     let active = filtered(activeGoals)
+                    let completed = filtered(completedGoals)
+
+                    if !goals.isEmpty && active.isEmpty && completed.isEmpty {
+                        // A filter is active but nothing matches — mirror Android's
+                        // "Nothing in {category}" empty state instead of a blank list.
+                        filterEmptyState
+                    }
+
                     if !active.isEmpty {
-                        sectionHeader("Active")
+                        sectionHeader("Active", subtitle: "\(active.count) in progress")
                         ForEach(active) { card(for: $0) }
                     }
 
-                    let completed = filtered(completedGoals)
                     if !completed.isEmpty {
-                        HStack {
-                            sectionHeader("Completed")
+                        HStack(alignment: .firstTextBaseline) {
+                            sectionHeader("Completed", subtitle: "\(completed.count) achieved")
                             Spacer()
                             Button(showCompleted ? "Hide" : "Show") {
                                 withAnimation(ChronosMotion.snappy) { showCompleted.toggle() }
@@ -77,7 +91,15 @@ struct GoalsView: View {
             .background { ChronosBackdrop() }
             .navigationTitle("Goals")
             .chronosScrollMinimizedBar()
-            .overlay { if goals.isEmpty { ContentUnavailableView("No goals", systemImage: "flag", description: Text("Set a measurable objective")) } }
+            .overlay {
+                if goals.isEmpty {
+                    ContentUnavailableView(
+                        "No goals yet",
+                        systemImage: "flag",
+                        description: Text("Add a goal, then link tasks and habits so completing them moves you forward.")
+                    )
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { creating = true } label: { Image(systemName: "plus") }
@@ -103,10 +125,42 @@ struct GoalsView: View {
 
     private var overdueBanner: some View {
         ChronosGlassCard(tone: .standard, tint: ChronosColors.brandAccent) {
-            Label(GoalLabels.goalsOverdueMessage(overdueCount), systemImage: "exclamationmark.triangle.fill")
-                .font(.chronosLabel)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .top, spacing: ChronosSpacing.small) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(ChronosColors.brandAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Overdue").font(.chronosLabel)
+                    Text(GoalLabels.goalsOverdueMessage(overdueCount))
+                        .font(.chronosCaption).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// Inline "Add goal" action, mirroring Android's filled-tonal button in the list (the toolbar
+    /// "+" remains for quick access). Both open the same `GoalEditorSheet`.
+    private var addGoalButton: some View {
+        Button {
+            creating = true
+        } label: {
+            Label("Add goal", systemImage: "plus")
+                .font(.chronosLabel.weight(.semibold))
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+    }
+
+    /// Shown when a category filter excludes every goal — mirrors Android's "Nothing in {category}".
+    private var filterEmptyState: some View {
+        ContentUnavailableView(
+            "Nothing in \(selectedCategory?.capitalized ?? "this category")",
+            systemImage: "line.3.horizontal.decrease.circle",
+            description: Text("No goals match this category yet. Switch the filter or add a new goal.")
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, ChronosSpacing.large)
     }
 
     private var metricTiles: some View {
@@ -125,9 +179,10 @@ struct GoalsView: View {
                 ForEach(categoriesInUse, id: \.self) { cat in
                     FilterChip(label: cat.capitalized, selected: selectedCategory == cat,
                                tint: ChronosColors.category(cat)) {
-                        withAnimation(ChronosMotion.snappy) {
-                            selectedCategory = (selectedCategory == cat) ? nil : cat
-                        }
+                        // Exclusive selection (mirrors Android's ChronosOptionChips): tapping a
+                        // category always selects it; re-tapping does NOT toggle it off. Use the
+                        // "All" chip to clear the filter.
+                        withAnimation(ChronosMotion.snappy) { selectedCategory = cat }
                     }
                 }
             }
@@ -135,10 +190,16 @@ struct GoalsView: View {
         }
     }
 
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.chronosTitle)
-            .padding(.top, ChronosSpacing.small)
+    /// Section header with an optional supporting subtitle, mirroring Android's
+    /// `ChronosSectionHeader(title, subtitle)`.
+    private func sectionHeader(_ title: String, subtitle: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.chronosTitle)
+            if let subtitle {
+                Text(subtitle).font(.chronosCaption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, ChronosSpacing.small)
     }
 }
 
@@ -150,6 +211,8 @@ private struct GoalCard: View {
     let completedTasks: Int
     let habitCompletions: Int
     let onOpen: () -> Void
+
+    @State private var editing = false
 
     private var derived: GoalDerivedProgress {
         GoalDerivedProgress(completedTaskCount: completedTasks, habitCompletionCount: habitCompletions)
@@ -182,10 +245,17 @@ private struct GoalCard: View {
 
                     Text(goal.title).font(.chronosHeadline).strikethrough(goal.isCompleted)
                     Spacer()
-                    Text("\(total)/\(goal.targetValue)").font(.chronosLabel).foregroundStyle(.secondary)
                 }
 
-                ProgressView(value: fraction).tint(tint)
+                // Progress bar with the human-readable summary beside it ("X of Y · Z%"),
+                // mirroring Android's GoalCard progress row.
+                HStack(spacing: ChronosSpacing.small) {
+                    ProgressView(value: fraction).tint(tint)
+                    Text(goalProgressSummary(progress: total, target: goal.targetValue))
+                        .font(.chronosLabel)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
                 HStack(spacing: ChronosSpacing.small) {
                     Text(goal.category.capitalized).font(.chronosCaption).foregroundStyle(.secondary)
@@ -198,11 +268,21 @@ private struct GoalCard: View {
                         Text(hint).font(.chronosCaption).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    Button { editing = true } label: { Image(systemName: "pencil") }
+                        .buttonStyle(.bordered).buttonBorderShape(.capsule)
+                        .accessibilityLabel("Edit goal")
                     Button { adjust(-1) } label: { Image(systemName: "minus") }
                         .buttonStyle(.bordered).buttonBorderShape(.capsule)
                         .disabled(goal.progressValue <= 0)
+                        .accessibilityLabel("Decrease progress")
+                    // Raw manual progress value (mirrors Android's "Manual progress" row).
+                    Text("\(goal.progressValue)")
+                        .font(.chronosLabel.weight(.semibold))
+                        .monospacedDigit()
+                        .accessibilityLabel("Manual progress \(goal.progressValue)")
                     Button("+1") { adjust(1) }
                         .buttonStyle(.bordered).buttonBorderShape(.capsule)
+                        .accessibilityLabel("Increase progress")
                 }
                 .font(.chronosCaption)
             }
@@ -210,6 +290,7 @@ private struct GoalCard: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
+        .sheet(isPresented: $editing) { GoalEditorSheet(goal: goal) }
     }
 
     /// Manual progress adjustment, clamped to 0...targetValue (mirrors Android `adjustProgress`).

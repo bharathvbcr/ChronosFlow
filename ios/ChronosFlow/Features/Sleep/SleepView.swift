@@ -2,6 +2,27 @@ import SwiftUI
 import SwiftData
 import ChronosCore
 
+/// Emoji + word labels for the sleep-log sheet, mirroring Android's `SleepLogSheetLogic`
+/// (`sleepQualityEmoji`/`sleepQualityLabel` and `sleepRefreshedEmoji`/`sleepRefreshedLabel`). The
+/// word-only quality label already lives in the portable `SleepLogHints` facade; the emoji faces and
+/// the morning-refreshment scale are presentation-only, so they stay here next to the sheet that
+/// uses them rather than in ChronosCore. Each lookup clamps out-of-range input, matching the Kotlin
+/// `coerceIn(1, 5)`.
+enum SleepEmoji {
+    private static let quality = ["😖", "😕", "😐", "🙂", "😄"]
+    private static let refreshedEmojis = ["😵", "😪", "😐", "🙂", "😃"]
+    private static let refreshedLabels = ["Exhausted", "Groggy", "Okay", "Refreshed", "Energized"]
+
+    /// Emoji face for a 1–5 quality rating. Mirrors `sleepQualityEmoji`.
+    static func qualityEmoji(_ level: Int) -> String { quality[min(max(level, 1), 5) - 1] }
+
+    /// Emoji face for a 1–5 morning-refreshment rating. Mirrors `sleepRefreshedEmoji`.
+    static func refreshedEmoji(_ level: Int) -> String { refreshedEmojis[min(max(level, 1), 5) - 1] }
+
+    /// Word label for a 1–5 morning-refreshment rating. Mirrors `sleepRefreshedLabel`.
+    static func refreshedLabel(_ level: Int) -> String { refreshedLabels[min(max(level, 1), 5) - 1] }
+}
+
 /// The Sleep tab: log nights, see readiness, and (on device) import from HealthKit — the iOS
 /// analogue of the Android Health Connect read-only sleep import. Ports the sleep tracking layer.
 struct SleepView: View {
@@ -43,7 +64,11 @@ struct SleepView: View {
                                         Text(night.date.formatted(.dateTime.weekday().month().day()))
                                             .font(.chronosHeadline)
                                         if let d = night.durationMinutes {
-                                            Text("\(d / 60)h \(d % 60)m · quality \(night.sleepQuality)/5")
+                                            Text("\(d / 60)h \(d % 60)m · \(SleepEmoji.qualityEmoji(night.sleepQuality)) quality \(night.sleepQuality)/5")
+                                                .font(.chronosCaption).foregroundStyle(.secondary)
+                                        }
+                                        if night.refreshedRating > 0 {
+                                            Text("\(SleepEmoji.refreshedEmoji(night.refreshedRating)) \(SleepEmoji.refreshedLabel(night.refreshedRating))")
                                                 .font(.chronosCaption).foregroundStyle(.secondary)
                                         }
                                     }
@@ -158,10 +183,12 @@ struct SleepView: View {
                     Text("Import your nights read-only from Apple Health. Manually logged nights are never overwritten.")
                         .font(.chronosCaption).foregroundStyle(.secondary)
 
-                    if !settings.healthKitSleepEnabled {
-                        Toggle("Enable Health import", isOn: healthKitToggle)
-                            .font(.chronosBody)
-                    }
+                    // Always show the auto-import toggle alongside the on-demand button, mirroring
+                    // Android's HealthConnectSleepCard ("Import sleep automatically" switch + "Import
+                    // now"). The toggle owns the recurring background import; the button is on-demand
+                    // and works regardless of the toggle state.
+                    Toggle("Import sleep automatically", isOn: healthKitToggle)
+                        .font(.chronosBody)
 
                     if let date = importer.lastImportDate {
                         Text("Last imported \(date.formatted(.relative(presentation: .named)))")
@@ -177,12 +204,12 @@ struct SleepView: View {
                         HStack(spacing: ChronosSpacing.small) {
                             if importer.isImporting { ProgressView() }
                             Text(importer.availability == .needsAuthorization
-                                 ? "Connect & import" : "Import from Health")
+                                 ? "Connect & import" : "Import now")
                         }
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(importer.isImporting || !settings.healthKitSleepEnabled)
+                    .disabled(importer.isImporting)
 
                     Toggle("Evening reminder (20:00)", isOn: logReminderBinding)
                         .font(.chronosBody)
@@ -270,6 +297,15 @@ struct SleepLogSheet: View {
     @State private var wake = Calendar.current.date(bySettingHour: 7, minute: 0, second: 0, of: .now) ?? .now
     @State private var quality = 3.0
     @State private var interruptions = 0.0
+    /// 1–5 morning-refreshment rating ("How refreshed do you feel?"), mirrors Android's
+    /// RefreshedEmojiSelector. Defaults to 3 (neutral) like the Android sheet.
+    @State private var refreshed = 3
+    /// Optional wind-down notes — parity with Android's OutlinedTextField + SleepTrack.windDownNotes.
+    @State private var windDownNotes = ""
+    /// Seeds quality/refreshed from the latest night's readiness exactly once, so a readiness-derived
+    /// pre-fill (Android's reactive existing-night seed) doesn't clobber the user's manual edits on
+    /// every re-render. Mirrors the "readiness-derived quality pre-fill" parity item.
+    @State private var didSeedFromReadiness = false
 
     // In-sheet one-time HealthKit pull (iOS analogue of Android's HealthConnectSleepSyncButton). This
     // runs a single import on demand and NEVER flips `healthKitSleepEnabled` (the tab-level toggle owns
@@ -287,50 +323,116 @@ struct SleepLogSheet: View {
     private var bedMinute: Int { minute(bedtime) }
     private var wakeMinute: Int { minute(wake) }
 
+    // Extracted from `body` so the type-checker handles the Form (and its nested Section/VStack/HStack
+    // generics) separately from the trailing `.onChange`/`.sensoryFeedback` modifier chain — together
+    // they overwhelm Swift's expression type-checker ("unable to type-check in reasonable time").
+    private var logForm: some View {
+        Form {
+            Section("Times") {
+                DatePicker("Bedtime", selection: $bedtime, displayedComponents: .hourAndMinute)
+                DatePicker("Wake", selection: $wake, displayedComponents: .hourAndMinute)
+                healthSyncButton
+                liveHints
+            }
+            Section("Quality") {
+                VStack(alignment: .leading) {
+                    HStack {
+                        Text("Quality")
+                        Spacer()
+                        // Emoji + "N of 5 · Label" inline, matching Android's quality row
+                        // ("😴 3 of 5 · Okay").
+                        Text("\(SleepEmoji.qualityEmoji(Int(quality))) \(Int(quality)) of 5 · \(SleepLogHints.qualityLabel(Int(quality)))")
+                            .font(.chronosCaption).foregroundStyle(ChronosColors.brandPrimary)
+                    }
+                    Slider(value: $quality, in: 1...5, step: 1)
+                }
+                Stepper("Interruptions: \(Int(interruptions))", value: $interruptions, in: 0...10)
+                Text("Overall · \(SleepLogHints.restfulnessLabel(quality: Int(quality), interruptions: Int(interruptions)))")
+                    .font(.chronosCaption).foregroundStyle(.secondary)
+                refreshedSelector
+            }
+            Section("Notes") {
+                TextField("Wind-down notes (optional)", text: $windDownNotes, axis: .vertical)
+                    .lineLimit(2...4)
+            }
+        }
+    }
+
+    /// The "How refreshed do you feel?" row: a label paired with five tappable emoji faces, mirroring
+    /// Android's RefreshedEmojiSelector (1–5 rating saved to `SleepTrack.refreshedRating`).
+    @ViewBuilder
+    private var refreshedSelector: some View {
+        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+            HStack {
+                Text("How refreshed do you feel?")
+                Spacer()
+                Text("\(SleepEmoji.refreshedEmoji(refreshed)) \(SleepEmoji.refreshedLabel(refreshed))")
+                    .font(.chronosCaption).foregroundStyle(ChronosColors.brandPrimary)
+            }
+            HStack(spacing: ChronosSpacing.small) {
+                ForEach(1...5, id: \.self) { rating in
+                    Button {
+                        refreshed = rating
+                    } label: {
+                        Text(SleepEmoji.refreshedEmoji(rating))
+                            .font(.title2)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, ChronosSpacing.small)
+                            .background(
+                                (refreshed == rating
+                                 ? ChronosColors.brandPrimary.opacity(0.20)
+                                 : Color.secondary.opacity(0.10)),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("How refreshed you feel \(rating) of 5, \(SleepEmoji.refreshedLabel(rating))")
+                    .accessibilityAddTraits(refreshed == rating ? .isSelected : [])
+                }
+            }
+        }
+    }
+
+    /// Newest imported night's id, precomputed so `.onChange` doesn't re-infer the optional chain
+    /// inside the already type-check-heavy modifier stack below.
+    private var latestNightID: String? { nights.first?.id }
+
+    /// Extracted so the toolbar's `ToolbarItem`/`Button` generics don't compound the body's
+    /// `.onChange` + `.sensoryFeedback` type-checking.
+    @ToolbarContentBuilder
+    private var sheetToolbar: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+        ToolbarItem(placement: .confirmationAction) {
+            Button("Save") {
+                context.insert(SleepTrack(
+                    actualStartMinute: bedMinute, actualEndMinute: wakeMinute,
+                    sleepQuality: Int(quality),
+                    windDownNotes: windDownNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty ? nil : windDownNotes,
+                    interruptedCount: Int(interruptions),
+                    refreshedRating: refreshed))
+                try? context.save(); dismiss()
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Times") {
-                    DatePicker("Bedtime", selection: $bedtime, displayedComponents: .hourAndMinute)
-                    DatePicker("Wake", selection: $wake, displayedComponents: .hourAndMinute)
-                    healthSyncButton
-                    liveHints
-                }
-                Section("Quality") {
-                    VStack(alignment: .leading) {
-                        HStack {
-                            Text("Quality: \(Int(quality))/5")
-                            Spacer()
-                            Text(SleepLogHints.qualityLabel(Int(quality)))
-                                .font(.chronosCaption).foregroundStyle(ChronosColors.brandPrimary)
-                        }
-                        Slider(value: $quality, in: 1...5, step: 1)
-                    }
-                    Stepper("Interruptions: \(Int(interruptions))", value: $interruptions, in: 0...10)
-                    Text("Overall · \(SleepLogHints.restfulnessLabel(quality: Int(quality), interruptions: Int(interruptions)))")
-                        .font(.chronosCaption).foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Log night")
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        context.insert(SleepTrack(
-                            actualStartMinute: bedMinute, actualEndMinute: wakeMinute,
-                            sleepQuality: Int(quality), interruptedCount: Int(interruptions)))
-                        try? context.save(); dismiss()
-                    }
-                }
-            }
-            // When a sheet-triggered import lands a newer night, mirror its stage-derived values into
-            // the editable fields so the user reviews/saves rather than re-entering. We only react
-            // after `didSync` so a pre-existing night never clobbers fresh manual edits.
-            .onChange(of: nights.first?.id) { _, _ in if didSync { autoPopulateFromLatestImport() } }
-            // Success/failure haptics, parity with the Android sync button's Confirm/Reject feedback.
-            .sensoryFeedback(.success, trigger: syncFeedback) { _, new in new == .success }
-            .sensoryFeedback(.error, trigger: syncFeedback) { _, new in new == .failure }
+            logForm
+                .navigationTitle("Log night")
+                .toolbarTitleDisplayMode(.inline)
+                .toolbar { sheetToolbar }
+                // When a sheet-triggered import lands a newer night, mirror its stage-derived values
+                // into the editable fields so the user reviews/saves rather than re-entering. We only
+                // react after `didSync` so a pre-existing night never clobbers fresh manual edits.
+                .onChange(of: latestNightID) { _, _ in if didSync { autoPopulateFromLatestImport() } }
+                // Readiness-derived quality pre-fill: seed quality/refreshed from the most recent
+                // logged night once on open, so the sheet opens at a sensible default rather than a
+                // bare 3. Mirrors Android's `existing?.sleepQuality` / `existing?.refreshedRating`
+                // seed. Runs only once (`didSeedFromReadiness`) so it never clobbers manual edits.
+                .onAppear { seedFromReadiness() }
+                // Success/failure haptics, parity with the Android sync button's Confirm/Reject feedback.
+                .sensoryFeedback(.success, trigger: syncFeedback) { _, new in new == .success }
+                .sensoryFeedback(.error, trigger: syncFeedback) { _, new in new == .failure }
         }
         .presentationDetents([.medium, .large])
     }
@@ -402,7 +504,19 @@ struct SleepLogSheet: View {
         if let start = latest.actualStartMinute { bedtime = date(fromMinute: start) }
         if let end = latest.actualEndMinute { wake = date(fromMinute: end) }
         if latest.sleepQuality > 0 { quality = Double(latest.sleepQuality) }
+        if latest.refreshedRating > 0 { refreshed = latest.refreshedRating }
         interruptions = Double(latest.interruptedCount)
+    }
+
+    /// One-shot seed of the quality/refreshed fields from the most recent logged night, so the sheet
+    /// opens at a readiness-aware default. Skips the seed once it has run (or if there's no prior
+    /// night) so it never overwrites manual edits or a fresh import-driven auto-fill.
+    private func seedFromReadiness() {
+        guard !didSeedFromReadiness else { return }
+        didSeedFromReadiness = true
+        guard let latest = nights.first else { return }
+        if latest.sleepQuality > 0 { quality = Double(latest.sleepQuality) }
+        if latest.refreshedRating > 0 { refreshed = latest.refreshedRating }
     }
 
     private func syncSummary(_ r: HealthKitSleepImporter.ImportResult) -> String {

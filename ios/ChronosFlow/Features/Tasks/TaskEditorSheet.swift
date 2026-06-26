@@ -12,6 +12,12 @@ struct TaskEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
+    /// All tasks — used to flag a gentle duplicate-title warning (Android `existingTaskTitles`) and
+    /// to jump to an existing match.
+    @Query private var allTasks: [TaskItem]
+    /// Goals available to link, for the goal-detection prompt + picker (Android `goalOptions`).
+    @Query(sort: \Goal.title) private var goals: [Goal]
+
     let existing: TaskItem?
     @State private var title: String
     @State private var detail: String
@@ -23,8 +29,21 @@ struct TaskEditorSheet: View {
     @State private var interval: Int
     /// For a weekly rule: the selected weekday set (1=Sun … 7=Sat). Empty = "same day each week".
     @State private var weekdays: Set<Int>
+    /// For a monthly-ordinal rule: which occurrence (1…4, 5 = last) and the target weekday.
+    @State private var ordinal: Int
+    @State private var ordinalWeekday: Int
+    /// Optional recurrence start/end window (Android `startsOn` / `endsOn`).
+    @State private var hasRecurrenceEnd: Bool
+    @State private var recurrenceEnd: Date
+    /// Linked goal id (Android `goalId`); empty = unlinked.
+    @State private var goalID: String
     @State private var checklist: [ChecklistItem]
     @State private var newChecklistItem = ""
+
+    /// Invoked with an existing task's id when the user taps "Open the existing task instead" on the
+    /// duplicate warning, so the presenter can re-present that task for editing (Android
+    /// `onOpenExistingTask`). Optional with a default so existing call sites compile unchanged.
+    private let onOpenExistingTask: ((String) -> Void)?
 
     /// Reusable templates (App-Group backed; no SwiftData). Created once per sheet.
     @State private var templateStore = TaskTemplateStore()
@@ -44,8 +63,9 @@ struct TaskEditorSheet: View {
     /// app's share. Read once from the App Group for a fresh single-share pre-fill; nil otherwise.
     private let sourceAppLabel: String?
 
-    init(task: TaskItem?, initialTitle: String? = nil) {
+    init(task: TaskItem?, initialTitle: String? = nil, onOpenExistingTask: ((String) -> Void)? = nil) {
         self.existing = task
+        self.onOpenExistingTask = onOpenExistingTask
         // Surface the share provenance only for a fresh share-driven new-task pre-fill.
         if task == nil, initialTitle != nil {
             self.sourceAppLabel = TaskEditorSheet.pendingShareSourceApp()
@@ -61,6 +81,12 @@ struct TaskEditorSheet: View {
         _frequency = State(initialValue: task?.recurrence?.frequency ?? .daily)
         _interval = State(initialValue: task?.recurrence?.interval ?? 1)
         _weekdays = State(initialValue: task?.recurrence?.weekdays ?? [])
+        _ordinal = State(initialValue: task?.recurrence?.ordinal ?? 1)
+        _ordinalWeekday = State(initialValue: task?.recurrence?.ordinalWeekday ?? 2)
+        _hasRecurrenceEnd = State(initialValue: task?.recurrence?.endsOn != nil)
+        _recurrenceEnd = State(initialValue: task?.recurrence?.endsOn
+            ?? Calendar.current.date(byAdding: .month, value: 3, to: .now) ?? .now)
+        _goalID = State(initialValue: task?.goalID ?? "")
         _checklist = State(initialValue: task?.checklist.sorted { $0.order < $1.order } ?? [])
     }
 
@@ -77,10 +103,32 @@ struct TaskEditorSheet: View {
                         }
                     if let source = sourceAppLabel {
                         // "Shared from [App]" provenance chip (Android TaskFormSheet ~1128), shown when
-                        // the draft was pre-filled from another app's share.
-                        Label("Shared from \(source)", systemImage: "square.and.arrow.up")
+                        // the draft was pre-filled from another app's share — styled as a pill to match.
+                        HStack(spacing: ChronosSpacing.micro) {
+                            Image(systemName: "square.and.arrow.up").font(.caption2)
+                            Text("Shared from \(source)")
+                        }
+                        .font(.chronosCaption)
+                        .padding(.horizontal, ChronosSpacing.small)
+                        .padding(.vertical, 4)
+                        .background(ChronosColors.brandSecondary.opacity(0.15), in: Capsule())
+                        .foregroundStyle(ChronosColors.brandSecondary)
+                        .listRowSeparator(.hidden)
+                    }
+                    if let duplicate = duplicateTask {
+                        // Gentle duplicate-title warning + jump to the existing task (Android ~1108).
+                        VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
+                            Label("A task named “\(duplicate.title)” already exists.", systemImage: "exclamationmark.circle")
+                                .font(.chronosCaption)
+                                .foregroundStyle(ChronosColors.brandAccent)
+                            Button("Open the existing task instead") {
+                                let id = duplicate.id
+                                dismiss()
+                                onOpenExistingTask?(id)
+                            }
                             .font(.chronosCaption)
-                            .foregroundStyle(.secondary)
+                        }
+                        .listRowSeparator(.hidden)
                     }
                     TextField("Notes", text: $detail, axis: .vertical)
                     if textTools.isAvailable && !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -105,6 +153,44 @@ struct TaskEditorSheet: View {
                         )
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
+                    }
+                }
+
+                // "Suggest details with AI" (Android `onRequestAssist` button + suggestion chips).
+                // On-device assist surfaces an offline smart-fill pass over the title; tapping the
+                // button re-runs detection so the preview card above can be applied.
+                Section {
+                    Button {
+                        requestAssistSuggestions()
+                    } label: {
+                        Label(smartFill?.hasDetection == true ? "Refresh suggestions" : "Suggest details with AI",
+                              systemImage: "wand.and.sparkles")
+                            .font(.chronosLabel)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(ChronosColors.brandPrimary)
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                }
+
+                // Goal detection + linking (Android `detectGoalIdFromText` + goal picker). A detection
+                // prompt appears when the typed title/notes name an existing goal that isn't linked yet.
+                if !goals.isEmpty {
+                    Section("Goal") {
+                        if let detected = detectedGoal, detected.id != goalID {
+                            Button {
+                                withAnimation(ChronosMotion.snappy) { goalID = detected.id }
+                            } label: {
+                                Label("Link to goal: \(detected.title)", systemImage: "link.badge.plus")
+                                    .font(.chronosCaption)
+                                    .foregroundStyle(ChronosColors.brandPrimary)
+                            }
+                        }
+                        Picker("Linked goal", selection: $goalID) {
+                            Text("None").tag("")
+                            ForEach(goals) { goal in Text(goal.title).tag(goal.id) }
+                        }
                     }
                 }
 
@@ -135,9 +221,10 @@ struct TaskEditorSheet: View {
                     Toggle("Repeats", isOn: $repeats.animation(ChronosMotion.snappy))
                     if repeats {
                         Picker("Frequency", selection: $frequency) {
-                            ForEach(RecurrenceSpec.Frequency.allCases, id: \.self) {
-                                Text($0.rawValue.capitalized).tag($0)
-                            }
+                            Text("Daily").tag(RecurrenceSpec.Frequency.daily)
+                            Text("Weekly").tag(RecurrenceSpec.Frequency.weekly)
+                            Text("Monthly").tag(RecurrenceSpec.Frequency.monthly)
+                            Text("Monthly (weekday)").tag(RecurrenceSpec.Frequency.monthlyOrdinal)
                         }
                         Stepper("Every \(interval) \(unitLabel)", value: $interval, in: 1...30)
                         if frequency == .weekly {
@@ -146,6 +233,27 @@ struct TaskEditorSheet: View {
                                 Text("Repeats on \(RecurrenceSpec.weekdayLabel(for: weekdays)).")
                                     .font(.chronosCaption).foregroundStyle(.secondary)
                             }
+                        }
+                        if frequency == .monthlyOrdinal {
+                            // Ordinal (1st…4th / Last) + target weekday (Android monthly-ordinal UI).
+                            Picker("Occurrence", selection: $ordinal) {
+                                ForEach(1...5, id: \.self) { n in
+                                    Text(RecurrenceSpec.ordinalLabel(n)).tag(n)
+                                }
+                            }
+                            Picker("Weekday", selection: $ordinalWeekday) {
+                                ForEach([2, 3, 4, 5, 6, 7, 1], id: \.self) { wd in
+                                    Text(RecurrenceSpec.weekdayName(wd)).tag(wd)
+                                }
+                            }
+                            Text("Repeats on the \(RecurrenceSpec.ordinalLabel(ordinal)) \(RecurrenceSpec.weekdayName(ordinalWeekday)) each month.")
+                                .font(.chronosCaption).foregroundStyle(.secondary)
+                        }
+                        // Optional end date for the series (Android `endsOn`). `startsOn` defaults to
+                        // the task's anchor day so it isn't surfaced as a separate field here.
+                        Toggle("Ends on a date", isOn: $hasRecurrenceEnd.animation(ChronosMotion.snappy))
+                        if hasRecurrenceEnd {
+                            DatePicker("End date", selection: $recurrenceEnd, displayedComponents: [.date])
                         }
                     }
                 }
@@ -251,6 +359,8 @@ struct TaskEditorSheet: View {
                 frequency = rec.frequency
                 interval = rec.interval
                 weekdays = rec.weekdays
+                ordinal = rec.ordinal
+                ordinalWeekday = rec.ordinalWeekday
             } else {
                 repeats = false
             }
@@ -275,20 +385,59 @@ struct TaskEditorSheet: View {
             title = ""; detail = ""; priority = 0
             hasDueDate = false; dueDate = .now
             repeats = false; frequency = .daily; interval = 1; weekdays = []
+            ordinal = 1; ordinalWeekday = 2; hasRecurrenceEnd = false
+            goalID = ""
             checklist = []; newChecklistItem = ""
             smartFill = nil; actionHint = nil
         }
     }
 
     private var unitLabel: String {
-        let base = switch frequency { case .daily: "day"; case .weekly: "week"; case .monthly: "month" }
+        let base = switch frequency {
+            case .daily: "day"; case .weekly: "week"; case .monthly, .monthlyOrdinal: "month"
+        }
         return interval == 1 ? base : base + "s"
     }
 
     private var recurrenceSpec: RecurrenceSpec? {
         guard repeats else { return nil }
-        return RecurrenceSpec(frequency: frequency, interval: interval,
-                              weekdays: frequency == .weekly ? weekdays : [])
+        return RecurrenceSpec(
+            frequency: frequency,
+            interval: interval,
+            weekdays: frequency == .weekly ? weekdays : [],
+            ordinal: ordinal,
+            ordinalWeekday: ordinalWeekday,
+            endsOn: hasRecurrenceEnd ? Calendar.current.startOfDay(for: recurrenceEnd) : nil)
+    }
+
+    // MARK: - Duplicate detection & goal linking
+
+    /// An existing OTHER task whose title matches the typed one (case-insensitive). Mirrors Android's
+    /// gentle duplicate warning (only while creating a new task, where a clash is unintended).
+    private var duplicateTask: TaskItem? {
+        guard existing == nil else { return nil }
+        let key = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard key.count >= 2 else { return nil }
+        return allTasks.first { $0.title.trimmingCharacters(in: .whitespaces).lowercased() == key }
+    }
+
+    /// A goal whose title appears in the typed title/notes (Android `detectGoalIdFromText`): a simple
+    /// case-insensitive substring scan, longest goal title first so the most specific match wins.
+    private var detectedGoal: Goal? {
+        let haystack = (title + " " + detail).lowercased()
+        guard !haystack.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return goals
+            .sorted { $0.title.count > $1.title.count }
+            .first { goal in
+                let needle = goal.title.trimmingCharacters(in: .whitespaces).lowercased()
+                return needle.count >= 3 && haystack.contains(needle)
+            }
+    }
+
+    /// Re-run the offline smart-fill pass so the "Detected in your text" preview card refreshes with
+    /// the latest title (the on-device stand-in for Android's networked `onRequestAssist`).
+    private func requestAssistSuggestions() {
+        detectSmartFill(title)
     }
 
     /// Reads (and consumes) the "Shared from [App]" provenance label the Share Extension wrote into
@@ -441,12 +590,14 @@ struct TaskEditorSheet: View {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty else { return }
         let task: TaskItem
+        let linkedGoal = goalID.isEmpty ? nil : goalID
         if let existing {
             existing.title = cleanTitle
             existing.detail = detail.isEmpty ? nil : detail
             existing.priority = priority
             existing.dueDate = hasDueDate ? dueDate : nil
             existing.recurrence = recurrenceSpec
+            existing.goalID = linkedGoal
             existing.checklist = checklist
             existing.updatedAt = .now
             task = existing
@@ -454,7 +605,8 @@ struct TaskEditorSheet: View {
             let newTask = TaskItem(
                 title: cleanTitle, detail: detail.isEmpty ? nil : detail,
                 priority: priority, dueDate: hasDueDate ? dueDate : nil,
-                targetDate: hasDueDate ? dueDate : nil, recurrence: recurrenceSpec, checklist: checklist)
+                targetDate: hasDueDate ? dueDate : nil, goalID: linkedGoal,
+                recurrence: recurrenceSpec, checklist: checklist)
             context.insert(newTask)
             task = newTask
         }

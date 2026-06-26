@@ -6,7 +6,16 @@ import SwiftData
 struct RoutinesView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Routine.title) private var routines: [Routine]
+    /// Today's blocks, used to derive each routine's "X/Y blocks done today" completion summary
+    /// (mirrors Android's deriveRoutineCompletions over the selected day's TimeBlocks).
+    @Query private var todaysBlocks: [TimeBlock]
     @State private var activeSheet: RoutineSheet?
+
+    init() {
+        let start = Calendar.current.startOfDay(for: .now)
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start
+        _todaysBlocks = Query(filter: #Predicate<TimeBlock> { $0.date >= start && $0.date < end })
+    }
 
     private enum RoutineSheet: Identifiable {
         case edit(Routine), new, apply(Routine)
@@ -19,14 +28,32 @@ struct RoutinesView: View {
         }
     }
 
+    /// Per-routine "X/Y blocks done today" summary, grouped by routineID. Mirrors Android's
+    /// `deriveRoutineCompletions(blocks)` (RoutineTemplateConverters.kt): every block carrying a
+    /// routineID counts toward the total; blocks with a recorded actualEndMinuteOfDay count as done.
+    private var completions: [String: RoutineCompletionSummary] {
+        var result: [String: RoutineCompletionSummary] = [:]
+        for block in todaysBlocks {
+            guard let rid = block.routineID else { continue }
+            var summary = result[rid] ?? RoutineCompletionSummary(doneCount: 0, totalCount: 0)
+            summary.totalCount += 1
+            if block.actualEndMinuteOfDay != nil { summary.doneCount += 1 }
+            result[rid] = summary
+        }
+        return result
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: ChronosSpacing.compact) {
                     ForEach(routines) { routine in
                         RoutineCard(routine: routine,
+                                    completion: completions[routine.id],
                                     onApply: { activeSheet = .apply(routine) },
+                                    onSeed: { seedDay(routine) },
                                     onEdit: { activeSheet = .edit(routine) },
+                                    onCopy: { copy(routine) },
                                     onComplete: { markComplete(routine) })
                     }
                 }
@@ -62,12 +89,52 @@ struct RoutinesView: View {
         routine.lastCompletedDate = Calendar.current.startOfDay(for: .now)
         try? context.save()
     }
+
+    /// "Seed day": instantly populate today with the routine's blocks at their default offsets,
+    /// with no start-time sheet. Mirrors Android's "Seed day" action (SidebarPageContent.kt 514),
+    /// which calls ApplyRoutineToDateUseCase with the template anchor minute 0. Each step's
+    /// offsetMinute is therefore treated as its absolute minute-of-day.
+    private func seedDay(_ routine: Routine) {
+        let today = Calendar.current.startOfDay(for: .now)
+        for step in routine.steps.sorted(by: { $0.offsetMinute < $1.offsetMinute }) {
+            let start = ((step.offsetMinute % 1440) + 1440) % 1440
+            context.insert(TimeBlock(
+                date: today, title: step.title, category: step.category,
+                startMinuteOfDay: start, durationMinutes: min(max(step.durationMinutes, 1), 1440),
+                provenance: .routine, energyLevel: EnergyIntensity.fromLevel(step.energyLevel),
+                routineID: routine.id))
+        }
+        try? context.save()
+    }
+
+    /// "Copy": duplicate a routine into a new, independent blueprint (fresh ids, "Copy" suffix).
+    /// Mirrors Android's onDuplicateTemplate action (SidebarPageContent.kt 525).
+    private func copy(_ routine: Routine) {
+        let steps = routine.steps.map {
+            RoutineStep(title: $0.title, category: $0.category,
+                        offsetMinute: $0.offsetMinute, durationMinutes: $0.durationMinutes,
+                        energyLevel: $0.energyLevel)
+        }
+        context.insert(Routine(title: "\(routine.title) Copy", isActive: routine.isActive, steps: steps))
+        try? context.save()
+    }
+}
+
+/// Per-routine completion tally for the viewed day. Ports `RoutineCompletionSummary`.
+private struct RoutineCompletionSummary {
+    var doneCount: Int
+    var totalCount: Int
+    /// "X/Y blocks done today" — mirrors Android's routineCompletionLabel.
+    var label: String { "\(doneCount)/\(totalCount) blocks done today" }
 }
 
 private struct RoutineCard: View {
     let routine: Routine
+    let completion: RoutineCompletionSummary?
     let onApply: () -> Void
+    let onSeed: () -> Void
     let onEdit: () -> Void
+    let onCopy: () -> Void
     let onComplete: () -> Void
 
     private var completedToday: Bool {
@@ -103,16 +170,32 @@ private struct RoutineCard: View {
                         .font(.chronosCaption)
                         .foregroundStyle(completedToday ? ChronosColors.brandSecondary : .secondary)
                 }
-                HStack {
-                    Button("Edit", action: onEdit).buttonStyle(.bordered).buttonBorderShape(.capsule)
-                    Spacer()
-                    Button(action: onComplete) {
-                        Label("Mark complete", systemImage: "checkmark")
+                // "X/Y blocks done today", derived from today's TimeBlocks carrying this routineID.
+                // Mirrors Android's routineCompletionLabel (SidebarPageContent.kt 485–492).
+                if let completion, completion.totalCount > 0 {
+                    Text(completion.label)
+                        .font(.chronosCaption.weight(.semibold))
+                        .foregroundStyle(ChronosColors.brandPrimary)
+                }
+                // Action row mirrors Android's horizontally-scrolling template actions
+                // (Apply / Seed day / Edit / Copy) plus iOS's deliberate "Mark complete".
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: ChronosSpacing.small) {
+                        Button("Apply to day", action: onApply)
+                            .buttonStyle(.borderedProminent)
+                        Button("Seed day", action: onSeed)
+                            .buttonStyle(.bordered)
+                        Button("Edit", action: onEdit)
+                            .buttonStyle(.bordered)
+                        Button("Copy", action: onCopy)
+                            .buttonStyle(.bordered)
+                        Button(action: onComplete) {
+                            Label("Mark complete", systemImage: "checkmark")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(completedToday)
                     }
-                    .buttonStyle(.bordered).buttonBorderShape(.capsule)
-                    .disabled(completedToday)
-                    Button("Apply to day", action: onApply)
-                        .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+                    .buttonBorderShape(.capsule)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

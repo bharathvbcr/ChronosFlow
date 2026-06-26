@@ -14,6 +14,7 @@ enum ChronosStore {
         Goal.self,
         MedicationPlan.self,
         FocusSession.self,
+        FocusSessionSnapshot.self,
         JournalEntry.self,
         SleepTrack.self,
         MoodEnergyCheckIn.self,
@@ -34,11 +35,24 @@ enum ChronosStore {
         UserDefaults(suiteName: appGroup)?.bool(forKey: cloudSyncKey) ?? false
     }
 
+    /// Whether the App Group container is actually provisioned for this build. SwiftData hard-
+    /// `fatalError`s (uncatchable — `do/catch` can't save us) inside `ModelContainer` init when asked
+    /// for `.identifier(appGroup)` while the entitlement is missing, which is exactly the case for an
+    /// unsigned simulator build (`CODE_SIGNING_ALLOWED=NO`). Probing the container URL up front lets us
+    /// pick a plain local store instead of trapping at launch.
+    static var appGroupAvailable: Bool {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) != nil
+    }
+
     /// Shared, App-Group-backed container for the main app + extensions.
     static func makeContainer(inMemory: Bool = false) -> ModelContainer {
         let config: ModelConfiguration
         if inMemory {
             config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        } else if !appGroupAvailable {
+            // App Group not provisioned (e.g. unsigned simulator build) — a default local store keeps
+            // the app launchable instead of trapping inside SwiftData on the missing entitlement.
+            config = ModelConfiguration(schema: schema)
         } else if cloudSyncEnabled {
             config = ModelConfiguration(
                 schema: schema,
@@ -59,10 +73,38 @@ enum ChronosStore {
                     return container
                 }
             }
-            // Last resort: the App Group container is unavailable (e.g. a simulator without the
-            // entitlement provisioned) — use a local store.
-            let fallback = ModelConfiguration(schema: schema, isStoredInMemoryOnly: inMemory)
+            // An incompatible on-disk store (a schema change with no lightweight-migration path)
+            // makes every *persistent* open throw. Rather than trap at launch, recreate the store
+            // once from scratch — the app has no shipped data to preserve yet, so a clean store
+            // beats a crash. (A real release would add a SchemaMigrationPlan instead.)
+            if !inMemory {
+                destroyPersistentStores()
+                if let container = try? ModelContainer(for: schema, configurations: [config]) {
+                    return container
+                }
+            }
+            // True last resort: an in-memory store so the app ALWAYS launches. (Must be in-memory —
+            // a persistent fallback would re-open the same incompatible file and crash again.)
+            let fallback = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
             return try! ModelContainer(for: schema, configurations: [fallback])
+        }
+    }
+
+    /// Delete the SwiftData store files at both the App Group and default locations. Used only as a
+    /// recovery step when an incompatible schema makes every persistent open throw (see `makeContainer`).
+    private static func destroyPersistentStores() {
+        let fm = FileManager.default
+        var dirs: [URL] = []
+        if let appSupport = try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false) {
+            dirs.append(appSupport)
+        }
+        if let group = fm.containerURL(forSecurityApplicationGroupIdentifier: appGroup) {
+            dirs.append(group.appendingPathComponent("Library/Application Support"))
+        }
+        for dir in dirs {
+            for name in ["default.store", "default.store-wal", "default.store-shm"] {
+                try? fm.removeItem(at: dir.appendingPathComponent(name))
+            }
         }
     }
 

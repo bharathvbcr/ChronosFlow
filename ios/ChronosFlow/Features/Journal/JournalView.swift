@@ -1,25 +1,28 @@
 import SwiftUI
 import SwiftData
-import PhotosUI
 import HealthKit
 import FoundationModels
 import ChronosCore
 
 // MARK: - JournalView
 //
-// Full Android-parity journal screen. Ports, in addition to the original emoji mood picker /
-// prompt shuffle / photo attachments / history:
-//   • Multi-entry per day — a primary reflection plus subtask-style "points", each with an
-//     optional time-of-day. Sub-notes inside the primary entry are serialized as bullet lines
-//     via ChronosCore (journalParseBody / journalSerializeBody). (J01, J05, J09)
+// The journal PAGE — the iOS analogue of Android's `JournalPageContent` (feature/daydial
+// JournalScreen.kt). Brought to parity with the Android source-of-truth: the page no longer hosts the
+// composer inline. Instead it presents `JournalEditorSheet` as a modal for new/edit flows (Android's
+// `openNew(date)` / `openEdit(entry)`), and the page itself layers:
+//   • A header card: "Journal" title, a streak label, and a "New entry" button. (Android header card)
 //   • A calendar month overview painting mood emoji + workout badges per day, with month nav and
 //     mood/workout filter pills (journalMoodByDate / journalWorkoutDates / journalWrittenDates). (J02)
-//   • HealthKit workout import as journal points (HKSampleQuery over .workoutType()). (J04)
-//   • An on-device AI insight card (Foundation Models) with a deterministic offline heuristic
-//     fallback built from buildJournalInsightPrompt + the recent entries. (J03)
-//   • Optional time-of-day per entry via parseFlexibleMinute / formatDisplayMinute. (J05)
-//   • Deterministic daily prompt (journalPromptOfTheDay) + manual shuffle. (J06)
-//   • Progressive "Add details" disclosure with a live summary line + search/filter over history.
+//   • An INLINE on-device AI insight card (Foundation Models) with a deterministic offline heuristic
+//     fallback — generate / regenerate / dismiss live in the card, NOT a separate sheet. (J03)
+//   • A HealthKit workout import card (HKSampleQuery over .workoutType()). (J04)
+//   • An always-available "Add a point to today" quick-capture card. (J09)
+//   • Search + a grouped history list ("X of Y reflections" / "… match"), each day group carrying a
+//     per-day header, an "add a full reflection" button, the day's rows, and an inline per-day point
+//     adder — matching Android's `grouped.forEach { … JournalPointAdder(compact = true) }`.
+//
+// The rich composer (mood, prompt-shuffled reflection, highlights, optional time, multi-day range,
+// photos, dictation) lives in `JournalEditorSheet` (Android's `JournalEntryComposer`).
 //
 // Model note: `JournalEntry` (Wellbeing.swift) has no `entryMinuteOfDay` column, so a point's time
 // is carried on `createdAt` (a real instant on the entry's day) — `entryDate` stays start-of-day for
@@ -30,24 +33,16 @@ struct JournalView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \JournalEntry.entryDate, order: .reverse) private var entries: [JournalEntry]
 
-    // Composer state
-    @State private var draft = ""
-    @State private var highlights: [String] = []
-    @State private var selectedMood: JournalMood = .unset
-    @State private var timeText = ""
-    @State private var dictation = DictationController()
-    @State private var pendingPhotos: [PhotosPickerItem] = []
-    @State private var pendingPhotoData: [Data] = []
-    @State private var showDetails = false
-    @State private var showCamera = false
-    @State private var showAIInsights = false
+    // Editor sheet target — Android's (composing, editingEntryId, composeDate).
+    @State private var editorTarget: JournalEditorTarget?
 
-    // Inline point adder
+    // Inline point adder (today)
     @State private var pointDraft = ""
     @State private var pointTimeText = ""
 
-    // Prompt state (deterministic daily base + manual shuffle offset)
-    @State private var promptOffset = 0
+    // Per-day inline point adders in the history (keyed by start-of-day).
+    @State private var dayPointDraft: [Date: String] = [:]
+    @State private var dayPointTime: [Date: String] = [:]
 
     // Calendar overview
     @State private var visibleMonth: Date = Calendar.current.startOfDay(for: .now)
@@ -56,6 +51,8 @@ struct JournalView: View {
 
     // History search
     @State private var searchText = ""
+    /// When set, the history list scrolls to this day's group (driven by tapping a calendar day).
+    @State private var scrollTarget: Date?
 
     // AI insight
     @State private var insight = JournalInsightEngine()
@@ -66,10 +63,6 @@ struct JournalView: View {
     private let cal = Calendar.current
 
     // MARK: Derived collections
-
-    private var todayEntry: JournalEntry? {
-        entries.first { cal.isDateInToday($0.entryDate) && $0.isPrimary }
-    }
 
     /// Value-typed snapshot of all entries for the ChronosCore overview helpers.
     private var records: [JournalEntryRecord] {
@@ -109,280 +102,93 @@ struct JournalView: View {
         return streak
     }
 
-    // MARK: Composer helpers
+    // MARK: Streak label
 
-    private var serializedDraft: String { journalSerializeBody(mainNote: draft, subNotes: highlights) }
-    private var canSave: Bool { journalCanSave(serializedDraft) }
-    private var isOnlyPrompts: Bool { journalIsOnlyPrompts(serializedDraft) }
-
-    /// The reflection prompt to show: deterministic daily base shifted by the manual shuffle offset.
-    private var activePrompt: String {
-        journalPrompt(date: .now, calendar: cal, offset: promptOffset)
+    /// "🔥 5-day streak" / "🔥 On a roll — 12 days!" — mirrors Android's `journalStreakLabel`.
+    private var streakLabel: String? {
+        let streak = currentStreak
+        guard streak > 0 else { return nil }
+        return streak >= 7 ? "🔥 On a roll — \(streak) days!" : "🔥 \(streak)-day streak"
     }
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
-                    headerRow
-                    composerCard
-                    pointsSection
-                    workoutImportCard
-                    aiInsightCard
+                    headerCard
                     calendarOverview
+                    aiInsightCard
+                    workoutImportCard
+                    pointsSection
                     historySection
                 }
                 .padding(ChronosSpacing.standard)
             }
+            // Tapping a calendar day scrolls the history to that day's group (Android parity for the
+            // tappable month grid). Only days with entries are tappable, so the target always exists.
+            .onChange(of: scrollTarget) { _, target in
+                guard let target else { return }
+                withAnimation(ChronosMotion.snappy) { proxy.scrollTo(target, anchor: .top) }
+                scrollTarget = nil
+            }
             .background { ChronosBackdrop() }
             .navigationTitle("Journal")
             .chronosScrollMinimizedBar()
-            .toolbar { aiInsightsToolbarItem }
-            .onAppear {
-                prefillFromExistingEntry()
-                workouts.refreshAvailability()
+            .onAppear { workouts.refreshAvailability() }
+            // The composer is a modal sheet (Android's JournalComposerSheet), not inline. Editing the
+            // day's existing entry, or composing a new one for a specific day.
+            .sheet(item: $editorTarget) { target in
+                JournalEditorSheet(editing: target.entry,
+                                   initialDate: target.date,
+                                   streak: currentStreak)
             }
-            .onChange(of: dictation.transcript) { _, new in
-                guard !new.isEmpty else { return }
-                appendDictation(new)
-                dictation.clearTranscript()
-            }
-            .onDisappear { dictation.stop() }
-            .onChange(of: pendingPhotos) { _, items in
-                Task { await loadPickedPhotos(items) }
-            }
-            .sheet(isPresented: $showAIInsights) {
-                AssistantSheet()
-            }
-            .sheet(isPresented: $showCamera) {
-                CameraPickerView { data in
-                    if let data { pendingPhotoData.append(data) }
-                }
             }
         }
     }
 
-    // MARK: Header
+    // MARK: Header card
 
-    private var headerRow: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Today's reflection")
-                    .font(.chronosTitle)
-                if let saved = todayEntry {
-                    Text(journalLastSavedLabel(updatedAt: saved.updatedAt, now: .now))
-                        .font(.chronosCaption).foregroundStyle(.secondary)
+    /// Title + streak + "New entry" — Android's `JournalPageContent` header `ChronosListCard`.
+    private var headerCard: some View {
+        ChronosGlassCard {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
+                    Text("Journal")
+                        .font(.chronosTitle)
+                    Text(streakLabel ?? "Start a streak today")
+                        .font(.chronosLabel)
+                        .foregroundStyle(currentStreak > 0 ? ChronosColors.brandPrimary : .secondary)
                 }
-            }
-            Spacer()
-            if currentStreak > 0 {
-                streakBadge
-            }
-        }
-    }
-
-    private var streakBadge: some View {
-        Label("\(currentStreak) day streak", systemImage: "flame.fill")
-            .font(.chronosCaption)
-            .foregroundStyle(ChronosColors.brandAccent)
-            .padding(.horizontal, ChronosSpacing.compact)
-            .padding(.vertical, ChronosSpacing.micro)
-            .background(ChronosColors.brandAccent.opacity(0.15), in: Capsule())
-    }
-
-    @ToolbarContentBuilder
-    private var aiInsightsToolbarItem: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                showAIInsights = true
-            } label: {
-                Label("Assistant", systemImage: "bubble.left.and.text.bubble.right")
-                    .font(.chronosCaption)
-            }
-        }
-    }
-
-    // MARK: Composer card
-
-    private var composerCard: some View {
-        ChronosGlassPanel {
-            VStack(alignment: .leading, spacing: ChronosSpacing.standard) {
-
-                shufflePromptRow
-
-                // Main text field (placeholder = the day's prompt, mirroring Android).
-                TextField(activePrompt.isEmpty ? "What shaped your day?" : activePrompt,
-                          text: $draft, axis: .vertical)
-                    .lineLimit(4...14)
-                    .font(.chronosBody)
-
-                HStack {
-                    dictationButton
-                    Spacer()
-                    Text(journalMeterLabel(serializedDraft))
-                        .font(.chronosCaption).foregroundStyle(.secondary)
-                }
-
-                if isOnlyPrompts {
-                    Text("Add your own words below the prompts to save.")
-                        .font(.chronosCaption).foregroundStyle(.secondary)
-                }
-
-                // Progressive "Add details" disclosure with a live summary.
-                DisclosureGroup(isExpanded: $showDetails) {
-                    VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
-                        highlightsEditor
-                        timeOfDayField
-                        moodPicker
-                        photoAttachmentSection
-                    }
-                    .padding(.top, ChronosSpacing.small)
+                Spacer()
+                Button {
+                    editorTarget = JournalEditorTarget(date: cal.startOfDay(for: .now), entry: nil)
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label("Add details", systemImage: "chevron.down.circle")
-                            .font(.chronosLabel)
-                            .foregroundStyle(ChronosColors.brandPrimary)
-                        if !detailsSummary.isEmpty {
-                            Text(detailsSummary)
-                                .font(.chronosCaption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .tint(ChronosColors.brandPrimary)
-
-                if !pendingPhotoData.isEmpty {
-                    photoThumbnailStrip
-                }
-
-                Button(action: save) {
-                    Text("Save entry")
-                        .frame(maxWidth: .infinity)
+                    Label("New entry", systemImage: "plus")
+                        .font(.chronosLabel)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!canSave)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    /// Live "1 highlight · 8:00 AM · 2 photos" summary under the collapsed "Add details" label.
-    private var detailsSummary: String {
-        var parts: [String] = []
-        if !highlights.isEmpty {
-            parts.append(highlights.count == 1 ? "1 highlight" : "\(highlights.count) highlights")
-        }
-        if let minute = parseFlexibleMinute(timeText) {
-            parts.append(formatDisplayMinute(minute))
-        }
-        if !pendingPhotoData.isEmpty {
-            parts.append(pendingPhotoData.count == 1 ? "1 photo" : "\(pendingPhotoData.count) photos")
-        }
-        if selectedMood != .unset {
-            parts.append(selectedMood.label)
-        }
-        return parts.joined(separator: " · ")
+    /// Open the composer for a brand-new entry pinned to `date` (Android's `openNew(date)`).
+    private func openNew(_ date: Date) {
+        editorTarget = JournalEditorTarget(date: cal.startOfDay(for: date), entry: nil)
     }
 
-    // MARK: Shuffle prompt
-
-    private var shufflePromptRow: some View {
-        HStack(spacing: ChronosSpacing.small) {
-            Button {
-                withAnimation(ChronosMotion.smooth) {
-                    draft = journalBodyWithPrompt(draft, question: activePrompt)
-                }
-            } label: {
-                Text(activePrompt)
-                    .font(.chronosLabel)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                withAnimation(ChronosMotion.bouncy) { promptOffset += 1 }
-            } label: {
-                Image(systemName: "dice")
-                    .font(.chronosBody)
-                    .foregroundStyle(ChronosColors.brandSecondary)
-                    .padding(ChronosSpacing.small)
-                    .background(ChronosColors.brandSecondary.opacity(0.12), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Shuffle prompt")
-        }
+    /// Open the composer to edit `entry` (Android's `openEdit(entry)`).
+    private func openEdit(_ entry: JournalEntry) {
+        editorTarget = JournalEditorTarget(date: cal.startOfDay(for: entry.entryDate), entry: entry)
     }
 
-    // MARK: Highlights (sub-notes / bullets)
-
-    private var highlightsEditor: some View {
-        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-            Text("Highlights")
-                .font(.chronosLabel)
-                .foregroundStyle(.secondary)
-
-            ForEach(Array(highlights.enumerated()), id: \.offset) { idx, _ in
-                HStack(spacing: ChronosSpacing.small) {
-                    Image(systemName: "circle.fill")
-                        .font(.system(size: 5))
-                        .foregroundStyle(.secondary)
-                    TextField("Highlight", text: Binding(
-                        get: { idx < highlights.count ? highlights[idx] : "" },
-                        set: { if idx < highlights.count { highlights[idx] = $0 } }))
-                        .font(.chronosBody)
-                    Button {
-                        withAnimation(ChronosMotion.snappy) {
-                            if idx < highlights.count { highlights.remove(at: idx) }
-                        }
-                    } label: {
-                        Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            Button {
-                withAnimation(ChronosMotion.snappy) { highlights.append("") }
-            } label: {
-                Label("Add highlight", systemImage: "plus.circle")
-                    .font(.chronosCaption)
-                    .foregroundStyle(ChronosColors.brandPrimary)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    // MARK: Time of day
-
-    private var timeOfDayField: some View {
-        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-            Text("Time of day (optional)")
-                .font(.chronosLabel)
-                .foregroundStyle(.secondary)
-            HStack(spacing: ChronosSpacing.small) {
-                TextField("e.g. 9:00 AM", text: $timeText)
-                    .font(.chronosBody)
-                    .textInputAutocapitalization(.characters)
-                if let minute = parseFlexibleMinute(timeText) {
-                    Text(formatDisplayMinute(minute))
-                        .font(.chronosCaption)
-                        .foregroundStyle(ChronosColors.brandSecondary)
-                } else if !timeText.isEmpty {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.chronosCaption)
-                        .foregroundStyle(ChronosColors.brandAccent)
-                }
-            }
-        }
-    }
-
-    // MARK: Inline point adder ("Add a point")
+    // MARK: Inline point adder ("Add a point to today")
 
     private var pointsSection: some View {
         ChronosGlassCard {
             VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-                Text("Add a point")
+                Text("Add a point to today")
                     .font(.chronosHeadline)
                     .foregroundStyle(.secondary)
                 Text("Quick timed notes for today — a moment, a thought, a win.")
@@ -393,14 +199,16 @@ struct JournalView: View {
                     TextField("What happened?", text: $pointDraft, axis: .vertical)
                         .lineLimit(1...4)
                         .font(.chronosBody)
-                    TextField("9:00 AM", text: $pointTimeText)
+                    TextField("time", text: $pointTimeText)
                         .font(.chronosCaption)
                         .frame(width: 88)
                         .textInputAutocapitalization(.characters)
                 }
 
                 Button {
-                    addPoint()
+                    addPoint(on: .now, body: pointDraft, timeText: pointTimeText)
+                    pointDraft = ""
+                    pointTimeText = ""
                 } label: {
                     Label("Add point", systemImage: "plus")
                         .font(.chronosCaption)
@@ -409,129 +217,6 @@ struct JournalView: View {
                 .disabled(pointDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    // MARK: Mood picker
-
-    private var moodPicker: some View {
-        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-            Text(selectedMood == .unset ? "How are you feeling?" : selectedMood.label)
-                .font(.chronosLabel)
-                .foregroundStyle(.secondary)
-                .animation(ChronosMotion.snappy, value: selectedMood)
-
-            HStack(spacing: ChronosSpacing.standard) {
-                ForEach(JournalMood.allCases.filter { $0 != .unset }, id: \.self) { mood in
-                    Button {
-                        withAnimation(ChronosMotion.bouncy) {
-                            selectedMood = (selectedMood == mood) ? .unset : mood
-                        }
-                    } label: {
-                        Text(mood.emoji)
-                            .font(.system(size: 40))
-                            .scaleEffect(selectedMood == mood ? 1.25 : 1.0)
-                            .animation(ChronosMotion.bouncy, value: selectedMood)
-                            .shadow(
-                                color: selectedMood == mood ? ChronosColors.brandPrimary.opacity(0.4) : .clear,
-                                radius: 8, x: 0, y: 4)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(mood.label)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, ChronosSpacing.micro)
-        }
-    }
-
-    // MARK: Photos
-
-    private var photoAttachmentSection: some View {
-        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-            Text("Photos")
-                .font(.chronosLabel)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: ChronosSpacing.small) {
-                PhotosPicker(
-                    selection: $pendingPhotos,
-                    maxSelectionCount: 6,
-                    matching: .images,
-                    photoLibrary: .shared()
-                ) {
-                    Label("Library", systemImage: "photo.on.rectangle")
-                        .font(.chronosCaption)
-                        .padding(.horizontal, ChronosSpacing.compact)
-                        .padding(.vertical, ChronosSpacing.small)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: ChronosRadius.extraSmall))
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    showCamera = true
-                } label: {
-                    Label("Camera", systemImage: "camera")
-                        .font(.chronosCaption)
-                        .padding(.horizontal, ChronosSpacing.compact)
-                        .padding(.vertical, ChronosSpacing.small)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: ChronosRadius.extraSmall))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private var photoThumbnailStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: ChronosSpacing.small) {
-                ForEach(Array(pendingPhotoData.enumerated()), id: \.offset) { idx, data in
-                    if let uiImage = UIImage(data: data) {
-                        ZStack(alignment: .topTrailing) {
-                            Image(uiImage: uiImage)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 72, height: 72)
-                                .clipShape(RoundedRectangle(cornerRadius: ChronosRadius.extraSmall, style: .continuous))
-                            Button {
-                                withAnimation(ChronosMotion.snappy) {
-                                    if idx < pendingPhotoData.count { pendingPhotoData.remove(at: idx) }
-                                }
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(.white)
-                                    .shadow(radius: 2)
-                            }
-                            .offset(x: 4, y: -4)
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-            .padding(.vertical, ChronosSpacing.micro)
-        }
-    }
-
-    // MARK: Dictation
-
-    @ViewBuilder
-    private var dictationButton: some View {
-        switch dictation.availability {
-        case .unsupported:
-            EmptyView()
-        case .available, .denied:
-            Button {
-                dictation.toggle()
-            } label: {
-                Label(dictation.isRecording ? "Listening…" : "Dictate",
-                      systemImage: dictation.isRecording ? "waveform" : "mic.fill")
-                    .font(.chronosCaption)
-                    .foregroundStyle(dictation.isRecording ? ChronosColors.brandAccent : .secondary)
-                    .symbolEffect(.variableColor, isActive: dictation.isRecording)
-            }
-            .buttonStyle(.plain)
-            .disabled(dictation.availability == .denied)
         }
     }
 
@@ -686,9 +371,36 @@ struct JournalView: View {
 
                 weekdayHeader
                 monthGrid
+
+                if let recap = monthRecap {
+                    Divider()
+                    Text(recap)
+                        .font(.chronosCaption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// One-line summary of the visible month — "avg 😄 Great · 8 days journaled · 3 workouts" —
+    /// mirroring the Android calendar recap below the month grid. `nil` when the month is empty.
+    private var monthRecap: String? {
+        let inMonth: (Date) -> Bool = { cal.isDate($0, equalTo: visibleMonth, toGranularity: .month) }
+        let journaled = writtenDates.filter(inMonth).count
+        let workouts = workoutDates.filter(inMonth).count
+        let ratings = moodByDate.filter { inMonth($0.key) }.map { $0.value.rating }
+        guard journaled > 0 || workouts > 0 || !ratings.isEmpty else { return nil }
+
+        var parts: [String] = []
+        if !ratings.isEmpty {
+            let avg = Int((Double(ratings.reduce(0, +)) / Double(ratings.count)).rounded())
+            if let mood = journalMoodFor(avg) { parts.append("avg \(mood.emoji) \(mood.label)") }
+        }
+        if journaled > 0 { parts.append("\(journaled) day\(journaled == 1 ? "" : "s") journaled") }
+        if workouts > 0 { parts.append("\(workouts) workout\(workouts == 1 ? "" : "s")") }
+        return parts.joined(separator: " · ")
     }
 
     private func filterPill(_ title: String, systemImage: String, on: Bool, action: @escaping () -> Void) -> some View {
@@ -759,6 +471,11 @@ struct JournalView: View {
             .padding(.vertical, 2)
             .background(isToday ? ChronosColors.brandPrimary.opacity(0.12) : .clear,
                         in: RoundedRectangle(cornerRadius: ChronosRadius.extraSmall, style: .continuous))
+            .contentShape(Rectangle())
+            // Tap a day that has reflections to jump the history list to it.
+            .onTapGesture {
+                if wrote { scrollTarget = key }
+            }
         } else {
             Color.clear.frame(height: 32)
         }
@@ -791,105 +508,32 @@ struct JournalView: View {
 
     // MARK: Actions
 
-    private func prefillFromExistingEntry() {
-        guard let saved = todayEntry else { return }
-        let parts = journalParseBody(saved.body)
-        draft = parts.mainNote
-        highlights = parts.subNotes
-        selectedMood = JournalMood(rawValue: saved.moodRating) ?? .unset
-        // Auto-expand "Add details" when the entry already carries any details (Android parity).
-        if !highlights.isEmpty || selectedMood != .unset || !saved.photoUris.isEmpty {
-            showDetails = true
-        }
-        pendingPhotoData = saved.photoUris.compactMap { path -> Data? in
-            guard let url = URL(string: path) else { return nil }
-            return try? Data(contentsOf: url)
-        }
-    }
-
-    private func appendDictation(_ transcript: String) {
-        let pieces = [draft.trimmingCharacters(in: .whitespacesAndNewlines),
-                      transcript.trimmingCharacters(in: .whitespacesAndNewlines)]
-            .filter { !$0.isEmpty }
-        draft = pieces.joined(separator: " ")
-    }
-
-    private func loadPickedPhotos(_ items: [PhotosPickerItem]) async {
-        var loaded: [Data] = []
-        for item in items {
-            if let data = try? await item.loadTransferable(type: Data.self) {
-                loaded.append(data)
-            }
-        }
-        await MainActor.run { pendingPhotoData.append(contentsOf: loaded) }
-    }
-
-    private func save() {
-        // Drop empty highlight rows, then serialize main note + bullets the Android way.
-        highlights = highlights.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let cleaned = journalCleanForSave(serializedDraft)
-        guard !cleaned.isEmpty else { return }
-
-        let streak = currentStreak
-        let savedPaths = savePhotosToFiles(pendingPhotoData)
-        // Record which shuffled prompt was active (parity with Android's shuffledPromptKey).
-        let promptKey = "offset-\(promptOffset)"
-        // Optional time-of-day → a real instant on today carried via createdAt.
-        let timestamp = composedTimestamp(on: .now)
-
-        if let existing = todayEntry {
-            existing.body = cleaned
-            existing.updatedAt = .now
-            existing.createdAt = timestamp
-            existing.moodRating = selectedMood.rawValue
-            existing.photoUris = savedPaths
-            existing.shuffledPromptKey = promptKey
-            existing.streakDay = streak
-        } else {
-            let entry = JournalEntry(
-                entryDate: .now,
-                createdAt: timestamp,
-                updatedAt: .now,
-                body: cleaned,
-                promptType: promptKey,
-                moodRating: selectedMood.rawValue,
-                photoUris: savedPaths,
-                shuffledPromptKey: promptKey,
-                streakDay: streak + 1)
-            context.insert(entry)
-        }
-        try? context.save()
-    }
-
-    /// Create a secondary, timed journal point for today from the inline adder.
-    private func addPoint() {
-        let body = pointDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return }
-        let timestamp = composedTimestamp(on: .now, timeText: pointTimeText)
+    /// Create a secondary, timed journal point on `day` from an inline adder (top card or per-day).
+    /// Mirrors Android's `JournalViewModel.addPoint(date, body, minuteOfDay)`.
+    private func addPoint(on day: Date, body: String, timeText: String) {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let timestamp = composedTimestamp(on: day, timeText: timeText)
         let entry = JournalEntry(
-            entryDate: .now,
+            entryDate: cal.startOfDay(for: day),
             createdAt: timestamp,
             updatedAt: .now,
-            body: body,
+            body: trimmed,
             isPrimary: false,
             moodRating: 0)
         context.insert(entry)
         try? context.save()
-        withAnimation(ChronosMotion.snappy) {
-            pointDraft = ""
-            pointTimeText = ""
-        }
     }
 
     /// Resolve the entry's stored instant: the day's start-of-day plus the parsed minute-of-day when a
-    /// time was given, otherwise `now`. Lets `minuteOfDay(of:)` recover the display/sort time.
-    private func composedTimestamp(on day: Date, timeText text: String? = nil) -> Date {
-        let source = text ?? timeText
-        if let minute = parseFlexibleMinute(source) {
-            let start = cal.startOfDay(for: day)
+    /// time was given, otherwise `now` (today) or the day's noon. Lets `minuteOfDay(of:)` recover it.
+    private func composedTimestamp(on day: Date, timeText text: String) -> Date {
+        let start = cal.startOfDay(for: day)
+        if let minute = parseFlexibleMinute(text) {
             return cal.date(byAdding: .minute, value: minute, to: start) ?? day
         }
-        return .now
+        if cal.isDateInToday(day) { return .now }
+        return cal.date(byAdding: .hour, value: 12, to: start) ?? start
     }
 
     /// Minute-of-day for an entry, derived from its `createdAt` instant (0–1439), or nil for the
@@ -898,18 +542,6 @@ struct JournalView: View {
         let comps = cal.dateComponents([.hour, .minute], from: entry.createdAt)
         guard let hour = comps.hour, let minute = comps.minute else { return nil }
         return hour * 60 + minute
-    }
-
-    private func savePhotosToFiles(_ dataList: [Data]) -> [String] {
-        guard let docsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        else { return [] }
-        let journalDir = docsURL.appendingPathComponent("JournalPhotos", isDirectory: true)
-        try? FileManager.default.createDirectory(at: journalDir, withIntermediateDirectories: true)
-        return dataList.compactMap { data -> String? in
-            let file = journalDir.appendingPathComponent(UUID().uuidString + ".jpg")
-            guard (try? data.write(to: file)) != nil else { return nil }
-            return file.absoluteString
-        }
     }
 
     // MARK: History
@@ -946,19 +578,22 @@ struct JournalView: View {
                 description: Text("Your saved reflections will appear here."))
                 .padding(.top, ChronosSpacing.large)
         } else {
+            // "History" + Android's `journalHistoryPageSummary` ("5 reflections" / "2 of 5 … match").
             HStack {
-                Text("History").font(.chronosTitle)
-                Spacer()
-                if !searchText.isEmpty {
-                    Text("\(filteredEntries.count) of \(entries.count)")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("History").font(.chronosTitle)
+                    Text(journalHistoryPageSummary(total: entries.count,
+                                                   shown: filteredEntries.count,
+                                                   query: searchText))
                         .font(.chronosCaption)
                         .foregroundStyle(.secondary)
                 }
+                Spacer()
             }
 
             HStack(spacing: ChronosSpacing.small) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search reflections", text: $searchText)
+                TextField("Search your reflections", text: $searchText)
                     .font(.chronosBody)
                 if !searchText.isEmpty {
                     Button {
@@ -972,27 +607,106 @@ struct JournalView: View {
             .padding(ChronosSpacing.compact)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: ChronosRadius.small, style: .continuous))
 
-            ForEach(groupedHistory, id: \.key) { group in
-                let dayLabel = cal.isDateInToday(group.key)
-                    ? "Today"
-                    : group.key.formatted(.dateTime.weekday(.wide).month().day())
-
-                VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-                    Text(dayLabel)
-                        .font(.chronosHeadline)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, ChronosSpacing.small)
-
-                    ForEach(group.entries) { entry in
-                        JournalHistoryCard(entry: entry, minuteOfDay: minuteOfDay(of: entry)) {
-                            context.delete(entry)
-                            try? context.save()
-                        }
-                    }
+            if filteredEntries.isEmpty {
+                Text("No reflections match “\(searchText.trimmingCharacters(in: .whitespacesAndNewlines))”.")
+                    .font(.chronosBody)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, ChronosSpacing.small)
+            } else {
+                ForEach(groupedHistory, id: \.key) { group in
+                    dayGroup(group)
+                        .id(group.key)
                 }
             }
         }
     }
+
+    /// One day group in the history list: a header with the day's mood emoji + a "+" to compose a full
+    /// reflection on that day, the day's rows, then an inline point adder — Android's `grouped.forEach`.
+    @ViewBuilder
+    private func dayGroup(_ group: (key: Date, entries: [JournalEntry])) -> some View {
+        // Exclude auto-imported workout entries from the human-written count (calendar "journaled" semantics).
+        let writtenCount = group.entries.filter { !$0.id.hasPrefix(journalWorkoutIdPrefix) }.count
+
+        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+            HStack(spacing: ChronosSpacing.small) {
+                if let mood = moodByDate[group.key] {
+                    Text(mood.emoji).font(.chronosCaption)
+                }
+                Text(journalDayGroupLabel(group.key, count: writtenCount, calendar: cal))
+                    .font(.chronosLabel)
+                    .foregroundStyle(ChronosColors.brandPrimary)
+                Spacer()
+                Button {
+                    openNew(group.key)
+                } label: {
+                    Image(systemName: "calendar.badge.plus")
+                        .font(.chronosBody)
+                        .foregroundStyle(ChronosColors.brandPrimary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add a full reflection on this day")
+            }
+            .padding(.top, ChronosSpacing.small)
+
+            ForEach(group.entries) { entry in
+                JournalHistoryCard(entry: entry, minuteOfDay: minuteOfDay(of: entry)) {
+                    // Tapping a written (non-workout) row opens the editor for it (Android openEdit).
+                    if !entry.id.hasPrefix(journalWorkoutIdPrefix) { openEdit(entry) }
+                } onDelete: {
+                    context.delete(entry)
+                    try? context.save()
+                }
+            }
+
+            // Inline subtask-style adder for another timed point on this day (Android JournalPointAdder).
+            dayPointAdder(for: group.key)
+        }
+    }
+
+    /// Compact per-day point adder shown under each day group's entries (Android `compact = true`).
+    private func dayPointAdder(for day: Date) -> some View {
+        let bodyBinding = Binding(
+            get: { dayPointDraft[day] ?? "" },
+            set: { dayPointDraft[day] = $0 })
+        let timeBinding = Binding(
+            get: { dayPointTime[day] ?? "" },
+            set: { dayPointTime[day] = $0 })
+        let canAdd = !(dayPointDraft[day] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        return HStack(spacing: ChronosSpacing.small) {
+            TextField("Add another point…", text: bodyBinding)
+                .font(.chronosCaption)
+            TextField("time", text: timeBinding)
+                .font(.chronosCaption)
+                .frame(width: 64)
+                .textInputAutocapitalization(.characters)
+            Button {
+                addPoint(on: day, body: dayPointDraft[day] ?? "", timeText: dayPointTime[day] ?? "")
+                dayPointDraft[day] = ""
+                dayPointTime[day] = ""
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(canAdd ? ChronosColors.brandPrimary : .secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canAdd)
+            .accessibilityLabel("Add point")
+        }
+        .padding(.leading, ChronosSpacing.small)
+    }
+}
+
+// MARK: - JournalEditorTarget
+//
+// Identifies what the editor sheet is composing — a new entry for `date` (entry == nil) or an edit of
+// an existing `entry`. Mirrors Android's (composing, editingEntryId, composeDate) sheet state. Used
+// with `.sheet(item:)`, so it is Identifiable; the id distinguishes a fresh compose-for-day from an
+// edit so reopening for a different day/entry re-presents the sheet.
+private struct JournalEditorTarget: Identifiable {
+    let date: Date
+    let entry: JournalEntry?
+    var id: String { entry?.id ?? "new-\(date.timeIntervalSince1970)" }
 }
 
 // MARK: - JournalHistoryCard
@@ -1000,6 +714,8 @@ struct JournalView: View {
 private struct JournalHistoryCard: View {
     let entry: JournalEntry
     let minuteOfDay: Int?
+    /// Tapping the card opens the editor for this entry (Android `onClick = { openEdit(entry) }`).
+    let onTap: () -> Void
     let onDelete: () -> Void
     @State private var expanded = false
 
@@ -1072,6 +788,10 @@ private struct JournalHistoryCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .contentShape(Rectangle())
+        // Tap to edit (skipped for read-only workout points). The expand/collapse "Show more" button
+        // has its own hit target, so a long entry can still be expanded without opening the editor.
+        .onTapGesture { onTap() }
         // The history list lives in a ScrollView (not a List), so `.swipeActions` wouldn't fire here;
         // a context menu is the portable delete affordance.
         .contextMenu {
@@ -1348,8 +1068,9 @@ private extension HKWorkoutActivityType {
 // MARK: - CameraPickerView (UIViewControllerRepresentable)
 
 /// Wraps UIImagePickerController with camera source for in-app photo capture.
-/// Falls back gracefully on simulator (no camera hardware).
-private struct CameraPickerView: UIViewControllerRepresentable {
+/// Falls back gracefully on simulator (no camera hardware). Module-internal so the journal editor
+/// sheet (a sibling file) can reuse it.
+struct CameraPickerView: UIViewControllerRepresentable {
     @Environment(\.dismiss) private var dismiss
     var onCapture: (Data?) -> Void
 

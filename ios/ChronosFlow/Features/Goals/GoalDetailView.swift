@@ -91,17 +91,16 @@ struct GoalDetailView: View {
 
     // MARK: Empty state
 
+    /// Centered title + message empty state, mirroring Android's `ChronosEmptyState` in
+    /// GoalDetailSheet (shown when `linkedWork.isEmpty`).
     private var emptyState: some View {
-        ChronosGlassCard(tone: .quiet) {
-            VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-                Label("No linked work yet", systemImage: "link")
-                    .font(.chronosHeadline)
-                Text("Link tasks and habits to this goal from their edit screens — completing them then moves this goal forward automatically.")
-                    .font(.chronosCaption)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        ContentUnavailableView(
+            "No linked work yet",
+            systemImage: "link",
+            description: Text("Link tasks and habits to this goal from their edit screens — completing them then moves this goal forward automatically.")
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, ChronosSpacing.medium)
     }
 
     // MARK: Tasks

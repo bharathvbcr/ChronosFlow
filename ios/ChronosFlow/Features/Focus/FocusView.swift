@@ -9,7 +9,7 @@ import ChronosCore
 struct FocusView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
-    @State private var timer = FocusTimerModel()
+    @State private var timer = FocusTimerModel.shared
     var prefilledBlockID: String? = nil
 
     var body: some View {
@@ -34,7 +34,7 @@ struct FocusView: View {
                 .padding(ChronosSpacing.medium)
             }
             .navigationTitle("Focus")
-            .toolbarTitleDisplayMode(.inlineLarge)
+            .chronosCommandPaletteToolbar()
             // Apply any focus controls that arrived from the Live Activity / Today widget while we
             // were backgrounded or on another tab (FocusCommandBridge — see WidgetIntents.swift).
             .onAppear {

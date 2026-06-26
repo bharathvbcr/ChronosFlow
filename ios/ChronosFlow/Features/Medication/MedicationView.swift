@@ -4,7 +4,15 @@ import Charts
 import ChronosCore
 
 /// The Meds tab: medication schedules, dose acknowledgement, refill and missed-dose tracking.
-/// Ports `feature/medication`. ChronosFlow helps track and remind — it does not give medical advice.
+/// Ports `feature/medication` (`MedicationScreen.kt`). ChronosFlow helps track and remind — it does
+/// not give medical advice.
+///
+/// Layout mirrors Android's `MedicationScreen` single-column page (a `LazyColumn`): page header →
+/// metric tiles (Active / Taken 7d / Missed) → "Add medication" button → next-dose card → refill
+/// card → 14-day adherence trend → adherence-suggestion panel → per-plan rows. Each plan renders as
+/// one `MedicationCard` carrying inline info pills, an expand/collapse details section, and a context
+/// action sheet with discrete snooze options — replacing the previous 2N (card + adherence-card)
+/// stacking so the page reads at Android's density.
 ///
 /// When `ChronosSettings.shared.medicationLockEnabled` is on, the whole tab is gated behind
 /// Face ID / Touch ID / passcode (`.medicationLock()`), mirroring Android's SensitiveArea.MEDICATION.
@@ -16,25 +24,83 @@ struct MedicationView: View {
     @Query(filter: #Predicate<MedicationPlan> { $0.isActive },
            sort: \MedicationPlan.reminderMinuteOfDay) private var plans: [MedicationPlan]
     @State private var creating = false
+    /// Pre-fill name for the editor when launched from a quick-add chip (Android `prefillName`).
+    @State private var prefillName: String?
+    /// Suggestions surfaced in the adherence panel, plus per-plan dismissals (Android
+    /// `adherenceSuggestions` flow). Recomputed locally; mirrors `MedicationAdherenceAssistPlanner`.
+    @State private var dismissedSuggestionPlanIDs: Set<String> = []
 
-    /// Plans whose remaining supply is at/under the refill threshold — surfaced in a single banner
-    /// at the top, mirroring Android's `MedicationRefillCard`.
+    /// Plans whose remaining supply is at/under the refill threshold — surfaced in a single banner,
+    /// mirroring Android's `MedicationRefillCard`.
     private var refillPlans: [MedicationPlan] { plans.filter(refillSoon) }
+
+    /// "Taken 7d" metric: every taken dose logged across all plans in the trailing 7 days.
+    private var takenLast7: Int {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: .now) ?? .now
+        return plans.reduce(0) { sum, plan in
+            sum + plan.takenAt.filter { $0 >= cutoff }.count
+        }
+    }
+
+    /// "Missed" metric: aggregate missed-dose counter across all plans (Android `sumOf { missedCount }`).
+    private var totalMissed: Int { plans.reduce(0) { $0 + $1.missedCount } }
+
+    /// Local adherence suggestions (Android `MedicationAdherenceAssistPlanner.suggestAdjustments`),
+    /// minus any the user dismissed this session. Capped at 3, matching Android's panel.
+    private var suggestions: [MedicationAdherenceSuggestion] {
+        MedicationAdherencePlanner.suggestAdjustments(plans: plans)
+            .filter { !dismissedSuggestionPlanIDs.contains($0.plan.id) }
+            .prefix(3)
+            .map { $0 }
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(spacing: ChronosSpacing.compact) {
+                LazyVStack(alignment: .leading, spacing: ChronosSpacing.compact) {
+                    pageHeader
+
+                    metricTiles
+
+                    Button { startCreate() } label: {
+                        Label("Add medication", systemImage: "plus")
+                            .font(.chronosLabel)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, ChronosSpacing.small)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ChronosColors.brandPrimary)
+                    .controlSize(.large)
+
+                    if let next = nextMedicationDose(plans: plans) {
+                        NextDoseCard(next: next)
+                    }
+
                     if !refillPlans.isEmpty {
                         RefillSummaryCard(plans: refillPlans)
                     }
-                    ForEach(plans) { plan in
-                        MedicationCard(plan: plan)
-                        MedicationAdherenceCard(plan: plan)
+
+                    AdherenceTrendCard(plans: plans)
+
+                    if !suggestions.isEmpty {
+                        AdherenceSuggestionPanel(
+                            suggestions: suggestions,
+                            onApply: applySuggestion,
+                            onDismiss: { dismissedSuggestionPlanIDs.insert($0.plan.id) })
                     }
+
+                    if plans.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(plans) { plan in
+                            MedicationCard(plan: plan)
+                        }
+                    }
+
                     Text("ChronosFlow helps you track and remember medication times. It does not provide medical advice.")
                         .font(.chronosCaption).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
                         .padding(.top, ChronosSpacing.medium)
                 }
                 .padding(ChronosSpacing.standard)
@@ -42,17 +108,77 @@ struct MedicationView: View {
             .background { ChronosBackdrop() }
             .navigationTitle("Medication")
             .chronosScrollMinimizedBar()
-            .overlay { if plans.isEmpty { ContentUnavailableView("No medication", systemImage: "pills", description: Text("Add a schedule to get reminders")) } }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { creating = true } label: { Image(systemName: "plus") }
+                    Button { startCreate() } label: { Image(systemName: "plus") }
                 }
             }
-            .sheet(isPresented: $creating) { MedicationEditorSheet() }
+            .sheet(isPresented: $creating, onDismiss: { prefillName = nil }) {
+                MedicationEditorSheet(prefillName: prefillName)
+            }
         }
         .medicationLock()
     }
+
+    // MARK: Header + metrics (Android ChronosPageHeader + ChronosMetricTile row)
+
+    private var pageHeader: some View {
+        HStack(spacing: ChronosSpacing.compact) {
+            Image(systemName: "pills.fill")
+                .font(.title2)
+                .foregroundStyle(ChronosColors.category("MEDICATION"))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Medication tracking").font(.chronosHeadline)
+                Text("Track active plans and get exact reminders for critical doses.")
+                    .font(.chronosCaption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var metricTiles: some View {
+        HStack(spacing: ChronosSpacing.compact) {
+            MedicationMetricTile(value: plans.count, label: "Active", tint: ChronosColors.brandPrimary)
+            MedicationMetricTile(value: takenLast7, label: "Taken 7d", tint: ChronosColors.brandSecondary)
+            MedicationMetricTile(value: totalMissed, label: "Missed", tint: ChronosColors.brandAccent)
+        }
+    }
+
+    // MARK: Empty state + quick-add chips (Android ChronosEmptyState + ChronosQuickAddChips)
+
+    private var emptyState: some View {
+        VStack(spacing: ChronosSpacing.compact) {
+            ContentUnavailableView("No medication plans", systemImage: "pills",
+                                   description: Text("Add a plan to schedule a reminder and track adherence."))
+            QuickAddChips(label: "Start quickly",
+                          options: ["Vitamin D", "Blood pressure", "Evening dose", "Inhaler"],
+                          onSelect: { startCreate(prefill: $0) })
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Actions
+
+    private func startCreate(prefill: String? = nil) {
+        prefillName = prefill
+        creating = true
+    }
+
+    /// Apply a suggested reminder time through the same edit path Android uses
+    /// (`applyAdherenceSuggestion` → `updateMedication`): updates the primary reminder minute, keeps
+    /// it as the sole reminder for the day, and reschedules notifications.
+    private func applySuggestion(_ suggestion: MedicationAdherenceSuggestion) {
+        let plan = suggestion.plan
+        plan.reminderMinuteOfDay = suggestion.suggestedReminderMinute
+        plan.reminderMinutes = [suggestion.suggestedReminderMinute]
+        try? context.save()
+        Task { await ChronosNotifications.shared.scheduleMedication(plan) }
+        dismissedSuggestionPlanIDs.insert(plan.id)
+    }
 }
+
+// MARK: - Doses-per-day / refill helpers
 
 /// Doses expected per day, from the configured reminder times. Shared by adherence + refill math.
 private func dosesPerDay(for plan: MedicationPlan) -> Int { max(plan.reminderMinutes.count, 1) }
@@ -71,33 +197,311 @@ private func refillSoon(_ plan: MedicationPlan) -> Bool {
     return (refillDays(for: plan) ?? .max) <= 3
 }
 
+// MARK: - Next dose (Android nextMedicationDose / MedicationNextDoseCard)
+
+/// The soonest upcoming dose across active, non-paused plans: the earliest reminder still ahead
+/// today, else the earliest reminder overall (rolling to tomorrow). Pure, mirrors Android's
+/// `nextMedicationDose`.
+private func nextMedicationDose(plans: [MedicationPlan]) -> NextMedicationDose? {
+    let now = Calendar.current.dateComponents([.hour, .minute], from: .now)
+    let nowMinute = (now.hour ?? 0) * 60 + (now.minute ?? 0)
+    let eligible = plans.filter { !$0.isPaused() }
+    guard !eligible.isEmpty else { return nil }
+
+    if let upcoming = eligible
+        .filter({ $0.reminderMinuteOfDay >= nowMinute })
+        .min(by: { $0.reminderMinuteOfDay < $1.reminderMinuteOfDay }) {
+        return NextMedicationDose(planName: upcoming.name, minuteOfDay: upcoming.reminderMinuteOfDay, isToday: true)
+    }
+    guard let earliest = eligible.min(by: { $0.reminderMinuteOfDay < $1.reminderMinuteOfDay }) else { return nil }
+    return NextMedicationDose(planName: earliest.name, minuteOfDay: earliest.reminderMinuteOfDay, isToday: false)
+}
+
+/// The next scheduled dose across eligible plans.
+private struct NextMedicationDose {
+    let planName: String
+    let minuteOfDay: Int
+    let isToday: Bool
+    /// Android `medicationNextDoseLabel`: "<plan> at <time>" / "<plan> tomorrow at <time>".
+    var label: String {
+        isToday ? "\(planName) at \(minuteOfDay.clockTime)"
+                : "\(planName) tomorrow at \(minuteOfDay.clockTime)"
+    }
+}
+
+/// "What's next" prompt at the top of the page (Android `MedicationNextDoseCard`).
+private struct NextDoseCard: View {
+    let next: NextMedicationDose
+    var body: some View {
+        ChronosGlassCard(tint: ChronosColors.brandPrimary) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Next dose").font(.chronosCaption).foregroundStyle(.secondary)
+                    Text(next.label).font(.chronosHeadline)
+                }
+            } icon: {
+                Image(systemName: "clock.fill").foregroundStyle(ChronosColors.brandPrimary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+// MARK: - Metric tile
+
+/// One metric tile in the Active / Taken 7d / Missed row (Android `ChronosMetricTile`).
+private struct MedicationMetricTile: View {
+    let value: Int
+    let label: String
+    let tint: Color
+    var body: some View {
+        ChronosGlassCard(tone: .quiet, tint: tint) {
+            VStack(spacing: 2) {
+                Text("\(value)").font(.chronosTitleLarge).foregroundStyle(tint)
+                Text(label).font(.chronosCaption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+// MARK: - Quick-add chips (Android ChronosQuickAddChips)
+
+/// Tappable preset chips shown in the empty state, pre-filling the editor with a medication name.
+private struct QuickAddChips: View {
+    let label: String
+    let options: [String]
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+            Text(label).font(.chronosCaption).foregroundStyle(.secondary)
+            MedicationPillFlow(spacing: ChronosSpacing.small) {
+                ForEach(options, id: \.self) { option in
+                    Button { onSelect(option) } label: {
+                        Text(option)
+                            .font(.chronosCaption)
+                            .padding(.horizontal, ChronosSpacing.compact)
+                            .padding(.vertical, ChronosSpacing.small)
+                            .background(ChronosColors.brandPrimary.opacity(0.14), in: Capsule())
+                            .foregroundStyle(ChronosColors.brandPrimary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 // MARK: - Refill summary banner (all plans low on supply)
 
 /// One banner listing every medication running low, mirroring Android's `MedicationRefillCard`.
 private struct RefillSummaryCard: View {
     let plans: [MedicationPlan]
 
+    /// Android `medicationRefillMessage`: lists up to two names, then "N more".
     private var message: String {
-        let names = plans.map(\.name)
-        let list: String
-        switch names.count {
-        case 1: list = names[0]
-        case 2: list = "\(names[0]) and \(names[1])"
-        default: list = names.dropLast().joined(separator: ", ") + ", and \(names.last ?? "")"
+        let names = plans.map { plan -> String in
+            if let remaining = plan.remainingDoses { return "\(plan.name) (\(remaining) left)" }
+            return plan.name
         }
-        return "Refill soon: \(list) running low."
+        switch names.count {
+        case 1: return "\(names[0]) is running low."
+        case 2: return "\(names[0]) and \(names[1]) are running low."
+        default: return "\(names[0]), \(names[1]) and \(names.count - 2) more are running low."
+        }
     }
 
     var body: some View {
         ChronosGlassCard(tint: ChronosColors.brandAccent) {
             Label {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Refill needed").font(.chronosHeadline)
+                    Text("Refill soon").font(.chronosHeadline)
                     Text(message).font(.chronosCaption).foregroundStyle(.secondary)
                 }
             } icon: {
-                Image(systemName: "exclamationmark.triangle.fill")
+                Image(systemName: "shippingbox.fill")
                     .foregroundStyle(ChronosColors.brandAccent)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+// MARK: - Aggregated 14-day adherence trend (Android MedicationAdherenceTrendCard)
+
+/// A single page-level 14-day taken/missed trend across all plans, replacing the per-plan adherence
+/// cards. Renders nothing when nothing has been logged.
+private struct AdherenceTrendCard: View {
+    let plans: [MedicationPlan]
+
+    private var buckets: [AdherenceDay] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        return (0..<14).reversed().compactMap { offset in
+            guard let day = cal.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            var taken = 0
+            var missed = 0
+            for plan in plans {
+                for event in plan.doseEvents ?? [] where cal.isDate(event.date, inSameDayAs: day) {
+                    if event.status == .taken { taken += 1 }
+                    else if event.status == .missed { missed += 1 }
+                }
+            }
+            // Expected = total per-day cadence across plans, so a full day reads at 1.0.
+            let expected = max(plans.reduce(0) { $0 + dosesPerDay(for: $1) }, 1)
+            return AdherenceDay(date: day, taken: taken, missed: missed, expected: expected)
+        }
+    }
+
+    private var totalTaken: Int { buckets.reduce(0) { $0 + $1.taken } }
+    private var totalMissed: Int { buckets.reduce(0) { $0 + $1.missed } }
+    /// Days with at least one taken dose and no misses (Android "on-track days").
+    private var onTrackDays: Int { buckets.filter { $0.taken > 0 && $0.missed == 0 }.count }
+
+    /// Android `medicationTrendHeadline`.
+    private var headline: String {
+        let ratio = buckets.isEmpty ? 0 : Double(onTrackDays) / Double(buckets.count)
+        switch ratio {
+        case 0.85...: return "Excellent adherence — keep it up."
+        case 0.5...: return "Solid routine. Stay consistent."
+        case 0.25...: return "Getting on track, dose by dose."
+        default: return "Every logged dose builds the habit."
+        }
+    }
+
+    var body: some View {
+        if totalTaken == 0 {
+            EmptyView()
+        } else {
+            ChronosGlassCard(tint: ChronosColors.category("MEDICATION")) {
+                VStack(alignment: .leading, spacing: ChronosSpacing.compact) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Dose history").font(.chronosHeadline)
+                            Text(headline).font(.chronosCaption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("\(onTrackDays)/\(buckets.count) days")
+                            .font(.chronosLabel)
+                            .foregroundStyle(ChronosColors.brandPrimary)
+                    }
+                    AdherenceTrendChart(buckets: buckets, tint: ChronosColors.category("MEDICATION"))
+                        .frame(height: 72)
+                    Text("\(totalTaken) taken · \(totalMissed) missed in the last \(buckets.count) days")
+                        .font(.chronosCaption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+// MARK: - Adherence suggestion panel (Android MedicationAdherencePanel)
+
+/// A passive timing-only suggestion for a plan whose dose slipped today or is routinely logged late.
+/// Mirrors Android's `MedicationAdherenceSuggestion`. Timing only — never dosing/medical advice.
+struct MedicationAdherenceSuggestion: Identifiable {
+    let plan: MedicationPlan
+    let suggestedReminderMinute: Int
+    let reason: String
+    var id: String { plan.id }
+}
+
+/// Local, on-device port of Android's `MedicationAdherenceAssistPlanner` (the LOCAL fallback path).
+/// iOS lacks the GenAI coordinator, so only the deterministic heuristic is ported: flag plans whose
+/// reminder passed today without a logged dose, or that are routinely taken well after the reminder,
+/// and propose a better minute-of-day. No network, no dosing advice.
+private enum MedicationAdherencePlanner {
+    private static let missedGraceMinutes = 30
+    private static let lateThresholdMinutes = 45
+    private static let lateMinOccurrences = 3
+
+    static func suggestAdjustments(plans: [MedicationPlan]) -> [MedicationAdherenceSuggestion] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        let comps = cal.dateComponents([.hour, .minute], from: .now)
+        let currentMinute = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
+
+        return plans.compactMap { plan -> MedicationAdherenceSuggestion? in
+            guard !plan.isPaused() else { return nil }
+            let missedToday = !acknowledgedToday(plan, today: today, cal: cal)
+                && currentMinute > plan.reminderMinuteOfDay + missedGraceMinutes
+            let lateMinutes = lateTakenMinutes(plan, today: today, cal: cal)
+            let latePattern = lateMinutes.count >= lateMinOccurrences
+            guard missedToday || latePattern else { return nil }
+
+            if latePattern, !missedToday {
+                let sorted = lateMinutes.sorted()
+                let typical = sorted[sorted.count / 2]
+                return MedicationAdherenceSuggestion(
+                    plan: plan,
+                    suggestedReminderMinute: min(max(typical, 0), 1439),
+                    reason: "Usually taken around \(typical.clockTime) — consider moving the reminder")
+            }
+            return MedicationAdherenceSuggestion(
+                plan: plan,
+                suggestedReminderMinute: min(currentMinute + 15, 1439),
+                reason: "Reminder at \(plan.reminderMinuteOfDay.clockTime) passed without a logged dose")
+        }
+        .sorted { $0.plan.reminderMinuteOfDay < $1.plan.reminderMinuteOfDay }
+    }
+
+    private static func acknowledgedToday(_ plan: MedicationPlan, today: Date, cal: Calendar) -> Bool {
+        (plan.doseEvents ?? []).contains { event in
+            cal.isDate(event.date, inSameDayAs: today)
+                && (event.status == .taken || event.status == .skipped)
+        }
+    }
+
+    /// Minute-of-day for taken events (on earlier days) logged ≥45 min after the scheduled reminder.
+    private static func lateTakenMinutes(_ plan: MedicationPlan, today: Date, cal: Calendar) -> [Int] {
+        (plan.doseEvents ?? []).compactMap { event -> Int? in
+            guard event.status == .taken, !cal.isDate(event.date, inSameDayAs: today) else { return nil }
+            let scheduled = event.scheduledMinuteOfDay ?? plan.reminderMinuteOfDay
+            let c = cal.dateComponents([.hour, .minute], from: event.date)
+            let recorded = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+            return recorded - scheduled >= lateThresholdMinutes ? recorded : nil
+        }
+    }
+}
+
+/// The suggestion card with Apply / Dismiss per suggestion (Android `MedicationAdherencePanel`).
+private struct AdherenceSuggestionPanel: View {
+    let suggestions: [MedicationAdherenceSuggestion]
+    let onApply: (MedicationAdherenceSuggestion) -> Void
+    let onDismiss: (MedicationAdherenceSuggestion) -> Void
+
+    var body: some View {
+        ChronosGlassCard(tint: ChronosColors.brandSecondary) {
+            VStack(alignment: .leading, spacing: ChronosSpacing.compact) {
+                Label("Adherence helper", systemImage: "lightbulb.fill")
+                    .font(.chronosHeadline)
+                    .foregroundStyle(ChronosColors.brandSecondary)
+                ForEach(suggestions) { suggestion in
+                    HStack(alignment: .top, spacing: ChronosSpacing.compact) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(suggestion.plan.name).font(.chronosLabel)
+                            Text("\(suggestion.reason). New reminder: \(suggestion.suggestedReminderMinute.clockTime)")
+                                .font(.chronosCaption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        VStack(spacing: ChronosSpacing.micro) {
+                            Button("Apply") { onApply(suggestion) }
+                                .buttonStyle(.borderedProminent)
+                                .tint(ChronosColors.brandSecondary)
+                                .controlSize(.small)
+                            Button("Dismiss") { onDismiss(suggestion) }
+                                .buttonStyle(.plain)
+                                .font(.chronosCaption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if suggestion.id != suggestions.last?.id {
+                        Divider()
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -112,51 +516,66 @@ private struct MedicationCard: View {
 
     @State private var editing = false
     @State private var confirmingArchive = false
+    @State private var expanded = false
+    /// Drives the Android-style context action sheet (taken/missed, discrete snooze, skip, pause).
+    @State private var showingActions = false
 
     private var takenToday: Bool { plan.isTaken(on: .now) }
     private var paused: Bool { plan.isPaused() }
     private var medColor: Color { ChronosColors.category("MEDICATION") }
+    private var soon: Bool { refillSoon(plan) }
 
-    /// "Take with food" / "Before bed" etc., derived from the boolean (the model carries the
-    /// simplified meal-timing as `takeWithFood`).
-    private var mealTimingLabel: (text: String, icon: String)? {
-        plan.takeWithFood ? ("With food", "fork.knife") : nil
+    /// 7-day adherence rate, surfaced inline as a pill (Android `MedicationInfoPill` "Adherence").
+    private var adherenceRate: Double {
+        adherenceStats(takenDates: plan.takenAt, dosesPerDay: dosesPerDay(for: plan), overDays: 7).rate
+    }
+
+    /// Form label for the "Form" pill / icon — derived from the unit (Android `safetyProfile.form`).
+    private var form: String { plan.unit.isEmpty ? "tablet" : plan.unit }
+
+    /// SF Symbol mirroring Android's `dosageFormIcon`.
+    private var formIcon: String {
+        switch form.lowercased() {
+        case "inhaler": return "wind"
+        case "liquid", "drop", "ml": return "drop.fill"
+        case "injection", "iu": return "syringe.fill"
+        default: return "pills.fill"
+        }
+    }
+
+    /// Most recent non-taken outcome for the expanded section (Android "Recent dose").
+    private var recentEvent: DoseEvent? {
+        (plan.doseEvents ?? []).max(by: { $0.date < $1.date })
     }
 
     var body: some View {
-        ChronosGlassCard(tint: paused ? .secondary : medColor) {
-            HStack(spacing: ChronosSpacing.compact) {
-                Image(systemName: "pills.fill")
-                    .font(.title2)
-                    .foregroundStyle(paused ? Color.secondary : medColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(plan.name).font(.chronosHeadline)
-                    Text(scheduleSummary)
-                        .font(.chronosCaption).foregroundStyle(.secondary)
-                    if let meal = mealTimingLabel {
-                        Label(meal.text, systemImage: meal.icon)
-                            .font(.chronosCaption).foregroundStyle(.secondary)
-                    }
-                    if let cap = plan.maxDosesPerDay {
-                        Label("Max \(cap)/day", systemImage: "gauge.with.dots.needle.bottom.50percent")
-                            .font(.chronosCaption).foregroundStyle(.secondary)
-                    }
-                    if paused, let until = plan.pausedUntil {
-                        Label("Paused until \(until.formatted(.relative(presentation: .named)))",
-                              systemImage: "pause.circle.fill")
-                            .font(.chronosCaption)
-                            .foregroundStyle(ChronosColors.brandAccent)
-                    } else if let days = refillDays(for: plan) {
-                        Label(refillSoon(plan) ? "Refill soon · \(max(days, 0))d left" : "Refill in \(days)d",
-                              systemImage: "arrow.triangle.2.circlepath")
-                            .font(.chronosCaption)
-                            .foregroundStyle(refillSoon(plan) ? ChronosColors.brandAccent : .secondary)
-                    }
+        ChronosGlassCard(tint: paused ? .secondary : (soon ? ChronosColors.brandAccent : medColor)) {
+            VStack(alignment: .leading, spacing: ChronosSpacing.compact) {
+                header
+                infoPills
+
+                // Inline low-supply warning banner (Android renders this within the card, not at top).
+                if soon, let days = refillDays(for: plan) {
+                    Label(days <= 0
+                          ? "Remaining supply is out. Please refill."
+                          : "Remaining supply is low (\(days)d of doses left). Please refill soon.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.chronosCaption)
+                        .foregroundStyle(ChronosColors.brandAccent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, ChronosSpacing.small)
+                        .padding(.horizontal, ChronosSpacing.compact)
+                        .background(ChronosColors.brandAccent.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: ChronosRadius.small, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: ChronosRadius.small, style: .continuous)
+                            .strokeBorder(ChronosColors.brandAccent.opacity(0.5), lineWidth: 1.5))
                 }
-                Spacer()
-                takeButton
+
+                actionRow
+
+                if expanded { expandedSection }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .contextMenu { contextMenu }
         .confirmationDialog("Archive \"\(plan.name)\"?", isPresented: $confirmingArchive, titleVisibility: .visible) {
@@ -166,40 +585,250 @@ private struct MedicationCard: View {
             Text("It will be hidden and its reminders cancelled. You can restore it from your data later.")
         }
         .sheet(isPresented: $editing) { MedicationEditorSheet(plan: plan) }
+        .sheet(isPresented: $showingActions) { contextActionSheet }
     }
 
-    /// e.g. "200 mg · 8:00 AM, 8:00 PM" — lists every reminder time, not just the primary.
-    private var scheduleSummary: String {
-        let dose = "\(plan.dosage) \(plan.unit)".trimmingCharacters(in: .whitespaces)
-        let times = plan.reminderMinutes.sorted().map(\.clockTime).joined(separator: ", ")
-        return dose.isEmpty ? times : "\(dose) · \(times)"
-    }
+    // MARK: Header (icon + name + low-supply badge + edit/archive/expand)
 
-    @ViewBuilder private var takeButton: some View {
-        Button {
-            withAnimation(ChronosMotion.bouncy) {
-                if !takenToday { plan.acknowledgeDose(); try? context.save() }
+    private var header: some View {
+        HStack(alignment: .top, spacing: ChronosSpacing.compact) {
+            Image(systemName: formIcon)
+                .font(.title3)
+                .foregroundStyle(paused ? Color.secondary : medColor)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: ChronosSpacing.small) {
+                    Text(plan.name).font(.chronosHeadline)
+                    if soon {
+                        Label("Low Supply", systemImage: "exclamationmark.circle.fill")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(ChronosColors.brandAccent.opacity(0.18), in: Capsule())
+                            .foregroundStyle(ChronosColors.brandAccent)
+                    }
+                }
+                Text(doseSummary).font(.chronosCaption).foregroundStyle(.secondary)
             }
-        } label: {
-            Text(takenToday ? "Taken" : "Take")
-                .font(.chronosLabel)
-                .padding(.horizontal, ChronosSpacing.compact)
-                .padding(.vertical, ChronosSpacing.small)
+            Spacer()
+            HStack(spacing: ChronosSpacing.micro) {
+                Button { editing = true } label: { Image(systemName: "pencil") }
+                    .accessibilityLabel("Edit \(plan.name)")
+                Button { confirmingArchive = true } label: { Image(systemName: "archivebox") }
+                    .accessibilityLabel("Archive \(plan.name)")
+                Button {
+                    withAnimation(ChronosMotion.snappy) { expanded.toggle() }
+                } label: {
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                }
+                .accessibilityLabel("\(expanded ? "Hide" : "Show") details for \(plan.name)")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(takenToday ? ChronosColors.brandSecondary : ChronosColors.brandPrimary)
-        .disabled(takenToday || paused)
     }
 
-    // MARK: Context menu (per-dose skip/snooze + pause/resume + duplicate/archive)
+    /// "200 mg" dosage line (Android renders dosage separately above the pills).
+    private var doseSummary: String {
+        "\(plan.dosage) \(plan.unit)".trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: Info pills (Android MedicationInfoPill FlowRow)
+
+    private var infoPills: some View {
+        MedicationPillFlow(spacing: ChronosSpacing.small) {
+            MedicationInfoPill(label: "Reminder", value: plan.reminderMinuteOfDay.clockTime, emphasized: true)
+            MedicationInfoPill(label: "Adherence", value: "\(Int((adherenceRate * 100).rounded()))%")
+            MedicationInfoPill(label: "Form", value: form.capitalized)
+            if paused {
+                MedicationInfoPill(label: "Status", value: "Paused", alert: true)
+            }
+            if let remaining = plan.remainingDoses {
+                MedicationInfoPill(label: "Refill", value: "\(remaining) doses", alert: soon)
+            }
+        }
+    }
+
+    // MARK: Taken / Missed action row (Android prominent in-card buttons)
+
+    private var actionRow: some View {
+        HStack(spacing: ChronosSpacing.small) {
+            Button {
+                withAnimation(ChronosMotion.bouncy) {
+                    if !takenToday { plan.acknowledgeDose(); try? context.save() }
+                }
+            } label: {
+                Label(takenToday ? "Taken" : "Take", systemImage: "checkmark.circle.fill")
+                    .font(.chronosLabel).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(takenToday ? ChronosColors.brandSecondary : ChronosColors.brandPrimary)
+            .disabled(takenToday || paused)
+            .accessibilityLabel("Mark \(plan.name) taken")
+
+            Button { markMissed() } label: {
+                Label("Missed", systemImage: "exclamationmark.circle")
+                    .font(.chronosLabel).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(ChronosColors.brandAccent)
+            .disabled(takenToday || paused)
+            .accessibilityLabel("Mark \(plan.name) missed")
+        }
+    }
+
+    // MARK: Expanded details (Android AnimatedVisibility section)
+
+    private var expandedSection: some View {
+        VStack(alignment: .leading, spacing: ChronosSpacing.compact) {
+            Divider()
+            MedicationPillFlow(spacing: ChronosSpacing.small) {
+                MedicationInfoPill(label: "Misses", value: "\(plan.missedCount)", alert: plan.missedCount > 0)
+                MedicationInfoPill(label: "Meal", value: plan.takeWithFood ? "With food" : "Anytime")
+                if let cap = plan.maxDosesPerDay {
+                    MedicationInfoPill(label: "Daily cap", value: "\(cap)/day")
+                }
+            }
+
+            if let notes = plan.notes, !notes.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Notes").font(.chronosCaption).foregroundStyle(ChronosColors.brandPrimary)
+                    Text(notes).font(.chronosCaption).foregroundStyle(.secondary)
+                }
+            }
+            if let safety = plan.safetyNotes, !safety.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Cautions").font(.chronosCaption).foregroundStyle(ChronosColors.brandAccent)
+                    Text(safety).font(.chronosCaption).foregroundStyle(.secondary)
+                }
+            }
+            if let event = recentEvent {
+                Text("Recent dose: \(doseStatusLabel(event.status)) · \(event.date.formatted(.dateTime.month().day().hour().minute()))")
+                    .font(.chronosCaption).foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: ChronosSpacing.small) {
+                Button { skip() } label: {
+                    Text("Skip today").font(.chronosLabel).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(paused)
+
+                if paused {
+                    Button { resume() } label: {
+                        Text("Resume").font(.chronosLabel).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).tint(ChronosColors.brandSecondary)
+                } else {
+                    Button { pause(days: 1) } label: {
+                        Text("Pause").font(.chronosLabel).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            if !recentHistory.isEmpty {
+                Divider()
+                DoseHistoryList(events: recentHistory)
+            }
+        }
+    }
+
+    private var recentHistory: [DoseEvent] {
+        (plan.doseEvents ?? []).sorted { $0.date > $1.date }.prefix(6).map { $0 }
+    }
+
+    // MARK: Context action sheet (Android MedicationContextActionSheet w/ discrete snooze)
+
+    private var contextActionSheet: some View {
+        NavigationStack {
+            VStack(spacing: ChronosSpacing.compact) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(plan.name).font(.chronosTitle)
+                    Text("\(doseSummary) · \(plan.reminderMinuteOfDay.clockTime)")
+                        .font(.chronosCaption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: ChronosSpacing.small) {
+                    Button { act { plan.acknowledgeDose() } } label: {
+                        Label("Taken", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).tint(ChronosColors.brandPrimary)
+                    Button { act { markMissedInline() } } label: {
+                        Label("Missed", systemImage: "exclamationmark.circle").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered).tint(ChronosColors.brandAccent)
+                }
+                .disabled(paused)
+
+                // Discrete snooze options — Android offers 15 / 30 / 60 minutes.
+                HStack(spacing: ChronosSpacing.small) {
+                    ForEach([15, 30, 60], id: \.self) { minutes in
+                        Button("\(minutes)m") { act { snooze(minutes: minutes) } }
+                            .buttonStyle(.bordered)
+                            .frame(maxWidth: .infinity)
+                            .accessibilityLabel("Snooze \(plan.name) for \(minutes) minutes")
+                    }
+                }
+                .disabled(paused)
+
+                HStack(spacing: ChronosSpacing.small) {
+                    Button("Skip today") { act { skip() } }
+                        .buttonStyle(.bordered).frame(maxWidth: .infinity).disabled(paused)
+                    if paused {
+                        Button("Resume") { act { resume() } }
+                            .buttonStyle(.borderedProminent).tint(ChronosColors.brandSecondary)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Button("Pause") { act { pause(days: 1) } }
+                            .buttonStyle(.bordered).frame(maxWidth: .infinity)
+                    }
+                }
+
+                Button { showingActions = false; editing = true } label: {
+                    Label("Edit", systemImage: "pencil").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button(role: .destructive) { showingActions = false; confirmingArchive = true } label: {
+                    Label("Archive", systemImage: "archivebox").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain).foregroundStyle(ChronosColors.brandAccent)
+
+                Spacer(minLength: 0)
+            }
+            .padding(ChronosSpacing.standard)
+            .navigationTitle("Actions")
+            .toolbarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { showingActions = false }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    /// Run a mutation, persist, and dismiss the action sheet.
+    private func act(_ mutate: () -> Void) {
+        mutate()
+        try? context.save()
+        showingActions = false
+    }
+
+    // MARK: Native context menu (long-press) — mirrors the action sheet's options
 
     @ViewBuilder private var contextMenu: some View {
+        Button { showingActions = true } label: { Label("Actions…", systemImage: "ellipsis.circle") }
         Button { editing = true } label: { Label("Edit", systemImage: "pencil") }
 
         if !takenToday && !paused {
             Button { skip() } label: { Label("Skip today's dose", systemImage: "forward.end.fill") }
             Button { markMissed() } label: { Label("Mark missed", systemImage: "xmark.circle") }
-            Button { snooze() } label: { Label("Snooze 15 min", systemImage: "zzz") }
+            Menu {
+                ForEach([15, 30, 60], id: \.self) { minutes in
+                    Button("\(minutes) minutes") { snooze(minutes: minutes) }
+                }
+            } label: { Label("Snooze", systemImage: "zzz") }
         }
 
         Divider()
@@ -228,16 +857,20 @@ private struct MedicationCard: View {
     }
 
     private func markMissed() {
-        plan.recordDose(.missed, reason: "Marked missed")
-        plan.missedCount += 1
+        markMissedInline()
         try? context.save()
     }
 
+    /// Mutation-only missed record (used inside `act` which handles the save).
+    private func markMissedInline() {
+        plan.recordDose(.missed, reason: "Marked missed")
+        plan.missedCount += 1
+    }
+
     /// Records a snoozed dose event for the adherence history (mirrors Android `snoozeReminder`).
-    /// The actual +15-minute one-shot reschedule is handled by the notification delegate; here we
-    /// only log the outcome, since dose-reminder scheduling lives outside this view.
-    private func snooze() {
-        plan.recordDose(.snoozed, reason: "Snoozed 15 minutes")
+    /// The actual reschedule is handled by the notification delegate; here we only log the outcome.
+    private func snooze(minutes: Int) {
+        plan.recordDose(.snoozed, reason: "Snoozed \(minutes) minutes")
         try? context.save()
     }
 
@@ -291,109 +924,79 @@ private struct MedicationCard: View {
     }
 }
 
-// MARK: - Adherence + refill projection
-//
-// Surfaces the adherence/refill analytics that already live in ChronosCore but weren't shown on
-// the tab. All math goes through `ChronosCore.adherenceStats` / `ChronosCore.daysUntilRefill` —
-// we do NOT recompute rates/refill here.
+// MARK: - Info pill (Android MedicationInfoPill)
 
-private struct MedicationAdherenceCard: View {
-    let plan: MedicationPlan
+/// A small label/value pill with optional emphasis (primary) or alert (accent) tinting.
+private struct MedicationInfoPill: View {
+    let label: String
+    let value: String
+    var emphasized: Bool = false
+    var alert: Bool = false
 
-    private var perDay: Int { dosesPerDay(for: plan) }
-
-    private var sevenDay: AdherenceStats {
-        adherenceStats(takenDates: plan.takenAt, dosesPerDay: perDay, overDays: 7)
+    private var container: Color {
+        if alert { return ChronosColors.brandAccent.opacity(0.15) }
+        if emphasized { return ChronosColors.brandPrimary.opacity(0.15) }
+        return Color(.tertiarySystemFill)
     }
-    private var fourteenDay: AdherenceStats {
-        adherenceStats(takenDates: plan.takenAt, dosesPerDay: perDay, overDays: 14)
-    }
-
-    /// Days (taken in full, none missed) over the trailing 14 — Android's "on-track days" metric.
-    private var onTrackDays: Int { trendBuckets.filter { $0.taken >= $0.expected && $0.expected > 0 }.count }
-
-    private var medColor: Color { ChronosColors.category("MEDICATION") }
-    private var soon: Bool { refillSoon(plan) }
-
-    /// Most recent non-taken outcomes for the inline history list.
-    private var recentEvents: [DoseEvent] {
-        (plan.doseEvents ?? []).sorted { $0.date > $1.date }.prefix(6).map { $0 }
+    private var content: Color {
+        if alert { return ChronosColors.brandAccent }
+        if emphasized { return ChronosColors.brandPrimary }
+        return .secondary
     }
 
     var body: some View {
-        ChronosGlassCard(tint: soon ? ChronosColors.brandAccent : medColor) {
-            VStack(alignment: .leading, spacing: ChronosSpacing.compact) {
-                HStack {
-                    Label("Adherence", systemImage: "chart.bar.fill").font(.chronosHeadline)
-                    Spacer()
-                    Text("\(plan.name)").font(.chronosCaption).foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: ChronosSpacing.standard) {
-                    rateColumn(title: "7-day", stats: sevenDay)
-                    Divider().frame(height: 36)
-                    rateColumn(title: "14-day", stats: fourteenDay)
-                    Divider().frame(height: 36)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("On-track").font(.chronosCaption).foregroundStyle(.secondary)
-                        Text("\(onTrackDays)")
-                            .font(.chronosTitle)
-                            .foregroundStyle(onTrackDays > 0 ? ChronosColors.brandSecondary : .secondary)
-                        Text("of 14d").font(.chronosCaption).foregroundStyle(.secondary)
-                    }
-                }
-
-                if hasDoseHistory {
-                    AdherenceTrendChart(buckets: trendBuckets, tint: medColor)
-                        .frame(height: 64)
-                        .padding(.top, ChronosSpacing.micro)
-                }
-
-                if soon, let days = refillDays(for: plan) {
-                    Label(days <= 0 ? "Refill now — supply is out" : "Refill soon — \(days)d of supply left",
-                          systemImage: "exclamationmark.triangle.fill")
-                        .font(.chronosLabel)
-                        .foregroundStyle(ChronosColors.brandAccent)
-                        .padding(.vertical, ChronosSpacing.small)
-                        .padding(.horizontal, ChronosSpacing.compact)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(ChronosColors.brandAccent.opacity(0.12),
-                                    in: RoundedRectangle(cornerRadius: ChronosRadius.small, style: .continuous))
-                }
-
-                if !recentEvents.isEmpty {
-                    Divider().padding(.vertical, ChronosSpacing.micro)
-                    DoseHistoryList(events: recentEvents)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func rateColumn(title: String, stats: AdherenceStats) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.chronosCaption).foregroundStyle(.secondary)
-            Text("\(Int((stats.rate * 100).rounded()))%")
-                .font(.chronosTitle)
-                .foregroundStyle(medColor)
-            Text("\(stats.takenCount)/\(stats.expectedCount)").font(.chronosCaption).foregroundStyle(.secondary)
+            Text(label).font(.caption2).foregroundStyle(content.opacity(0.85))
+            Text(value).font(.chronosCaption.weight(.semibold)).foregroundStyle(content)
         }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(container, in: RoundedRectangle(cornerRadius: ChronosRadius.small, style: .continuous))
+    }
+}
+
+// MARK: - Pill flow layout (Android FlowRow)
+
+/// Wrapping horizontal flow layout for pills and chips, mirroring Compose's `FlowRow`.
+private struct MedicationPillFlow: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var rowWidth: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var totalWidth: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if rowWidth + size.width > maxWidth, rowWidth > 0 {
+                totalHeight += rowHeight + spacing
+                totalWidth = max(totalWidth, rowWidth - spacing)
+                rowWidth = 0
+                rowHeight = 0
+            }
+            rowWidth += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        totalHeight += rowHeight
+        totalWidth = max(totalWidth, rowWidth - spacing)
+        return CGSize(width: min(totalWidth, maxWidth), height: totalHeight)
     }
 
-    // MARK: 14-day trend buckets (per-day taken/expected, capped at the cadence)
-
-    private var hasDoseHistory: Bool { !plan.takenAt.isEmpty }
-
-    /// One bucket per day for the last 14 days (oldest → newest), each carrying the day's taken
-    /// count (capped at the cadence) and the expected cadence — driving the small bar chart.
-    private var trendBuckets: [AdherenceDay] {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: .now)
-        let perDayCount = perDay
-        return (0..<14).reversed().compactMap { offset in
-            guard let day = cal.date(byAdding: .day, value: -offset, to: today) else { return nil }
-            let count = plan.takenAt.filter { cal.isDate($0, inSameDayAs: day) }.count
-            return AdherenceDay(date: day, taken: min(count, perDayCount), expected: perDayCount)
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        let maxWidth = bounds.width
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x + size.width > bounds.minX + maxWidth, x > bounds.minX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
         }
     }
 }
@@ -415,7 +1018,7 @@ private struct DoseHistoryList: View {
                         .foregroundStyle(color(for: event.status))
                         .frame(width: 18)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(label(for: event.status)).font(.chronosCaption)
+                        Text(doseStatusLabel(event.status)).font(.chronosCaption)
                         if let reason = event.reason, !reason.isEmpty {
                             Text(reason).font(.chronosCaption).foregroundStyle(.secondary)
                         }
@@ -444,24 +1047,25 @@ private struct DoseHistoryList: View {
         case .skipped, .snoozed: return .secondary
         }
     }
+}
 
-    private func label(for status: DoseStatus) -> String {
-        switch status {
-        case .taken: return "Taken"
-        case .missed: return "Missed"
-        case .skipped: return "Skipped"
-        case .snoozed: return "Snoozed"
-        }
+private func doseStatusLabel(_ status: DoseStatus) -> String {
+    switch status {
+    case .taken: return "Taken"
+    case .missed: return "Missed"
+    case .skipped: return "Skipped"
+    case .snoozed: return "Snoozed"
     }
 }
 
-/// One day in the adherence trend.
+/// One day in the adherence trend (per-day taken/missed against the day's expected cadence).
 private struct AdherenceDay: Identifiable {
     let date: Date
     let taken: Int
+    let missed: Int
     let expected: Int
     var id: Date { date }
-    var rate: Double { expected > 0 ? Double(taken) / Double(expected) : 0 }
+    var rate: Double { expected > 0 ? Double(min(taken, expected)) / Double(expected) : 0 }
 }
 
 /// A compact 14-day adherence bar chart. Each bar's height encodes that day's adherence; fully
@@ -513,9 +1117,11 @@ struct MedicationEditorSheet: View {
     /// Collapsed by default to keep the create flow short (Android's "Safety & Details" section).
     @State private var showSafety: Bool
 
-    init(plan: MedicationPlan? = nil) {
+    /// New plans launched from a quick-add chip / command-palette capture (Android `prefillName`).
+    /// Additive parameter with a default so existing `MedicationEditorSheet(plan:)` callers compile.
+    init(plan: MedicationPlan? = nil, prefillName: String? = nil) {
         self.editing = plan
-        _name = State(initialValue: plan?.name ?? "")
+        _name = State(initialValue: plan?.name ?? (prefillName ?? ""))
         _dosage = State(initialValue: plan?.dosage ?? "")
         _unit = State(initialValue: plan?.unit ?? "mg")
         let cal = Calendar.current
@@ -539,12 +1145,14 @@ struct MedicationEditorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Name", text: $name)
-                HStack {
-                    TextField("Dosage", text: $dosage).keyboardType(.decimalPad)
-                    Picker("Unit", selection: $unit) {
-                        ForEach(["mg", "mcg", "mL", "IU", "tablet"], id: \.self) { Text($0).tag($0) }
-                    }.labelsHidden()
+                Section("Basics") {
+                    TextField("Name", text: $name)
+                    HStack {
+                        TextField("Dosage", text: $dosage).keyboardType(.decimalPad)
+                        Picker("Unit", selection: $unit) {
+                            ForEach(["mg", "mcg", "mL", "IU", "tablet"], id: \.self) { Text($0).tag($0) }
+                        }.labelsHidden()
+                    }
                 }
                 Section("Reminders") {
                     ForEach(reminderTimes.indices, id: \.self) { index in
@@ -564,7 +1172,9 @@ struct MedicationEditorSheet: View {
                         Label("Add another time", systemImage: "plus.circle.fill")
                     }
                 }
-                Toggle("Take with food", isOn: $withFood)
+                Section("Meal timing") {
+                    Toggle("Take with food", isOn: $withFood)
+                }
                 Section("Refill") {
                     Toggle("Track supply", isOn: $trackSupply.animation(ChronosMotion.snappy))
                     if trackSupply {
@@ -589,7 +1199,7 @@ struct MedicationEditorSheet: View {
                         Label("Safety & details", systemImage: "cross.case")
                     }
                 }
-                Section { TextField("Notes", text: $notes, axis: .vertical) }
+                Section("Notes") { TextField("Notes", text: $notes, axis: .vertical) }
             }
             .navigationTitle(editing == nil ? "New medication" : "Edit medication")
             .toolbarTitleDisplayMode(.inline)
