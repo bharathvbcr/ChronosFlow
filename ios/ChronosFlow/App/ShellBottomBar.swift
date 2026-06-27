@@ -62,6 +62,17 @@ struct ShellBottomBar: View {
                             .frame(width: 7, height: 7)
                             .offset(x: 11, y: -10)
                     }
+                    // Off-today badge on the Today tab — mirrors Android `todayBadgeValue`: when the
+                    // dial is browsing another day, show that day-of-month so it reads from the bar.
+                    if tab == .today, let offDay = offTodayDayOfMonth {
+                        Text(offDay)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .frame(minWidth: 15, minHeight: 15)
+                            .background(ChronosColors.brandPrimary, in: Capsule())
+                            .offset(x: 12, y: -10)
+                    }
                 }
                 Text(tab.label)
                     .font(.caption2.weight(.medium))
@@ -79,7 +90,21 @@ struct ShellBottomBar: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        // Double-tapping Today snaps the browsed day back to today (Android TARGET_TODAY_RESET).
+        .simultaneousGesture(
+            tab == .today
+                ? TapGesture(count: 2).onEnded {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { shell.resetToToday() }
+                }
+                : nil
+        )
         .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
+    }
+
+    /// The day-of-month string to badge on the Today tab when the dial is off today (else nil).
+    private var offTodayDayOfMonth: String? {
+        guard !Calendar.current.isDateInToday(shell.selectedDate) else { return nil }
+        return String(Calendar.current.component(.day, from: shell.selectedDate))
     }
 
     private var quickAddButton: some View {

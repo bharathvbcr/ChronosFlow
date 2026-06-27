@@ -119,6 +119,16 @@ final class ShellState {
     /// The selected primary tab (Plan/Today/Focus). Defaults to Today like the Android shell.
     var selectedTab: PrimaryTab = .today
 
+    /// The day the dial-centric screens browse — app-level state shared across the primary tabs,
+    /// mirroring Android's single `DayDialViewModel.selectedDate`. The Plan dial reads/writes this;
+    /// the bottom bar surfaces an off-today badge and a double-tap-Today reset against it.
+    var selectedDate = Calendar.current.startOfDay(for: .now)
+
+    /// Reset the browsed day to today (Android `TARGET_TODAY_RESET`, fired by a Today double-tap).
+    func resetToToday() {
+        selectedDate = Calendar.current.startOfDay(for: .now)
+    }
+
     /// A secondary destination presented over the current tab (nil = none). Set from the
     /// Quick-Add menu, the command palette, or a deep link.
     var presentedRoute: ShellRoute?

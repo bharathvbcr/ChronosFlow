@@ -6,7 +6,20 @@ import ChronosCore
 /// banner, free-window chips, and the AI day-planner entry point. Ports `feature/daydial`.
 struct DayDialScreen: View {
     @Environment(\.modelContext) private var context
-    @State private var selectedDate = Calendar.current.startOfDay(for: .now)
+    /// Shared browsed day. Reads from the shell (so Plan/Today/Review agree and the bottom-bar
+    /// off-today badge + double-tap reset work), falling back to local state when no shell is in the
+    /// environment (e.g. SwiftUI previews). Mirrors Android's single `DayDialViewModel.selectedDate`.
+    @Environment(ShellState.self) private var shell: ShellState?
+    @State private var localDate = Calendar.current.startOfDay(for: .now)
+    private var selectedDate: Date { shell?.selectedDate ?? localDate }
+    private var selectedDateBinding: Binding<Date> {
+        Binding(
+            get: { shell?.selectedDate ?? localDate },
+            set: { newValue in
+                if let shell { shell.selectedDate = newValue } else { localDate = newValue }
+            }
+        )
+    }
     @State private var activeSheet: DialSheet?
     @State private var showCalendar = false
     @State private var overlayEvents: [CalendarOverlayEvent] = []
@@ -99,7 +112,7 @@ struct DayDialScreen: View {
             .chronosCommandPaletteToolbar()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    DatePicker("Day", selection: $selectedDate, displayedComponents: .date)
+                    DatePicker("Day", selection: selectedDateBinding, displayedComponents: .date)
                         .labelsHidden()
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
