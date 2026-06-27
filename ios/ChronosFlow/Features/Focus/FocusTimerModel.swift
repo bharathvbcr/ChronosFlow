@@ -101,6 +101,11 @@ final class FocusTimerModel {
                blockID: String? = nil,
                blockMinutes: Int = 25,
                preset: FocusSplitPreset? = nil) {
+        // Never clobber a live session. A queued widget/Live-Activity `.start` (drained on appear) or
+        // a re-entrant call while a session is RUNNING/PAUSED would otherwise reset completedWorkSessions
+        // / phasePlan and interrupt the Live Activity — the F03 restore-vs-start race. Restarting is only
+        // valid from idle/completed (the UI shows Stop, not Start, while a session runs).
+        guard phase == .idle || phase == .completed else { return }
         self.blockTitle = blockTitle
         self.blockID = blockID
         self.plannedBlockMinutes = max(blockMinutes, 1)

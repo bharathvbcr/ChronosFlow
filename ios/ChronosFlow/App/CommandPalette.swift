@@ -13,8 +13,6 @@ struct CommandPalette: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""
-    @State private var editor: QuickAddEditor?
-    @State private var showAssistant = false
 
     private struct Command: Identifiable {
         let id: String
@@ -41,7 +39,9 @@ struct CommandPalette: View {
         quickAddActions(settings).map { action in
             Command(id: "create.\(action.id)", label: action.label, icon: action.icon) {
                 switch action.target {
-                case .editor(let which): editor = which
+                // Dismiss the palette and present the editor at the shell root (Android dismisses the
+                // palette on execute; presenting locally would stack the editor over the palette).
+                case .editor(let which): shell.pendingEditor = which; dismiss()
                 case .route(let route):  shell.open(route); dismiss()
                 }
             }
@@ -51,7 +51,7 @@ struct CommandPalette: View {
     private var assistantCommands: [Command] {
         guard settings.aiEnabled else { return [] }
         return [Command(id: "assistant", label: "Ask the assistant", icon: "sparkles") {
-            showAssistant = true
+            shell.showAssistant = true; dismiss()
         }]
     }
 
@@ -77,8 +77,6 @@ struct CommandPalette: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .sheet(item: $editor) { quickAddEditorView(for: $0) }
-            .sheet(isPresented: $showAssistant) { AssistantSheet() }
         }
     }
 

@@ -50,6 +50,10 @@ struct RootView: View {
         .sheet(isPresented: $shell.commandPaletteShown) {
             CommandPalette(shell: shell, settings: settings)
         }
+        // Create editors / assistant requested from the command palette are presented here at the
+        // root so the palette dismisses first instead of stacking sheets.
+        .sheet(item: $shell.pendingEditor) { quickAddEditorView(for: $0) }
+        .sheet(isPresented: $shell.showAssistant) { AssistantSheet() }
         // Foreground-refresh the proactive digest the widget/notifications read (Nano-style
         // "foreground writes, background reads"), mirroring the Android ProactiveAssistRefresher.
         .task { await ProactiveDigest.refresh() }

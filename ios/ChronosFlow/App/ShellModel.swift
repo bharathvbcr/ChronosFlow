@@ -139,6 +139,14 @@ final class ShellState {
     /// Whether the global command palette sheet is showing (Android Ctrl+K / top-bar action).
     var commandPaletteShown = false
 
+    /// A create-editor requested from the command palette. Presented at the shell root so the palette
+    /// can dismiss first (Android dismisses the palette on command execution) instead of stacking the
+    /// editor sheet on top of the still-visible palette.
+    var pendingEditor: QuickAddEditor?
+
+    /// Whether the assistant sheet is requested from the command palette (presented at the root).
+    var showAssistant = false
+
     /// Open a secondary destination, closing any transient shell chrome first (matches Android's
     /// `closeQuickAdd()` on navigate).
     func open(_ route: ShellRoute) {

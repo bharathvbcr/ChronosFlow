@@ -575,12 +575,15 @@ struct InsightsView: View {
         }
     }
 
-    /// Inserts a 15-minute break block right after the latest scheduled block today (parity with
-    /// Android's `createQuickBlock(title = "Break", durationMinutes = 15, category = "BREAK")`).
+    /// Inserts a 15-minute break block at the current time, snapped to a 5-minute increment — parity
+    /// with Android's `createQuickBlock(...)`, which places the quick block at
+    /// `snapToIncrement(currentMinuteValue)` rather than after the last scheduled block. (The previous
+    /// "after the last block" math also overflowed past 1440 for blocks that wrap past midnight.)
     private func insertBreakBlock() {
         let today = Calendar.current.startOfDay(for: .now)
-        let lastEnd = todayBlocks.map { $0.startMinuteOfDay + $0.durationMinutes }.max() ?? (9 * 60)
-        let start = min(max(lastEnd, 0), 1439 - 15)
+        let comps = Calendar.current.dateComponents([.hour, .minute], from: .now)
+        let currentMinute = (comps.hour ?? 9) * 60 + (comps.minute ?? 0)
+        let start = min(max((currentMinute / 5) * 5, 0), 1440 - 15)
         let block = TimeBlock(
             date: today,
             title: "Break",

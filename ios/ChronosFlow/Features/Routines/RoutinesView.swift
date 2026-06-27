@@ -247,16 +247,24 @@ struct ApplyRoutineSheet: View {
         let title: String
         let category: String
         let startMinuteOfDay: Int
+        /// Whole-day offset from the apply date for steps whose start + offset rolls past midnight, so
+        /// they land on the correct following day (Android `ApplyRoutineToDateUseCase` day rollover).
+        let dayOffset: Int
         let durationMinutes: Int
         let energy: Int
     }
 
-    /// Mirror of ChronosCore.instantiateRoutine — each step at start+offset, wrapped to the day.
+    /// Mirror of ChronosCore.instantiateRoutine — each step at start+offset; minute-of-day is wrapped
+    /// to 0..<1440 and the overflow becomes a whole-day offset so a step crossing midnight is placed on
+    /// the next day rather than back at the same day's small hours.
     private func instantiated() -> [InstantiatedStep] {
         let base = startMinute()
         return routine.steps.sorted { $0.offsetMinute < $1.offsetMinute }.map { step in
-            let start = ((base + step.offsetMinute) % 1440 + 1440) % 1440
+            let absolute = base + step.offsetMinute
+            let start = ((absolute % 1440) + 1440) % 1440
+            let dayOffset = Int(floor(Double(absolute) / 1440.0))
             return InstantiatedStep(title: step.title, category: step.category, startMinuteOfDay: start,
+                                    dayOffset: dayOffset,
                                     durationMinutes: min(max(step.durationMinutes, 1), 1440), energy: step.energyLevel)
         }
     }
@@ -265,9 +273,11 @@ struct ApplyRoutineSheet: View {
     /// applying only instantiates the steps as blocks. Completion is a separate, deliberate action
     /// ("Mark complete") so a routine planned ahead isn't prematurely stamped as done.
     private func apply() {
+        let cal = Calendar.current
         for block in instantiated() {
+            let blockDate = cal.date(byAdding: .day, value: block.dayOffset, to: date) ?? date
             context.insert(TimeBlock(
-                date: date, title: block.title, category: block.category,
+                date: blockDate, title: block.title, category: block.category,
                 startMinuteOfDay: block.startMinuteOfDay, durationMinutes: block.durationMinutes,
                 provenance: .routine, energyLevel: EnergyIntensity.fromLevel(block.energy),
                 routineID: routine.id))

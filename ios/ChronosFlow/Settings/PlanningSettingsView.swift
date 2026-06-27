@@ -58,6 +58,9 @@ struct PlanningSettingsView: View {
         if settings.protectFocusBlocks {
             lines.append("Existing focus blocks are kept when the plan regenerates.")
         }
+        if settings.addBreaksAutomatically {
+            lines.append("Short recovery breaks are inserted between long work stretches automatically.")
+        }
         if settings.preserveManualBlocks {
             lines.append("Blocks you placed or edited by hand are never overwritten.")
         }

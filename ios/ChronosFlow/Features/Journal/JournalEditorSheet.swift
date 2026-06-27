@@ -564,6 +564,10 @@ struct JournalEditorSheet: View {
         let promptKey = "offset-\(promptOffset)"
 
         if let existing = editing {
+            // prefill() loaded the old photos back as Data, so savePhotosToFiles() just wrote fresh
+            // copies under new UUIDs — delete the previous files now replaced, or every edit orphans
+            // (and effectively duplicates) the entry's images on disk.
+            deletePhotoFiles(existing.photoUris.filter { !savedPaths.contains($0) })
             existing.body = body
             existing.updatedAt = .now
             existing.createdAt = composedTimestamp(on: existing.entryDate)
@@ -619,6 +623,14 @@ struct JournalEditorSheet: View {
             let file = journalDir.appendingPathComponent(UUID().uuidString + ".jpg")
             guard (try? data.write(to: file)) != nil else { return nil }
             return file.absoluteString
+        }
+    }
+
+    /// Remove on-disk photo files for the given saved URIs (used to clean up images an edit replaced).
+    private func deletePhotoFiles(_ uris: [String]) {
+        for uri in uris {
+            guard let url = URL(string: uri) else { continue }
+            try? FileManager.default.removeItem(at: url)
         }
     }
 }

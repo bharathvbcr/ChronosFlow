@@ -67,7 +67,7 @@ enum ChronosStore {
             // CloudKit unavailable / entitlement missing: retry with a plain local group store
             // before giving up to in-memory, so enabling sync without provisioning never silently
             // drops the user's data.
-            if !inMemory && cloudSyncEnabled {
+            if !inMemory && cloudSyncEnabled && appGroupAvailable {
                 let local = ModelConfiguration(schema: schema, groupContainer: .identifier(appGroup))
                 if let container = try? ModelContainer(for: schema, configurations: [local]) {
                     return container
