@@ -466,9 +466,9 @@ class FocusService : Service() {
     }
 
     private fun updateForegroundNotification(snapshot: FocusSessionSnapshot) {
-        // A live countdown is back on screen — clear any "tap to continue" nudge.
-        FocusCompletionNotifier.cancelPhaseBoundary(this)
-        // The focus notification is now the single live surface — stand the block "now"
+        // The boundary "tap to continue" prompt reuses the live notification's id, so re-posting the
+        // running notification below (startForeground) replaces it in place — no separate nudge to
+        // cancel. The focus notification is the single live surface — stand the block "now"
         // notification down so the two never show at once.
         if (snapshot.isRunning || snapshot.isPaused) {
             currentBlockNotificationCoordinator.onFocusStarted()
@@ -535,11 +535,10 @@ class FocusService : Service() {
                     val redactSensitiveTitles = privacyPreferences.redactSensitiveNotifications()
                     val boundaryLabel = currentBoundaryLabel
                     val completed = currentTerminal || boundaryLabel == null
-                    // Release the foreground notification BEFORE re-posting: DETACH keeps id 4201 on
-                    // screen so the completion celebration updates it in place (folds into the live
-                    // slot — a clean channel swap on a detached notification); a phase boundary REMOVEs
-                    // it before the separate "tap to continue" nudge (id 4203) posts.
-                    stopForeground(if (completed) STOP_FOREGROUND_DETACH else STOP_FOREGROUND_REMOVE)
+                    // DETACH (never REMOVE): keep the live notification (id 4201) on screen so the
+                    // completion celebration AND the phase-boundary "tap to continue" prompt both
+                    // update it in place — one live notification on one channel, no separate nudge.
+                    stopForeground(STOP_FOREGROUND_DETACH)
                     when {
                         // Legacy / final-phase completion: log actual time and announce.
                         currentTerminal -> {

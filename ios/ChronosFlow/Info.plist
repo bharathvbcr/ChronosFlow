@@ -8,6 +8,21 @@
     <string>1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <!-- Custom URL scheme so widget taps (chronosflow://today, …), the share extension's
+         chronosflow://add-task hand-off, and Siri/Shortcuts deep links actually route into
+         RootView.onOpenURL. Without this the system can't deliver the URL and every deep link
+         is a silent no-op (the iOS analogue of Android's widget PendingIntents). -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.chronosflow.app.deeplink</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>chronosflow</string>
+            </array>
+        </dict>
+    </array>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UISupportedInterfaceOrientations</key>
@@ -46,6 +61,7 @@
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
         <string>com.chronosflow.autobackup</string>
+        <string>com.chronosflow.interop.sync</string>
     </array>
     <key>UIBackgroundModes</key>
     <array>

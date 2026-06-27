@@ -34,8 +34,8 @@ enum SeedData {
         blocks.forEach(context.insert)
 
         let tasks = [
-            TaskItem(title: "Finish quarterly report", priority: 3, targetDate: today,
-                     preferredDurationMinutes: 90),
+            TaskItem(title: "Finish quarterly report", priority: 3,
+                     preferredDurationMinutes: 90, targetDate: today),
             TaskItem(title: "Reply to mentor email", priority: 2, targetDate: today),
             TaskItem(title: "Plan weekend trip", priority: 1),
         ]

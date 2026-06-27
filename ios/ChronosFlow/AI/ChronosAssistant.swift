@@ -141,7 +141,7 @@ struct TodayScheduleTool: Tool {
         var includeFinished: Bool
     }
 
-    func call(arguments: Arguments) async throws -> ToolOutput {
+    func call(arguments: Arguments) async throws -> String {
         let summary = await MainActor.run {
             let context = ChronosStore.shared.mainContext
             let blocks = ((try? context.fetch(FetchDescriptor<TimeBlock>())) ?? [])
@@ -155,7 +155,7 @@ struct TodayScheduleTool: Tool {
                     .joined(separator: "; ")
             return "Today's blocks: \(lines). Open tasks: \(openTasks.count)."
         }
-        return ToolOutput(summary)
+        return summary
     }
 }
 
@@ -176,7 +176,7 @@ struct AddTimeBlockTool: Tool {
         var durationMinutes: Int
     }
 
-    func call(arguments: Arguments) async throws -> ToolOutput {
+    func call(arguments: Arguments) async throws -> String {
         let start = min(max(arguments.startMinuteOfDay, 0), 1439)
         let duration = min(max(arguments.durationMinutes, 1), 1440)
         let title = arguments.title
@@ -189,7 +189,7 @@ struct AddTimeBlockTool: Tool {
                 provenance: .ai, flexibility: .movable, source: "assistant"))
             try? context.save()
         }
-        return ToolOutput("Scheduled “\(title)” at \(start.clockTime) for \(duration) min.")
+        return "Scheduled “\(title)” at \(start.clockTime) for \(duration) min."
     }
 }
 
@@ -206,7 +206,7 @@ struct AddTaskTool: Tool {
         var priority: Int
     }
 
-    func call(arguments: Arguments) async throws -> ToolOutput {
+    func call(arguments: Arguments) async throws -> String {
         let title = arguments.title
         let priority = min(max(arguments.priority, 0), 3)
         await MainActor.run {
@@ -214,7 +214,7 @@ struct AddTaskTool: Tool {
             context.insert(TaskItem(title: title, priority: priority))
             try? context.save()
         }
-        return ToolOutput("Added task “\(title)”.")
+        return "Added task “\(title)”."
     }
 }
 
@@ -229,7 +229,7 @@ struct CompleteHabitTool: Tool {
         var habitTitle: String
     }
 
-    func call(arguments: Arguments) async throws -> ToolOutput {
+    func call(arguments: Arguments) async throws -> String {
         let query = arguments.habitTitle.lowercased()
         let result = await MainActor.run { () -> String in
             let context = ChronosStore.shared.mainContext
@@ -247,7 +247,7 @@ struct CompleteHabitTool: Tool {
             try? context.save()
             return "Marked “\(match.title)” done — streak is now \(match.streakCount)."
         }
-        return ToolOutput(result)
+        return result
     }
 }
 
@@ -264,7 +264,7 @@ struct LogMoodTool: Tool {
         var energy: Int
     }
 
-    func call(arguments: Arguments) async throws -> ToolOutput {
+    func call(arguments: Arguments) async throws -> String {
         let mood = min(max(arguments.mood, 1), 5)
         let energy = min(max(arguments.energy, 1), 5)
         await MainActor.run {
@@ -272,6 +272,6 @@ struct LogMoodTool: Tool {
             context.insert(MoodEnergyCheckIn(moodScore: mood, energyScore: energy))
             try? context.save()
         }
-        return ToolOutput("Logged a check-in: mood \(mood)/5, energy \(energy)/5.")
+        return "Logged a check-in: mood \(mood)/5, energy \(energy)/5."
     }
 }

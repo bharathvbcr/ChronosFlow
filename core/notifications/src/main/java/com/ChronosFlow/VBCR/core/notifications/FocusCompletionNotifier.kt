@@ -1,26 +1,32 @@
 package com.ChronosFlow.VBCR.core.notifications
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 
+/**
+ * Posts the split-session phase-boundary prompt and the session-completion celebration. Both reuse
+ * the single live focus notification (id [FocusNotificationManager.FOCUS_NOTIFICATION_ID] on
+ * [FocusNotificationManager.FOCUS_CHANNEL_ID]) that [com.ChronosFlow.VBCR.feature.focus.FocusService]
+ * runs as its foreground notification — the live timer transitions *in place* into the boundary
+ * prompt or the completion state, so the user only ever sees one focus notification on one channel
+ * (no separate "nudge" notification, no second channel).
+ */
 object FocusCompletionNotifier {
-    private const val CHANNEL_ID = "chronos_focus_completion"
-    // Completion folds into the live focus notification's slot (id 4201): the bar you were watching
-    // fills to 100% and reads "complete" in place, rather than a separate notification popping up.
-    // FocusService detaches (not removes) the foreground notification on completion so this survives.
-    private const val NOTIFICATION_ID = FocusNotificationManager.FOCUS_NOTIFICATION_ID
-    private const val BOUNDARY_NOTIFICATION_ID = 4203
+    private val NOTIFICATION_ID = FocusNotificationManager.FOCUS_NOTIFICATION_ID
+    private val CHANNEL_ID = FocusNotificationManager.FOCUS_CHANNEL_ID
+    // Distinct PendingIntent request code for the "continue" tap so it doesn't collide with the
+    // running notification's plain content intent (FOCUS_NOTIFICATION_REQUEST_CODE).
+    private const val BOUNDARY_ADVANCE_REQUEST_CODE = 4203
     // The folded-in completion auto-clears after a readable beat so it doesn't linger in the shade.
     private const val COMPLETION_TIMEOUT_MS = 30_000L
 
     /**
-     * Announces a split-session phase boundary while the app is backgrounded.
-     * [body] is a ready-made, non-sensitive prompt (e.g. "Time for a 5m break —
-     * tap to continue") computed by the caller.
+     * Announces a split-session phase boundary while the app is backgrounded by transitioning the
+     * live focus notification into a "tap to continue" prompt in place. [body] is a ready-made,
+     * non-sensitive prompt (e.g. "Time for a 5m break — tap to continue") computed by the caller.
+     * Tapping it advances the held session to its next phase (see [buildFocusNotificationContentIntent]).
      */
     fun showPhaseBoundary(
         context: Context,
@@ -29,11 +35,11 @@ object FocusCompletionNotifier {
         redactSensitiveTitles: Boolean
     ) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        ensureChannel(context, manager)
+        FocusNotificationManager.createFocusNotificationChannel(context, manager)
 
         val title = PrivacyRedaction.focusNotificationTitle(blockTitle, redactSensitiveTitles)
         manager.notify(
-            BOUNDARY_NOTIFICATION_ID,
+            NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_focus_session)
                 .setContentTitle(title)
@@ -42,25 +48,21 @@ object FocusCompletionNotifier {
                 .setLargeIcon(focusBadge(context))
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setAutoCancel(true)
+                // Alert once when the boundary is reached (the live timer's running updates were
+                // silent via setOnlyAlertOnce); the user is backgrounded and should be nudged.
                 .setOnlyAlertOnce(false)
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setContentIntent(
                     buildFocusNotificationContentIntent(
                         context = context,
-                        requestCode = BOUNDARY_NOTIFICATION_ID,
-                        // Tapping the nudge IS "continue": carry the advance flag so the app
+                        requestCode = BOUNDARY_ADVANCE_REQUEST_CODE,
+                        // Tapping the prompt IS "continue": carry the advance flag so the app
                         // resumes into the next phase instead of just opening the Focus tab.
                         focusAdvance = true
                     )
                 )
                 .build()
         )
-    }
-
-    /** Dismisses any pending phase-boundary notification (e.g. once the next phase begins). */
-    fun cancelPhaseBoundary(context: Context) {
-        context.getSystemService(NotificationManager::class.java)
-            ?.cancel(BOUNDARY_NOTIFICATION_ID)
     }
 
     fun show(
@@ -70,7 +72,7 @@ object FocusCompletionNotifier {
         nextStepLine: String? = null
     ) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        ensureChannel(context, manager)
+        FocusNotificationManager.createFocusNotificationChannel(context, manager)
 
         val title = PrivacyRedaction.focusNotificationTitle(blockTitle, redactSensitiveTitles)
         val text = context.getString(R.string.focus_notification_completed_text)
@@ -97,7 +99,9 @@ object FocusCompletionNotifier {
                 // The live bar reaching 100% — the visual "the session you were watching is done".
                 .setProgress(1, 1, false)
                 .setAutoCancel(true)
-                .setOnlyAlertOnce(true)
+                // The running updates were silent (setOnlyAlertOnce on the live notification); alert
+                // once now that the session is complete.
+                .setOnlyAlertOnce(false)
                 .setTimeoutAfter(COMPLETION_TIMEOUT_MS)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .setContentIntent(
@@ -115,18 +119,4 @@ object FocusCompletionNotifier {
         iconRes = R.drawable.ic_focus_session,
         backgroundColor = ContextCompat.getColor(context, R.color.notification_accent)
     )
-
-    private fun ensureChannel(context: Context, manager: NotificationManager) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        NotificationChannelGroups.ensureCreated(manager)
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            context.getString(R.string.focus_completion_channel_name),
-            NotificationManager.IMPORTANCE_DEFAULT
-        ).apply {
-            description = context.getString(R.string.focus_completion_channel_description)
-            group = NotificationChannelGroups.FOCUS
-        }
-        manager.createNotificationChannel(channel)
-    }
 }

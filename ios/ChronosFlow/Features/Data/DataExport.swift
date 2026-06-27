@@ -312,7 +312,8 @@ enum ChronosBackupService {
                 notes: $0.notes, reminderMinuteOfDay: $0.reminderMinutes.first ?? 8 * 60,
                 takeWithFood: $0.takeWithFood, refillNeededAfterDoses: $0.refillNeededAfterDoses,
                 remainingDoses: $0.remainingDoses, isActive: $0.isActive,
-                reminderMinutes: $0.reminderMinutes, takenAt: $0.takenAt))
+                reminderMinutes: $0.reminderMinutes,
+                doseEvents: $0.takenAt.map { DoseEvent(date: $0, status: .taken) }))
         }
         applyTable(ChronosBackup.Table.journal, backup.journal) {
             context.insert(JournalEntry(id: $0.id, entryDate: $0.date, body: $0.body, isPrimary: $0.isPrimary))

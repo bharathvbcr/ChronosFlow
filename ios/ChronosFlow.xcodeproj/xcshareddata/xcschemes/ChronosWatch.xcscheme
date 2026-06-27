@@ -15,9 +15,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "A40A0786B8C3A60A1A41D356"
-               BuildableName = "ChronosFlow.app"
-               BlueprintName = "ChronosFlow"
+               BlueprintIdentifier = "34FECFE51B52C45CC3DDC543"
+               BuildableName = "ChronosWatch.app"
+               BlueprintName = "ChronosWatch"
                ReferencedContainer = "container:ChronosFlow.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -32,9 +32,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "A40A0786B8C3A60A1A41D356"
-            BuildableName = "ChronosFlow.app"
-            BlueprintName = "ChronosFlow"
+            BlueprintIdentifier = "34FECFE51B52C45CC3DDC543"
+            BuildableName = "ChronosWatch.app"
+            BlueprintName = "ChronosWatch"
             ReferencedContainer = "container:ChronosFlow.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -55,9 +55,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "A40A0786B8C3A60A1A41D356"
-            BuildableName = "ChronosFlow.app"
-            BlueprintName = "ChronosFlow"
+            BlueprintIdentifier = "34FECFE51B52C45CC3DDC543"
+            BuildableName = "ChronosWatch.app"
+            BlueprintName = "ChronosWatch"
             ReferencedContainer = "container:ChronosFlow.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -74,9 +74,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "A40A0786B8C3A60A1A41D356"
-            BuildableName = "ChronosFlow.app"
-            BlueprintName = "ChronosFlow"
+            BlueprintIdentifier = "34FECFE51B52C45CC3DDC543"
+            BuildableName = "ChronosWatch.app"
+            BlueprintName = "ChronosWatch"
             ReferencedContainer = "container:ChronosFlow.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

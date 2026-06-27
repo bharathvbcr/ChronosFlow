@@ -6,225 +6,1391 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		006FC1EBA838FC1A705771CB /* HabitsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F1D8D9574EE3AF981496E3F /* HabitsWidget.swift */; };
+		01C9A89E739D658743C7DA09 /* ChronosResponseCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA52973D45F5065286F7429C /* ChronosResponseCache.swift */; };
+		078B3EBE4B7CCBA8350AC23B /* ConnectedAppsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DAD16628C8A413EA19FDCB2 /* ConnectedAppsView.swift */; };
+		0976B0384517D306E89FBFDD /* WatchTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F63F34E4475D86440C7070EC /* WatchTokens.swift */; };
+		0A54EE093701A9E7430765B7 /* FocusTimerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96CD3F7C3CC298DA693D7955 /* FocusTimerModel.swift */; };
+		0A58DA9CF8412C0587AB37CA /* ShellBottomBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3118E0814379C49EC3A56277 /* ShellBottomBar.swift */; };
+		0AE52BC81693EE2835CF180E /* MedicationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE65ED8EE1739DB21963C9BA /* MedicationPlan.swift */; };
+		0D1281E79593F19F15FC359E /* ChronosBackdrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1F42F8732C684E0FB64EDC /* ChronosBackdrop.swift */; };
+		0D12F99ADB79F7FCB6CCF4D1 /* MedicationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9693EA9B6AD6C9E0F6A45828 /* MedicationView.swift */; };
+		0D3D4401C9E325CF0C926A51 /* RoutineEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DF5AB0BF7042411B55E8060 /* RoutineEditorSheet.swift */; };
+		0EC2865A0EB157DAD49104CC /* AssistantSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25FE9C724F5512216FA327BF /* AssistantSheet.swift */; };
+		1293C5DF15E680B32AF98093 /* ChronosAutoBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB84686791C63375EDA141EF /* ChronosAutoBackup.swift */; };
+		164614E4000987B96191F05C /* SeedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02B90027EB1F945CA0F70AA /* SeedData.swift */; };
+		1AB0D9E1906576FFFE19D595 /* TimeBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 613969D580BCB982F2096389 /* TimeBlock.swift */; };
+		1AE10C2AA53D20D40EDFAF25 /* JournalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B9281D12D768B86257AFDAD /* JournalView.swift */; };
+		1B2B5DA8372DE7BF1309BAB2 /* PlanningSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE6E15CEA3608CA81DF0937 /* PlanningSettingsView.swift */; };
+		1FFAC785C03D9189DDBDC1C1 /* DayDialScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3BFCB9EFD109DED2C977298 /* DayDialScreen.swift */; };
+		2001C651F95EC0EA8086BCAC /* AIPlannerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69855E109FF53E71BBFCD3AC /* AIPlannerSheet.swift */; };
+		2449622CFBDD7C0DB72B76AF /* NotificationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C8B5B06873716F6DC33F10F /* NotificationSettingsView.swift */; };
+		24621C31359AB87C85323D21 /* AppearanceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1519F6ACD0C60C5E020110 /* AppearanceSettingsView.swift */; };
+		254801C51FD992B280E6DA8C /* MedsComplication.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA18F01A5BB944946EAE06E5 /* MedsComplication.swift */; };
+		255B8C334C2517F5CA73E3D3 /* CalendarOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145EEB39144C0196F4141FD5 /* CalendarOverlay.swift */; };
+		27F60AA4C5196AA070FD6B4C /* Planner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D2BE922BC5BFB85DD191F4D /* Planner.swift */; };
+		2D1CA48711225EB350516678 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22F855ACC2BCC8C21CD684D6 /* SettingsView.swift */; };
+		2F3D3AAF84C30402DC063073 /* DialGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E801F60B6C91439AC63C3A28 /* DialGeometry.swift */; };
+		2FF1A4692E15C381BDD81654 /* GoalsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61C7D288B7DAED32EB1FE93D /* GoalsView.swift */; };
+		31E100067A100A1D1CCA016D /* Enums.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF6FC744096E9A9241D85EB9 /* Enums.swift */; };
+		332C47CD0EDF87DB16AC33EC /* TaskTemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17AE3E4586AFC2A4A6DA168D /* TaskTemplate.swift */; };
+		333F3195EB5BC33344F8E8DE /* Goal.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF52081E6BDE3FA62D64287F /* Goal.swift */; };
+		33A565C7DD7C1F51472447BF /* TodayWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F998991DCD3BBF639812DD9 /* TodayWidget.swift */; };
+		38A43099B57A4640BC725198 /* ShellModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 612B4A5D7D37A7D70FF7746A /* ShellModel.swift */; };
+		3B89691B7281F807A4B16788 /* ChronosCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8EA79A00125A7BE3AB4B086A /* ChronosCore */; };
+		3C8431ECA5BAEEAB578E5349 /* ChronosStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05E1A46410DF7B05D86B0326 /* ChronosStore.swift */; };
+		3CC70C287D741B965B0943E1 /* TaskBulkImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD83373F732EB3C770A2A869 /* TaskBulkImportSheet.swift */; };
+		3E6336BFADB8015E696DEF99 /* DialGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E801F60B6C91439AC63C3A28 /* DialGeometry.swift */; };
+		3EF2D3A40931A4DCE04A57E4 /* FocusCommandObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60D8876EC155FA7F4B737C59 /* FocusCommandObserver.swift */; };
+		422865A723DA17DD68CC6899 /* WatchSyncDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA07457A164C8BA24CF4EF2 /* WatchSyncDTO.swift */; };
+		4437CE389B508ABC2F8CE87D /* DataManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E731C15A7EF1DD1253B1D7A2 /* DataManagementView.swift */; };
+		47A20BE2CB006EDD01C1E9CD /* FocusWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44ACD6DC3B5FD1493E0F0A92 /* FocusWidget.swift */; };
+		4A98948091454EA9CC64A1FA /* GlassSurfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FFDFAB0E2C34114F14FAAB3 /* GlassSurfaces.swift */; };
+		4AC4E2FFD19B485290055712 /* ChronosFlowWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 75937FBC4B242A48DCDF50DE /* ChronosFlowWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		4D60B2A2E0E3F1E83580DBD0 /* ChronosAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160CB402A87F7081892E9317 /* ChronosAppIntents.swift */; };
+		5131F928AE178FB4C11AF68A /* ConflictResolveSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95719A04EF7CD50D4CE1CF00 /* ConflictResolveSheet.swift */; };
+		520B58756C2619DC8BF988F6 /* WatchSyncDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA07457A164C8BA24CF4EF2 /* WatchSyncDTO.swift */; };
+		54AC1AB59C54F4370312E4B4 /* FocusLiveActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 418584DB95F680EEA53E13C4 /* FocusLiveActivityView.swift */; };
+		5F23B1F9FB19FDD2C72347E3 /* ChronosWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 578B427D56B9ED9F5FDC3303 /* ChronosWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		60A1813697327BA90ECD959F /* ChronosDeviceTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B691C0C1CA03A081789C9CC4 /* ChronosDeviceTransfer.swift */; };
+		61B77A7933FD0879807EE0CF /* WatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D11B7E7AEC62DB934B9F33AD /* WatchRootView.swift */; };
+		622DEB416188AC08EC18EE3A /* InteropPeerPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 087730CAEC1D32C4DFB1DBCE /* InteropPeerPayload.swift */; };
+		65E1BEA33155B51FA4B0F160 /* Habit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15AF6503917D10D9631CD0D0 /* Habit.swift */; };
+		66F119DA424ED277A860794F /* MedicationWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A3B7A11F4CD6DB19094BF17 /* MedicationWidget.swift */; };
+		694E907EA0B693B4FA8C2942 /* ChronosDialCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D1304276D0899F75E776179 /* ChronosDialCanvas.swift */; };
+		6AF6037A4FD244D9F07E66A7 /* Habit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15AF6503917D10D9631CD0D0 /* Habit.swift */; };
+		6B7B1CD889EBA033F80A3669 /* TaskEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17BF8BF96912DA57EF91C542 /* TaskEditorSheet.swift */; };
+		6FB3E53989A3F0370997EDA6 /* ChronosWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84BB007AA5DD607010A791E9 /* ChronosWatchApp.swift */; };
+		6FF2933301E73EABC8F7218F /* ChronosCore in Frameworks */ = {isa = PBXBuildFile; productRef = 9CE96E621A22A493A6218E30 /* ChronosCore */; };
+		723168BCF966B61E05854B15 /* TaskStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0226578FC0947FF092C9B5A /* TaskStats.swift */; };
+		74BC8DE3244DD90745818292 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBBE84614BB5ADF69F7B0770 /* OnboardingView.swift */; };
+		74D1D382DA968E8E65B70EFB /* FocusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C6EF567C7199C765F9B54ED /* FocusView.swift */; };
+		77430F78067DDB01425D00AC /* JournalEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A73CD389480F457B2D6C62E1 /* JournalEditorSheet.swift */; };
+		787BC7DDBB40FFBB0DD69FFC /* AgendaWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F77245B9EDB5186C3955BC0 /* AgendaWidget.swift */; };
+		7945BFF0200E5641F643AEC1 /* WidgetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 881D25533C2369D2B2C99CF1 /* WidgetIntents.swift */; };
+		7B1BC89F1325713936B0FC20 /* ChronosFlowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2535C20A9C5E2658E4212C9 /* ChronosFlowApp.swift */; };
+		7E28D6E46B5380FC09763CB2 /* ChronosToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA71B35DC40F47DEBD2534B1 /* ChronosToolbar.swift */; };
+		85232DD01FA22E3C3F20651A /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF542A7ECA9D9F79B6FB08E9 /* InsightsView.swift */; };
+		86312F3D9EB2A6647B8B908F /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF628DF793CF31AE0F4925E6 /* ShareViewController.swift */; };
+		865DB76C970754F78B93C85C /* ChronosShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE3965DE8BE976BC18A1DC86 /* ChronosShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		86D38938898897BB40D6B032 /* Goal.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF52081E6BDE3FA62D64287F /* Goal.swift */; };
+		87E73A31B51C238CAE14FA08 /* ChronosCore in Frameworks */ = {isa = PBXBuildFile; productRef = B0765918800E68975408D1D3 /* ChronosCore */; };
+		883B08EC0554FE38C2E3D5EA /* TasksWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A0A9F55B12C0E20DD9BD4C5 /* TasksWidget.swift */; };
+		8C23659A864CC0F8485716A1 /* TasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8CDF3947DEB8C79BD2A0D87 /* TasksView.swift */; };
+		8C5B0E5ECD1BE9E7E021BFD7 /* Wellbeing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87EEB646E06656E0F8F1F129 /* Wellbeing.swift */; };
+		9021092D6BFF7EBCEE0913D7 /* DataExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80967CC945B5A34D54955BE9 /* DataExport.swift */; };
+		90CD0FF06DF6C307B7447654 /* ChronosStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05E1A46410DF7B05D86B0326 /* ChronosStore.swift */; };
+		92E8368CD15B27BA2ED6E881 /* FocusSessionSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9073DE6FDC6A3702FF3C725 /* FocusSessionSnapshot.swift */; };
+		942939BBD7E0AC515CE287B1 /* TaskItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C74F700E0F18E08C6B9635E /* TaskItem.swift */; };
+		9BB8423DD31EFA812D62ED61 /* ChronosTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF661700F603223BD7F2F76 /* ChronosTokens.swift */; };
+		9D6E4F8FA62EF1F82E51BAB9 /* HealthKitSleepImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A18D857641F651B63A7513B4 /* HealthKitSleepImporter.swift */; };
+		9EAD03ECE2CB7ADF7B01401C /* AppLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14E5646E714E239C7848BD8B /* AppLock.swift */; };
+		A19B987E0D03519BE67D3C55 /* ProactiveDigest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 552DBCE13678CC89BBD018C9 /* ProactiveDigest.swift */; };
+		A6AFAB5DAEE9E86DD6A9CA3C /* MedicationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE65ED8EE1739DB21963C9BA /* MedicationPlan.swift */; };
+		A92311B3AD356F0635C3C910 /* WatchSyncDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA07457A164C8BA24CF4EF2 /* WatchSyncDTO.swift */; };
+		AB66FBDC23081A4BD90006EC /* WatchSyncDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA07457A164C8BA24CF4EF2 /* WatchSyncDTO.swift */; };
+		ABAE2F7E75E1011D423E027D /* FocusLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25EFFFA8AC09E012B5F7A93B /* FocusLiveActivityWidget.swift */; };
+		AFC38072B776C1AA684393E7 /* FocusActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AFFEE06688150DF02EEA4BC /* FocusActivityAttributes.swift */; };
+		B17EDD8D518DDA88FFC73B54 /* CalendarManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB893D283B1912191CACA11C /* CalendarManagementView.swift */; };
+		B26D44FAD5C24F0FED33A22F /* FocusActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AFFEE06688150DF02EEA4BC /* FocusActivityAttributes.swift */; };
+		B2C7EF2C621DEAA54252B0F1 /* ChronosSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96DD0CB7526DD6E3838F4BC1 /* ChronosSettings.swift */; };
+		B31B02EC67DDB21AC3D82B5C /* NextBlockWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34FA973F5FE5E792F117CFF /* NextBlockWidget.swift */; };
+		B3BDDF12ED5E7F6C1BCB3A41 /* ChronosTextTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B5213C3CC479D493FD1EA1 /* ChronosTextTools.swift */; };
+		BA2A9785BC516EB29735871E /* ChronosWatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 15F60EA4C7F326A29C7C635D /* ChronosWatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BB82AD9EAB065A0124C8541C /* RoutinesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BAE865638D9CF95EF44ACFF /* RoutinesView.swift */; };
+		BE7482CCE38E5FD51AA9A7FC /* ChronosAIPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D7696E2BC58E90BBE3F2CE /* ChronosAIPlanner.swift */; };
+		C049D4D87A84B5F4074F07C3 /* Wellbeing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87EEB646E06656E0F8F1F129 /* Wellbeing.swift */; };
+		C26F4D1A49830BFE1C5BC0EA /* PhoneWatchSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9E01860F48E5882FD5E59AA /* PhoneWatchSync.swift */; };
+		C29E9DA3F1142B37CBAE916E /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCF242E9605B2EC3A7C84D43 /* RootView.swift */; };
+		C492425F0A663F504E7E7AB6 /* DictationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142409BB421A865C3A1CEE4C /* DictationController.swift */; };
+		C5F74935BB38C30911BF9E52 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 179D372060F3DF7353D89A63 /* Assets.xcassets */; };
+		CAE4067DC61C3498D92161FF /* Enums.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF6FC744096E9A9241D85EB9 /* Enums.swift */; };
+		CB9CD8D43A4887B55E99351C /* QuickAdd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 240B87DF90D387E13E34E0C8 /* QuickAdd.swift */; };
+		CC5F4FDDC719553182B175A1 /* InteropSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31E3C76828E2921EA960D77F /* InteropSync.swift */; };
+		CED1EDEB5D722CFF19CBB44D /* SleepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7405F90D84728285DFFE478 /* SleepView.swift */; };
+		D0DAF398ACDB508D1B7CC30F /* GapFillSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 687A5A30F3979C0B15DE7CD8 /* GapFillSheet.swift */; };
+		D1978DCE17C4FA45F394566B /* ChronosNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE2231AB1F83961A67A825BD /* ChronosNotifications.swift */; };
+		D4231BAACD846186161B527E /* ChronosWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A91655C97E659F524BFFD71 /* ChronosWidgetBundle.swift */; };
+		D4767E6CE95463D8AAEE601C /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 683C908C8F01AE477FE88BFC /* TodayView.swift */; };
+		D574EAF0240232ABB4ED4405 /* TimeBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 613969D580BCB982F2096389 /* TimeBlock.swift */; };
+		D8DB3EB93606ED8AAA7BC9E8 /* WidgetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 881D25533C2369D2B2C99CF1 /* WidgetIntents.swift */; };
+		D8FF9EB596B56F17F45BDEDB /* ChronosAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 632E9A8925DDE1B195FC0658 /* ChronosAssistant.swift */; };
+		DA82D5C84DDC8F8678DFEAD1 /* WatchConnectivityClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5424D3137205CA08B2D268CA /* WatchConnectivityClient.swift */; };
+		DDA2FB6A97DBD92B2193D2BD /* PrivacySyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B17F7F3293C63DB134E9013 /* PrivacySyncSettingsView.swift */; };
+		E49035993F10FAC71DE5DA36 /* ChronosTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF661700F603223BD7F2F76 /* ChronosTokens.swift */; };
+		E88670F2509C94FF955A45D1 /* CommandPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDDD854DD48D020F9CC137F7 /* CommandPalette.swift */; };
+		E9E70AA38900837B6FBECEE0 /* ChronosWatchWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9096E8C91B47BB21B397FF0 /* ChronosWatchWidgetBundle.swift */; };
+		EF013008FF2BE4C32332BBF6 /* HabitsComplication.swift in Sources */ = {isa = PBXBuildFile; fileRef = 561E69A97DCF8278FE623442 /* HabitsComplication.swift */; };
+		F026DAC52B1E0ABD61FE6BEA /* HabitsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C11A81ACE01CB5EEFB5F2F /* HabitsView.swift */; };
+		F0C732F581AC01FEBCCF91DF /* SeedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02B90027EB1F945CA0F70AA /* SeedData.swift */; };
+		FA0A683565838EE0006F9BD5 /* TimeBlockEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7697765EB15E1D9FD0421A6 /* TimeBlockEditorSheet.swift */; };
+		FCEC7E93848AA1D665B0A7C8 /* FocusSessionSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9073DE6FDC6A3702FF3C725 /* FocusSessionSnapshot.swift */; };
+		FDA2381DB3E28725F02154B4 /* GoalDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7568AF1C5A76D3803DA05E1D /* GoalDetailView.swift */; };
+		FDA8724B2AD7D8F2C3E3CE6D /* TaskItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C74F700E0F18E08C6B9635E /* TaskItem.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		ADFDD5D17479043D30C6ECF8 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5D109C2FFFD118FD05A43CEE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 628C0E44226D4304BEA65FD9;
+			remoteInfo = ChronosFlowWidgets;
+		};
+		B71A08B8F802B0D199EC4106 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5D109C2FFFD118FD05A43CEE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4425F4DE092E662CB57BE0A1;
+			remoteInfo = ChronosShareExtension;
+		};
+		D360F0087189B5EE13C67922 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5D109C2FFFD118FD05A43CEE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 46682015DACDAAA6F71B6F86;
+			remoteInfo = ChronosWatchWidgets;
+		};
+		D8CC2CB274208569537C7DDE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5D109C2FFFD118FD05A43CEE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 34FECFE51B52C45CC3DDC543;
+			remoteInfo = ChronosWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		2748FAAE41B28FF2EA34EB27 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				4AC4E2FFD19B485290055712 /* ChronosFlowWidgets.appex in Embed Foundation Extensions */,
+				865DB76C970754F78B93C85C /* ChronosShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7147B453D5AAF0ED35A532AF /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				5F23B1F9FB19FDD2C72347E3 /* ChronosWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DF3B8221E1C12CB74FF64489 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				BA2A9785BC516EB29735871E /* ChronosWatchWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
-		CF00000000000000000000A1 /* ChronosFlow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChronosFlow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		05E1A46410DF7B05D86B0326 /* ChronosStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosStore.swift; sourceTree = "<group>"; };
+		087730CAEC1D32C4DFB1DBCE /* InteropPeerPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteropPeerPayload.swift; sourceTree = "<group>"; };
+		0A535232D2E35C3E02658002 /* ChronosWatchWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChronosWatchWidgets.entitlements; sourceTree = "<group>"; };
+		0C6EF567C7199C765F9B54ED /* FocusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusView.swift; sourceTree = "<group>"; };
+		0D1304276D0899F75E776179 /* ChronosDialCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosDialCanvas.swift; sourceTree = "<group>"; };
+		11CF18D3FB9862E2E3B9ECD7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		142409BB421A865C3A1CEE4C /* DictationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationController.swift; sourceTree = "<group>"; };
+		145EEB39144C0196F4141FD5 /* CalendarOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarOverlay.swift; sourceTree = "<group>"; };
+		14E5646E714E239C7848BD8B /* AppLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLock.swift; sourceTree = "<group>"; };
+		15AF6503917D10D9631CD0D0 /* Habit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Habit.swift; sourceTree = "<group>"; };
+		15F60EA4C7F326A29C7C635D /* ChronosWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ChronosWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		160CB402A87F7081892E9317 /* ChronosAppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosAppIntents.swift; sourceTree = "<group>"; };
+		179D372060F3DF7353D89A63 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		17AE3E4586AFC2A4A6DA168D /* TaskTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTemplate.swift; sourceTree = "<group>"; };
+		17BF8BF96912DA57EF91C542 /* TaskEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskEditorSheet.swift; sourceTree = "<group>"; };
+		1F998991DCD3BBF639812DD9 /* TodayWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayWidget.swift; sourceTree = "<group>"; };
+		22F855ACC2BCC8C21CD684D6 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		240B87DF90D387E13E34E0C8 /* QuickAdd.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickAdd.swift; sourceTree = "<group>"; };
+		250CE71367959F3D45C7B959 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		25EFFFA8AC09E012B5F7A93B /* FocusLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusLiveActivityWidget.swift; sourceTree = "<group>"; };
+		25FE9C724F5512216FA327BF /* AssistantSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantSheet.swift; sourceTree = "<group>"; };
+		2A0A9F55B12C0E20DD9BD4C5 /* TasksWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksWidget.swift; sourceTree = "<group>"; };
+		3118E0814379C49EC3A56277 /* ShellBottomBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellBottomBar.swift; sourceTree = "<group>"; };
+		31E3C76828E2921EA960D77F /* InteropSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteropSync.swift; sourceTree = "<group>"; };
+		330579F9116CBDA56C295291 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		3AE9941AF04F104938B1E1DC /* ChronosFlowWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChronosFlowWidgets.entitlements; sourceTree = "<group>"; };
+		3D2BE922BC5BFB85DD191F4D /* Planner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Planner.swift; sourceTree = "<group>"; };
+		3DF5AB0BF7042411B55E8060 /* RoutineEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineEditorSheet.swift; sourceTree = "<group>"; };
+		3FA07457A164C8BA24CF4EF2 /* WatchSyncDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSyncDTO.swift; sourceTree = "<group>"; };
+		418584DB95F680EEA53E13C4 /* FocusLiveActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusLiveActivityView.swift; sourceTree = "<group>"; };
+		44ACD6DC3B5FD1493E0F0A92 /* FocusWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusWidget.swift; sourceTree = "<group>"; };
+		4A3B7A11F4CD6DB19094BF17 /* MedicationWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationWidget.swift; sourceTree = "<group>"; };
+		4B9281D12D768B86257AFDAD /* JournalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalView.swift; sourceTree = "<group>"; };
+		4F1D8D9574EE3AF981496E3F /* HabitsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitsWidget.swift; sourceTree = "<group>"; };
+		4F77245B9EDB5186C3955BC0 /* AgendaWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgendaWidget.swift; sourceTree = "<group>"; };
+		5424D3137205CA08B2D268CA /* WatchConnectivityClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchConnectivityClient.swift; sourceTree = "<group>"; };
+		552DBCE13678CC89BBD018C9 /* ProactiveDigest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactiveDigest.swift; sourceTree = "<group>"; };
+		561E69A97DCF8278FE623442 /* HabitsComplication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitsComplication.swift; sourceTree = "<group>"; };
+		56B2DF9D7143E8F19811293D /* ChronosFlow.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChronosFlow.entitlements; sourceTree = "<group>"; };
+		578B427D56B9ED9F5FDC3303 /* ChronosWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChronosWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5BAE865638D9CF95EF44ACFF /* RoutinesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesView.swift; sourceTree = "<group>"; };
+		5BC2F5236C610F63BD5F7C2C /* ChronosWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChronosWatch.entitlements; sourceTree = "<group>"; };
+		5C8B5B06873716F6DC33F10F /* NotificationSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationSettingsView.swift; sourceTree = "<group>"; };
+		60D8876EC155FA7F4B737C59 /* FocusCommandObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusCommandObserver.swift; sourceTree = "<group>"; };
+		612B4A5D7D37A7D70FF7746A /* ShellModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellModel.swift; sourceTree = "<group>"; };
+		613969D580BCB982F2096389 /* TimeBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeBlock.swift; sourceTree = "<group>"; };
+		61C7D288B7DAED32EB1FE93D /* GoalsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalsView.swift; sourceTree = "<group>"; };
+		632E9A8925DDE1B195FC0658 /* ChronosAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosAssistant.swift; sourceTree = "<group>"; };
+		683C908C8F01AE477FE88BFC /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
+		687A5A30F3979C0B15DE7CD8 /* GapFillSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GapFillSheet.swift; sourceTree = "<group>"; };
+		69855E109FF53E71BBFCD3AC /* AIPlannerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPlannerSheet.swift; sourceTree = "<group>"; };
+		6A91655C97E659F524BFFD71 /* ChronosWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosWidgetBundle.swift; sourceTree = "<group>"; };
+		6B17F7F3293C63DB134E9013 /* PrivacySyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacySyncSettingsView.swift; sourceTree = "<group>"; };
+		7568AF1C5A76D3803DA05E1D /* GoalDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalDetailView.swift; sourceTree = "<group>"; };
+		75937FBC4B242A48DCDF50DE /* ChronosFlowWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ChronosFlowWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		7C74F700E0F18E08C6B9635E /* TaskItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskItem.swift; sourceTree = "<group>"; };
+		80967CC945B5A34D54955BE9 /* DataExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataExport.swift; sourceTree = "<group>"; };
+		84BB007AA5DD607010A791E9 /* ChronosWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosWatchApp.swift; sourceTree = "<group>"; };
+		874FC1DEE75FA4C1B6D66090 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		87EEB646E06656E0F8F1F129 /* Wellbeing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wellbeing.swift; sourceTree = "<group>"; };
+		881D25533C2369D2B2C99CF1 /* WidgetIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetIntents.swift; sourceTree = "<group>"; };
+		8DE6E15CEA3608CA81DF0937 /* PlanningSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanningSettingsView.swift; sourceTree = "<group>"; };
+		95719A04EF7CD50D4CE1CF00 /* ConflictResolveSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConflictResolveSheet.swift; sourceTree = "<group>"; };
+		9693EA9B6AD6C9E0F6A45828 /* MedicationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationView.swift; sourceTree = "<group>"; };
+		96CD3F7C3CC298DA693D7955 /* FocusTimerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusTimerModel.swift; sourceTree = "<group>"; };
+		96DD0CB7526DD6E3838F4BC1 /* ChronosSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosSettings.swift; sourceTree = "<group>"; };
+		9AFFEE06688150DF02EEA4BC /* FocusActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusActivityAttributes.swift; sourceTree = "<group>"; };
+		9DAD16628C8A413EA19FDCB2 /* ConnectedAppsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectedAppsView.swift; sourceTree = "<group>"; };
+		9FFDFAB0E2C34114F14FAAB3 /* GlassSurfaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassSurfaces.swift; sourceTree = "<group>"; };
+		A18D857641F651B63A7513B4 /* HealthKitSleepImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSleepImporter.swift; sourceTree = "<group>"; };
+		A3BFCB9EFD109DED2C977298 /* DayDialScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayDialScreen.swift; sourceTree = "<group>"; };
+		A73CD389480F457B2D6C62E1 /* JournalEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalEditorSheet.swift; sourceTree = "<group>"; };
+		AA71B35DC40F47DEBD2534B1 /* ChronosToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosToolbar.swift; sourceTree = "<group>"; };
+		AE65ED8EE1739DB21963C9BA /* MedicationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationPlan.swift; sourceTree = "<group>"; };
+		B0226578FC0947FF092C9B5A /* TaskStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStats.swift; sourceTree = "<group>"; };
+		B2535C20A9C5E2658E4212C9 /* ChronosFlowApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosFlowApp.swift; sourceTree = "<group>"; };
+		B691C0C1CA03A081789C9CC4 /* ChronosDeviceTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosDeviceTransfer.swift; sourceTree = "<group>"; };
+		B8CDF3947DEB8C79BD2A0D87 /* TasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
+		B9073DE6FDC6A3702FF3C725 /* FocusSessionSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusSessionSnapshot.swift; sourceTree = "<group>"; };
+		BB4412ED5A0AFAFF1023F8BF /* ChronosFlow.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ChronosFlow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BCF242E9605B2EC3A7C84D43 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		BDDD854DD48D020F9CC137F7 /* CommandPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPalette.swift; sourceTree = "<group>"; };
+		BF6FC744096E9A9241D85EB9 /* Enums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Enums.swift; sourceTree = "<group>"; };
+		C8FEE193F1FA355E4E75E88A /* ChronosCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ChronosCore; path = ChronosCore; sourceTree = SOURCE_ROOT; };
+		CA52973D45F5065286F7429C /* ChronosResponseCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosResponseCache.swift; sourceTree = "<group>"; };
+		CE1F42F8732C684E0FB64EDC /* ChronosBackdrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosBackdrop.swift; sourceTree = "<group>"; };
+		CF542A7ECA9D9F79B6FB08E9 /* InsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsView.swift; sourceTree = "<group>"; };
+		D11B7E7AEC62DB934B9F33AD /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
+		D7405F90D84728285DFFE478 /* SleepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepView.swift; sourceTree = "<group>"; };
+		DA18F01A5BB944946EAE06E5 /* MedsComplication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedsComplication.swift; sourceTree = "<group>"; };
+		DB893D283B1912191CACA11C /* CalendarManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarManagementView.swift; sourceTree = "<group>"; };
+		DBBE84614BB5ADF69F7B0770 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		DEF661700F603223BD7F2F76 /* ChronosTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosTokens.swift; sourceTree = "<group>"; };
+		E731C15A7EF1DD1253B1D7A2 /* DataManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataManagementView.swift; sourceTree = "<group>"; };
+		E801F60B6C91439AC63C3A28 /* DialGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialGeometry.swift; sourceTree = "<group>"; };
+		E9B5213C3CC479D493FD1EA1 /* ChronosTextTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosTextTools.swift; sourceTree = "<group>"; };
+		EB84686791C63375EDA141EF /* ChronosAutoBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosAutoBackup.swift; sourceTree = "<group>"; };
+		EE2231AB1F83961A67A825BD /* ChronosNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosNotifications.swift; sourceTree = "<group>"; };
+		F02B90027EB1F945CA0F70AA /* SeedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeedData.swift; sourceTree = "<group>"; };
+		F1D7696E2BC58E90BBE3F2CE /* ChronosAIPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosAIPlanner.swift; sourceTree = "<group>"; };
+		F2CA8B820A06B80C723ADD61 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+		F34FA973F5FE5E792F117CFF /* NextBlockWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextBlockWidget.swift; sourceTree = "<group>"; };
+		F63F34E4475D86440C7070EC /* WatchTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchTokens.swift; sourceTree = "<group>"; };
+		F6C11A81ACE01CB5EEFB5F2F /* HabitsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitsView.swift; sourceTree = "<group>"; };
+		F7697765EB15E1D9FD0421A6 /* TimeBlockEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeBlockEditorSheet.swift; sourceTree = "<group>"; };
+		F9096E8C91B47BB21B397FF0 /* ChronosWatchWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChronosWatchWidgetBundle.swift; sourceTree = "<group>"; };
+		F9E01860F48E5882FD5E59AA /* PhoneWatchSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneWatchSync.swift; sourceTree = "<group>"; };
+		FD1519F6ACD0C60C5E020110 /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
+		FD83373F732EB3C770A2A869 /* TaskBulkImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBulkImportSheet.swift; sourceTree = "<group>"; };
+		FE3965DE8BE976BC18A1DC86 /* ChronosShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ChronosShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		FF52081E6BDE3FA62D64287F /* Goal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Goal.swift; sourceTree = "<group>"; };
+		FF628DF793CF31AE0F4925E6 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedRootGroup section */
-		CF00000000000000000000B1 /* ChronosFlow */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = ChronosFlow;
-			sourceTree = "<group>";
-		};
-/* End PBXFileSystemSynchronizedRootGroup section */
-
 /* Begin PBXFrameworksBuildPhase section */
-		CF00000000000000000000C1 /* Frameworks */ = {
+		3F326DC3999F55B663884266 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3B89691B7281F807A4B16788 /* ChronosCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		53EB244EC65B9363A4A6B310 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				87E73A31B51C238CAE14FA08 /* ChronosCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6883BE2B57C952DDD94C1804 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6FF2933301E73EABC8F7218F /* ChronosCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		CF00000000000000000000D1 = {
+		01CC59899EAAE88932A945E2 /* ChronosShareExtension */ = {
 			isa = PBXGroup;
 			children = (
-				CF00000000000000000000B1 /* ChronosFlow */,
-				CF00000000000000000000D2 /* Products */,
+				330579F9116CBDA56C295291 /* Info.plist */,
+				F2CA8B820A06B80C723ADD61 /* ShareExtension.entitlements */,
+				FF628DF793CF31AE0F4925E6 /* ShareViewController.swift */,
+			);
+			path = ChronosShareExtension;
+			sourceTree = "<group>";
+		};
+		045A52060F42710D979D53B0 /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				05E1A46410DF7B05D86B0326 /* ChronosStore.swift */,
+				F02B90027EB1F945CA0F70AA /* SeedData.swift */,
+			);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
+		05C3CC04F0F0E73AF8E190DA /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				80967CC945B5A34D54955BE9 /* DataExport.swift */,
+				E731C15A7EF1DD1253B1D7A2 /* DataManagementView.swift */,
+			);
+			path = Data;
+			sourceTree = "<group>";
+		};
+		092F442F9F646BC8B4F48B7C /* Notifications */ = {
+			isa = PBXGroup;
+			children = (
+				EE2231AB1F83961A67A825BD /* ChronosNotifications.swift */,
+			);
+			path = Notifications;
+			sourceTree = "<group>";
+		};
+		09AAC8C15D8E3B687A4E02F8 /* Backup */ = {
+			isa = PBXGroup;
+			children = (
+				EB84686791C63375EDA141EF /* ChronosAutoBackup.swift */,
+				B691C0C1CA03A081789C9CC4 /* ChronosDeviceTransfer.swift */,
+			);
+			path = Backup;
+			sourceTree = "<group>";
+		};
+		341DBF644209122BA03E2192 /* Journal */ = {
+			isa = PBXGroup;
+			children = (
+				142409BB421A865C3A1CEE4C /* DictationController.swift */,
+				A73CD389480F457B2D6C62E1 /* JournalEditorSheet.swift */,
+				4B9281D12D768B86257AFDAD /* JournalView.swift */,
+			);
+			path = Journal;
+			sourceTree = "<group>";
+		};
+		3760F8DFFC06EB03C3A51599 /* DayDial */ = {
+			isa = PBXGroup;
+			children = (
+				0D1304276D0899F75E776179 /* ChronosDialCanvas.swift */,
+				95719A04EF7CD50D4CE1CF00 /* ConflictResolveSheet.swift */,
+				A3BFCB9EFD109DED2C977298 /* DayDialScreen.swift */,
+				687A5A30F3979C0B15DE7CD8 /* GapFillSheet.swift */,
+				F7697765EB15E1D9FD0421A6 /* TimeBlockEditorSheet.swift */,
+			);
+			path = DayDial;
+			sourceTree = "<group>";
+		};
+		37E5F8E63A1DAA8F4CEE1E71 /* Today */ = {
+			isa = PBXGroup;
+			children = (
+				683C908C8F01AE477FE88BFC /* TodayView.swift */,
+			);
+			path = Today;
+			sourceTree = "<group>";
+		};
+		426A6203FAF89CF2E5F9D226 /* ChronosFlowWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				4F77245B9EDB5186C3955BC0 /* AgendaWidget.swift */,
+				3AE9941AF04F104938B1E1DC /* ChronosFlowWidgets.entitlements */,
+				6A91655C97E659F524BFFD71 /* ChronosWidgetBundle.swift */,
+				25EFFFA8AC09E012B5F7A93B /* FocusLiveActivityWidget.swift */,
+				44ACD6DC3B5FD1493E0F0A92 /* FocusWidget.swift */,
+				4F1D8D9574EE3AF981496E3F /* HabitsWidget.swift */,
+				250CE71367959F3D45C7B959 /* Info.plist */,
+				4A3B7A11F4CD6DB19094BF17 /* MedicationWidget.swift */,
+				2A0A9F55B12C0E20DD9BD4C5 /* TasksWidget.swift */,
+				1F998991DCD3BBF639812DD9 /* TodayWidget.swift */,
+				881D25533C2369D2B2C99CF1 /* WidgetIntents.swift */,
+			);
+			path = ChronosFlowWidgets;
+			sourceTree = "<group>";
+		};
+		447795271AEC115AF3C22E46 /* Interop */ = {
+			isa = PBXGroup;
+			children = (
+				087730CAEC1D32C4DFB1DBCE /* InteropPeerPayload.swift */,
+				31E3C76828E2921EA960D77F /* InteropSync.swift */,
+			);
+			path = Interop;
+			sourceTree = "<group>";
+		};
+		47BE27D7BF5929806D43915E /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				FD1519F6ACD0C60C5E020110 /* AppearanceSettingsView.swift */,
+				96DD0CB7526DD6E3838F4BC1 /* ChronosSettings.swift */,
+				9DAD16628C8A413EA19FDCB2 /* ConnectedAppsView.swift */,
+				5C8B5B06873716F6DC33F10F /* NotificationSettingsView.swift */,
+				8DE6E15CEA3608CA81DF0937 /* PlanningSettingsView.swift */,
+				6B17F7F3293C63DB134E9013 /* PrivacySyncSettingsView.swift */,
+				22F855ACC2BCC8C21CD684D6 /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		5284E5507891F7EA29A6F714 /* ChronosFlow */ = {
+			isa = PBXGroup;
+			children = (
+				179D372060F3DF7353D89A63 /* Assets.xcassets */,
+				56B2DF9D7143E8F19811293D /* ChronosFlow.entitlements */,
+				B2535C20A9C5E2658E4212C9 /* ChronosFlowApp.swift */,
+				11CF18D3FB9862E2E3B9ECD7 /* Info.plist */,
+				E2FBF4688F0D5E837A02E54D /* AI */,
+				F04F5575C6CD4897A9DE820C /* App */,
+				B8CE931806ED0165FC36C6ED /* AppIntents */,
+				09AAC8C15D8E3B687A4E02F8 /* Backup */,
+				5718099A057A028C74B46207 /* DesignSystem */,
+				F1F911F2610BB039ABD9EC60 /* Features */,
+				79B15AD9CABAE5E10BF38C9A /* Health */,
+				447795271AEC115AF3C22E46 /* Interop */,
+				5820748FBAEC615E7E087384 /* LiveActivity */,
+				9F562C86187091EFA54E1102 /* Models */,
+				092F442F9F646BC8B4F48B7C /* Notifications */,
+				045A52060F42710D979D53B0 /* Persistence */,
+				EC562F91572E98FC088B8F65 /* Planner */,
+				71BD8A7488D29D7A16B9F433 /* Security */,
+				47BE27D7BF5929806D43915E /* Settings */,
+				5ADDCB9E12CD3D6985BFD882 /* Watch */,
+			);
+			path = ChronosFlow;
+			sourceTree = "<group>";
+		};
+		54910C655DD355635A76179F /* Habits */ = {
+			isa = PBXGroup;
+			children = (
+				F6C11A81ACE01CB5EEFB5F2F /* HabitsView.swift */,
+			);
+			path = Habits;
+			sourceTree = "<group>";
+		};
+		5718099A057A028C74B46207 /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				CE1F42F8732C684E0FB64EDC /* ChronosBackdrop.swift */,
+				DEF661700F603223BD7F2F76 /* ChronosTokens.swift */,
+				AA71B35DC40F47DEBD2534B1 /* ChronosToolbar.swift */,
+				9FFDFAB0E2C34114F14FAAB3 /* GlassSurfaces.swift */,
+			);
+			path = DesignSystem;
+			sourceTree = "<group>";
+		};
+		5820748FBAEC615E7E087384 /* LiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				9AFFEE06688150DF02EEA4BC /* FocusActivityAttributes.swift */,
+				418584DB95F680EEA53E13C4 /* FocusLiveActivityView.swift */,
+			);
+			path = LiveActivity;
+			sourceTree = "<group>";
+		};
+		5ADDCB9E12CD3D6985BFD882 /* Watch */ = {
+			isa = PBXGroup;
+			children = (
+				F9E01860F48E5882FD5E59AA /* PhoneWatchSync.swift */,
+			);
+			path = Watch;
+			sourceTree = "<group>";
+		};
+		5E8108F049D6AF0982E7A509 /* Focus */ = {
+			isa = PBXGroup;
+			children = (
+				60D8876EC155FA7F4B737C59 /* FocusCommandObserver.swift */,
+				96CD3F7C3CC298DA693D7955 /* FocusTimerModel.swift */,
+				0C6EF567C7199C765F9B54ED /* FocusView.swift */,
+			);
+			path = Focus;
+			sourceTree = "<group>";
+		};
+		7049AD4F205802ADEB1FC948 /* ChronosWatch */ = {
+			isa = PBXGroup;
+			children = (
+				5BC2F5236C610F63BD5F7C2C /* ChronosWatch.entitlements */,
+				84BB007AA5DD607010A791E9 /* ChronosWatchApp.swift */,
+				5424D3137205CA08B2D268CA /* WatchConnectivityClient.swift */,
+				D11B7E7AEC62DB934B9F33AD /* WatchRootView.swift */,
+				F63F34E4475D86440C7070EC /* WatchTokens.swift */,
+			);
+			path = ChronosWatch;
+			sourceTree = "<group>";
+		};
+		70DF77A57DFF19C4B86794D4 /* ChronosWatchWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				F9096E8C91B47BB21B397FF0 /* ChronosWatchWidgetBundle.swift */,
+				0A535232D2E35C3E02658002 /* ChronosWatchWidgets.entitlements */,
+				561E69A97DCF8278FE623442 /* HabitsComplication.swift */,
+				874FC1DEE75FA4C1B6D66090 /* Info.plist */,
+				DA18F01A5BB944946EAE06E5 /* MedsComplication.swift */,
+				F34FA973F5FE5E792F117CFF /* NextBlockWidget.swift */,
+			);
+			path = ChronosWatchWidgets;
+			sourceTree = "<group>";
+		};
+		71BD8A7488D29D7A16B9F433 /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				14E5646E714E239C7848BD8B /* AppLock.swift */,
+			);
+			path = Security;
+			sourceTree = "<group>";
+		};
+		78BBBC0C450217FBDB2DD724 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				DBBE84614BB5ADF69F7B0770 /* OnboardingView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		79B15AD9CABAE5E10BF38C9A /* Health */ = {
+			isa = PBXGroup;
+			children = (
+				A18D857641F651B63A7513B4 /* HealthKitSleepImporter.swift */,
+			);
+			path = Health;
+			sourceTree = "<group>";
+		};
+		84DA13C46C8647D9FEDEED2C /* Tasks */ = {
+			isa = PBXGroup;
+			children = (
+				FD83373F732EB3C770A2A869 /* TaskBulkImportSheet.swift */,
+				17BF8BF96912DA57EF91C542 /* TaskEditorSheet.swift */,
+				B0226578FC0947FF092C9B5A /* TaskStats.swift */,
+				B8CDF3947DEB8C79BD2A0D87 /* TasksView.swift */,
+				17AE3E4586AFC2A4A6DA168D /* TaskTemplate.swift */,
+			);
+			path = Tasks;
+			sourceTree = "<group>";
+		};
+		892788A33AEDC96D2E0BEA57 /* Goals */ = {
+			isa = PBXGroup;
+			children = (
+				7568AF1C5A76D3803DA05E1D /* GoalDetailView.swift */,
+				61C7D288B7DAED32EB1FE93D /* GoalsView.swift */,
+			);
+			path = Goals;
+			sourceTree = "<group>";
+		};
+		89B7C728A5B38636932A5E95 /* Routines */ = {
+			isa = PBXGroup;
+			children = (
+				3DF5AB0BF7042411B55E8060 /* RoutineEditorSheet.swift */,
+				5BAE865638D9CF95EF44ACFF /* RoutinesView.swift */,
+			);
+			path = Routines;
+			sourceTree = "<group>";
+		};
+		9F562C86187091EFA54E1102 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				BF6FC744096E9A9241D85EB9 /* Enums.swift */,
+				B9073DE6FDC6A3702FF3C725 /* FocusSessionSnapshot.swift */,
+				FF52081E6BDE3FA62D64287F /* Goal.swift */,
+				15AF6503917D10D9631CD0D0 /* Habit.swift */,
+				AE65ED8EE1739DB21963C9BA /* MedicationPlan.swift */,
+				7C74F700E0F18E08C6B9635E /* TaskItem.swift */,
+				613969D580BCB982F2096389 /* TimeBlock.swift */,
+				3FA07457A164C8BA24CF4EF2 /* WatchSyncDTO.swift */,
+				87EEB646E06656E0F8F1F129 /* Wellbeing.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A46868E85A85AC7B1B17CB8A = {
+			isa = PBXGroup;
+			children = (
+				5284E5507891F7EA29A6F714 /* ChronosFlow */,
+				426A6203FAF89CF2E5F9D226 /* ChronosFlowWidgets */,
+				01CC59899EAAE88932A945E2 /* ChronosShareExtension */,
+				7049AD4F205802ADEB1FC948 /* ChronosWatch */,
+				70DF77A57DFF19C4B86794D4 /* ChronosWatchWidgets */,
+				D1959CEFE4E7E8E0B7ABC06A /* Packages */,
+				B38F2820398683EAB7FCEA2D /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		CF00000000000000000000D2 /* Products */ = {
+		B38F2820398683EAB7FCEA2D /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				CF00000000000000000000A1 /* ChronosFlow.app */,
+				BB4412ED5A0AFAFF1023F8BF /* ChronosFlow.app */,
+				75937FBC4B242A48DCDF50DE /* ChronosFlowWidgets.appex */,
+				FE3965DE8BE976BC18A1DC86 /* ChronosShareExtension.appex */,
+				578B427D56B9ED9F5FDC3303 /* ChronosWatch.app */,
+				15F60EA4C7F326A29C7C635D /* ChronosWatchWidgets.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B8CE931806ED0165FC36C6ED /* AppIntents */ = {
+			isa = PBXGroup;
+			children = (
+				160CB402A87F7081892E9317 /* ChronosAppIntents.swift */,
+			);
+			path = AppIntents;
+			sourceTree = "<group>";
+		};
+		BA19664499483C29D00074BA /* Medication */ = {
+			isa = PBXGroup;
+			children = (
+				9693EA9B6AD6C9E0F6A45828 /* MedicationView.swift */,
+			);
+			path = Medication;
+			sourceTree = "<group>";
+		};
+		D1959CEFE4E7E8E0B7ABC06A /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				C8FEE193F1FA355E4E75E88A /* ChronosCore */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		E2A8E301EC91A2006D5EFC50 /* Sleep */ = {
+			isa = PBXGroup;
+			children = (
+				D7405F90D84728285DFFE478 /* SleepView.swift */,
+			);
+			path = Sleep;
+			sourceTree = "<group>";
+		};
+		E2FBF4688F0D5E837A02E54D /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				69855E109FF53E71BBFCD3AC /* AIPlannerSheet.swift */,
+				25FE9C724F5512216FA327BF /* AssistantSheet.swift */,
+				F1D7696E2BC58E90BBE3F2CE /* ChronosAIPlanner.swift */,
+				632E9A8925DDE1B195FC0658 /* ChronosAssistant.swift */,
+				CA52973D45F5065286F7429C /* ChronosResponseCache.swift */,
+				E9B5213C3CC479D493FD1EA1 /* ChronosTextTools.swift */,
+				552DBCE13678CC89BBD018C9 /* ProactiveDigest.swift */,
+			);
+			path = AI;
+			sourceTree = "<group>";
+		};
+		E8A403FD7BBE3FCB953F3E2B /* Calendar */ = {
+			isa = PBXGroup;
+			children = (
+				DB893D283B1912191CACA11C /* CalendarManagementView.swift */,
+				145EEB39144C0196F4141FD5 /* CalendarOverlay.swift */,
+			);
+			path = Calendar;
+			sourceTree = "<group>";
+		};
+		EC562F91572E98FC088B8F65 /* Planner */ = {
+			isa = PBXGroup;
+			children = (
+				E801F60B6C91439AC63C3A28 /* DialGeometry.swift */,
+				3D2BE922BC5BFB85DD191F4D /* Planner.swift */,
+			);
+			path = Planner;
+			sourceTree = "<group>";
+		};
+		F04F5575C6CD4897A9DE820C /* App */ = {
+			isa = PBXGroup;
+			children = (
+				BDDD854DD48D020F9CC137F7 /* CommandPalette.swift */,
+				240B87DF90D387E13E34E0C8 /* QuickAdd.swift */,
+				BCF242E9605B2EC3A7C84D43 /* RootView.swift */,
+				3118E0814379C49EC3A56277 /* ShellBottomBar.swift */,
+				612B4A5D7D37A7D70FF7746A /* ShellModel.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		F1F911F2610BB039ABD9EC60 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				E8A403FD7BBE3FCB953F3E2B /* Calendar */,
+				05C3CC04F0F0E73AF8E190DA /* Data */,
+				3760F8DFFC06EB03C3A51599 /* DayDial */,
+				5E8108F049D6AF0982E7A509 /* Focus */,
+				892788A33AEDC96D2E0BEA57 /* Goals */,
+				54910C655DD355635A76179F /* Habits */,
+				FB4C59DCDD164A7BC53F208F /* Insights */,
+				341DBF644209122BA03E2192 /* Journal */,
+				BA19664499483C29D00074BA /* Medication */,
+				78BBBC0C450217FBDB2DD724 /* Onboarding */,
+				89B7C728A5B38636932A5E95 /* Routines */,
+				E2A8E301EC91A2006D5EFC50 /* Sleep */,
+				84DA13C46C8647D9FEDEED2C /* Tasks */,
+				37E5F8E63A1DAA8F4CEE1E71 /* Today */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		FB4C59DCDD164A7BC53F208F /* Insights */ = {
+			isa = PBXGroup;
+			children = (
+				CF542A7ECA9D9F79B6FB08E9 /* InsightsView.swift */,
+			);
+			path = Insights;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		CF00000000000000000000E1 /* ChronosFlow */ = {
+		34FECFE51B52C45CC3DDC543 /* ChronosWatch */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = CF00000000000000000000F1 /* Build configuration list for PBXNativeTarget "ChronosFlow" */;
+			buildConfigurationList = 6C4FEDE923722E68D7DCFAD9 /* Build configuration list for PBXNativeTarget "ChronosWatch" */;
 			buildPhases = (
-				CF00000000000000000000C2 /* Sources */,
-				CF00000000000000000000C1 /* Frameworks */,
-				CF00000000000000000000C3 /* Resources */,
+				7884DB9C47C6F189BCA08AEC /* Sources */,
+				6883BE2B57C952DDD94C1804 /* Frameworks */,
+				DF3B8221E1C12CB74FF64489 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				33E9A8B0B9CD622A0D3C68DB /* PBXTargetDependency */,
+			);
+			name = ChronosWatch;
+			packageProductDependencies = (
+				9CE96E621A22A493A6218E30 /* ChronosCore */,
+			);
+			productName = ChronosWatch;
+			productReference = 578B427D56B9ED9F5FDC3303 /* ChronosWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+		4425F4DE092E662CB57BE0A1 /* ChronosShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1404444E0238B3C9514BEAB9 /* Build configuration list for PBXNativeTarget "ChronosShareExtension" */;
+			buildPhases = (
+				1AA733C172131A0562C533C0 /* Sources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			fileSystemSynchronizedGroups = (
-				CF00000000000000000000B1 /* ChronosFlow */,
+			name = ChronosShareExtension;
+			packageProductDependencies = (
+			);
+			productName = ChronosShareExtension;
+			productReference = FE3965DE8BE976BC18A1DC86 /* ChronosShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		46682015DACDAAA6F71B6F86 /* ChronosWatchWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9D30CF828EA5884119D8D8BA /* Build configuration list for PBXNativeTarget "ChronosWatchWidgets" */;
+			buildPhases = (
+				5E02CB7AB744DD51E33FCFA0 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ChronosWatchWidgets;
+			packageProductDependencies = (
+			);
+			productName = ChronosWatchWidgets;
+			productReference = 15F60EA4C7F326A29C7C635D /* ChronosWatchWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		628C0E44226D4304BEA65FD9 /* ChronosFlowWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 18C00A3B61739A7D1E495636 /* Build configuration list for PBXNativeTarget "ChronosFlowWidgets" */;
+			buildPhases = (
+				21E7D80144A9823B934B0226 /* Sources */,
+				3F326DC3999F55B663884266 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ChronosFlowWidgets;
+			packageProductDependencies = (
+				8EA79A00125A7BE3AB4B086A /* ChronosCore */,
+			);
+			productName = ChronosFlowWidgets;
+			productReference = 75937FBC4B242A48DCDF50DE /* ChronosFlowWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		A40A0786B8C3A60A1A41D356 /* ChronosFlow */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EB3615E2FD3E443E9FDA90F7 /* Build configuration list for PBXNativeTarget "ChronosFlow" */;
+			buildPhases = (
+				087C4906F49F863DC0F1BECE /* Sources */,
+				79AB4FA42F1A2875E45C2F4C /* Resources */,
+				53EB244EC65B9363A4A6B310 /* Frameworks */,
+				2748FAAE41B28FF2EA34EB27 /* Embed Foundation Extensions */,
+				7147B453D5AAF0ED35A532AF /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1F2EFD6CE1B57AA33955CC21 /* PBXTargetDependency */,
+				880014AD57CA7D31A8224FA0 /* PBXTargetDependency */,
+				F7EFA9931616FC5EDEF6C29D /* PBXTargetDependency */,
 			);
 			name = ChronosFlow;
+			packageProductDependencies = (
+				B0765918800E68975408D1D3 /* ChronosCore */,
+			);
 			productName = ChronosFlow;
-			productReference = CF00000000000000000000A1 /* ChronosFlow.app */;
+			productReference = BB4412ED5A0AFAFF1023F8BF /* ChronosFlow.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		CF00000000000000000000A0 /* Project object */ = {
+		5D109C2FFFD118FD05A43CEE /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2700;
-				LastUpgradeCheck = 2700;
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
 				TargetAttributes = {
-					CF00000000000000000000E1 = {
-						CreatedOnToolsVersion = 27.0;
+					34FECFE51B52C45CC3DDC543 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					4425F4DE092E662CB57BE0A1 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					46682015DACDAAA6F71B6F86 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					628C0E44226D4304BEA65FD9 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					A40A0786B8C3A60A1A41D356 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
-			buildConfigurationList = CF00000000000000000000A2 /* Build configuration list for PBXProject "ChronosFlow" */;
-			compatibilityVersion = "Xcode 16.0";
+			buildConfigurationList = 61302218A0263F33512F5EA8 /* Build configuration list for PBXProject "ChronosFlow" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
 				Base,
+				en,
 			);
-			mainGroup = CF00000000000000000000D1;
+			mainGroup = A46868E85A85AC7B1B17CB8A;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				46F0EDBB93CCBE60698526F4 /* XCLocalSwiftPackageReference "ChronosCore" */,
+			);
 			preferredProjectObjectVersion = 77;
-			productRefGroup = CF00000000000000000000D2 /* Products */;
+			productRefGroup = B38F2820398683EAB7FCEA2D /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				CF00000000000000000000E1 /* ChronosFlow */,
+				A40A0786B8C3A60A1A41D356 /* ChronosFlow */,
+				628C0E44226D4304BEA65FD9 /* ChronosFlowWidgets */,
+				4425F4DE092E662CB57BE0A1 /* ChronosShareExtension */,
+				34FECFE51B52C45CC3DDC543 /* ChronosWatch */,
+				46682015DACDAAA6F71B6F86 /* ChronosWatchWidgets */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		CF00000000000000000000C3 /* Resources */ = {
+		79AB4FA42F1A2875E45C2F4C /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C5F74935BB38C30911BF9E52 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		CF00000000000000000000C2 /* Sources */ = {
+		087C4906F49F863DC0F1BECE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2001C651F95EC0EA8086BCAC /* AIPlannerSheet.swift in Sources */,
+				9EAD03ECE2CB7ADF7B01401C /* AppLock.swift in Sources */,
+				24621C31359AB87C85323D21 /* AppearanceSettingsView.swift in Sources */,
+				0EC2865A0EB157DAD49104CC /* AssistantSheet.swift in Sources */,
+				B17EDD8D518DDA88FFC73B54 /* CalendarManagementView.swift in Sources */,
+				255B8C334C2517F5CA73E3D3 /* CalendarOverlay.swift in Sources */,
+				BE7482CCE38E5FD51AA9A7FC /* ChronosAIPlanner.swift in Sources */,
+				4D60B2A2E0E3F1E83580DBD0 /* ChronosAppIntents.swift in Sources */,
+				D8FF9EB596B56F17F45BDEDB /* ChronosAssistant.swift in Sources */,
+				1293C5DF15E680B32AF98093 /* ChronosAutoBackup.swift in Sources */,
+				0D1281E79593F19F15FC359E /* ChronosBackdrop.swift in Sources */,
+				60A1813697327BA90ECD959F /* ChronosDeviceTransfer.swift in Sources */,
+				694E907EA0B693B4FA8C2942 /* ChronosDialCanvas.swift in Sources */,
+				7B1BC89F1325713936B0FC20 /* ChronosFlowApp.swift in Sources */,
+				D1978DCE17C4FA45F394566B /* ChronosNotifications.swift in Sources */,
+				01C9A89E739D658743C7DA09 /* ChronosResponseCache.swift in Sources */,
+				B2C7EF2C621DEAA54252B0F1 /* ChronosSettings.swift in Sources */,
+				90CD0FF06DF6C307B7447654 /* ChronosStore.swift in Sources */,
+				B3BDDF12ED5E7F6C1BCB3A41 /* ChronosTextTools.swift in Sources */,
+				E49035993F10FAC71DE5DA36 /* ChronosTokens.swift in Sources */,
+				7E28D6E46B5380FC09763CB2 /* ChronosToolbar.swift in Sources */,
+				E88670F2509C94FF955A45D1 /* CommandPalette.swift in Sources */,
+				5131F928AE178FB4C11AF68A /* ConflictResolveSheet.swift in Sources */,
+				078B3EBE4B7CCBA8350AC23B /* ConnectedAppsView.swift in Sources */,
+				9021092D6BFF7EBCEE0913D7 /* DataExport.swift in Sources */,
+				4437CE389B508ABC2F8CE87D /* DataManagementView.swift in Sources */,
+				1FFAC785C03D9189DDBDC1C1 /* DayDialScreen.swift in Sources */,
+				3E6336BFADB8015E696DEF99 /* DialGeometry.swift in Sources */,
+				C492425F0A663F504E7E7AB6 /* DictationController.swift in Sources */,
+				31E100067A100A1D1CCA016D /* Enums.swift in Sources */,
+				B26D44FAD5C24F0FED33A22F /* FocusActivityAttributes.swift in Sources */,
+				3EF2D3A40931A4DCE04A57E4 /* FocusCommandObserver.swift in Sources */,
+				54AC1AB59C54F4370312E4B4 /* FocusLiveActivityView.swift in Sources */,
+				FCEC7E93848AA1D665B0A7C8 /* FocusSessionSnapshot.swift in Sources */,
+				0A54EE093701A9E7430765B7 /* FocusTimerModel.swift in Sources */,
+				74D1D382DA968E8E65B70EFB /* FocusView.swift in Sources */,
+				D0DAF398ACDB508D1B7CC30F /* GapFillSheet.swift in Sources */,
+				4A98948091454EA9CC64A1FA /* GlassSurfaces.swift in Sources */,
+				86D38938898897BB40D6B032 /* Goal.swift in Sources */,
+				FDA2381DB3E28725F02154B4 /* GoalDetailView.swift in Sources */,
+				2FF1A4692E15C381BDD81654 /* GoalsView.swift in Sources */,
+				65E1BEA33155B51FA4B0F160 /* Habit.swift in Sources */,
+				F026DAC52B1E0ABD61FE6BEA /* HabitsView.swift in Sources */,
+				9D6E4F8FA62EF1F82E51BAB9 /* HealthKitSleepImporter.swift in Sources */,
+				85232DD01FA22E3C3F20651A /* InsightsView.swift in Sources */,
+				622DEB416188AC08EC18EE3A /* InteropPeerPayload.swift in Sources */,
+				CC5F4FDDC719553182B175A1 /* InteropSync.swift in Sources */,
+				77430F78067DDB01425D00AC /* JournalEditorSheet.swift in Sources */,
+				1AE10C2AA53D20D40EDFAF25 /* JournalView.swift in Sources */,
+				0AE52BC81693EE2835CF180E /* MedicationPlan.swift in Sources */,
+				0D12F99ADB79F7FCB6CCF4D1 /* MedicationView.swift in Sources */,
+				2449622CFBDD7C0DB72B76AF /* NotificationSettingsView.swift in Sources */,
+				74BC8DE3244DD90745818292 /* OnboardingView.swift in Sources */,
+				C26F4D1A49830BFE1C5BC0EA /* PhoneWatchSync.swift in Sources */,
+				27F60AA4C5196AA070FD6B4C /* Planner.swift in Sources */,
+				1B2B5DA8372DE7BF1309BAB2 /* PlanningSettingsView.swift in Sources */,
+				DDA2FB6A97DBD92B2193D2BD /* PrivacySyncSettingsView.swift in Sources */,
+				A19B987E0D03519BE67D3C55 /* ProactiveDigest.swift in Sources */,
+				CB9CD8D43A4887B55E99351C /* QuickAdd.swift in Sources */,
+				C29E9DA3F1142B37CBAE916E /* RootView.swift in Sources */,
+				0D3D4401C9E325CF0C926A51 /* RoutineEditorSheet.swift in Sources */,
+				BB82AD9EAB065A0124C8541C /* RoutinesView.swift in Sources */,
+				F0C732F581AC01FEBCCF91DF /* SeedData.swift in Sources */,
+				2D1CA48711225EB350516678 /* SettingsView.swift in Sources */,
+				0A58DA9CF8412C0587AB37CA /* ShellBottomBar.swift in Sources */,
+				38A43099B57A4640BC725198 /* ShellModel.swift in Sources */,
+				CED1EDEB5D722CFF19CBB44D /* SleepView.swift in Sources */,
+				3CC70C287D741B965B0943E1 /* TaskBulkImportSheet.swift in Sources */,
+				6B7B1CD889EBA033F80A3669 /* TaskEditorSheet.swift in Sources */,
+				FDA8724B2AD7D8F2C3E3CE6D /* TaskItem.swift in Sources */,
+				723168BCF966B61E05854B15 /* TaskStats.swift in Sources */,
+				332C47CD0EDF87DB16AC33EC /* TaskTemplate.swift in Sources */,
+				8C23659A864CC0F8485716A1 /* TasksView.swift in Sources */,
+				D574EAF0240232ABB4ED4405 /* TimeBlock.swift in Sources */,
+				FA0A683565838EE0006F9BD5 /* TimeBlockEditorSheet.swift in Sources */,
+				D4767E6CE95463D8AAEE601C /* TodayView.swift in Sources */,
+				A92311B3AD356F0635C3C910 /* WatchSyncDTO.swift in Sources */,
+				C049D4D87A84B5F4074F07C3 /* Wellbeing.swift in Sources */,
+				D8DB3EB93606ED8AAA7BC9E8 /* WidgetIntents.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1AA733C172131A0562C533C0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				86312F3D9EB2A6647B8B908F /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		21E7D80144A9823B934B0226 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				787BC7DDBB40FFBB0DD69FFC /* AgendaWidget.swift in Sources */,
+				3C8431ECA5BAEEAB578E5349 /* ChronosStore.swift in Sources */,
+				9BB8423DD31EFA812D62ED61 /* ChronosTokens.swift in Sources */,
+				D4231BAACD846186161B527E /* ChronosWidgetBundle.swift in Sources */,
+				2F3D3AAF84C30402DC063073 /* DialGeometry.swift in Sources */,
+				CAE4067DC61C3498D92161FF /* Enums.swift in Sources */,
+				AFC38072B776C1AA684393E7 /* FocusActivityAttributes.swift in Sources */,
+				ABAE2F7E75E1011D423E027D /* FocusLiveActivityWidget.swift in Sources */,
+				92E8368CD15B27BA2ED6E881 /* FocusSessionSnapshot.swift in Sources */,
+				47A20BE2CB006EDD01C1E9CD /* FocusWidget.swift in Sources */,
+				333F3195EB5BC33344F8E8DE /* Goal.swift in Sources */,
+				6AF6037A4FD244D9F07E66A7 /* Habit.swift in Sources */,
+				006FC1EBA838FC1A705771CB /* HabitsWidget.swift in Sources */,
+				A6AFAB5DAEE9E86DD6A9CA3C /* MedicationPlan.swift in Sources */,
+				66F119DA424ED277A860794F /* MedicationWidget.swift in Sources */,
+				164614E4000987B96191F05C /* SeedData.swift in Sources */,
+				942939BBD7E0AC515CE287B1 /* TaskItem.swift in Sources */,
+				883B08EC0554FE38C2E3D5EA /* TasksWidget.swift in Sources */,
+				1AB0D9E1906576FFFE19D595 /* TimeBlock.swift in Sources */,
+				33A565C7DD7C1F51472447BF /* TodayWidget.swift in Sources */,
+				520B58756C2619DC8BF988F6 /* WatchSyncDTO.swift in Sources */,
+				8C5B0E5ECD1BE9E7E021BFD7 /* Wellbeing.swift in Sources */,
+				7945BFF0200E5641F643AEC1 /* WidgetIntents.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5E02CB7AB744DD51E33FCFA0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E9E70AA38900837B6FBECEE0 /* ChronosWatchWidgetBundle.swift in Sources */,
+				EF013008FF2BE4C32332BBF6 /* HabitsComplication.swift in Sources */,
+				254801C51FD992B280E6DA8C /* MedsComplication.swift in Sources */,
+				B31B02EC67DDB21AC3D82B5C /* NextBlockWidget.swift in Sources */,
+				422865A723DA17DD68CC6899 /* WatchSyncDTO.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7884DB9C47C6F189BCA08AEC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6FB3E53989A3F0370997EDA6 /* ChronosWatchApp.swift in Sources */,
+				DA82D5C84DDC8F8678DFEAD1 /* WatchConnectivityClient.swift in Sources */,
+				61B77A7933FD0879807EE0CF /* WatchRootView.swift in Sources */,
+				AB66FBDC23081A4BD90006EC /* WatchSyncDTO.swift in Sources */,
+				0976B0384517D306E89FBFDD /* WatchTokens.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		1F2EFD6CE1B57AA33955CC21 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 628C0E44226D4304BEA65FD9 /* ChronosFlowWidgets */;
+			targetProxy = ADFDD5D17479043D30C6ECF8 /* PBXContainerItemProxy */;
+		};
+		33E9A8B0B9CD622A0D3C68DB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 46682015DACDAAA6F71B6F86 /* ChronosWatchWidgets */;
+			targetProxy = D360F0087189B5EE13C67922 /* PBXContainerItemProxy */;
+		};
+		880014AD57CA7D31A8224FA0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 34FECFE51B52C45CC3DDC543 /* ChronosWatch */;
+			targetProxy = D8CC2CB274208569537C7DDE /* PBXContainerItemProxy */;
+		};
+		F7EFA9931616FC5EDEF6C29D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4425F4DE092E662CB57BE0A1 /* ChronosShareExtension */;
+			targetProxy = B71A08B8F802B0D199EC4106 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
-		CF0000000000000000000101 /* Debug */ = {
+		0658C68223C7689FE89CB605 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu17;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
-				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
-				ONLY_ACTIVE_ARCH = YES;
-				SDKROOT = iphoneos;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
-			};
-			name = Debug;
-		};
-		CF0000000000000000000102 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				ENABLE_NS_ASSERTIONS = NO;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu17;
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
-				MTL_ENABLE_DEBUG_INFO = NO;
-				SDKROOT = iphoneos;
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_VERSION = 5.0;
-				VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
-		CF0000000000000000000111 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = ChronosFlow/ChronosFlow.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = ChronosFlow/Info.plist;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				CODE_SIGN_ENTITLEMENTS = ChronosWatchWidgets/ChronosWatchWidgets.entitlements;
+				INFOPLIST_FILE = ChronosWatchWidgets/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.chronosflow.app;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chronosflow.app.watchkitapp.widgets;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Release;
+		};
+		249591745314CD2E2216BD41 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ChronosShareExtension/ShareExtension.entitlements;
+				INFOPLIST_FILE = ChronosShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.chronosflow.app.share;
+				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
-		CF0000000000000000000112 /* Release */ = {
+		258834852645788BA89B4241 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ChronosWatchWidgets/ChronosWatchWidgets.entitlements;
+				INFOPLIST_FILE = ChronosWatchWidgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.chronosflow.app.watchkitapp.widgets;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Debug;
+		};
+		325BA04985AAE4503188BEB1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+				WATCHOS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Debug;
+		};
+		3AC72626A845B3521F6C3C36 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = ChronosFlow/ChronosFlow.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = ChronosFlow/Info.plist;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.chronosflow.app;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		5F1AAD8B616C4D766A4955AE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ChronosWatch/ChronosWatch.entitlements;
+				INFOPLIST_KEY_CFBundleDisplayName = ChronosFlow;
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.chronosflow.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chronosflow.app.watchkitapp;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Debug;
+		};
+		6C96A22653CFDB54D022B0F0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ChronosFlowWidgets/ChronosFlowWidgets.entitlements;
+				INFOPLIST_FILE = ChronosFlowWidgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.chronosflow.app.widgets;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		6E6DC3EFD3D1B05EC7E6AC41 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 5.0;
+				WATCHOS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Release;
+		};
+		A2B7CA7174D0595A609C478A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ChronosWatch/ChronosWatch.entitlements;
+				INFOPLIST_KEY_CFBundleDisplayName = ChronosFlow;
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.chronosflow.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chronosflow.app.watchkitapp;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Release;
+		};
+		AA074E9C81A917997342E853 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ChronosFlow/ChronosFlow.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = ChronosFlow/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.chronosflow.app;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B46188CB74605A3BB7F3AFAA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ChronosFlowWidgets/ChronosFlowWidgets.entitlements;
+				INFOPLIST_FILE = ChronosFlowWidgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.chronosflow.app.widgets;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F175D306CBE957942E691206 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ChronosShareExtension/ShareExtension.entitlements;
+				INFOPLIST_FILE = ChronosShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.chronosflow.app.share;
+				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -232,25 +1398,83 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		CF00000000000000000000A2 /* Build configuration list for PBXProject "ChronosFlow" */ = {
+		1404444E0238B3C9514BEAB9 /* Build configuration list for PBXNativeTarget "ChronosShareExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				CF0000000000000000000101 /* Debug */,
-				CF0000000000000000000102 /* Release */,
+				249591745314CD2E2216BD41 /* Debug */,
+				F175D306CBE957942E691206 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			defaultConfigurationName = Debug;
 		};
-		CF00000000000000000000F1 /* Build configuration list for PBXNativeTarget "ChronosFlow" */ = {
+		18C00A3B61739A7D1E495636 /* Build configuration list for PBXNativeTarget "ChronosFlowWidgets" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				CF0000000000000000000111 /* Debug */,
-				CF0000000000000000000112 /* Release */,
+				6C96A22653CFDB54D022B0F0 /* Debug */,
+				B46188CB74605A3BB7F3AFAA /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			defaultConfigurationName = Debug;
+		};
+		61302218A0263F33512F5EA8 /* Build configuration list for PBXProject "ChronosFlow" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				325BA04985AAE4503188BEB1 /* Debug */,
+				6E6DC3EFD3D1B05EC7E6AC41 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6C4FEDE923722E68D7DCFAD9 /* Build configuration list for PBXNativeTarget "ChronosWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5F1AAD8B616C4D766A4955AE /* Debug */,
+				A2B7CA7174D0595A609C478A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9D30CF828EA5884119D8D8BA /* Build configuration list for PBXNativeTarget "ChronosWatchWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				258834852645788BA89B4241 /* Debug */,
+				0658C68223C7689FE89CB605 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		EB3615E2FD3E443E9FDA90F7 /* Build configuration list for PBXNativeTarget "ChronosFlow" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA074E9C81A917997342E853 /* Debug */,
+				3AC72626A845B3521F6C3C36 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		46F0EDBB93CCBE60698526F4 /* XCLocalSwiftPackageReference "ChronosCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ChronosCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		8EA79A00125A7BE3AB4B086A /* ChronosCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ChronosCore;
+		};
+		9CE96E621A22A493A6218E30 /* ChronosCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ChronosCore;
+		};
+		B0765918800E68975408D1D3 /* ChronosCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ChronosCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
-	rootObject = CF00000000000000000000A0 /* Project object */;
+	rootObject = 5D109C2FFFD118FD05A43CEE /* Project object */;
 }

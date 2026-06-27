@@ -1360,6 +1360,23 @@ internal fun SidebarPageContent(
                         }
                     }
                     ActionGrid(listOf("View Diagnostics" to onOpenDiagnostics, "View Logs" to onOpenLogs))
+                    val developerContext = LocalContext.current
+                    if (developerContext.isDebuggableBuild()) {
+                        ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                ChronosSectionTitle(
+                                    title = "Focus notification demo",
+                                    subtitle = "Drives the live notification through a 5s boundary / completion (debug only)"
+                                )
+                                ActionGrid(
+                                    listOf(
+                                        "Split boundary (5s)" to { developerContext.startFocusSplitBoundaryDemo() },
+                                        "Completion (5s)" to { developerContext.startFocusCompletionDemo() }
+                                    )
+                                )
+                            }
+                        }
+                    }
                 }
                 SidebarPage.ABOUT -> {
                     val aboutContext = LocalContext.current

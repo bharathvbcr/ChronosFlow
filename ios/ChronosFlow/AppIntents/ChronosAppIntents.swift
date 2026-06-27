@@ -849,7 +849,7 @@ struct LogSleepAndJournalIntent: AppIntent {
         }
         try? context.save()
         let dialog = (sleepMsg + journalMsg).isEmpty ? "Nothing to log." : sleepMsg + journalMsg
-        return .result(dialog: dialog)
+        return .result(dialog: IntentDialog(stringLiteral: dialog))
     }
 }
 
@@ -917,15 +917,6 @@ struct ChronosShortcuts: AppShortcutsProvider {
         AppShortcut(intent: LogMedicationDoseIntent(),
                     phrases: ["Log a dose in \(.applicationName)", "I took my medication in \(.applicationName)"],
                     shortTitle: "Log Dose", systemImageName: "pills.fill")
-        AppShortcut(intent: SkipHabitIntent(),
-                    phrases: ["Skip a habit in \(.applicationName)", "\(.applicationName) skip habit"],
-                    shortTitle: "Skip Habit", systemImageName: "arrow.uturn.forward")
-        AppShortcut(intent: SkipMedicationDoseIntent(),
-                    phrases: ["Skip a dose in \(.applicationName)", "\(.applicationName) skip medication"],
-                    shortTitle: "Skip Dose", systemImageName: "pills")
-        AppShortcut(intent: ListMedicationsIntent(),
-                    phrases: ["List my medications in \(.applicationName)", "\(.applicationName) my medications"],
-                    shortTitle: "List Medications", systemImageName: "list.bullet.clipboard")
         AppShortcut(intent: LogSleepIntent(),
                     phrases: ["Log my sleep in \(.applicationName)", "\(.applicationName) sleep log"],
                     shortTitle: "Log Sleep", systemImageName: "bed.double.fill")
@@ -938,11 +929,10 @@ struct ChronosShortcuts: AppShortcutsProvider {
         AppShortcut(intent: ReflowRemainingDayIntent(),
                     phrases: ["Reflow my day in \(.applicationName)", "Fix my day in \(.applicationName)"],
                     shortTitle: "Reflow Day", systemImageName: "arrow.triangle.2.circlepath")
-        AppShortcut(intent: LogSleepAndJournalIntent(),
-                    phrases: ["Log sleep and journal in \(.applicationName)", "\(.applicationName) evening log"],
-                    shortTitle: "Evening Log", systemImageName: "moon.zzz.fill")
-        AppShortcut(intent: AddTaskFromTextIntent(),
-                    phrases: ["Add a task from this text in \(.applicationName)"],
-                    shortTitle: "Task from Text", systemImageName: "text.badge.plus")
+        // NOTE: AppShortcutsProvider is hard-capped at 10 shortcuts by the App Intents compiler
+        // (appintentsmetadataprocessor halts above 10). The five lower-value voice phrases below are
+        // intentionally not registered as pre-canned shortcuts — their intents (SkipHabitIntent,
+        // SkipMedicationDoseIntent, ListMedicationsIntent, LogSleepAndJournalIntent,
+        // AddTaskFromTextIntent) remain fully usable from the Shortcuts app and Siri.
     }
 }

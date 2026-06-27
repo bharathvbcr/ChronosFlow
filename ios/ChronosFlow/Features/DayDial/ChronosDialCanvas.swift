@@ -255,10 +255,40 @@ struct ChronosDialCanvas: View {
             Text(nowMinute.clockTime)
                 .font(.chronosTitle)
                 .monospacedDigit()
-            Text("\(blocks.count) blocks")
-                .font(.chronosCaption)
-                .foregroundStyle(.secondary)
+            // Contextual now/next status (parity with the Android dial hub) instead of a bare count.
+            if let current = currentBlock {
+                Text(current.title).font(.chronosCaption).lineLimit(1)
+                Text("Ends in \(durationLabel(current.startMinuteOfDay + current.durationMinutes - nowMinute))")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else if let next = nextBlock {
+                Text("Next: \(next.title)").font(.chronosCaption).lineLimit(1)
+                Text("at \(next.startMinuteOfDay.clockTime)")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else {
+                Text("\(blocks.count) blocks")
+                    .font(.chronosCaption).foregroundStyle(.secondary)
+            }
         }
+        .frame(maxWidth: 116)
+        .multilineTextAlignment(.center)
+    }
+
+    /// The block covering the current minute (same-day lanes; midnight-crossing handled coarsely).
+    private var currentBlock: TimeBlock? {
+        blocks.first { nowMinute >= $0.startMinuteOfDay && nowMinute < $0.startMinuteOfDay + $0.durationMinutes }
+    }
+
+    /// The next block starting after now (earliest), for the "Next: … at HH:MM" hub line.
+    private var nextBlock: TimeBlock? {
+        blocks.filter { $0.startMinuteOfDay > nowMinute }.min { $0.startMinuteOfDay < $1.startMinuteOfDay }
+    }
+
+    /// "45 min" / "1h 20m" for a minute count (clamped at 0).
+    private func durationLabel(_ minutes: Int) -> String {
+        let m = max(0, minutes)
+        if m < 60 { return "\(m) min" }
+        let h = m / 60, rem = m % 60
+        return rem == 0 ? "\(h)h" : "\(h)h \(rem)m"
     }
 
     // MARK: Hit testing

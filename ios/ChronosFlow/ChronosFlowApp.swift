@@ -25,6 +25,9 @@ struct ChronosFlowApp: App {
         PhoneWatchSync.shared.activate()
         // First-run seed (mirrors the Android first-run onboarding/seed pass), then enqueue backup
         // and push the initial snapshot to the watch.
+        // Capture the container locally so this escaping `Task` closure doesn't capture the
+        // still-initializing `self` value-type struct (which the compiler rejects).
+        let container = container
         Task { @MainActor in
             SeedData.populate(container.mainContext)
             ChronosAutoBackup.schedule()
@@ -124,8 +127,10 @@ enum ChronosBackgroundSync {
     static func registerAll() {
         let permitted = permittedIdentifiers
         if permitted.contains(interopTaskIdentifier) {
+            // Route the interop identifier into the real DevTime import pipeline (I02) instead of the
+            // reschedule-only stub. InteropSync.handleRefresh owns its own reschedule + completion.
             BGTaskScheduler.shared.register(forTaskWithIdentifier: interopTaskIdentifier, using: nil) { task in
-                handle(task, identifier: interopTaskIdentifier, interval: interopInterval)
+                InteropSync.handleRefresh(task)
             }
         }
         if permitted.contains(calendarTaskIdentifier) {
