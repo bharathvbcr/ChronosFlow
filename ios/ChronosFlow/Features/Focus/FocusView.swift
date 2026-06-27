@@ -10,6 +10,8 @@ struct FocusView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @State private var timer = FocusTimerModel.shared
+    /// Drives the repeating opacity pulse on the active phase dot (see `phaseDots`).
+    @State private var pulseOpacity: Double = 1.0
     var prefilledBlockID: String? = nil
 
     var body: some View {
@@ -19,8 +21,11 @@ struct FocusView: View {
                 VStack(spacing: ChronosSpacing.hero) {
                     Text(phaseTitle).font(.chronosTitle).foregroundStyle(.secondary)
                     timerRing
-                    if timer.isPaused && timer.phase != .idle {
-                        Label("Paused", systemImage: "pause.fill")
+                    // Paused affordance. Mirrors Android's "Paused · tap play to resume" copy, shown
+                    // only while genuinely paused mid-phase (not while holding at a phase boundary,
+                    // where pause is a no-op and a different prompt applies).
+                    if timer.isPaused && timer.phase != .idle && !timer.awaitingPhaseAdvance {
+                        Label("Paused · tap play to resume", systemImage: "pause.fill")
                             .font(.chronosLabel).foregroundStyle(.secondary)
                             .transition(.opacity)
                     }
@@ -39,6 +44,14 @@ struct FocusView: View {
             // were backgrounded or on another tab (FocusCommandBridge — see WidgetIntents.swift).
             .onAppear {
                 FocusCommandObserver.startIfNeeded()
+                // F03: explicitly restore an in-flight SPLIT session left by a previous app run BEFORE
+                // anything else, so a session survives relaunch. Mirrors Android
+                // `DayDialFocusDelegate.restoreActiveSplitFromStore()`: `attach` only rehydrates when
+                // the live model is idle and a RUNNING/PAUSED snapshot exists, so it never clobbers an
+                // already-running session. After restore, re-sync a boundary that may have elapsed
+                // while the app was killed/backgrounded.
+                timer.attach(context: context)
+                timer.recoverBoundaryIfNeeded()
                 drainFocusCommands()
                 // Restore the user's last-used split preset (persisted in ChronosSettings) when idle,
                 // so a new session defaults to their preference instead of the hard-coded 25 · 5.
@@ -47,7 +60,13 @@ struct FocusView: View {
                 }
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { drainFocusCommands() }
+                if phase == .active {
+                    // Re-sync across a backgrounded phase boundary (the Timer doesn't fire while
+                    // suspended), then restore any session persisted by a kill, then drain controls.
+                    timer.recoverBoundaryIfNeeded()
+                    timer.attach(context: context)
+                    drainFocusCommands()
+                }
             }
             // A control tapped while we're already foregrounded on this tab applies immediately.
             .onReceive(NotificationCenter.default.publisher(for: FocusCommandObserver.didReceive)) { _ in
@@ -131,16 +150,31 @@ struct FocusView: View {
 
     // MARK: Phase dots
 
+    /// True while the current phase is actively running (drives the active-dot pulse).
+    private var phaseIsRunning: Bool {
+        timer.phase != .idle && !timer.isPaused && !timer.awaitingPhaseAdvance
+    }
+
     private var phaseDots: some View {
         HStack(spacing: 8) {
             ForEach(0..<timer.totalPhases, id: \.self) { index in
+                let isCurrent = index == timer.phaseNumber - 1
                 Circle()
                     .fill(dotColor(for: index))
-                    .frame(width: index == timer.phaseNumber - 1 ? 12 : 8,
-                           height: index == timer.phaseNumber - 1 ? 12 : 8)
+                    .frame(width: isCurrent ? 12 : 8, height: isCurrent ? 12 : 8)
+                    // Continuously pulse the active dot while the phase is running (Android's
+                    // active-phase emphasis). `Circle` is a Shape, not an SF Symbol, so we drive the
+                    // pulse with a repeating opacity animation rather than `.symbolEffect`.
+                    .opacity(isCurrent && phaseIsRunning ? pulseOpacity : 1.0)
                     .animation(ChronosMotion.bouncy, value: timer.phaseNumber)
+                    .animation(
+                        isCurrent && phaseIsRunning
+                            ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
+                            : .default,
+                        value: pulseOpacity)
             }
         }
+        .onAppear { pulseOpacity = 0.4 }
         .accessibilityLabel("Phase \(timer.phaseNumber) of \(timer.totalPhases)")
     }
 
@@ -258,10 +292,16 @@ struct FocusView: View {
             .buttonStyle(.borderedProminent).tint(ChronosColors.brandAccent)
             .buttonBorderShape(.circle).controlSize(.large)
 
-            Button { timer.skipPhase() } label: {
-                Image(systemName: "forward.fill").font(.title)
+            // Skip advances to the next phase boundary (Android's ⏭ skip). Only meaningful for a
+            // multi-phase split session — for a flat session there's no next phase to skip into, so
+            // the Stop button is the correct affordance. Hidden while paused to match Android.
+            if timer.isSplitSession && !timer.isPaused {
+                Button { timer.skipPhase() } label: {
+                    Image(systemName: "forward.fill").font(.title)
+                }
+                .buttonStyle(.bordered).buttonBorderShape(.circle).controlSize(.large)
+                .accessibilityLabel("Skip phase")
             }
-            .buttonStyle(.bordered).buttonBorderShape(.circle).controlSize(.large)
             }
         }
     }
@@ -286,11 +326,27 @@ struct FocusView: View {
         }
     }
 
-    /// +5m / +15m controls to lengthen the CURRENT phase mid-session (Android's session extend).
-    /// (Shorten is intentionally omitted: `FocusTimerModel.extend` clamps to positive minutes, so a
-    /// "-5m" control would be a no-op — extend-only matches the working model API.)
+    /// Lengthen (+5m / +15m) or shorten (-5m / -15m) the CURRENT phase mid-session. Mirrors Android's
+    /// FocusTab two-row extend/shorten controls (`onExtend` / `onShorten`): extend adds to the live
+    /// countdown, shorten subtracts with a 1-minute floor (`FocusTimerModel.shorten`, the analogue of
+    /// Android's `coerceAtLeast(5)`). All four are hidden while holding at a boundary (handled by the
+    /// caller showing `runningControls` only when not awaiting advance).
     private var adjustControls: some View {
         HStack(spacing: ChronosSpacing.medium) {
+            Button { timer.shorten(minutes: 15) } label: {
+                Label("15m", systemImage: "minus").font(.chronosCaption)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+            }
+            .buttonStyle(.bordered).buttonBorderShape(.capsule).tint(ChronosColors.brandSecondary)
+            .accessibilityLabel("Subtract 15 minutes")
+
+            Button { timer.shorten(minutes: 5) } label: {
+                Label("5m", systemImage: "minus").font(.chronosCaption)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+            }
+            .buttonStyle(.bordered).buttonBorderShape(.capsule).tint(ChronosColors.brandSecondary)
+            .accessibilityLabel("Subtract 5 minutes")
+
             Button { timer.extend(minutes: 5) } label: {
                 Label("5m", systemImage: "plus").font(.chronosCaption)
                     .padding(.horizontal, 10).padding(.vertical, 6)

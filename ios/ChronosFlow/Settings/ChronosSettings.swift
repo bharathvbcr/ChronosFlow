@@ -55,6 +55,14 @@ final class ChronosSettings {
         planningStyle = PlanningStyle(rawValue: defaults.string(forKey: "ai.planningStyle") ?? "") ?? .balanced
         autoApplyPlan = defaults.boolOr("ai.autoApply", false)
 
+        // Planning behaviour toggles (Android parity: SidebarPageContent.kt lines 961–963,
+        // "Protect focus blocks" / "Add breaks automatically" / "Preserve manual blocks").
+        // Defaults match Android's CheckboxSetting initial state: protect focus on, auto-breaks on,
+        // preserve manual edits on — conservative choices that never silently discard the user's work.
+        protectFocusBlocks = defaults.boolOr("ai.protectFocus", true)
+        addBreaksAutomatically = defaults.boolOr("ai.autoBreaks", true)
+        preserveManualBlocks = defaults.boolOr("ai.preserveManual", true)
+
         // Notifications.
         remindersEnabled = defaults.boolOr("notif.reminders", true)
         medicationRemindersEnabled = defaults.boolOr("notif.medication", true)
@@ -140,6 +148,15 @@ final class ChronosSettings {
     var aiEnabled: Bool { didSet { defaults.set(aiEnabled, forKey: "ai.enabled") } }
     var planningStyle: PlanningStyle { didSet { defaults.set(planningStyle.rawValue, forKey: "ai.planningStyle") } }
     var autoApplyPlan: Bool { didSet { defaults.set(autoApplyPlan, forKey: "ai.autoApply") } }
+    /// When on, the planner never reschedules or shortens existing FOCUS blocks when it regenerates a
+    /// plan. Android parity: onProtectFocusChanged ("Protect focus blocks").
+    var protectFocusBlocks: Bool { didSet { defaults.set(protectFocusBlocks, forKey: "ai.protectFocus") } }
+    /// When on, the planner inserts short recovery breaks between long work stretches automatically.
+    /// Android parity: onAddBreaksAutomaticallyChanged ("Add breaks automatically").
+    var addBreaksAutomatically: Bool { didSet { defaults.set(addBreaksAutomatically, forKey: "ai.autoBreaks") } }
+    /// When on, blocks the user placed or edited by hand are kept exactly as-is across regenerations.
+    /// Android parity: onPreserveManualBlocksChanged ("Preserve manual blocks").
+    var preserveManualBlocks: Bool { didSet { defaults.set(preserveManualBlocks, forKey: "ai.preserveManual") } }
 
     // MARK: Notifications
     var remindersEnabled: Bool { didSet { defaults.set(remindersEnabled, forKey: "notif.reminders") } }
@@ -322,6 +339,59 @@ enum PlanningStyle: String, CaseIterable, Identifiable, Sendable {
         case .focused: "Long deep-work stretches, fewer breaks"
         case .balanced: "A steady mix of focus and recovery"
         case .flexible: "Shorter blocks, more breathing room"
+        }
+    }
+}
+
+/// A calendar/timeline source label, mirroring Android's `CalendarTimelineSourceLabels`
+/// (SidebarPageContent.kt). The six sources the Detailed Calendar groups items under, in the same
+/// sort order Android uses (Calendar, All-day calendar, then the schedule-side sources).
+enum CalendarTimelineSource: String, CaseIterable, Identifiable, Sendable {
+    case calendar = "Calendar"
+    case allDayCalendar = "All-day calendar"
+    case task = "Task"
+    case habit = "Habit"
+    case medication = "Medication"
+    case plan = "Plan"
+
+    var id: String { rawValue }
+    var label: String { rawValue }
+
+    /// SF Symbol used for the source header / accent, chosen to read like Android's per-source icons.
+    var symbol: String {
+        switch self {
+        case .calendar: "calendar"
+        case .allDayCalendar: "calendar.day.timeline.left"
+        case .task: "checklist"
+        case .habit: "repeat"
+        case .medication: "pills"
+        case .plan: "sparkles"
+        }
+    }
+}
+
+/// The three segmented presets the Android Detailed Calendar exposes (CalendarTimelinePreset).
+/// `all` = all 6 sources, `schedule` = the 4 schedule-side sources, `calendar` = the 2 calendar sources.
+/// (Android also has a `custom` case for manual mixes; iOS keeps the three segmented presets.)
+enum CalendarTimelinePreset: String, CaseIterable, Identifiable, Sendable {
+    case all, schedule, calendar
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .all: "All"
+        case .schedule: "Schedule"
+        case .calendar: "Calendar"
+        }
+    }
+
+    /// The set of sources this preset surfaces — byte-aligned with Android's preset→source mapping
+    /// (SidebarPageContent.kt lines 1548–1553).
+    var sources: Set<CalendarTimelineSource> {
+        switch self {
+        case .all: Set(CalendarTimelineSource.allCases)
+        case .schedule: [.task, .habit, .medication, .plan]
+        case .calendar: [.calendar, .allDayCalendar]
         }
     }
 }

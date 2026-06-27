@@ -137,10 +137,12 @@ final class ShellState {
         presentedRoute = route
     }
 
-    /// Select a primary tab, closing transient chrome (Android `onShellDestinationSelected`).
+    /// Select a primary tab, closing transient chrome AND any presented secondary page (Android
+    /// `onShellDestinationSelected` pops back to the Day root before switching primary destinations).
     func select(_ tab: PrimaryTab) {
         quickAddExpanded = false
         commandPaletteShown = false
+        presentedRoute = nil
         selectedTab = tab
     }
 }

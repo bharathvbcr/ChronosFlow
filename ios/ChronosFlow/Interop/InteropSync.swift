@@ -128,8 +128,12 @@ enum InteropSync {
     @discardableResult
     @MainActor
     static func runSync(now: Date = .now,
-                        context: ModelContext = ChronosStore.shared.mainContext,
+                        context: ModelContext? = nil,
                         settings: ChronosSettings = .shared) async -> Outcome {
+        // Resolve the default store inside the @MainActor body: `ModelContainer.mainContext` is
+        // main-actor-isolated and can't be referenced from a (nonisolated) default-argument
+        // expression under the Swift 5 language mode this target builds in.
+        let context = context ?? ChronosStore.shared.mainContext
         // Gate 1 — consent. Off → silent no-op; deliberately leave existing imports untouched so a
         // transient consent toggle / missing payload doesn't churn the mirror (Android parity:
         // "skip, keeping existing imports").

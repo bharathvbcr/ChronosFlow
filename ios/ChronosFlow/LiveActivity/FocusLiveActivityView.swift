@@ -12,6 +12,12 @@ struct FocusLiveActivityWidget: Widget {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(context.state.phase.title)
                             .font(.headline.bold()).foregroundStyle(.primary)
+                        // Phase count on the lock-screen tile (Android's "Focus 2 of 4" parity). Shown
+                        // only for a genuine multi-phase split; a flat session has no phase context.
+                        if context.state.totalPhases > 1 {
+                            Text("Phase \(context.state.phaseNumber) of \(context.state.totalPhases)")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
                         if let end = context.state.blockEndsAt {
                             Text("until \(end, style: .time)")
                                 .font(.caption).foregroundStyle(.secondary)
@@ -19,12 +25,27 @@ struct FocusLiveActivityWidget: Widget {
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(timerInterval: Date()...context.state.phaseEndsAt,
-                             countsDown: true)
-                            .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
-                            .multilineTextAlignment(.trailing)
-                        Text("Phase \(context.state.phaseNumber)/\(context.state.totalPhases)")
-                            .font(.caption2).foregroundStyle(.secondary)
+                        if context.state.isPaused && !context.state.awaitingAdvance {
+                            // Clear paused state mirroring Android's "Paused · tap play to resume".
+                            // A live countdown is meaningless while paused, so we freeze the readout
+                            // and surface the resume hint instead.
+                            Label("Paused", systemImage: "pause.fill")
+                                .font(.system(size: 22, weight: .bold, design: .rounded))
+                                .foregroundStyle(.secondary)
+                            Text("tap play to resume")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        } else if context.state.awaitingAdvance {
+                            // Holding at a phase boundary — the timer has reached 0 and is waiting for
+                            // the user to advance. Show the hold state rather than a 00:00 countdown.
+                            Label("Tap to continue", systemImage: "forward.fill")
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundStyle(.primary)
+                        } else {
+                            Text(timerInterval: Date()...context.state.phaseEndsAt,
+                                 countsDown: true)
+                                .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
+                                .multilineTextAlignment(.trailing)
+                        }
                     }
                 }
                 // Segmented Pomodoro progress bar — one segment per work/break phase, sized by its
@@ -57,14 +78,27 @@ struct FocusLiveActivityWidget: Widget {
                     }
                 }
             } compactLeading: {
-                Image(systemName: "timer").foregroundStyle(.orange)
+                // Swap the glyph to a pause when paused so the Island reads as paused at a glance.
+                Image(systemName: context.state.isPaused ? "pause.fill" : "timer")
+                    .foregroundStyle(context.state.isPaused ? Color.secondary : .orange)
             } compactTrailing: {
-                Text(timerInterval: Date()...context.state.phaseEndsAt,
-                     countsDown: true)
-                    .font(.caption.monospacedDigit())
-                    .frame(width: 40)
+                if context.state.isPaused && !context.state.awaitingAdvance {
+                    Image(systemName: "pause.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 40)
+                } else if context.state.awaitingAdvance {
+                    Image(systemName: "forward.fill")
+                        .font(.caption)
+                        .frame(width: 40)
+                } else {
+                    Text(timerInterval: Date()...context.state.phaseEndsAt,
+                         countsDown: true)
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 40)
+                }
             } minimal: {
-                Image(systemName: "timer")
+                Image(systemName: context.state.isPaused ? "pause.fill" : "timer")
             }
         }
     }
@@ -87,6 +121,16 @@ private struct FocusSegmentedBar: View {
                             // Subtract the cumulative inter-segment spacing so widths still sum to the
                             // available width (n segments → n-1 gaps of 2pt).
                             .frame(width: max(2, segment.fractionalWidth * availableWidth(geo.size.width)))
+                            // Gentle active-phase pulse: the current segment, while actively running
+                            // (not paused / ending-soon handled by color), breathes to draw the eye —
+                            // the Live-Activity analogue of the in-app active-dot pulse. ActivityKit
+                            // animates ContentState transitions; we drive a repeating opacity here.
+                            .opacity(isRunningCurrent(segment) ? 0.7 : 1.0)
+                            .animation(
+                                isRunningCurrent(segment)
+                                    ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
+                                    : .default,
+                                value: isRunningCurrent(segment))
                     }
                 }
                 .frame(maxHeight: .infinity, alignment: .center)
@@ -94,6 +138,12 @@ private struct FocusSegmentedBar: View {
             .frame(height: 5)
             .accessibilityHidden(true)
         }
+    }
+
+    /// The current focus segment while it is actively ticking (`.running`). Breaks, paused, and
+    /// ending-soon segments carry their own color emphasis and are not pulsed.
+    private func isRunningCurrent(_ segment: FocusActivityAttributes.ContentState.PhaseSegmentInfo) -> Bool {
+        segment.isCurrent && !segment.isBreak && segment.currentState == .running
     }
 
     private func availableWidth(_ total: CGFloat) -> CGFloat {

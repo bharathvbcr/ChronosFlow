@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import ActivityKit
 import SwiftData
+import WidgetKit
 import ChronosCore
 
 /// Drives a BLOCK-BOUNDED focus session split into a fixed work/break phase sequence — the iOS port
@@ -15,6 +16,12 @@ import ChronosCore
 @MainActor
 @Observable
 final class FocusTimerModel {
+    /// Process-wide instance so cross-process focus commands (Live Activity / focus-widget controls,
+    /// routed app-wide by `ChronosFocusCommandRouter.drain()`) drive the SAME timer the Focus UI
+    /// renders. `FocusView` binds to this singleton; without a shared instance the router would apply
+    /// commands to a model no view observes — the silent-no-op the router is meant to fix.
+    static let shared = FocusTimerModel()
+
     /// Coarse phase the UI renders. `work` covers any focus phase; `shortBreak` covers break phases
     /// (kept for ring colour + Live-Activity title parity with the old model).
     enum Phase: Equatable { case idle, work, shortBreak, longBreak, completed }
@@ -157,6 +164,43 @@ final class FocusTimerModel {
             runTicker()
         }
         updateLiveActivity()
+    }
+
+    /// Shorten the current phase by `minutes` (the in-session "-5m" / "-15m" controls). Mirrors the
+    /// Android `DayDialFocusDelegate.shortenFocusSession(minutes:)`, which subtracts from the active
+    /// phase's planned duration with a 5-minute floor (`coerceAtLeast(5)`). Here we subtract from the
+    /// live `remaining` countdown with a 1-minute floor so the phase can be wound down but never
+    /// reaches a degenerate zero that would silently trip the boundary. No-op when idle, completed,
+    /// holding at a boundary, or given a non-positive delta.
+    func shorten(minutes: Int) {
+        guard phase != .idle, phase != .completed, !awaitingPhaseAdvance, minutes > 0 else { return }
+        // Floor mirrors Android's coerceAtLeast: keep at least 60s on the clock so the user always
+        // gets an explicit boundary tap rather than an instant auto-advance from a -Nm press.
+        let floor: TimeInterval = 60
+        remaining = max(floor, remaining - TimeInterval(minutes * 60))
+        if !isPaused {
+            phaseEndsAt = Date.now.addingTimeInterval(remaining)
+            runTicker()
+        }
+        updateLiveActivity()
+    }
+
+    /// Re-sync the phase machine after the app returns to the foreground across a phase boundary.
+    /// While backgrounded the `Timer` does not fire, so a phase that should have elapsed leaves
+    /// `remaining` stale. This recomputes `remaining` from the wall-clock `phaseEndsAt` and, if the
+    /// phase has fully elapsed, drops into the boundary hold (or completes the block). The iOS port of
+    /// Android `DayDialFocusDelegate.checkPhaseBoundary()` being driven on resume. Safe to call from
+    /// `FocusView.onAppear` / scene-active; a no-op when idle, paused, completed, or already holding.
+    func recoverBoundaryIfNeeded() {
+        guard phase == .work || phase == .shortBreak || phase == .longBreak else { return }
+        guard !isPaused, !awaitingPhaseAdvance, let end = phaseEndsAt else { return }
+        remaining = max(0, end.timeIntervalSinceNow)
+        if remaining <= 0 {
+            reachPhaseBoundary()
+        } else {
+            // Still mid-phase — make sure a ticker is running (it may have been torn down on resume).
+            runTicker()
+        }
     }
 
     /// Insert an immediate short break WITHOUT ending the current work phase.
@@ -361,15 +405,47 @@ final class FocusTimerModel {
         saveSnapshot()
         // Mirror to the watch regardless of whether a Live Activity is running.
         publishWatchFocus(active: true)
+        // Publish the home-screen Focus widget snapshot (WG02) so its progress + controls stay live
+        // even when the Live Activity isn't running. Mirrors the Android focus widget GlanceState.
+        publishFocusWidget(active: true)
         guard let activity else { return }
         Task { await activity.update(.init(state: contentState(), staleDate: nil)) }
     }
 
     private func endLiveActivity() {
         publishWatchFocus(active: false)
+        publishFocusWidget(active: false)
         guard let activity else { return }
         Task { await activity.end(nil, dismissalPolicy: .immediate) }
         self.activity = nil
+    }
+
+    /// Publish (or clear) the home-screen Focus widget snapshot via the App-Group bridge, then ask
+    /// WidgetKit to reload its timeline. The iOS analogue of the Android `FocusWidgetBridge.publish`
+    /// + `WidgetCenter.reloadTimelines` pair the handoff flagged as an unwired TODO.
+    private func publishFocusWidget(active: Bool) {
+        let defaults = UserDefaults(suiteName: ChronosStore.appGroup) ?? .standard
+        if active {
+            let encoded = phasePlan
+                .map { "\($0.kind == .break ? "B" : "F")\($0.durationMinutes)" }
+                .joined(separator: ",")
+            let snapshot = FocusWidgetSnapshot(
+                isActive: true,
+                blockTitle: blockTitle,
+                phaseIsBreak: phase == .shortBreak || phase == .longBreak,
+                isPaused: isPaused,
+                awaitingAdvance: awaitingPhaseAdvance,
+                phaseNumber: phaseNumber,
+                totalPhases: max(totalPhases, 1),
+                phaseEndsAt: phaseEndsAt ?? .now,
+                currentPhaseTotalSeconds: Int((phaseTotal ?? 0).rounded()),
+                currentPhaseIndex: currentPhaseIndex,
+                phasePlanEncoded: encoded)
+            FocusWidgetBridge.publish(snapshot, to: defaults)
+        } else {
+            FocusWidgetBridge.publish(nil, to: defaults)
+        }
+        WidgetCenter.shared.reloadTimelines(ofKind: "ChronosFocusWidget")
     }
 
     /// Publish (or clear) the live focus state for the paired watch — the iOS analogue of the
@@ -499,59 +575,6 @@ final class FocusTimerModel {
     }
 }
 
-/// SwiftData snapshot of an in-flight SPLIT focus session, so a session survives an app kill (F03).
-/// The iOS analogue of the Android `FocusSplitSessionStore` (SharedPreferences-backed). Persisted
-/// only while a split session is RUNNING/PAUSED and cleared otherwise. All stored properties are
-/// optional or default-initialized (CloudKit-safe); the phase list is stored as a Codable JSON blob.
-@Model
-final class FocusSessionSnapshot {
-    /// Coarse lifecycle status of the snapshot. Only RUNNING/PAUSED snapshots are resumed.
-    enum Status: String, Codable, Sendable {
-        case running
-        case paused
-        case completed
-    }
-
-    var blockID: String?
-    var blockTitle: String?
-    /// `FocusSplitPreset.rawValue`; resolved via `presetValue`.
-    var presetRaw: String?
-    var plannedBlockMinutes: Int = 25
-    /// The planned phase sequence, JSON-encoded `[FocusPhase]`; read via `phaseList`.
-    var phasesData: Data?
-    var currentIndex: Int = 0
-    /// `Status.rawValue`; read via `statusValue`.
-    var statusRaw: String?
-    var awaitingAdvance: Bool = false
-    /// Seconds left in the current phase at the moment of the last save (for PAUSED/RUNNING resume).
-    var remainingSeconds: Int = 0
-    var completedWorkSessions: Int = 0
-    var interruptions: Int = 0
-    var startedAt: Date?
-    var updatedAt: Date = Date.now
-
-    init() {}
-
-    /// Decoded phase plan (empty if missing/corrupt).
-    var phaseList: [FocusPhase] {
-        guard let phasesData,
-              let decoded = try? JSONDecoder().decode([FocusPhase].self, from: phasesData) else { return [] }
-        return decoded
-    }
-
-    /// Store the phase plan as a JSON blob.
-    func encodePhases(_ phases: [FocusPhase]) {
-        phasesData = try? JSONEncoder().encode(phases)
-    }
-
-    /// Resolved status (defaults to `.running` for legacy/missing values).
-    var statusValue: Status { statusRaw.flatMap(Status.init(rawValue:)) ?? .running }
-
-    /// Resolved preset (defaults to the 25·5 default to match `FocusTimerModel.preset`).
-    var presetValue: FocusSplitPreset { presetRaw.flatMap(FocusSplitPreset.init(rawValue:)) ?? .p25_5 }
-
-    /// Newest-first fetch descriptor (the live session, if any).
-    static var fetchDescriptor: FetchDescriptor<FocusSessionSnapshot> {
-        FetchDescriptor<FocusSessionSnapshot>(sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])
-    }
-}
+// `FocusSessionSnapshot` (the @Model persisted here) lives in `Models/FocusSessionSnapshot.swift`
+// so it is compiled into both the app and the widget extension (the shared `ChronosStore.schema`
+// references it).
