@@ -18,6 +18,9 @@ struct RootView: View {
     @State private var settings = ChronosSettings.shared
     @State private var focus = FocusTimerModel.shared
     @Environment(\.scenePhase) private var scenePhase
+    /// iPad / regular width shows Android's adaptive navigation rail instead of the compact pill
+    /// (`ChronosAdaptiveNavigationRail` vs `ChronosCompactFloatingBottomBar`).
+    @Environment(\.horizontalSizeClass) private var hSizeClass
     /// Share Extension handoff: pending text written by ChronosShareExtension via App Group.
     @State private var pendingShareText: String?
     @State private var showingShareTaskEditor = false
@@ -28,18 +31,7 @@ struct RootView: View {
     var body: some View {
         @Bindable var shell = shell
 
-        ZStack(alignment: .bottom) {
-            // The selected primary tab fills the screen (each screen owns its own NavigationStack).
-            primaryContent
-                .environment(shell)
-                // Reserve room so scrollable content clears the floating bar (Android compact-shell
-                // bottom clearance), instead of hiding behind it.
-                .safeAreaInset(edge: .bottom) { Color.clear.frame(height: floatingBarClearance) }
-
-            // The floating bar + Quick-Add FAB, over the content (Android compact shell).
-            ShellBottomBar(shell: shell, settings: settings, focusActive: focus.phase != .idle)
-                .padding(.bottom, ChronosSpacing.small)
-        }
+        shellLayout(shell: shell)
         // ⌘K toggles the command palette on hardware keyboards (Android Ctrl+K). Hidden zero-size
         // button — the shortcut is the only way to reach it.
         .background {
@@ -86,6 +78,40 @@ struct RootView: View {
         .sheet(isPresented: $showingShareTaskEditor) {
             if let text = pendingShareText {
                 TaskEditorSheet(task: nil, initialTitle: text)
+            }
+        }
+    }
+
+    /// Compact width (iPhone): the primary tab fills the screen with the floating pill + FAB over it
+    /// (Android compact shell). Regular width (iPad): a leading navigation rail with all destinations,
+    /// the tab content beside it, and a standalone Quick-Add FAB (Android adaptive layout).
+    @ViewBuilder
+    private func shellLayout(shell: ShellState) -> some View {
+        if hSizeClass == .regular {
+            HStack(spacing: 0) {
+                ShellNavigationRail(shell: shell, settings: settings, focusActive: focus.phase != .idle)
+                    .padding(.leading, ChronosSpacing.small)
+                    .padding(.vertical, ChronosSpacing.standard)
+                ZStack(alignment: .bottomTrailing) {
+                    primaryContent
+                        .environment(shell)
+                    ShellBottomBar(shell: shell, settings: settings,
+                                   focusActive: focus.phase != .idle, fabOnly: true)
+                        .padding(.bottom, ChronosSpacing.small)
+                }
+            }
+        } else {
+            ZStack(alignment: .bottom) {
+                // The selected primary tab fills the screen (each screen owns its own NavigationStack).
+                primaryContent
+                    .environment(shell)
+                    // Reserve room so scrollable content clears the floating bar (Android compact-shell
+                    // bottom clearance), instead of hiding behind it.
+                    .safeAreaInset(edge: .bottom) { Color.clear.frame(height: floatingBarClearance) }
+
+                // The floating bar + Quick-Add FAB, over the content (Android compact shell).
+                ShellBottomBar(shell: shell, settings: settings, focusActive: focus.phase != .idle)
+                    .padding(.bottom, ChronosSpacing.small)
             }
         }
     }

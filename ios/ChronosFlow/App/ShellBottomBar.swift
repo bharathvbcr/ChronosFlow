@@ -12,6 +12,9 @@ struct ShellBottomBar: View {
     @Bindable var settings: ChronosSettings
     /// Drives the Focus tab's "session running" dot, mirroring Android's `focusActive` badge.
     var focusActive: Bool
+    /// Regular-width (iPad) mode: render only the Quick-Add FAB + menu — the tabs live in the
+    /// leading `ShellNavigationRail` instead (Android's adaptive-layout `ChronosQuickAddFab`).
+    var fabOnly = false
 
     /// Feeds the Today tab's missed-count badge fallback (Android `missedBlocksCount`).
     @Query private var allBlocks: [TimeBlock]
@@ -29,7 +32,13 @@ struct ShellBottomBar: View {
                 quickAddMenu
                     .transition(.scale(scale: 0.85, anchor: .bottomTrailing).combined(with: .opacity))
             }
-            bar
+            if fabOnly {
+                // The pill carries the shadow in compact; the standalone FAB needs its own.
+                quickAddButton
+                    .shadow(color: ChronosColors.shellShadow, radius: 12, x: 0, y: 6)
+            } else {
+                bar
+            }
         }
         .padding(.horizontal, ChronosSpacing.standard)
         .sheet(item: $editor) { quickAddEditorView(for: $0) }
@@ -119,49 +128,20 @@ struct ShellBottomBar: View {
 
     /// The day-of-month string to badge on the Today tab when the dial is off today (else nil).
     private var offTodayDayOfMonth: String? {
-        guard !Calendar.current.isDateInToday(shell.selectedDate) else { return nil }
-        return String(Calendar.current.component(.day, from: shell.selectedDate))
-    }
-
-    /// Today's blocks whose scheduled end has passed without a recorded completion — the same
-    /// done rule the Today tab uses (`actualEndMinuteOfDay != nil` = done).
-    private var missedTodayCount: Int {
-        let now = Calendar.current.dateComponents([.hour, .minute], from: .now)
-        let nowMinute = (now.hour ?? 0) * 60 + (now.minute ?? 0)
-        return allBlocks.filter {
-            Calendar.current.isDateInToday($0.date)
-                && $0.plannedEndMinuteOfDay <= nowMinute
-                && $0.actualEndMinuteOfDay == nil
-        }.count
+        ShellBadges.offTodayDayOfMonth(shell.selectedDate)
     }
 
     /// Android `todayBadgeValue`: the viewed-date indicator outranks the missed-count fallback.
     private var todayBadgeValue: String? {
-        if let offDay = offTodayDayOfMonth { return offDay }
-        let missed = missedTodayCount
-        guard missed > 0 else { return nil }
-        return missed > 99 ? "99+" : String(missed)
+        ShellBadges.todayBadgeValue(selectedDate: shell.selectedDate, blocks: allBlocks)
     }
 
     /// Spoken status for a tab — the browsed day on Today when off-today, the running state on Focus.
     private func accessibilityValue(for tab: PrimaryTab) -> String {
-        switch tab {
-        case .today where offTodayDayOfMonth != nil:
-            return "Viewing \(Self.browsedDayFormatter.string(from: shell.selectedDate))"
-        case .today where missedTodayCount > 0:
-            return "\(missedTodayCount) missed block\(missedTodayCount == 1 ? "" : "s") today"
-        case .focus where focusActive:
-            return "Focus session running"
-        default:
-            return ""
-        }
+        ShellBadges.accessibilityValue(
+            for: tab, selectedDate: shell.selectedDate, blocks: allBlocks, focusActive: focusActive
+        )
     }
-
-    private static let browsedDayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("MMMMd")
-        return f
-    }()
 
     private var quickAddButton: some View {
         Button {
@@ -261,5 +241,216 @@ struct ShellBottomBar: View {
         } else {
             editor = .typed(trimmed)
         }
+    }
+}
+
+// MARK: - Shared badge derivations
+
+/// Badge / spoken-status derivations shared by the compact pill and the iPad rail — mirrors
+/// Android's single `badgeValueFor` feeding both `ChronosCompactFloatingBottomBar` and
+/// `ChronosAdaptiveNavigationRail`.
+enum ShellBadges {
+    /// The day-of-month string when the dial browses a day other than today (else nil).
+    static func offTodayDayOfMonth(_ selectedDate: Date) -> String? {
+        guard !Calendar.current.isDateInToday(selectedDate) else { return nil }
+        return String(Calendar.current.component(.day, from: selectedDate))
+    }
+
+    /// Today's blocks whose scheduled end has passed without a recorded completion — the same
+    /// done rule the Today tab uses (`actualEndMinuteOfDay != nil` = done).
+    static func missedTodayCount(_ blocks: [TimeBlock]) -> Int {
+        let now = Calendar.current.dateComponents([.hour, .minute], from: .now)
+        let nowMinute = (now.hour ?? 0) * 60 + (now.minute ?? 0)
+        return blocks.filter {
+            Calendar.current.isDateInToday($0.date)
+                && $0.plannedEndMinuteOfDay <= nowMinute
+                && $0.actualEndMinuteOfDay == nil
+        }.count
+    }
+
+    /// Android `todayBadgeValue`: the viewed-date indicator outranks the missed-count fallback.
+    static func todayBadgeValue(selectedDate: Date, blocks: [TimeBlock]) -> String? {
+        if let offDay = offTodayDayOfMonth(selectedDate) { return offDay }
+        let missed = missedTodayCount(blocks)
+        guard missed > 0 else { return nil }
+        return missed > 99 ? "99+" : String(missed)
+    }
+
+    /// Spoken status for a tab — the browsed day on Today when off-today, the running state on Focus.
+    static func accessibilityValue(
+        for tab: PrimaryTab, selectedDate: Date, blocks: [TimeBlock], focusActive: Bool
+    ) -> String {
+        switch tab {
+        case .today where offTodayDayOfMonth(selectedDate) != nil:
+            return "Viewing \(browsedDayFormatter.string(from: selectedDate))"
+        case .today where missedTodayCount(blocks) > 0:
+            let missed = missedTodayCount(blocks)
+            return "\(missed) missed block\(missed == 1 ? "" : "s") today"
+        case .focus where focusActive:
+            return "Focus session running"
+        default:
+            return ""
+        }
+    }
+
+    private static let browsedDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMMMd")
+        return f
+    }()
+}
+
+// MARK: - iPad navigation rail
+
+/// The regular-width navigation rail — the iOS rebuild of Android's `ChronosAdaptiveNavigationRail`.
+///
+/// A vertical glass panel with a "Navigate" header listing ALL shell destinations (Android
+/// `expandedShellDestinations`): the three primary tabs plus the flag-gated Tasks/Habits/Goals/
+/// Meds/Review pages, in that order. Primary tabs select in place; secondary destinations present
+/// as dismissible pages exactly as they do from Quick-Add / the palette. Quick-Add itself stays a
+/// bottom-trailing FAB (Android's adaptive-layout `ChronosQuickAddFab`), via `ShellBottomBar(fabOnly:)`.
+struct ShellNavigationRail: View {
+    let shell: ShellState
+    @Bindable var settings: ChronosSettings
+    /// Drives the Focus item's "session running" dot, mirroring Android's `focusActive` badge.
+    var focusActive: Bool
+
+    /// Feeds the Today item's badge — the same derivation the compact pill uses.
+    @Query private var allBlocks: [TimeBlock]
+
+    @Namespace private var railNamespace
+
+    /// The secondary routes Android's rail shows beyond the primary tabs, in its order.
+    /// Routines/Sleep/Journal/Settings/Data stay Quick-Add / palette-only, as on Android.
+    private static let secondaryDestinations: [ShellRoute] = [.tasks, .habits, .goals, .medication, .review]
+
+    var body: some View {
+        VStack(spacing: ChronosSpacing.micro) {
+            Text("Navigate")
+                .font(.chronosCaption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.vertical, ChronosSpacing.micro)
+            ForEach(PrimaryTab.allCases) { tab in
+                primaryItem(tab)
+            }
+            ForEach(Self.secondaryDestinations.filter { $0.isEnabled(settings) }) { route in
+                secondaryItem(route)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, ChronosSpacing.small)
+        .padding(.vertical, ChronosSpacing.compact)
+        // Slightly narrower than Android's 116dp rail; icon+label items fit comfortably at 96pt.
+        .frame(width: 96)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: ChronosRadius.extraLarge, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: ChronosRadius.extraLarge, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06))
+        )
+        .shadow(color: ChronosColors.shellShadow, radius: 12, x: 0, y: 6)
+    }
+
+    private func primaryItem(_ tab: PrimaryTab) -> some View {
+        // A presented secondary page owns the highlight (Android's `currentDestination.id`);
+        // the primary tab reads selected only when nothing is presented over it.
+        let selected = shell.presentedRoute == nil && shell.selectedTab == tab
+        return Button {
+            withAnimation(ChronosMotion.snappy) {
+                shell.select(tab)
+            }
+        } label: {
+            itemLabel(
+                icon: tab.icon,
+                label: tab.label,
+                selected: selected,
+                badge: tab == .today
+                    ? ShellBadges.todayBadgeValue(selectedDate: shell.selectedDate, blocks: allBlocks)
+                    : nil,
+                showsFocusDot: tab == .focus && focusActive
+            )
+        }
+        .buttonStyle(.plain)
+        .pressable()
+        // Double-tapping Today snaps the browsed day back to today, like the pill (Android's rail
+        // wires the same onDoubleClick).
+        .simultaneousGesture(
+            tab == .today
+                ? TapGesture(count: 2).onEnded {
+                    withAnimation(ChronosMotion.snappy) { shell.resetToToday() }
+                }
+                : nil
+        )
+        .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
+        .accessibilityValue(ShellBadges.accessibilityValue(
+            for: tab, selectedDate: shell.selectedDate, blocks: allBlocks, focusActive: focusActive
+        ))
+        .accessibilityHint(
+            tab == .today && ShellBadges.offTodayDayOfMonth(shell.selectedDate) != nil
+                ? "Activate twice to jump back to today"
+                : ""
+        )
+    }
+
+    private func secondaryItem(_ route: ShellRoute) -> some View {
+        let selected = shell.presentedRoute == route
+        return Button {
+            withAnimation(ChronosMotion.snappy) {
+                shell.open(route)
+            }
+        } label: {
+            // Android's rail labels Medication "Meds". Review carries no unread badge here: iOS
+            // has no unread-insights counter to mirror Android's `unreadInsightsCount`.
+            itemLabel(
+                icon: route.icon,
+                label: route == .medication ? "Meds" : route.label,
+                selected: selected
+            )
+        }
+        .buttonStyle(.plain)
+        .pressable()
+        .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
+    }
+
+    private func itemLabel(
+        icon: String, label: String, selected: Bool, badge: String? = nil, showsFocusDot: Bool = false
+    ) -> some View {
+        VStack(spacing: 3) {
+            ZStack {
+                Image(systemName: icon)
+                    .font(.system(.title3, design: .rounded).weight(.semibold))
+                    .imageScale(.large)
+                if showsFocusDot {
+                    Circle()
+                        .fill(ChronosColors.brandPrimary)
+                        .frame(width: 7, height: 7)
+                        .offset(x: 11, y: -10)
+                        .accessibilityHidden(true)
+                }
+                if let badge {
+                    Text(badge)
+                        .font(.system(.caption2, design: .rounded).weight(.bold))
+                        .foregroundStyle(ChronosColors.onBrand)
+                        .padding(.horizontal, 4)
+                        .frame(minWidth: 15, minHeight: 15)
+                        .background(ChronosColors.brandPrimary, in: Capsule())
+                        .offset(x: 12, y: -10)
+                        .accessibilityHidden(true)
+                }
+            }
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(selected ? ChronosColors.onBrand : Color.secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 7)
+        .background {
+            if selected {
+                RoundedRectangle(cornerRadius: ChronosRadius.medium, style: .continuous)
+                    .fill(ChronosColors.brandPrimary)
+                    .matchedGeometryEffect(id: "railSelection", in: railNamespace)
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: ChronosRadius.medium, style: .continuous))
     }
 }
