@@ -484,13 +484,17 @@ private struct HabitCard: View {
     private var computedPills: [Pill] {
         var pills: [Pill] = []
         let now = nowMinuteOfDay()
-        // Android surfaces a single status pill: "Done" (success) when completed, else "Due now"
-        // (emphasized) while inside the window.
+        // Status pill: "Done" when completed; "Due now" (emphasized) when the cadence schedules
+        // today and we're inside the window; "Not due today" when the cadence skips today (every-N /
+        // weekly-interval off-week / quota target already met). Cadence-awareness via `habit.isDue`.
+        let dueToday = habit.isDue(on: .now)
         if doneToday {
             pills.append(Pill(text: "Done", tint: ChronosColors.brandSecondary, emphasized: true))
-        } else if !skippedToday && !paused
+        } else if !skippedToday && !paused && dueToday
                     && now >= habit.windowStartMinute && now <= habit.windowEndMinute {
             pills.append(Pill(text: "Due now", tint: ChronosColors.brandPrimary, emphasized: true))
+        } else if !skippedToday && !paused && !dueToday {
+            pills.append(Pill(text: "Not due today", tint: .secondary, emphasized: false))
         }
         if habit.isBundled { pills.append(Pill(text: "On day plan", tint: ChronosColors.brandSecondary, emphasized: false)) }
         // Cadence pill (Android always shows the raw cadence label).
@@ -704,6 +708,9 @@ struct HabitEditorSheet: View {
     /// Weekdays (Mon-first index 0…6) backing the "Custom days" cadence, serialized as
     /// "Mon/Thu"-style cadence strings — Android's SELECTED_WEEKDAYS custom recurrence.
     @State private var customDays: Set<Int>
+    /// Interval backing the "Every N days…" cadence (Android's arbitrary EVERY_N_DAYS; the presets
+    /// only expose N=2). Serialized as "Every N days".
+    @State private var everyNDays: Int
     @State private var difficulty: Double
     @State private var windowStart: Date
     @State private var windowEnd: Date
@@ -717,10 +724,20 @@ struct HabitEditorSheet: View {
         editing = habit
         let cal = Calendar.current
         _title = State(initialValue: habit?.title ?? initialTitle ?? "")
-        let cadenceState = habitCadenceEditorState(habit?.cadence ?? "Daily")
-        _cadence = State(initialValue: cadenceState.selection)
+        let stored = habit?.cadence ?? "Daily"
+        let cadenceState = habitCadenceEditorState(stored)
+        // An arbitrary every-N-days cadence (N ≠ 2, which is a named preset) opens the stepper mode
+        // instead of showing as a raw extra option.
+        if case .everyNDays(let n) = parseHabitCadence(stored), n != 2 {
+            _cadence = State(initialValue: Self.everyNDaysOption)
+            _everyNDays = State(initialValue: n)
+            extraCadenceOption = nil
+        } else {
+            _cadence = State(initialValue: cadenceState.selection)
+            _everyNDays = State(initialValue: 3)
+            extraCadenceOption = cadenceState.extraOption
+        }
         _customDays = State(initialValue: cadenceState.customDays)
-        extraCadenceOption = cadenceState.extraOption
         _difficulty = State(initialValue: Double(habit?.difficulty ?? 2))
         _windowStart = State(initialValue: habit.map { Self.date(fromMinute: $0.windowStartMinute) } ?? .now)
         _windowEnd = State(initialValue: habit.map { Self.date(fromMinute: $0.windowEndMinute) }
@@ -742,6 +759,10 @@ struct HabitEditorSheet: View {
                 }
                 if cadence == "Custom days" {
                     customDaysRow
+                }
+                if cadence == Self.everyNDaysOption {
+                    Stepper("Every \(everyNDays) days", value: $everyNDays, in: 2...30)
+                        .font(.chronosBody)
                 }
                 VStack(alignment: .leading) {
                     Text("Difficulty: \(Int(difficulty))")
@@ -791,11 +812,14 @@ struct HabitEditorSheet: View {
 
     // MARK: Cadence presets + custom weekdays (Android habitRecurrenceQuickPresets / SELECTED_WEEKDAYS)
 
+    /// Sentinel picker entry that reveals the arbitrary "Every N days" stepper. Static so `init`
+    /// can reference it without touching `self` before stored properties are initialized.
+    private static let everyNDaysOption = "Every N days…"
+
     private var cadenceOptions: [String] {
-        guard let extra = extraCadenceOption, !habitCadencePresets.contains(extra) else {
-            return habitCadencePresets
-        }
-        return habitCadencePresets + [extra]
+        let base = habitCadencePresets + [Self.everyNDaysOption]
+        guard let extra = extraCadenceOption, !base.contains(extra) else { return base }
+        return base + [extra]
     }
 
     /// Weekday toggle chips for the "Custom days" cadence (Android's weekday FilterChip row).
@@ -829,6 +853,7 @@ struct HabitEditorSheet: View {
     /// The cadence string persisted on the model: the preset label, or the custom weekday set
     /// serialized "Mon/Thu"-style (empty custom selection falls back to Daily).
     private var cadenceValue: String {
+        if cadence == Self.everyNDaysOption { return "Every \(everyNDays) days" }
         guard cadence == "Custom days" else { return cadence }
         let days = customDays.sorted().map { habitWeekdayShortNames[$0] }
         return days.isEmpty ? "Daily" : days.joined(separator: "/")

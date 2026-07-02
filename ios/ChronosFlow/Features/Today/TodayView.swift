@@ -86,6 +86,12 @@ struct TodayView: View {
 
     private var activeHabits: [Habit] { habits.filter(\.isActive) }
 
+    /// Active habits the cadence actually schedules for the browsed day (or already completed then) —
+    /// so a "3x/week" or every-N habit only appears on Today when it's due, matching Android's TodayTab.
+    private var dueHabits: [Habit] {
+        activeHabits.filter { $0.isDue(on: browsedDate) || $0.isCompleted(on: browsedDate) }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -118,7 +124,7 @@ struct TodayView: View {
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                         taskSection
-                        if !activeHabits.isEmpty {
+                        if !dueHabits.isEmpty {
                             habitSummarySection
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
@@ -131,7 +137,7 @@ struct TodayView: View {
                     .animation(ChronosMotion.smooth, value: hasDayJournalEntry)
                     .animation(ChronosMotion.smooth, value: hasDaySleepLog)
                     .animation(ChronosMotion.smooth, value: upNext?.id)
-                    .animation(ChronosMotion.smooth, value: activeHabits.isEmpty)
+                    .animation(ChronosMotion.smooth, value: dueHabits.isEmpty)
                     .animation(ChronosMotion.smooth, value: readiness)
                     .animation(ChronosMotion.smooth, value: focusTimer.phase)
                 }
@@ -437,7 +443,7 @@ struct TodayView: View {
     private var habitSummarySection: some View {
         VStack(alignment: .leading, spacing: ChronosSpacing.small) {
             Text(isViewingToday ? "Today's habits" : "Habits").font(.chronosTitle)
-            ForEach(activeHabits.prefix(5)) { habit in
+            ForEach(dueHabits.prefix(5)) { habit in
                 Button {
                     habit.toggleCompletion(on: browsedDate)
                     try? context.save()

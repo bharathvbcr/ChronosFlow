@@ -82,6 +82,14 @@ final class Habit {
         skipDates.contains { Calendar.current.isDate($0, inSameDayAs: day) }
     }
 
+    /// Whether this habit's cadence schedules it to occur on `day` (every-N-days / weekly-interval /
+    /// quota aware, via ChronosCore `habitIsDue`). Paused/skipped state is separate — this answers
+    /// only "does the schedule land here today". A quota habit stays due until its per-period target
+    /// is met, so a same-day completion flips it to not-due.
+    func isDue(on day: Date = .now) -> Bool {
+        habitIsDue(cadence: cadence, on: day, completions: completionDates)
+    }
+
     /// True while the habit is paused for the given day (today < pausedUntil, inclusive of the
     /// pause day). Mirrors Android's `pausedUntil?.let { !it.isBefore(date) } == true`.
     func isPaused(on day: Date = .now) -> Bool {
