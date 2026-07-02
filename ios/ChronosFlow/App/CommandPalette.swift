@@ -1,4 +1,6 @@
 import SwiftUI
+import SwiftData
+import ChronosCore
 
 /// The global command palette — the iOS rebuild of Android's `CommandPaletteDialog`
 /// (Ctrl+K / the top-bar command action in `DayDialTopBar`).
@@ -6,13 +8,24 @@ import SwiftUI
 /// On Android the compact bottom bar only carries Plan/Today/Focus, so the command palette is the
 /// primary way to reach Tasks/Habits/Goals/Meds/Routines/Sleep/Journal/Review/Settings on a phone.
 /// This sheet provides that: a filterable list of **navigate** commands (every enabled destination),
-/// **create** commands (mirroring Quick-Add), and an **Ask the assistant** row.
+/// **create** commands (mirroring Quick-Add), an **Ask the assistant** row, and — when searching — a
+/// **Your data** section that finds your tasks/habits/goals/meds/routines/journal by name (ranked by
+/// `ChronosCore.rankCommands`) and jumps to the owning screen (Android's `CommandSearchViewModel`
+/// entity search; iOS approximates its `SemanticPlanningIndex` with the deterministic ranker).
 struct CommandPalette: View {
     let shell: ShellState
     @Bindable var settings: ChronosSettings
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""
+
+    // Personal-scale datasets, so an unbounded fetch is fine for a name search.
+    @Query private var allTasks: [TaskItem]
+    @Query private var allHabits: [Habit]
+    @Query private var allGoals: [Goal]
+    @Query private var allMeds: [MedicationPlan]
+    @Query private var allRoutines: [Routine]
+    @Query private var allJournal: [JournalEntry]
 
     private struct Command: Identifiable {
         let id: String
@@ -82,15 +95,85 @@ struct CommandPalette: View {
         return commands.filter { $0.label.lowercased().contains(q) }
     }
 
+    // MARK: Entity search (Android CommandSearchViewModel "Your data")
+
+    /// A searchable app entity mapped to the screen that owns it.
+    private struct Entity {
+        let candidate: CommandAssistCandidate
+        let label: String
+        let typeLabel: String
+        let icon: String
+        let route: ShellRoute
+    }
+
+    /// Every enabled entity as a ranker candidate keyed by its owning route + id.
+    private var searchableEntities: [Entity] {
+        var entities: [Entity] = []
+        func add(_ items: [Entity]) { entities.append(contentsOf: items) }
+        if ShellRoute.tasks.isEnabled(settings) {
+            add(allTasks.map {
+                Entity(candidate: .init(id: "task.\($0.id)", title: $0.title, keywords: ["task", "todo"]),
+                       label: $0.title, typeLabel: "Task", icon: "checklist", route: .tasks)
+            })
+        }
+        if ShellRoute.habits.isEnabled(settings) {
+            add(allHabits.map {
+                Entity(candidate: .init(id: "habit.\($0.id)", title: $0.title, keywords: ["habit", "routine"]),
+                       label: $0.title, typeLabel: "Habit", icon: "repeat", route: .habits)
+            })
+        }
+        if ShellRoute.goals.isEnabled(settings) {
+            add(allGoals.map {
+                Entity(candidate: .init(id: "goal.\($0.id)", title: $0.title, keywords: ["goal", "target"]),
+                       label: $0.title, typeLabel: "Goal", icon: "target", route: .goals)
+            })
+        }
+        if ShellRoute.medication.isEnabled(settings) {
+            add(allMeds.map {
+                Entity(candidate: .init(id: "med.\($0.id)", title: $0.name, keywords: ["medication", "med", "dose"]),
+                       label: $0.name, typeLabel: "Medication", icon: "pills", route: .medication)
+            })
+        }
+        if ShellRoute.routines.isEnabled(settings) {
+            add(allRoutines.map {
+                Entity(candidate: .init(id: "routine.\($0.id)", title: $0.title, keywords: ["routine", "template"]),
+                       label: $0.title, typeLabel: "Routine", icon: "list.bullet.rectangle", route: .routines)
+            })
+        }
+        if ShellRoute.journal.isEnabled(settings) {
+            add(allJournal.map {
+                let snippet = String($0.body.prefix(60))
+                return Entity(candidate: .init(id: "journal.\($0.id)", title: snippet, keywords: ["journal", "entry", "reflection"]),
+                              label: snippet.isEmpty ? "Journal entry" : snippet, typeLabel: "Journal", icon: "book.closed", route: .journal)
+            })
+        }
+        return entities
+    }
+
+    /// Name-matched entities for the current query, ranked by `ChronosCore.rankCommands` (the offline
+    /// baseline; the assistant sheet remains the generative surface). Empty for queries under 3 chars.
+    private var entityResults: [Command] {
+        let entities = searchableEntities
+        let ranked = rankCommands(query: query, candidates: entities.map(\.candidate), limit: 8)
+        let byID = Dictionary(entities.map { ($0.candidate.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return ranked.compactMap { id in
+            guard let entity = byID[id] else { return nil }
+            return Command(id: entity.candidate.id, label: entity.label, icon: entity.icon) {
+                shell.open(entity.route); dismiss()
+            }
+        }
+    }
+
     var body: some View {
         let nav = filter(navigateCommands)
         let create = filter(createCommands)
         let assist = filter(assistantCommands)
+        let entities = entityResults
         let trimmedQuery = query.trimmingCharacters(in: .whitespaces)
         return NavigationStack {
             ZStack {
                 ChronosBackdrop()
-                if nav.isEmpty && create.isEmpty && assist.isEmpty && !trimmedQuery.isEmpty {
+                if nav.isEmpty && create.isEmpty && assist.isEmpty && entities.isEmpty && !trimmedQuery.isEmpty {
                     ContentUnavailableView.search(text: query)
                 } else {
                     List {
@@ -100,6 +183,9 @@ struct CommandPalette: View {
                             digestSection
                             section("Recent", recentCommands)
                         }
+                        // A name search most likely targets one of the user's items, so "Your data"
+                        // leads when present (Android surfaces entity hits above the command catalog).
+                        entitySection(entities)
                         section("Go to", nav)
                         section("Create", create)
                         section("Assistant", assist)
@@ -140,6 +226,22 @@ struct CommandPalette: View {
                     }
                 }
                 .foregroundStyle(.primary)
+            }
+        }
+    }
+
+    /// "Your data" hits. Unlike `section`, taps here are not recorded as recent commands — a recent
+    /// list of one-off entity ids would never resurface and would crowd out real command recents.
+    @ViewBuilder
+    private func entitySection(_ commands: [Command]) -> some View {
+        if !commands.isEmpty {
+            Section("Your data") {
+                ForEach(commands) { command in
+                    Button { command.perform() } label: {
+                        Label(command.label, systemImage: command.icon).lineLimit(1)
+                    }
+                    .foregroundStyle(.primary)
+                }
             }
         }
     }

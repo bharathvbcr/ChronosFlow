@@ -8,10 +8,11 @@ import Foundation
 // re-ranker on top); on iOS the deterministic baseline is enough for a command palette and is
 // fully testable without the model.
 //
-// TODO(ios): there is no command-palette UI on iOS yet. When one is added (e.g. a `.searchable`
-// quick-action sheet), feed its query + the registry of action descriptors through `rankCommands`
-// to order results; an optional ChronosAssistant re-rank could sit on top, mirroring Android's
-// `rankCommandIdsWithAssist`.
+// The palette UI is `ios/ChronosFlow/App/CommandPalette.swift`: its "Your data" search feeds every
+// task/habit/goal/medication/routine/journal entry through `rankCommands` as a candidate and jumps
+// to the owning screen for the best matches. Android's optional on-device LLM re-rank
+// (`rankCommandIdsWithAssist`) is not ported — a FoundationModels call per keystroke isn't
+// appropriate; the assistant sheet remains the generative surface on iOS.
 
 public struct CommandAssistCandidate: Sendable, Equatable {
     public let id: String
