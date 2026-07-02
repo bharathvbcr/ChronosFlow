@@ -22,7 +22,8 @@ data" across tasks/habits/goals/meds/routines/journal via `rankCommands`); and *
 habit scheduling** (every-N-days / weekly-interval / quota due-derivation in ChronosCore, parsed
 from the cadence string so no schema change, honored by the Habits pill + Today quick-list).
 
-**Consciously deferred (known, accepted divergences):**
+**Consciously deferred (known, accepted divergences)** — build briefs (constraint, approach, files,
+guardrails) for all five are in [`DEFERRED_PARITY.md`](DEFERRED_PARITY.md):
 - Unified cross-tab undo/redo (iOS history is Plan-scoped; Android shares one stack).
 - Review as a 4th in-dial tab (iOS presents Review as a sheet route — accepted shell redesign).
 - Command-palette on-device LLM re-rank (`rankCommandIdsWithAssist`) + AppSearch-backed
