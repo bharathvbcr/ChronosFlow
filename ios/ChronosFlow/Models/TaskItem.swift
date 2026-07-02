@@ -187,8 +187,47 @@ struct RecurrenceSpec: Codable, Hashable, Sendable {
     /// Optional last day the recurrence is active (start-of-day). Mirrors `endsOn`.
     var endsOn: Date?
 
+    /// A per-occurrence reminder for a recurring task. Mirrors Android `TaskReminderDraft`
+    /// (`TaskReminderTrigger.AT_TIME` / `BEFORE_OCCURRENCE`): either fire at a fixed clock time on
+    /// each occurrence day, or a lead offset before the task's preferred start.
+    struct Reminder: Codable, Hashable, Identifiable, Sendable {
+        enum Trigger: String, Codable, Sendable { case atTime, beforeOccurrence }
+        var id: String = UUID().uuidString
+        var trigger: Trigger = .atTime
+        /// For `.atTime`: minutes after midnight. `nil` falls back to the task's preferred start.
+        var minuteOfDay: Int?
+        /// For `.beforeOccurrence`: lead minutes before the preferred start (must be > 0).
+        var offsetMinutesBefore: Int?
+
+        init(id: String = UUID().uuidString, trigger: Trigger = .atTime,
+             minuteOfDay: Int? = nil, offsetMinutesBefore: Int? = nil) {
+            self.id = id
+            self.trigger = trigger
+            self.minuteOfDay = minuteOfDay
+            self.offsetMinutesBefore = offsetMinutesBefore
+        }
+
+        /// Tolerant decode so a reminder written by another platform (or a later schema) never
+        /// fails the whole task import: missing keys fall back to defaults.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+            trigger = try c.decodeIfPresent(Trigger.self, forKey: .trigger) ?? .atTime
+            minuteOfDay = try c.decodeIfPresent(Int.self, forKey: .minuteOfDay)
+            offsetMinutesBefore = try c.decodeIfPresent(Int.self, forKey: .offsetMinutesBefore)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case id, trigger, minuteOfDay, offsetMinutesBefore
+        }
+    }
+
+    /// Per-occurrence reminders (Android `TaskRecurringConfig.reminderDrafts`). Stored inside the
+    /// same inline JSON blob, so adding the field is a zero-migration change (missing key → empty).
+    var reminders: [Reminder] = []
+
     private enum CodingKeys: String, CodingKey {
-        case frequency, interval, weekdays, ordinal, ordinalWeekday, startsOn, endsOn
+        case frequency, interval, weekdays, ordinal, ordinalWeekday, startsOn, endsOn, reminders
     }
 
     init(
@@ -198,7 +237,8 @@ struct RecurrenceSpec: Codable, Hashable, Sendable {
         ordinal: Int = 1,
         ordinalWeekday: Int = 2,
         startsOn: Date? = nil,
-        endsOn: Date? = nil
+        endsOn: Date? = nil,
+        reminders: [Reminder] = []
     ) {
         self.frequency = frequency
         self.interval = interval
@@ -207,6 +247,7 @@ struct RecurrenceSpec: Codable, Hashable, Sendable {
         self.ordinalWeekday = ordinalWeekday
         self.startsOn = startsOn
         self.endsOn = endsOn
+        self.reminders = reminders
     }
 
     /// Decode tolerant of pre-existing records: any key added after a task was first saved is simply
@@ -220,6 +261,7 @@ struct RecurrenceSpec: Codable, Hashable, Sendable {
         ordinalWeekday = try c.decodeIfPresent(Int.self, forKey: .ordinalWeekday) ?? 2
         startsOn = try c.decodeIfPresent(Date.self, forKey: .startsOn)
         endsOn = try c.decodeIfPresent(Date.self, forKey: .endsOn)
+        reminders = try c.decodeIfPresent([Reminder].self, forKey: .reminders) ?? []
     }
 
     var label: String {

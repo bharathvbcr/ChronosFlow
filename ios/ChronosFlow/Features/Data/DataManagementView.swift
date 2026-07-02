@@ -73,7 +73,7 @@ struct DataManagementView: View {
                         Task {
                             _ = await ChronosAutoBackup.runBackup()
                             refreshAutoBackup()
-                            message = ChronosAutoBackup.lastResult
+                            withAnimation(ChronosMotion.snappy) { message = ChronosAutoBackup.lastResult }
                         }
                     } label: { Label("Back up now", systemImage: "arrow.clockwise") }
                 } footer: {
@@ -127,9 +127,9 @@ struct DataManagementView: View {
                     Button {
                         do {
                             let url = try ChronosDeviceTransfer.writeSnapshot(from: context)
-                            message = "Transfer snapshot saved to \(url.lastPathComponent). A new install that starts with no data will pick it up automatically on first launch."
+                            show("Transfer snapshot saved to \(url.lastPathComponent). A new install that starts with no data will pick it up automatically on first launch.")
                         } catch {
-                            message = "Couldn't write transfer snapshot: \(error.localizedDescription)"
+                            show("Couldn't write transfer snapshot: \(error.localizedDescription)")
                         }
                     } label: {
                         Label("Prepare device-transfer snapshot", systemImage: "externaldrive.badge.timemachine")
@@ -140,6 +140,7 @@ struct DataManagementView: View {
 
                 if let message {
                     Section { Text(message).font(.chronosCaption).foregroundStyle(.secondary) }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
             .navigationTitle("Data")
@@ -153,15 +154,15 @@ struct DataManagementView: View {
                           document: document,
                           contentType: .json,
                           defaultFilename: "ChronosFlow-Backup-\(Date.now.formatted(.iso8601.year().month().day()))") { result in
-                if case .success = result { message = "Backup exported." }
-                else if case .failure(let e) = result { message = "Export failed: \(e.localizedDescription)" }
+                if case .success = result { show("Backup exported.") }
+                else if case .failure(let e) = result { show("Export failed: \(e.localizedDescription)") }
             }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
                 switch result {
                 case .success(let url):
                     loadBackup(from: url)
                 case .failure(let e):
-                    message = "Import failed: \(e.localizedDescription)"
+                    show("Import failed: \(e.localizedDescription)")
                 }
             }
             .alert(restoreMode == .destructive ? "Replace all data?" : "Restore backup?",
@@ -172,7 +173,7 @@ struct DataManagementView: View {
                        role: restoreMode == .destructive ? .destructive : nil) {
                     if let backup = pendingRestore {
                         let summary = ChronosBackupService.restore(backup, into: context, mode: restoreMode)
-                        message = restoreMessage(for: summary)
+                        show(restoreMessage(for: summary))
                     }
                     pendingRestore = nil
                 }
@@ -187,6 +188,11 @@ struct DataManagementView: View {
                 }
             }
         }
+    }
+
+    /// Animate result-message changes so the footer Section's insertion/removal eases in/out.
+    private func show(_ text: String) {
+        withAnimation(ChronosMotion.snappy) { message = text }
     }
 
     private func refreshAutoBackup() {
@@ -218,13 +224,13 @@ struct DataManagementView: View {
         do {
             pendingRestore = try ChronosAutoBackup.decode(entry)
         } catch {
-            message = "Couldn't read snapshot: \(error.localizedDescription)"
+            show("Couldn't read snapshot: \(error.localizedDescription)")
         }
     }
 
     private func loadBackup(from url: URL) {
         guard url.startAccessingSecurityScopedResource() else {
-            message = "Couldn't access the selected file."; return
+            show("Couldn't access the selected file."); return
         }
         defer { url.stopAccessingSecurityScopedResource() }
         do {
@@ -232,7 +238,7 @@ struct DataManagementView: View {
             let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
             pendingRestore = try decoder.decode(ChronosBackup.self, from: data)
         } catch {
-            message = "Couldn't read backup: \(error.localizedDescription)"
+            show("Couldn't read backup: \(error.localizedDescription)")
         }
     }
 }

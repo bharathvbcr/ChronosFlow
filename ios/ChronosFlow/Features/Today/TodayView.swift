@@ -1,16 +1,26 @@
 import SwiftUI
 import SwiftData
 
-/// The Today tab: a calm "what's now / next" view over the day, plus quick check-in and the
-/// sleep-readiness banner that adapts the day. Ports the Today shell target.
+/// The Today tab: the read-only day dial plus a calm "what's now / next" view over the day, quick
+/// check-in, and the sleep-readiness banner that adapts the day. Ports the Today shell target.
 struct TodayView: View {
     @Environment(\.modelContext) private var context
+    /// Shared browsed day (Android `selectDate()` re-derives all tabs). Optional so previews
+    /// without a shell fall back to today — same pattern as `DayDialScreen`.
+    @Environment(ShellState.self) private var shell: ShellState?
     @Query private var allBlocks: [TimeBlock]
     @Query private var tasks: [TaskItem]
     @Query private var sleepNights: [SleepTrack]
     @Query(sort: \JournalEntry.entryDate, order: .reverse) private var journalEntries: [JournalEntry]
     @Query private var habits: [Habit]
+    /// Active medication plans for the quick mark-taken row (Android TodayTab medication items).
+    @Query(filter: #Predicate<MedicationPlan> { $0.isActive }, sort: \MedicationPlan.name)
+    private var medicationPlans: [MedicationPlan]
+    /// Cross-tab surfacing of the running focus session (Android's shell-level focus state).
+    @State private var focusTimer = FocusTimerModel.shared
     @State private var activeSheet: TodaySheet?
+    /// Increments on a med mark-taken to fire a one-shot success haptic (MedicationView idiom).
+    @State private var medTakeTick = 0
 
     private enum TodaySheet: String, Identifiable {
         case assistant, checkIn, data, newTask, newBlock, logSleep, journal, planDay, fillGaps
@@ -22,17 +32,28 @@ struct TodayView: View {
         return (c.hour ?? 0) * 60 + (c.minute ?? 0)
     }
 
-    private var todayBlocks: [TimeBlock] {
-        allBlocks.filter { Calendar.current.isDateInToday($0.date) }
+    /// The browsed day, shared with the Plan dial via the shell (today when no shell is injected).
+    private var browsedDate: Date { shell?.selectedDate ?? Calendar.current.startOfDay(for: .now) }
+
+    /// Now/next emphasis and the quick action rows only apply when the browsed day IS today
+    /// (Android `isViewingToday` in `TodayTab` / `findActiveBlock(forToday:)`).
+    private var isViewingToday: Bool { Calendar.current.isDateInToday(browsedDate) }
+
+    private var dayBlocks: [TimeBlock] {
+        allBlocks.filter { Calendar.current.isDate($0.date, inSameDayAs: browsedDate) }
             .sorted { $0.startMinuteOfDay < $1.startMinuteOfDay }
     }
 
     private var current: TimeBlock? {
-        todayBlocks.first { nowMinute >= $0.startMinuteOfDay && nowMinute < $0.startMinuteOfDay + $0.durationMinutes }
+        guard isViewingToday else { return nil }
+        return dayBlocks.first { nowMinute >= $0.startMinuteOfDay && nowMinute < $0.startMinuteOfDay + $0.durationMinutes }
     }
 
+    /// Today: the next block to start. Off-today: the day's first block (Android `findNextBlock`
+    /// returns the earliest block when not viewing today).
     private var upNext: TimeBlock? {
-        todayBlocks.first { $0.startMinuteOfDay > nowMinute }
+        guard isViewingToday else { return dayBlocks.first }
+        return dayBlocks.first { $0.startMinuteOfDay > nowMinute }
     }
 
     private var lastNight: SleepTrack? {
@@ -41,19 +62,26 @@ struct TodayView: View {
 
     private var readiness: SleepReadiness { deriveSleepReadiness(lastNight: lastNight) }
 
-    private var todaysTasks: [TaskItem] {
+    private var dayTasks: [TaskItem] {
         tasks.filter { task in
             guard let target = task.targetDate else { return false }
-            return Calendar.current.isDateInToday(target)
+            return Calendar.current.isDate(target, inSameDayAs: browsedDate)
         }
     }
 
-    private var hasTodayJournalEntry: Bool {
-        journalEntries.contains { Calendar.current.isDateInToday($0.entryDate) }
+    private var hasDayJournalEntry: Bool {
+        journalEntries.contains { Calendar.current.isDate($0.entryDate, inSameDayAs: browsedDate) }
     }
 
-    private var hasTodaySleepLog: Bool {
-        sleepNights.contains { Calendar.current.isDateInToday($0.date) }
+    private var hasDaySleepLog: Bool {
+        sleepNights.contains { Calendar.current.isDate($0.date, inSameDayAs: browsedDate) }
+    }
+
+    /// Plans due for a quick mark-taken today: active (queried), not paused. Mirrors the
+    /// MedicationView "take" affordance surfaced as Today quick items (Android TodayTab meds).
+    private var dueMedicationPlans: [MedicationPlan] {
+        guard ChronosSettings.shared.medicationEnabled else { return [] }
+        return medicationPlans.filter { !$0.isPaused() }
     }
 
     private var activeHabits: [Habit] { habits.filter(\.isActive) }
@@ -64,19 +92,51 @@ struct TodayView: View {
                 ChronosBackdrop()
                 ScrollView {
                     VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
-                        if readiness != .unknown && readiness != .normal { readinessBanner }
-                        nowCard
+                        if focusTimer.phase != .idle {
+                            focusSessionCard
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                        if isViewingToday && readiness != .unknown && readiness != .normal {
+                            readinessBanner
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                        dialCard
+                        if isViewingToday {
+                            nowCard
+                        }
                         dayActionStrip
-                        if !hasTodayJournalEntry { journalActionCard }
-                        if !hasTodaySleepLog { sleepActionCard }
-                        if let upNext { upNextCard(upNext) }
+                        if isViewingToday && !hasDayJournalEntry {
+                            journalActionCard
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                        if isViewingToday && !hasDaySleepLog {
+                            sleepActionCard
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                        if let upNext {
+                            upNextCard(upNext)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                         taskSection
-                        if !activeHabits.isEmpty { habitSummarySection }
+                        if !activeHabits.isEmpty {
+                            habitSummarySection
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                        if isViewingToday && !dueMedicationPlans.isEmpty {
+                            medicationSection
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                     }
                     .padding(ChronosSpacing.standard)
+                    .animation(ChronosMotion.smooth, value: hasDayJournalEntry)
+                    .animation(ChronosMotion.smooth, value: hasDaySleepLog)
+                    .animation(ChronosMotion.smooth, value: upNext?.id)
+                    .animation(ChronosMotion.smooth, value: activeHabits.isEmpty)
+                    .animation(ChronosMotion.smooth, value: readiness)
+                    .animation(ChronosMotion.smooth, value: focusTimer.phase)
                 }
             }
-            .navigationTitle(Date.now.formatted(.dateTime.weekday(.wide).month().day()))
+            .navigationTitle(browsedDate.formatted(.dateTime.weekday(.wide).month().day()))
             .chronosCommandPaletteToolbar()
             .chronosScrollMinimizedBar()
             .toolbar {
@@ -98,12 +158,15 @@ struct TodayView: View {
                     Menu {
                         Button { activeSheet = .data } label: { Label("Data & backup", systemImage: "externaldrive") }
                     } label: { Image(systemName: "ellipsis.circle") }
+                        .accessibilityLabel("More")
                 }
             }
             // Keep the "next block starts soon" notification aligned with today's plan (re-runs
-            // whenever the day's blocks change). Gated on settings inside the scheduler.
-            .task(id: todayBlocks.map(\.id)) {
-                await ChronosNotifications.shared.scheduleNextBlockNotification(blocks: todayBlocks)
+            // whenever the day's blocks change). Gated on settings inside the scheduler; only
+            // today's blocks may schedule — a browsed day's plan must not rewrite the alerts.
+            .task(id: dayBlocks.map(\.id)) {
+                guard isViewingToday else { return }
+                await ChronosNotifications.shared.scheduleNextBlockNotification(blocks: dayBlocks)
             }
             .sheet(item: $activeSheet) { sheet in
                 switch sheet {
@@ -114,11 +177,75 @@ struct TodayView: View {
                 case .newBlock: TimeBlockEditorSheet(block: nil)
                 case .logSleep: SleepLogSheet()
                 case .journal: JournalView()
-                case .planDay: AIPlannerSheet(date: .now, existingBlocks: todayBlocks)
-                case .fillGaps: GapFillSheet(date: .now, existingBlocks: todayBlocks)
+                case .planDay: AIPlannerSheet(date: browsedDate, existingBlocks: dayBlocks)
+                case .fillGaps: GapFillSheet(date: browsedDate, existingBlocks: dayBlocks)
                 }
             }
         }
+    }
+
+    /// Compact running-session card — the cross-tab surfacing of the focus timer (Android shows
+    /// the running session above the Today content). Tapping lands on the Focus tab.
+    private var focusSessionCard: some View {
+        Button { shell?.select(.focus) } label: {
+            ChronosGlassCard(tint: ChronosColors.brandPrimary) {
+                HStack(spacing: ChronosSpacing.compact) {
+                    Image(systemName: "timer")
+                        .foregroundStyle(ChronosColors.brandPrimary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(focusTimer.blockTitle).font(.chronosHeadline).lineLimit(1)
+                        Text(focusPhaseLabel).font(.chronosCaption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(focusRemainingLabel)
+                        .font(.chronosLabel).monospacedDigit().foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
+        .pressable()
+        .accessibilityLabel("Focus session running: \(focusTimer.blockTitle), \(focusPhaseLabel)")
+        .accessibilityHint("Opens the Focus tab")
+    }
+
+    private var focusPhaseLabel: String {
+        if focusTimer.awaitingPhaseAdvance { return "Holding — tap to continue" }
+        if focusTimer.isPaused { return "Paused" }
+        switch focusTimer.phase {
+        case .work: return "Focusing"
+        case .shortBreak, .longBreak: return "On a break"
+        case .completed: return "Session complete"
+        case .idle: return ""
+        }
+    }
+
+    /// mm:ss remaining in the current phase (same format as the Focus tab's ring).
+    private var focusRemainingLabel: String {
+        String(format: "%02d:%02d", Int(focusTimer.remaining) / 60, Int(focusTimer.remaining) % 60)
+    }
+
+    /// Read-only Chronos Dial over the browsed day — Android's TodayTab centers the shared dial.
+    /// The feed mirrors `DayDialScreen` (day blocks + conflict IDs); the calendar overlay and drag
+    /// editing stay Plan-only, so hit testing is disabled and any tap lands on the Plan tab.
+    private var dialCard: some View {
+        Button {
+            withAnimation(ChronosMotion.snappy) { shell?.select(.plan) }
+        } label: {
+            ChronosDialCanvas(
+                blocks: dayBlocks,
+                nowMinute: nowMinute,
+                conflictBlockIDs: Set(PlannerMath.conflicts(in: dayBlocks).flatMap { [$0.firstID, $0.secondID] }),
+                showNowHand: isViewingToday
+            )
+            .allowsHitTesting(false)
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: 380)
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel("Day dial, \(dayBlocks.count) blocks")
+        .accessibilityHint("Opens the Plan tab")
     }
 
     private var readinessBanner: some View {
@@ -194,7 +321,7 @@ struct TodayView: View {
     /// day nudges planning; a populated day offers gap-fill. Both always offer "Add block".
     private var dayActionStrip: some View {
         HStack(spacing: ChronosSpacing.small) {
-            if todayBlocks.isEmpty {
+            if dayBlocks.isEmpty {
                 actionChip("Plan my day", "sparkles") { activeSheet = .planDay }
             } else {
                 actionChip("Fill gaps", "wand.and.stars") { activeSheet = .fillGaps }
@@ -232,11 +359,22 @@ struct TodayView: View {
 
     private var taskSection: some View {
         VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-            Text("Today's tasks").font(.chronosTitle)
-            if todaysTasks.isEmpty {
-                Text("No tasks scheduled for today").font(.chronosBody).foregroundStyle(.secondary)
+            Text(isViewingToday ? "Today's tasks" : "Tasks").font(.chronosTitle)
+            if dayTasks.isEmpty {
+                VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+                    Text(isViewingToday ? "No tasks scheduled for today" : "No tasks scheduled for this day")
+                        .font(.chronosBody).foregroundStyle(.secondary)
+                    Button { activeSheet = .newTask } label: {
+                        Label("Add task", systemImage: "checklist")
+                            .font(.chronosLabel)
+                            .padding(.vertical, ChronosSpacing.small)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .tint(ChronosColors.brandPrimary)
+                }
             } else {
-                ForEach(todaysTasks) { task in
+                ForEach(dayTasks) { task in
                     Button {
                         task.isCompleted.toggle(); try? context.save()
                     } label: {
@@ -248,8 +386,10 @@ struct TodayView: View {
                         }
                         .font(.chronosBody)
                         .padding(.vertical, ChronosSpacing.micro)
+                        .frame(minHeight: 44)
                     }
                     .buttonStyle(.plain)
+                    .sensoryFeedback(.success, trigger: task.isCompleted) { old, new in !old && new }
                 }
             }
         }
@@ -259,7 +399,7 @@ struct TodayView: View {
     private var journalActionCard: some View {
         ChronosGlassCard(tint: ChronosColors.brandSecondary) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
                     Label("Reflect on your day", systemImage: "book.closed.fill")
                         .font(.chronosHeadline)
                         .foregroundStyle(ChronosColors.brandSecondary)
@@ -271,12 +411,13 @@ struct TodayView: View {
             }
         }
         .onTapGesture { activeSheet = .journal }
+        .pressable()
     }
 
     private var sleepActionCard: some View {
         ChronosGlassCard(tone: .quiet) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
                     Label("Log tonight's sleep", systemImage: "moon.zzz.fill")
                         .font(.chronosHeadline)
                     Text("Track your sleep to adapt tomorrow's plan.")
@@ -285,7 +426,7 @@ struct TodayView: View {
                 Spacer()
                 Button { activeSheet = .logSleep } label: {
                     Text("Log").font(.chronosLabel)
-                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .padding(.horizontal, ChronosSpacing.compact).padding(.vertical, ChronosSpacing.micro)
                         .background(ChronosColors.brandPrimary.opacity(0.15), in: Capsule())
                 }
                 .buttonStyle(.plain)
@@ -295,15 +436,15 @@ struct TodayView: View {
 
     private var habitSummarySection: some View {
         VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-            Text("Today's habits").font(.chronosTitle)
+            Text(isViewingToday ? "Today's habits" : "Habits").font(.chronosTitle)
             ForEach(activeHabits.prefix(5)) { habit in
                 Button {
-                    habit.toggleCompletion(on: .now)
+                    habit.toggleCompletion(on: browsedDate)
                     try? context.save()
                 } label: {
                     HStack {
-                        Image(systemName: habit.isCompleted(on: .now) ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(habit.isCompleted(on: .now) ? ChronosColors.brandSecondary : .secondary)
+                        Image(systemName: habit.isCompleted(on: browsedDate) ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(habit.isCompleted(on: browsedDate) ? ChronosColors.brandSecondary : .secondary)
                         Text(habit.title).font(.chronosBody)
                         Spacer()
                         if habit.streakCount > 0 {
@@ -312,10 +453,50 @@ struct TodayView: View {
                         }
                     }
                     .padding(.vertical, ChronosSpacing.micro)
+                    .frame(minHeight: 44)
                 }
                 .buttonStyle(.plain)
+                .sensoryFeedback(.success, trigger: habit.streakCount)
             }
         }
+    }
+
+    /// Medication quick items — mark a dose taken without leaving Today (Android TodayTab meds).
+    /// The write path mirrors MedicationView's take action: `acknowledgeDose()` appends a taken
+    /// `DoseEvent` and decrements supply; already-taken plans show as done and don't re-record.
+    private var medicationSection: some View {
+        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+            Text("Today's medications").font(.chronosTitle)
+            ForEach(dueMedicationPlans) { plan in
+                let taken = plan.isTaken(on: .now)
+                Button {
+                    if !taken {
+                        plan.acknowledgeDose()
+                        try? context.save()
+                        medTakeTick += 1
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: taken ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(taken ? ChronosColors.brandSecondary : .secondary)
+                        Text(plan.name).font(.chronosBody)
+                        if !plan.dosage.isEmpty {
+                            Text("\(plan.dosage) \(plan.unit)")
+                                .font(.chronosCaption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(plan.reminderMinuteOfDay.clockTime)
+                            .font(.chronosCaption).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, ChronosSpacing.micro)
+                    .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .disabled(taken)
+                .accessibilityLabel(taken ? "\(plan.name), taken" : "Mark \(plan.name) taken")
+            }
+        }
+        .sensoryFeedback(.success, trigger: medTakeTick)
     }
 }
 

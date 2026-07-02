@@ -149,18 +149,34 @@ final class ChronosNotifications {
 
     // MARK: Task
 
-    /// Schedule a one-shot reminder for a task with a due date/time. Gated on `taskRemindersEnabled`.
-    /// The fire time is the task's due date, shifted out of quiet hours when necessary. Completed
-    /// or past-due tasks are skipped.
+    /// Schedule a one-shot reminder for a task with a due date/time, plus per-occurrence reminders
+    /// for a recurring task's reminder drafts (Android `AT_TIME` / `BEFORE_OCCURRENCE`). Gated on
+    /// `taskRemindersEnabled`. Fire times are shifted out of quiet hours when necessary. Completed
+    /// tasks and past fire times are skipped.
     func scheduleTask(_ task: TaskItem, settings: ChronosSettings = .shared) async {
         await requestAuthorization()
         cancel(idPrefix: "task-\(task.id)")
         guard settings.remindersEnabled, settings.taskRemindersEnabled else { return }
-        guard !task.isCompleted, let due = task.dueDate else { return }
+        guard !task.isCompleted else { return }
 
-        let fireDate = shiftedOutOfQuietHours(due, settings: settings)
-        guard fireDate > Date() else { return }  // don't schedule for the past
+        if let due = task.dueDate {
+            let fireDate = shiftedOutOfQuietHours(due, settings: settings)
+            if fireDate > Date() {  // don't schedule for the past
+                let trigger = UNCalendarNotificationTrigger(
+                    dateMatching: Calendar.current.dateComponents(
+                        [.year, .month, .day, .hour, .minute], from: fireDate),
+                    repeats: false)
+                try? await center.add(UNNotificationRequest(
+                    identifier: "task-\(task.id)", content: taskContent(task, body: "This task is due now."),
+                    trigger: trigger))
+            }
+        }
 
+        await scheduleRecurrenceReminders(task, settings: settings)
+    }
+
+    /// The shared notification content for a task reminder (title / priority / detail / checklist).
+    private func taskContent(_ task: TaskItem, body fallbackBody: String) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = task.title
         content.subtitle = task.priority > 0 ? "\(task.priorityLabel) priority" : ""
@@ -170,19 +186,68 @@ final class ChronosNotifications {
             let done = task.checklist.filter(\.isDone).count
             bodyLines.append("Checklist: \(done)/\(task.checklist.count) done.")
         }
-        content.body = bodyLines.isEmpty ? "This task is due now." : bodyLines.joined(separator: "\n")
+        content.body = bodyLines.isEmpty ? fallbackBody : bodyLines.joined(separator: "\n")
         content.sound = .default
         content.categoryIdentifier = Self.taskCategory
         content.threadIdentifier = Self.taskThread
         content.interruptionLevel = task.priority >= 3 ? .timeSensitive : .active
         content.userInfo = ["taskID": task.id, "section": "tasks"]
+        return content
+    }
 
-        let trigger = UNCalendarNotificationTrigger(
-            dateMatching: Calendar.current.dateComponents(
-                [.year, .month, .day, .hour, .minute], from: fireDate),
-            repeats: false)
-        try? await center.add(UNNotificationRequest(
-            identifier: "task-\(task.id)", content: content, trigger: trigger))
+    /// How many upcoming occurrences of a recurring task get their reminders pre-scheduled. iOS has
+    /// no per-occurrence alarm re-arming like Android's AlarmManager path, so the next few
+    /// occurrences are scheduled up front and refreshed on every save / completion.
+    static let recurringReminderOccurrences = 4
+
+    /// One-shot notifications for each of a recurring task's reminder drafts across the next few
+    /// occurrence days (Android: `TaskRecurringConfig.reminderDrafts` scheduling per occurrence).
+    /// `atTime` fires at its clock time (falling back to the preferred start); `beforeOccurrence`
+    /// needs a preferred start and a positive lead offset — invalid drafts are skipped, mirroring
+    /// the Android form's `recurringRemindersValid` rule.
+    private func scheduleRecurrenceReminders(_ task: TaskItem, settings: ChronosSettings) async {
+        guard let rec = task.recurrence, !rec.reminders.isEmpty else { return }
+        let cal = Calendar.current
+
+        // Occurrence days: the task's anchor day, then the recurrence chain, capped and clipped
+        // to the series end.
+        var day = cal.startOfDay(for: task.targetDate ?? task.dueDate ?? .now)
+        var occurrences: [Date] = []
+        for _ in 0..<Self.recurringReminderOccurrences {
+            if let endsOn = rec.endsOn, day > endsOn { break }
+            occurrences.append(day)
+            guard let next = rec.nextDate(after: day, calendar: cal) else { break }
+            day = cal.startOfDay(for: next)
+        }
+
+        for (occurrenceIndex, occurrence) in occurrences.enumerated() {
+            for (reminderIndex, reminder) in rec.reminders.enumerated() {
+                let fireMinute: Int
+                switch reminder.trigger {
+                case .atTime:
+                    guard let minute = reminder.minuteOfDay ?? task.preferredStartMinuteOfDay else { continue }
+                    fireMinute = minute
+                case .beforeOccurrence:
+                    guard let start = task.preferredStartMinuteOfDay,
+                          let offset = reminder.offsetMinutesBefore, offset > 0 else { continue }
+                    fireMinute = start - offset
+                }
+                guard let raw = cal.date(byAdding: .minute, value: fireMinute, to: occurrence) else { continue }
+                let fireDate = shiftedOutOfQuietHours(raw, settings: settings)
+                guard fireDate > Date() else { continue }
+
+                let body = reminder.trigger == .atTime
+                    ? "Recurring task reminder."
+                    : "Starts in \(reminder.offsetMinutesBefore ?? 0) min."
+                let trigger = UNCalendarNotificationTrigger(
+                    dateMatching: cal.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate),
+                    repeats: false)
+                try? await center.add(UNNotificationRequest(
+                    identifier: "task-\(task.id)-rec-\(occurrenceIndex)-\(reminderIndex)",
+                    content: taskContent(task, body: body),
+                    trigger: trigger))
+            }
+        }
     }
 
     // MARK: Habit

@@ -594,6 +594,223 @@ public enum LocalPlanningHeuristics {
     }
 }
 
+// MARK: - Planning toggles (protect focus / auto breaks / preserve manual)
+
+/// The three user-facing planning switches (Settings → Planning), mirroring Android's
+/// `protect_focus_blocks` / `add_breaks_automatically` / `preserve_manual_blocks` persisted flags.
+/// All default ON, matching Android's `rememberPersistentBoolean(..., true)` defaults.
+public struct PlanningToggles: Sendable, Equatable {
+    public let protectFocusBlocks: Bool
+    public let addBreaksAutomatically: Bool
+    public let preserveManualBlocks: Bool
+
+    public init(
+        protectFocusBlocks: Bool = true,
+        addBreaksAutomatically: Bool = true,
+        preserveManualBlocks: Bool = true
+    ) {
+        self.protectFocusBlocks = protectFocusBlocks
+        self.addBreaksAutomatically = addBreaksAutomatically
+        self.preserveManualBlocks = preserveManualBlocks
+    }
+}
+
+/// An already-scheduled block, reduced to the fields regeneration protection reasons about.
+public struct RegenExistingBlock: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let category: String
+    public let startMinute: Int
+    public let durationMinutes: Int
+    /// True when the user placed or edited this block by hand (provenance MANUAL/USER).
+    public let isManual: Bool
+    public let isLocked: Bool
+    public let isProtected: Bool
+
+    public init(
+        id: String,
+        category: String,
+        startMinute: Int,
+        durationMinutes: Int,
+        isManual: Bool = false,
+        isLocked: Bool = false,
+        isProtected: Bool = false
+    ) {
+        self.id = id
+        self.category = category
+        self.startMinute = startMinute
+        self.durationMinutes = durationMinutes
+        self.isManual = isManual
+        self.isLocked = isLocked
+        self.isProtected = isProtected
+    }
+
+    public var endMinute: Int { startMinute + durationMinutes }
+}
+
+/// A block the planner proposes for the day, before the toggles are applied.
+public struct RegenCandidateBlock: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let title: String
+    public let category: String
+    public let startMinute: Int
+    public let durationMinutes: Int
+
+    public init(id: String, title: String, category: String, startMinute: Int, durationMinutes: Int) {
+        self.id = id
+        self.title = title
+        self.category = category
+        self.startMinute = startMinute
+        self.durationMinutes = durationMinutes
+    }
+
+    public var endMinute: Int { startMinute + durationMinutes }
+}
+
+/// The outcome of applying the planning toggles to a regeneration pass.
+public struct PlanRegenerationOutcome: Sendable, Equatable {
+    /// Candidates that survived protection filtering, in start order.
+    public let acceptedCandidates: [RegenCandidateBlock]
+    /// Recovery breaks inserted after long demanding stretches (empty unless `addBreaksAutomatically`).
+    public let insertedBreaks: [RegenCandidateBlock]
+    /// Existing (unprotected) blocks an accepted candidate overlapped — the caller replaces these.
+    public let displacedExistingIDs: [String]
+
+    public init(
+        acceptedCandidates: [RegenCandidateBlock],
+        insertedBreaks: [RegenCandidateBlock],
+        displacedExistingIDs: [String]
+    ) {
+        self.acceptedCandidates = acceptedCandidates
+        self.insertedBreaks = insertedBreaks
+        self.displacedExistingIDs = displacedExistingIDs
+    }
+}
+
+/// Deterministic day-plan regeneration policy driven by the three planning toggles:
+///   - `protectFocusBlocks`   — existing FOCUS-class blocks are immovable; overlapping candidates drop.
+///   - `preserveManualBlocks` — hand-placed blocks are immovable; overlapping candidates drop.
+///   - `addBreaksAutomatically` — a short recovery break is inserted after each long demanding stretch.
+/// Locked / protected blocks are always immovable (Android parity: PlannerService's
+/// "locked / protected / FIXED are immovable"). Existing blocks left unprotected by the toggles may
+/// be *replaced* by an overlapping candidate: the candidate is accepted and the block's id is
+/// reported in `displacedExistingIDs`.
+public enum PlanRegeneration {
+    /// Focus-class categories the protect-focus toggle shields.
+    public static let protectedFocusCategories: Set<String> = ["FOCUS", "DEEP WORK"]
+    /// Demanding categories that accrue toward a break-worthy stretch (Android GapFillPlanner
+    /// `FOCUS_CATEGORIES`).
+    public static let demandingCategories: Set<String> = ["WORK", "STUDY", "FOCUS", "TASK", "DEEP WORK"]
+    /// Android GapFillPlanner parity: FOCUS_STRETCH_MINUTES / BREAK_DURATION_MINUTES / MIN_PLACEMENT.
+    static let focusStretchMinutes = 90
+    static let breakDurationMinutes = 20
+    static let minBreakGapMinutes = 15
+
+    /// Applies the toggles to one regeneration pass. Pure and order-deterministic: candidates are
+    /// processed in start order (ties keep input order); overlaps among candidates are first-wins.
+    public static func resolve(
+        candidates: [RegenCandidateBlock],
+        existing: [RegenExistingBlock],
+        toggles: PlanningToggles,
+        breakIDProvider: () -> String = { UUID().uuidString }
+    ) -> PlanRegenerationOutcome {
+        let immovable = existing.filter { isImmovable($0, toggles: toggles) }
+        let movable = existing.filter { !isImmovable($0, toggles: toggles) }
+
+        // Stable start-order walk; a candidate must clear every immovable block and every
+        // previously accepted candidate. Overlapping a movable existing block displaces it.
+        let ordered = candidates.enumerated()
+            .sorted { a, b in
+                a.element.startMinute != b.element.startMinute
+                    ? a.element.startMinute < b.element.startMinute
+                    : a.offset < b.offset
+            }
+            .map(\.element)
+        var accepted: [RegenCandidateBlock] = []
+        var displaced: [String] = []
+        for candidate in ordered {
+            let blocked = immovable.contains { overlaps(candidate.startMinute, candidate.endMinute, $0.startMinute, $0.endMinute) }
+                || accepted.contains { overlaps(candidate.startMinute, candidate.endMinute, $0.startMinute, $0.endMinute) }
+            guard !blocked else { continue }
+            accepted.append(candidate)
+            for block in movable
+            where overlaps(candidate.startMinute, candidate.endMinute, block.startMinute, block.endMinute)
+                && !displaced.contains(block.id) {
+                displaced.append(block.id)
+            }
+        }
+
+        let breaks: [RegenCandidateBlock]
+        if toggles.addBreaksAutomatically {
+            let kept = existing.filter { !displaced.contains($0.id) }
+                .map { (category: $0.category, start: $0.startMinute, end: $0.endMinute) }
+            let plan = accepted.map { (category: $0.category, start: $0.startMinute, end: $0.endMinute) }
+            breaks = insertRecoveryBreaks(spans: kept + plan, idProvider: breakIDProvider)
+        } else {
+            breaks = []
+        }
+
+        return PlanRegenerationOutcome(
+            acceptedCandidates: accepted,
+            insertedBreaks: breaks,
+            displacedExistingIDs: displaced
+        )
+    }
+
+    private static func isImmovable(_ block: RegenExistingBlock, toggles: PlanningToggles) -> Bool {
+        if block.isLocked || block.isProtected { return true }
+        if toggles.protectFocusBlocks && protectedFocusCategories.contains(block.category.uppercased()) {
+            return true
+        }
+        if toggles.preserveManualBlocks && block.isManual { return true }
+        return false
+    }
+
+    private static func overlaps(_ aStart: Int, _ aEnd: Int, _ bStart: Int, _ bEnd: Int) -> Bool {
+        aStart < bEnd && bStart < aEnd
+    }
+
+    /// Scans the merged timeline for contiguous demanding runs of at least `focusStretchMinutes`
+    /// and drops a recovery break into the free space right after each run (when at least
+    /// `minBreakGapMinutes` are free before the next block). One pass, one break per stretch —
+    /// mirrors GapFillPlanner's "break after a focus-heavy stretch" rule.
+    private static func insertRecoveryBreaks(
+        spans: [(category: String, start: Int, end: Int)],
+        idProvider: () -> String
+    ) -> [RegenCandidateBlock] {
+        let sorted = spans.sorted { $0.start != $1.start ? $0.start < $1.start : $0.end < $1.end }
+        var breaks: [RegenCandidateBlock] = []
+        var runMinutes = 0
+        var runEnd = -1
+        for (index, span) in sorted.enumerated() {
+            guard demandingCategories.contains(span.category.uppercased()) else {
+                runMinutes = 0
+                runEnd = -1
+                continue
+            }
+            if span.start == runEnd {
+                runMinutes += span.end - span.start
+            } else {
+                runMinutes = span.end - span.start
+            }
+            runEnd = span.end
+            guard runMinutes >= focusStretchMinutes else { continue }
+            let nextStart = index + 1 < sorted.count ? sorted[index + 1].start : 1440
+            let gap = min(nextStart, 1440) - span.end
+            guard gap >= minBreakGapMinutes else { continue }
+            breaks.append(RegenCandidateBlock(
+                id: idProvider(),
+                title: "Recovery break",
+                category: "RECOVERY",
+                startMinute: span.end,
+                durationMinutes: min(breakDurationMinutes, gap)
+            ))
+            runMinutes = 0
+            runEnd = -1
+        }
+        return breaks
+    }
+}
+
 // MARK: - distinctBy (Kotlin parity helper)
 
 /// Returns the elements of `source` keeping only the FIRST element for each distinct key produced by

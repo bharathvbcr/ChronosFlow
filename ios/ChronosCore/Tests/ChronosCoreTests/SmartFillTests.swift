@@ -308,4 +308,21 @@ final class SmartFillTests: XCTestCase {
         // Several chips surfaced.
         XCTAssertGreaterThanOrEqual(r.detections.count, 4)
     }
+
+    // MARK: Typed detections (per-chip apply)
+
+    func testTypedDetectionsParallelChipsAndCarryReasons() {
+        let r = parse("urgent email mom@home.com pay taxes tomorrow 9am every friday")
+        // Typed list mirrors the plain chip strings one-to-one, in order.
+        XCTAssertEqual(r.typedDetections.map(\.label), r.detections)
+        // Each kind surfaced exactly once with a non-empty reason.
+        let kinds = r.typedDetections.map(\.kind)
+        XCTAssertTrue(kinds.contains(.action))
+        XCTAssertTrue(kinds.contains(.priority))
+        XCTAssertTrue(kinds.contains(.time))
+        XCTAssertTrue(kinds.contains(.date))
+        XCTAssertTrue(kinds.contains(.recurrence))
+        XCTAssertEqual(kinds.count, Set(kinds).count)
+        XCTAssertTrue(r.typedDetections.allSatisfy { !$0.reason.isEmpty })
+    }
 }

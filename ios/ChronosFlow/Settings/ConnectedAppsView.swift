@@ -21,6 +21,10 @@ struct ConnectedAppsView: View {
     @State private var lastResult: String? = InteropSync.lastResult
     @State private var isSyncing = false
 
+    /// Drives success/failure haptics after a manual "Sync now" completes.
+    private enum SyncFeedback: Equatable { case success, failure }
+    @State private var syncFeedback: SyncFeedback?
+
     var body: some View {
         Form {
             statusSection
@@ -29,6 +33,8 @@ struct ConnectedAppsView: View {
         .navigationTitle("Connected apps")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: refreshStatus)
+        .sensoryFeedback(.success, trigger: syncFeedback) { _, new in new == .success }
+        .sensoryFeedback(.error, trigger: syncFeedback) { _, new in new == .failure }
     }
 
     // MARK: Status
@@ -38,7 +44,7 @@ struct ConnectedAppsView: View {
             LabeledContent("Meridian") {
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(isCompanionAppInstalled ? Color.green : Color.secondary)
+                        .fill(isCompanionAppInstalled ? ChronosColors.success : Color.secondary)
                         .frame(width: 8, height: 8)
                     Text(isCompanionAppInstalled ? "Installed" : "Not installed")
                         .foregroundStyle(.secondary)
@@ -98,8 +104,10 @@ struct ConnectedAppsView: View {
     /// Consent-gated inside `runSync()`, so a manual trigger with consent off is a silent no-op.
     private func syncNow() {
         isSyncing = true
+        syncFeedback = nil
         Task { @MainActor in
-            _ = await InteropSync.runSync()
+            let result = await InteropSync.runSync()
+            syncFeedback = result.isSuccess ? .success : .failure
             refreshStatus()
             isSyncing = false
         }

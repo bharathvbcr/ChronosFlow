@@ -167,7 +167,6 @@ struct TimeBlockEditorSheet: View {
             }
         }
         .presentationDetents([.large])
-        .presentationBackground(.thinMaterial)
     }
 
     // MARK: - Save

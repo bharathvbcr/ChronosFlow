@@ -301,7 +301,8 @@ private struct StreakChartCard: View {
                         HStack(spacing: ChronosSpacing.small) {
                             Text(row.title)
                                 .font(.chronosLabel).lineLimit(1)
-                                .frame(width: 96, alignment: .leading)
+                                .minimumScaleFactor(0.7)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             GeometryReader { geo in
                                 Capsule()
                                     .fill(ChronosColors.brandAccent)
@@ -311,7 +312,8 @@ private struct StreakChartCard: View {
                             .frame(height: 10)
                             Text("\(row.streak)d")
                                 .font(.chronosCaption).fontWeight(.semibold)
-                                .frame(width: 36, alignment: .trailing)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .frame(minWidth: 36, alignment: .trailing)
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel("\(row.title): \(row.streak) day streak")
@@ -354,15 +356,19 @@ private struct HabitCard: View {
                     Text(habit.title)
                         .font(.chronosHeadline)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    HStack(spacing: ChronosSpacing.micro) {
+                    HStack(spacing: ChronosSpacing.small) {
                         Button(action: onEdit) {
                             Image(systemName: "pencil").foregroundStyle(.secondary)
                         }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .buttonStyle(.plain)
                         .accessibilityLabel("Edit \(habit.title)")
                         Button(action: onArchive) {
                             Image(systemName: "archivebox").foregroundStyle(.secondary)
                         }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .buttonStyle(.plain)
                         .accessibilityLabel("Archive \(habit.title)")
                     }
@@ -416,6 +422,7 @@ private struct HabitCard: View {
         .contentShape(Rectangle())
         .onTapGesture { onMore() }
         .pressable()
+        .sensoryFeedback(.success, trigger: doneToday) { old, new in new && !old }
     }
 
     // MARK: 7-day week strip (parity with Android `HabitWeekStrip`).
@@ -434,7 +441,7 @@ private struct HabitCard: View {
             ForEach(days, id: \.timeIntervalSince1970) { day in
                 let done = habit.isCompleted(on: day)
                 let isToday = cal.isDateInToday(day)
-                VStack(spacing: 4) {
+                VStack(spacing: ChronosSpacing.micro) {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(done ? filled : (isToday ? todayEmpty : empty))
                         .frame(width: 16, height: 16)
@@ -683,6 +690,9 @@ struct HabitEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     /// Active goals to link a habit to (parity with Android's goal-link picker in the habit form).
     @Query(filter: #Predicate<Goal> { !$0.isCompleted }, sort: \Goal.title) private var goals: [Goal]
+    /// Archived habits offered as "From history" prefill chips for new habits — the iOS analogue of
+    /// Android's `HabitHistoryTemplate` section (recreate a past habit's saved setup).
+    @Query(filter: #Predicate<Habit> { !$0.isActive }, sort: \Habit.title) private var archivedHabits: [Habit]
 
     /// When non-nil the sheet edits an existing habit; otherwise it creates a new one. Tapping a
     /// habit card / "Edit" in the context sheet now opens this in edit mode (previously the editor
@@ -691,26 +701,36 @@ struct HabitEditorSheet: View {
 
     @State private var title: String
     @State private var cadence: String
+    /// Weekdays (Mon-first index 0…6) backing the "Custom days" cadence, serialized as
+    /// "Mon/Thu"-style cadence strings — Android's SELECTED_WEEKDAYS custom recurrence.
+    @State private var customDays: Set<Int>
     @State private var difficulty: Double
     @State private var windowStart: Date
     @State private var windowEnd: Date
     @State private var isBundled: Bool
     @State private var goalID: String?
 
+    /// A stored cadence that matches no preset (e.g. imported data) is kept selectable as-is.
+    private let extraCadenceOption: String?
+
     init(habit: Habit? = nil, initialTitle: String? = nil) {
         editing = habit
         let cal = Calendar.current
-        func date(fromMinute minute: Int) -> Date {
-            cal.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: .now) ?? .now
-        }
         _title = State(initialValue: habit?.title ?? initialTitle ?? "")
-        _cadence = State(initialValue: habit?.cadence ?? "DAILY")
+        let cadenceState = habitCadenceEditorState(habit?.cadence ?? "Daily")
+        _cadence = State(initialValue: cadenceState.selection)
+        _customDays = State(initialValue: cadenceState.customDays)
+        extraCadenceOption = cadenceState.extraOption
         _difficulty = State(initialValue: Double(habit?.difficulty ?? 2))
-        _windowStart = State(initialValue: habit.map { date(fromMinute: $0.windowStartMinute) } ?? .now)
-        _windowEnd = State(initialValue: habit.map { date(fromMinute: $0.windowEndMinute) }
+        _windowStart = State(initialValue: habit.map { Self.date(fromMinute: $0.windowStartMinute) } ?? .now)
+        _windowEnd = State(initialValue: habit.map { Self.date(fromMinute: $0.windowEndMinute) }
             ?? (cal.date(byAdding: .hour, value: 16, to: .now) ?? .now))
         _isBundled = State(initialValue: habit?.isBundled ?? false)
         _goalID = State(initialValue: habit?.goalID)
+    }
+
+    private static func date(fromMinute minute: Int) -> Date {
+        Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: .now) ?? .now
     }
 
     var body: some View {
@@ -718,10 +738,10 @@ struct HabitEditorSheet: View {
             Form {
                 TextField("Habit", text: $title)
                 Picker("Cadence", selection: $cadence) {
-                    Text("Daily").tag("DAILY")
-                    Text("Weekly").tag("WEEKLY")
-                    Text("3× / week").tag("3x/week")
-                    Text("5× / week").tag("5x/week")
+                    ForEach(cadenceOptions, id: \.self) { Text($0).tag($0) }
+                }
+                if cadence == "Custom days" {
+                    customDaysRow
                 }
                 VStack(alignment: .leading) {
                     Text("Difficulty: \(Int(difficulty))")
@@ -729,6 +749,15 @@ struct HabitEditorSheet: View {
                 }
                 DatePicker("Window start", selection: $windowStart, displayedComponents: .hourAndMinute)
                 DatePicker("Window end", selection: $windowEnd, displayedComponents: .hourAndMinute)
+                if let hint = historyHint {
+                    // Android's "Today snapshot" streak/adherence context line in the edit form.
+                    Label(hint, systemImage: "flame")
+                        .font(.chronosCaption).foregroundStyle(.secondary)
+                }
+
+                if editing == nil {
+                    templatesSection
+                }
 
                 Section {
                     Toggle("On day plan", isOn: $isBundled)
@@ -743,6 +772,10 @@ struct HabitEditorSheet: View {
                 } footer: {
                     Text("“On day plan” lets this habit be scheduled as a block. Linking a goal counts completions toward it.")
                 }
+
+                if editing == nil && !historyTitles.isEmpty {
+                    fromHistorySection
+                }
             }
             .navigationTitle(editing == nil ? "New habit" : "Edit habit")
             .toolbarTitleDisplayMode(.inline)
@@ -756,10 +789,125 @@ struct HabitEditorSheet: View {
         .presentationDetents([.medium, .large])
     }
 
+    // MARK: Cadence presets + custom weekdays (Android habitRecurrenceQuickPresets / SELECTED_WEEKDAYS)
+
+    private var cadenceOptions: [String] {
+        guard let extra = extraCadenceOption, !habitCadencePresets.contains(extra) else {
+            return habitCadencePresets
+        }
+        return habitCadencePresets + [extra]
+    }
+
+    /// Weekday toggle chips for the "Custom days" cadence (Android's weekday FilterChip row).
+    private var customDaysRow: some View {
+        HStack(spacing: ChronosSpacing.small) {
+            ForEach(0..<7, id: \.self) { day in
+                let selected = customDays.contains(day)
+                Button {
+                    // Discard the Set mutation results — a non-Void withAnimation closure
+                    // poisons type inference (see ios-swiftui-typecheck-pitfalls).
+                    withAnimation(ChronosMotion.snappy) {
+                        if selected { _ = customDays.remove(day) } else { _ = customDays.insert(day) }
+                    }
+                } label: {
+                    Text(habitWeekdayShortNames[day])
+                        .font(.chronosCaption)
+                        .fontWeight(selected ? .semibold : .regular)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, ChronosSpacing.small)
+                        .background(selected ? ChronosColors.brandPrimary.opacity(0.2) : Color(.tertiarySystemFill),
+                                    in: Capsule())
+                        .foregroundStyle(selected ? ChronosColors.brandPrimary : .secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(habitWeekdayShortNames[day])
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+    }
+
+    /// The cadence string persisted on the model: the preset label, or the custom weekday set
+    /// serialized "Mon/Thu"-style (empty custom selection falls back to Daily).
+    private var cadenceValue: String {
+        guard cadence == "Custom days" else { return cadence }
+        let days = customDays.sorted().map { habitWeekdayShortNames[$0] }
+        return days.isEmpty ? "Daily" : days.joined(separator: "/")
+    }
+
+    // MARK: Templates (Android habitTemplates chips)
+
+    private var templatesSection: some View {
+        Section {
+            FlowChips(titles: habitTemplates.map(\.label)) { label in
+                guard let template = habitTemplates.first(where: { $0.label == label }) else { return }
+                withAnimation(ChronosMotion.smooth) { apply(template) }
+            }
+        } header: {
+            Text("Templates")
+        } footer: {
+            Text("Prefills the form — nothing is saved until you tap Save.")
+        }
+    }
+
+    private func apply(_ template: HabitTemplate) {
+        title = template.title
+        cadence = template.cadence
+        customDays = []
+        windowStart = Self.date(fromMinute: template.startMinute)
+        windowEnd = Self.date(fromMinute: template.endMinute)
+        difficulty = Double(template.difficulty)
+        isBundled = template.isBundled
+    }
+
+    // MARK: From history (Android HabitHistoryTemplate chips — archived setups, new habits only)
+
+    /// Distinct archived-habit titles offered as prefill chips (first occurrence wins).
+    private var historyTitles: [String] {
+        var seen = Set<String>()
+        return archivedHabits.map(\.title).filter { seen.insert($0).inserted }
+    }
+
+    private var fromHistorySection: some View {
+        Section {
+            FlowChips(titles: historyTitles) { picked in
+                guard let source = archivedHabits.first(where: { $0.title == picked }) else { return }
+                withAnimation(ChronosMotion.smooth) {
+                    title = source.title
+                    let state = habitCadenceEditorState(source.cadence)
+                    cadence = state.selection
+                    customDays = state.customDays
+                    windowStart = Self.date(fromMinute: source.windowStartMinute)
+                    windowEnd = Self.date(fromMinute: source.windowEndMinute)
+                    difficulty = Double(source.difficulty)
+                    isBundled = source.isBundled
+                }
+            }
+        } header: {
+            Text("From history")
+        } footer: {
+            Text("Recreate an archived habit's saved setup.")
+        }
+    }
+
+    // MARK: History hint (edit mode)
+
+    /// One-line completion context for the habit being edited, mirroring the streak/adherence line
+    /// in Android's "Today snapshot" form section.
+    private var historyHint: String? {
+        guard let habit = editing else { return nil }
+        let analytics = habit.analytics(today: .now)
+        var parts = ["Streak \(analytics.currentStreak)",
+                     "adherence \(Int((analytics.adherenceRate * 100).rounded()))%"]
+        if let best = analytics.bestCompletionMinuteOfDay {
+            parts.append("best time \(best.clockTime)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
     private func saveHabit() {
         if let habit = editing {
             habit.title = title
-            habit.cadence = cadence
+            habit.cadence = cadenceValue
             habit.difficulty = Int(difficulty)
             habit.windowStartMinute = minute(windowStart)
             habit.windowEndMinute = minute(windowEnd)
@@ -767,7 +915,7 @@ struct HabitEditorSheet: View {
             habit.goalID = goalID
         } else {
             context.insert(Habit(
-                title: title, cadence: cadence, windowStartMinute: minute(windowStart),
+                title: title, cadence: cadenceValue, windowStartMinute: minute(windowStart),
                 windowEndMinute: minute(windowEnd), difficulty: Int(difficulty),
                 isBundled: isBundled, goalID: goalID))
         }
@@ -780,6 +928,75 @@ struct HabitEditorSheet: View {
         return (c.hour ?? 0) * 60 + (c.minute ?? 0)
     }
 }
+
+// MARK: - Habit form presets (Android HabitFormSheet parity data)
+
+/// Quick cadence presets, mirroring Android's `habitRecurrenceQuickPresets` (the Custom entry maps
+/// to the weekday-set editor). Stored on the model as the display string, like Android's `cadence`.
+private let habitCadencePresets = [
+    "Daily", "Weekdays", "Weekends", "Mon/Wed/Fri", "Tue/Thu", "Weekly", "Every 2 days",
+    "2x / week", "3x / week", "4x / week", "5x / week", "6x / week", "1x / month", "Custom days"
+]
+
+/// Mon-first weekday short names used by the custom-days editor and its cadence serialization.
+private let habitWeekdayShortNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+/// Resolve a stored cadence string into editor state: legacy values ("DAILY", "3x/week") normalize
+/// onto the preset labels; "Mon/Thu"-style weekday lists open the custom-days editor; anything else
+/// is kept as an extra selectable option so existing data never breaks the picker.
+private func habitCadenceEditorState(_ stored: String)
+    -> (selection: String, customDays: Set<Int>, extraOption: String?) {
+    let normalized: String
+    switch stored.uppercased() {
+    case "DAILY": normalized = "Daily"
+    case "WEEKLY": normalized = "Weekly"
+    case "3X/WEEK": normalized = "3x / week"
+    case "5X/WEEK": normalized = "5x / week"
+    default: normalized = stored
+    }
+    if habitCadencePresets.contains(normalized) { return (normalized, [], nil) }
+    // A "/"-joined list of weekday names (that isn't one of the named presets) is a custom-day set.
+    let tokens = normalized.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }
+    let days = tokens.compactMap { token in
+        habitWeekdayShortNames.firstIndex { $0.caseInsensitiveCompare(token) == .orderedSame }
+    }
+    if !tokens.isEmpty && days.count == tokens.count {
+        return ("Custom days", Set(days), nil)
+    }
+    return (normalized, [], normalized)
+}
+
+/// Starter templates that prefill the whole form, mirroring Android's `habitTemplates`.
+private struct HabitTemplate {
+    let label: String
+    let title: String
+    let cadence: String
+    let startMinute: Int
+    let endMinute: Int
+    let difficulty: Int
+    let isBundled: Bool
+}
+
+private let habitTemplates: [HabitTemplate] = [
+    HabitTemplate(label: "Morning reset", title: "Morning walk", cadence: "Daily",
+                  startMinute: 6 * 60, endMinute: 9 * 60, difficulty: 2, isBundled: true),
+    HabitTemplate(label: "Workout", title: "Workout", cadence: "Weekdays",
+                  startMinute: 6 * 60, endMinute: 8 * 60, difficulty: 4, isBundled: true),
+    HabitTemplate(label: "Reading", title: "Read 20 min", cadence: "Daily",
+                  startMinute: 19 * 60, endMinute: 22 * 60, difficulty: 2, isBundled: false),
+    HabitTemplate(label: "Hydration", title: "Hydrate", cadence: "Daily",
+                  startMinute: 8 * 60, endMinute: 20 * 60, difficulty: 1, isBundled: true),
+    HabitTemplate(label: "Dental", title: "Brush and floss", cadence: "Daily",
+                  startMinute: 20 * 60, endMinute: 22 * 60, difficulty: 1, isBundled: true),
+    HabitTemplate(label: "Study", title: "Study 25 min", cadence: "Weekdays",
+                  startMinute: 18 * 60, endMinute: 21 * 60, difficulty: 3, isBundled: true),
+    HabitTemplate(label: "Sleep routine", title: "Wind down for sleep", cadence: "Daily",
+                  startMinute: 20 * 60, endMinute: 22 * 60, difficulty: 2, isBundled: true),
+    HabitTemplate(label: "Nutrition", title: "Prep healthy meal", cadence: "Daily",
+                  startMinute: 11 * 60, endMinute: 14 * 60, difficulty: 2, isBundled: false),
+    HabitTemplate(label: "Wind down", title: "Journal", cadence: "Daily",
+                  startMinute: 20 * 60, endMinute: 22 * 60, difficulty: 2, isBundled: false)
+]
 
 // MARK: - Repair assistant
 

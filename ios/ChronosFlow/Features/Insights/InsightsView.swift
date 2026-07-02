@@ -21,9 +21,16 @@ struct InsightsView: View {
     @Query private var nights: [SleepTrack]
     @Query private var checkIns: [MoodEnergyCheckIn]
     @Query private var medications: [MedicationPlan]
+    @Query private var journalEntries: [JournalEntry]
     @Environment(\.modelContext) private var modelContext
     @State private var showingDayReview = false
     @State private var period: InsightsPeriod = .day
+
+    // MARK: Journal / sleep affordances (Android: onOpenJournal / onOpenSleepLog on the trend cards)
+    @State private var showingJournalEditor = false
+    @State private var showingSleepLog = false
+    /// Journal-history rows expanded in place (Android: JournalTimelineEntryRow's expand state).
+    @State private var expandedJournalEntryIDs: Set<String> = []
 
     // MARK: Recommendation apply feedback — transient confirmation shown after tapping "Apply",
     // mirroring the snackbar message Android surfaces from `applyInsightRecommendation`.
@@ -134,26 +141,7 @@ struct InsightsView: View {
                     // InsightsTrendSections, each trend renders inline and is gated ONLY on data
                     // availability (never on collapsed state) under one cohesive "Trends" heading.
                     if sectionVisible(.trends) {
-                        Text("Trends").font(.chronosHeadline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if !habits.isEmpty {
-                            habitChart
-                        }
-                        if nights.count >= 2 {
-                            sleepChart
-                        }
-                        if let best = bestWindow {
-                            bestWindowCard(best)
-                        }
-                        if checkIns.count >= 2 {
-                            moodChart
-                        }
-                        if let corr = sleepMoodCorrelation {
-                            correlationCard(corr)
-                        }
-                        if !medications.isEmpty, adherenceRate > 0 {
-                            adherenceCard
-                        }
+                        trendsSection
                     }
                 }
                 .padding(ChronosSpacing.standard)
@@ -163,9 +151,54 @@ struct InsightsView: View {
             .chronosScrollMinimizedBar()
             .sheet(isPresented: $showingDayReview) {
                 DayReviewSheet(blocks: todayBlocks)
+                    .presentationDetents([.large])
+            }
+            .sheet(isPresented: $showingJournalEditor) {
+                JournalEditorSheet(editing: todayJournalEntry, initialDate: .now)
+            }
+            .sheet(isPresented: $showingSleepLog) {
+                SleepLogSheet()
             }
             .task { refreshRecommendationsBaseline() }
             .onChange(of: period) { _, _ in refreshRecommendationsBaseline() }
+        }
+    }
+
+    // MARK: TRENDS section body (extracted from `body` to keep the type-checker in budget)
+
+    @ViewBuilder
+    private var trendsSection: some View {
+        Text("Trends").font(.chronosHeadline)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        if !habits.isEmpty {
+            habitChart
+        }
+        if nights.count >= 2 {
+            sleepChart
+        }
+        if let best = bestWindow {
+            bestWindowCard(best)
+        }
+        if checkIns.count >= 2 {
+            moodChart
+        }
+        if let corr = sleepMoodCorrelation {
+            correlationCard(corr)
+        }
+        if !medications.isEmpty, adherenceRate > 0 {
+            adherenceCard
+        }
+        // Journal + sleep trend cards (Android: InsightsTrendSections lines 292–476).
+        // The history card is data-gated; the reflection / sleep-log affordance cards
+        // always show while their feature flag is on, mirroring Android's gating.
+        if settings.journalEnabled {
+            if !recentJournalEntries.isEmpty {
+                journalHistoryCard
+            }
+            eveningReflectionCard
+        }
+        if settings.sleepEnabled {
+            sleepLogCard
         }
     }
 
@@ -190,7 +223,7 @@ struct InsightsView: View {
                             .background(
                                 selected
                                     ? ChronosColors.brandPrimary.opacity(0.18)
-                                    : Color.secondary.opacity(0.10),
+                                    : Color(.tertiarySystemFill),
                                 in: Capsule()
                             )
                             .foregroundStyle(
@@ -205,10 +238,12 @@ struct InsightsView: View {
                             )
                     }
                     .buttonStyle(.plain)
-                    .animation(.easeInOut(duration: 0.15), value: selected)
+                    .pressable()
+                    .animation(ChronosMotion.snappy, value: selected)
                 }
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, ChronosSpacing.micro)
+            .sensoryFeedback(.selection, trigger: selectedSections)
         }
     }
 
@@ -310,7 +345,6 @@ struct InsightsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(ChronosColors.brandPrimary)
-                .padding(.top, 2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -385,6 +419,14 @@ struct InsightsView: View {
                 Text("Category breakdown").font(.chronosHeadline)
                 if s.categoryRows.isEmpty {
                     Text("No blocks tracked yet").font(.chronosBody).foregroundStyle(.secondary)
+                    Button {
+                        showingDayReview = true
+                    } label: {
+                        Label("Open daily review", systemImage: "eye")
+                            .font(.chronosLabel)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(ChronosColors.brandPrimary)
                 } else {
                     if let top = s.topCategory {
                         Text("★ \(top.category) leads at \(percent(top.share)) · \(s.concentration.rawValue) concentration")
@@ -537,6 +579,7 @@ struct InsightsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .sensoryFeedback(.success, trigger: appliedRecommendationMessage) { _, new in new != nil }
     }
 
     /// One recommendation row with text, source label, and an "Apply" action — mirrors Android's
@@ -889,6 +932,8 @@ struct InsightsView: View {
                         .cornerRadius(6)
                 }
                 .frame(height: 160)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Habit streaks bar chart")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -909,6 +954,9 @@ struct InsightsView: View {
                         .foregroundStyle(ChronosColors.brandPrimary)
                 }
                 .frame(height: 160)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Sleep hours over the last 7 nights")
+                .accessibilityValue("Latest: \(String(format: "%.1f", Double(recent.last?.durationMinutes ?? 0) / 60)) hours")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -933,10 +981,160 @@ struct InsightsView: View {
                     .chartForegroundStyleScale(["Mood": ChronosColors.brandAccent,
                                                 "Energy": ChronosColors.brandSecondary])
                     .frame(height: 160)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Mood and energy over recent check-ins")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    // MARK: Journal history + evening reflection (Android: JournalTimelineSection / the
+    // "Evening reflection" card in InsightsTrendSections)
+
+    /// Caps the eagerly-rendered history rows, mirroring Android's `InlineHistoryCap`.
+    private static let inlineHistoryCap = 10
+    /// Trailing window for the history card — matches this screen's other 14-day trend windows.
+    private static let journalWindowDays = 14
+
+    /// Journal entries in the trailing window, newest first (Android: observeRecentJournalEntries).
+    private var recentJournalEntries: [JournalEntry] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        guard let windowStart = cal.date(byAdding: .day, value: -(Self.journalWindowDays - 1), to: today)
+        else { return [] }
+        return journalEntries
+            .filter { $0.entryDate >= windowStart }
+            .sorted { $0.entryDate > $1.entryDate }
+    }
+
+    /// Today's reflection entry (primary preferred), backing the evening-reflection card.
+    private var todayJournalEntry: JournalEntry? {
+        let todays = journalEntries.filter { Calendar.current.isDateInToday($0.entryDate) }
+        return todays.first(where: \.isPrimary) ?? todays.first
+    }
+
+    /// "N reflections in the last X days" / "Showing N of M …" — mirrors `journalHistorySummary`.
+    private func journalHistorySummary(total: Int, shown: Int, windowDays: Int) -> String {
+        let label = total == 1 ? "reflection" : "reflections"
+        return shown < total
+            ? "Showing \(shown) of \(total) \(label) from the last \(windowDays) days"
+            : "\(total) \(label) in the last \(windowDays) days"
+    }
+
+    private var journalHistoryCard: some View {
+        let entries = recentJournalEntries
+        let shown = Array(entries.prefix(Self.inlineHistoryCap))
+        return ChronosGlassCard {
+            VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+                Text("Journal history").font(.chronosHeadline)
+                ForEach(shown, id: \.id) { entry in
+                    journalHistoryRow(entry)
+                    if entry.id != shown.last?.id { Divider() }
+                }
+                Text(journalHistorySummary(total: entries.count, shown: shown.count,
+                                           windowDays: Self.journalWindowDays))
+                    .font(.chronosCaption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// One history row, expandable in place (Android: JournalTimelineEntryRow).
+    private func journalHistoryRow(_ entry: JournalEntry) -> some View {
+        let expanded = expandedJournalEntryIDs.contains(entry.id)
+        return Button {
+            // `_ =` keeps the withAnimation closure Void — Set.insert/remove return values
+            // otherwise poison type inference (see ios-swiftui-typecheck-pitfalls).
+            withAnimation(ChronosMotion.snappy) {
+                if expanded {
+                    _ = expandedJournalEntryIDs.remove(entry.id)
+                } else {
+                    _ = expandedJournalEntryIDs.insert(entry.id)
+                }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.entryDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                    .font(.chronosCaption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(entry.body.trimmingCharacters(in: .whitespacesAndNewlines))
+                    .font(.chronosBody)
+                    .lineLimit(expanded ? nil : 4)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: expanded)
+    }
+
+    /// Today's reflection snippet + an Open/Write affordance into the journal composer.
+    private var eveningReflectionCard: some View {
+        let entry = todayJournalEntry
+        return ChronosGlassCard {
+            HStack(spacing: ChronosSpacing.compact) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Evening reflection").font(.chronosHeadline)
+                    Text(entry.flatMap { $0.body.isEmpty ? nil : $0.body } ?? "No entry for this day yet.")
+                        .font(.chronosCaption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer()
+                Button(entry != nil ? "Open" : "Write") { showingJournalEditor = true }
+                    .buttonStyle(.bordered)
+                    .clipShape(Capsule())
+                    .font(.chronosLabel)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: Sleep-log affordance (Android: the "Sleep" card with Update / Log sleep)
+
+    /// The night logged for today, backing the sleep card's summary.
+    private var todaySleepTrack: SleepTrack? {
+        nights.first { Calendar.current.isDateInToday($0.date) }
+    }
+
+    private var sleepLogCard: some View {
+        let night = todaySleepTrack
+        return ChronosGlassCard {
+            HStack(spacing: ChronosSpacing.compact) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sleep").font(.chronosHeadline)
+                    if let night {
+                        Text(sleepSummaryLine(night))
+                            .font(.chronosCaption).foregroundStyle(.secondary)
+                        if night.refreshedRating > 0 {
+                            Text("Felt \(SleepEmoji.refreshedEmoji(night.refreshedRating)) \(SleepEmoji.refreshedLabel(night.refreshedRating)) on waking")
+                                .font(.chronosCaption).foregroundStyle(.secondary)
+                        }
+                        if night.source == .healthKit {
+                            Text("From HealthKit")
+                                .font(.chronosCaption).foregroundStyle(ChronosColors.brandPrimary)
+                        }
+                    } else {
+                        Text("Last night not logged yet.")
+                            .font(.chronosCaption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Button(night != nil ? "Update" : "Log sleep") { showingSleepLog = true }
+                    .buttonStyle(.bordered)
+                    .clipShape(Capsule())
+                    .font(.chronosLabel)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// "Quality X/5 · 11:00 PM – 7:00 AM · N interruptions" — mirrors the Android sleep-card line.
+    private func sleepSummaryLine(_ night: SleepTrack) -> String {
+        let window = [night.actualStartMinute, night.actualEndMinute]
+            .compactMap { $0.map(formatDisplayMinute) }
+            .joined(separator: " – ")
+        var line = "Quality \(night.sleepQuality)/5 · \(window.isEmpty ? "times not set" : window)"
+        if night.interruptedCount > 0 { line += " · \(night.interruptedCount) interruptions" }
+        return line
     }
 }
 

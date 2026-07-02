@@ -17,6 +17,7 @@ import WatchConnectivity
 
 struct PrivacySyncSettingsView: View {
     @State private var settings = ChronosSettings.shared
+    @State private var syncTick = 0
 
     var body: some View {
         Form {
@@ -114,10 +115,10 @@ struct PrivacySyncSettingsView: View {
             DisclosureGroup(isExpanded: $settings.privacyWearLinkExpanded) {
                 let status = currentWearLinkStatus
                 LabeledContent("Status") {
-                    HStack(spacing: 4) {
+                    HStack(spacing: ChronosSpacing.micro) {
                         Circle()
-                            .fill(status.watchAppInstalled ? Color.green
-                                  : (status.watchConnected || status.watchPaired) ? Color.orange : Color.secondary)
+                            .fill(status.watchAppInstalled ? ChronosColors.success
+                                  : (status.watchConnected || status.watchPaired) ? ChronosColors.warning : Color.secondary)
                             .frame(width: 8, height: 8)
                         Text(wearLinkConnectionSummary(status))
                             .foregroundStyle(.secondary)
@@ -130,8 +131,10 @@ struct PrivacySyncSettingsView: View {
                     .foregroundStyle(.secondary)
                 Button("Sync now") {
                     PhoneWatchSync.shared.pushSnapshot()
+                    syncTick += 1
                 }
                 .disabled(!status.watchConnected)
+                .sensoryFeedback(.success, trigger: syncTick)
             } label: {
                 Label("Apple Watch", systemImage: "applewatch")
             }

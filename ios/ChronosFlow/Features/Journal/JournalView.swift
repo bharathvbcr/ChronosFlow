@@ -40,6 +40,9 @@ struct JournalView: View {
     @State private var pointDraft = ""
     @State private var pointTimeText = ""
 
+    /// Shared, Dynamic-Type-aware width for the inline time fields (top card + per-day adder).
+    @ScaledMetric(relativeTo: .caption) private var timeFieldWidth: CGFloat = 72
+
     // Per-day inline point adders in the history (keyed by start-of-day).
     @State private var dayPointDraft: [Date: String] = [:]
     @State private var dayPointTime: [Date: String] = [:]
@@ -48,6 +51,8 @@ struct JournalView: View {
     @State private var visibleMonth: Date = Calendar.current.startOfDay(for: .now)
     @State private var showMoodLayer = true
     @State private var showWorkoutLayer = true
+    /// Toggled on tapping a written calendar day, to drive the selection haptic.
+    @State private var calendarTapFeedback = false
 
     // History search
     @State private var searchText = ""
@@ -190,7 +195,6 @@ struct JournalView: View {
             VStack(alignment: .leading, spacing: ChronosSpacing.small) {
                 Text("Add a point to today")
                     .font(.chronosHeadline)
-                    .foregroundStyle(.secondary)
                 Text("Quick timed notes for today — a moment, a thought, a win.")
                     .font(.chronosCaption)
                     .foregroundStyle(.secondary)
@@ -201,7 +205,7 @@ struct JournalView: View {
                         .font(.chronosBody)
                     TextField("time", text: $pointTimeText)
                         .font(.chronosCaption)
-                        .frame(width: 88)
+                        .frame(minWidth: timeFieldWidth)
                         .textInputAutocapitalization(.characters)
                 }
 
@@ -347,17 +351,27 @@ struct JournalView: View {
                 HStack {
                     Button {
                         withAnimation(ChronosMotion.snappy) { shiftMonth(by: -1) }
-                    } label: { Image(systemName: "chevron.left") }
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Previous month")
                     Spacer()
                     Text(visibleMonth.formatted(.dateTime.month(.wide).year()))
                         .font(.chronosHeadline)
                     Spacer()
                     Button {
                         withAnimation(ChronosMotion.snappy) { shiftMonth(by: 1) }
-                    } label: { Image(systemName: "chevron.right") }
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
                         .buttonStyle(.plain)
                         .disabled(isCurrentMonth)
+                        .accessibilityLabel("Next month")
                 }
 
                 HStack(spacing: ChronosSpacing.small) {
@@ -472,13 +486,31 @@ struct JournalView: View {
             .background(isToday ? ChronosColors.brandPrimary.opacity(0.12) : .clear,
                         in: RoundedRectangle(cornerRadius: ChronosRadius.extraSmall, style: .continuous))
             .contentShape(Rectangle())
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Self.cellLabel(day: day, cal: cal, mood: mood,
+                                               hasWorkout: hasWorkout, wrote: wrote, isToday: isToday))
+            .accessibilityHint(wrote ? "Opens reflections" : "")
+            .pressable()
             // Tap a day that has reflections to jump the history list to it.
             .onTapGesture {
-                if wrote { scrollTarget = key }
+                if wrote { scrollTarget = key; calendarTapFeedback.toggle() }
             }
+            .sensoryFeedback(.selection, trigger: calendarTapFeedback)
         } else {
             Color.clear.frame(height: 32)
         }
+    }
+
+    /// Spoken VoiceOver label for a calendar day cell — date, plus any state the cell conveys only
+    /// via emoji / glyph / dot (today, mood, workout, has-reflection).
+    private static func cellLabel(day: Date, cal: Calendar, mood: ChronosCore.JournalMood?,
+                                  hasWorkout: Bool, wrote: Bool, isToday: Bool) -> String {
+        var parts: [String] = [day.formatted(.dateTime.month().day())]
+        if isToday { parts.append("Today") }
+        if let mood { parts.append("mood \(mood.label)") }
+        if hasWorkout { parts.append("workout") }
+        if wrote { parts.append("has reflection") }
+        return parts.joined(separator: ", ")
     }
 
     private var isCurrentMonth: Bool {
@@ -592,7 +624,7 @@ struct JournalView: View {
             }
 
             HStack(spacing: ChronosSpacing.small) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
                 TextField("Search your reflections", text: $searchText)
                     .font(.chronosBody)
                 if !searchText.isEmpty {
@@ -602,6 +634,7 @@ struct JournalView: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(ChronosSpacing.compact)
@@ -679,7 +712,7 @@ struct JournalView: View {
                 .font(.chronosCaption)
             TextField("time", text: timeBinding)
                 .font(.chronosCaption)
-                .frame(width: 64)
+                .frame(minWidth: timeFieldWidth)
                 .textInputAutocapitalization(.characters)
             Button {
                 addPoint(on: day, body: dayPointDraft[day] ?? "", timeText: dayPointTime[day] ?? "")

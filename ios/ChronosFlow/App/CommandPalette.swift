@@ -55,6 +55,27 @@ struct CommandPalette: View {
         }]
     }
 
+    // MARK: Recents (Android CommandSearchViewModel recent-command boosting)
+
+    /// Most-recent-first executed command ids, capped like Android's `MAX_RECENT_COMMANDS`.
+    private static let recentIDsKey = "commandPalette.recentCommandIDs"
+    private static let maxRecents = 8
+
+    private func recordRecent(_ id: String) {
+        var ids = UserDefaults.standard.stringArray(forKey: Self.recentIDsKey) ?? []
+        ids.removeAll { $0 == id }
+        ids.insert(id, at: 0)
+        UserDefaults.standard.set(Array(ids.prefix(Self.maxRecents)), forKey: Self.recentIDsKey)
+    }
+
+    /// Recently executed commands (still enabled), surfaced above "Go to" on the empty query.
+    private var recentCommands: [Command] {
+        let ids = UserDefaults.standard.stringArray(forKey: Self.recentIDsKey) ?? []
+        guard !ids.isEmpty else { return [] }
+        let all = navigateCommands + createCommands + assistantCommands
+        return ids.compactMap { id in all.first { $0.id == id } }
+    }
+
     private func filter(_ commands: [Command]) -> [Command] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return commands }
@@ -62,13 +83,31 @@ struct CommandPalette: View {
     }
 
     var body: some View {
-        NavigationStack {
-            List {
-                section("Go to", filter(navigateCommands))
-                section("Create", filter(createCommands))
-                section("Assistant", filter(assistantCommands))
+        let nav = filter(navigateCommands)
+        let create = filter(createCommands)
+        let assist = filter(assistantCommands)
+        let trimmedQuery = query.trimmingCharacters(in: .whitespaces)
+        return NavigationStack {
+            ZStack {
+                ChronosBackdrop()
+                if nav.isEmpty && create.isEmpty && assist.isEmpty && !trimmedQuery.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                } else {
+                    List {
+                        // Empty-query extras, in Android's priority order: the proactive digest
+                        // outranks recents, which outrank the plain catalog.
+                        if trimmedQuery.isEmpty {
+                            digestSection
+                            section("Recent", recentCommands)
+                        }
+                        section("Go to", nav)
+                        section("Create", create)
+                        section("Assistant", assist)
+                    }
+                    .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
+                }
             }
-            .listStyle(.insetGrouped)
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search commands")
             .navigationTitle("Commands")
             .navigationBarTitleDisplayMode(.inline)
@@ -80,12 +119,38 @@ struct CommandPalette: View {
         }
     }
 
+    /// The cached daily digest, shown when the palette opens with no query so the first thing the
+    /// user sees is a one-line read on their day (Android `proactiveDigestCommand`). Cache-only —
+    /// no live inference on the palette-open path. Tapping it opens the review.
+    @ViewBuilder
+    private var digestSection: some View {
+        if settings.insightsEnabled,
+           let digest = ProactiveDigest.cachedHeadline() ?? ProactiveDigest.cachedLine() {
+            Section("Today") {
+                Button {
+                    shell.open(.review); dismiss()
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Today at a glance")
+                            Text(digest).font(.chronosCaption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "sparkles")
+                    }
+                }
+                .foregroundStyle(.primary)
+            }
+        }
+    }
+
     @ViewBuilder
     private func section(_ title: String, _ commands: [Command]) -> some View {
         if !commands.isEmpty {
             Section(title) {
                 ForEach(commands) { command in
                     Button {
+                        recordRecent(command.id)
                         command.perform()
                     } label: {
                         Label(command.label, systemImage: command.icon)

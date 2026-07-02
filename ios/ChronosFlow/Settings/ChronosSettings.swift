@@ -54,6 +54,7 @@ final class ChronosSettings {
         aiEnabled = defaults.boolOr("ai.enabled", true)
         planningStyle = PlanningStyle(rawValue: defaults.string(forKey: "ai.planningStyle") ?? "") ?? .balanced
         autoApplyPlan = defaults.boolOr("ai.autoApply", false)
+        autoApplyAssist = defaults.boolOr("ai.autoApplyAssist", false)
 
         // Planning behaviour toggles (Android parity: SidebarPageContent.kt lines 961–963,
         // "Protect focus blocks" / "Add breaks automatically" / "Preserve manual blocks").
@@ -148,6 +149,10 @@ final class ChronosSettings {
     var aiEnabled: Bool { didSet { defaults.set(aiEnabled, forKey: "ai.enabled") } }
     var planningStyle: PlanningStyle { didSet { defaults.set(planningStyle.rawValue, forKey: "ai.planningStyle") } }
     var autoApplyPlan: Bool { didSet { defaults.set(autoApplyPlan, forKey: "ai.autoApply") } }
+    /// When on, a NEW task form auto-applies non-destructive smart-fill suggestions: empty fields
+    /// are filled from the detections; fields the user already set are never overwritten.
+    /// Android parity: ChronosUiSettingsKeys.KEY_ASSIST_AUTO_APPLY ("Auto-apply form suggestions").
+    var autoApplyAssist: Bool { didSet { defaults.set(autoApplyAssist, forKey: "ai.autoApplyAssist") } }
     /// When on, the planner never reschedules or shortens existing FOCUS blocks when it regenerates a
     /// plan. Android parity: onProtectFocusChanged ("Protect focus blocks").
     var protectFocusBlocks: Bool { didSet { defaults.set(protectFocusBlocks, forKey: "ai.protectFocus") } }

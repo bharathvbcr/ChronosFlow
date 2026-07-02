@@ -7,7 +7,7 @@ struct FocusLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: FocusActivityAttributes.self) { context in
             // Lock screen / banner
-            VStack(spacing: 8) {
+            VStack(spacing: ChronosSpacing.small) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(context.state.phase.title)
@@ -53,7 +53,7 @@ struct FocusLiveActivityWidget: Widget {
                 // foreground-notification bar). Empty for a flat session, which shows nothing here.
                 FocusSegmentedBar(segments: context.state.phaseSegments)
             }
-            .padding()
+            .padding(ChronosSpacing.standard)
             .activityBackgroundTint(Color.black.opacity(0.7))
         } dynamicIsland: { context in
             DynamicIsland {
@@ -80,7 +80,7 @@ struct FocusLiveActivityWidget: Widget {
             } compactLeading: {
                 // Swap the glyph to a pause when paused so the Island reads as paused at a glance.
                 Image(systemName: context.state.isPaused ? "pause.fill" : "timer")
-                    .foregroundStyle(context.state.isPaused ? Color.secondary : .orange)
+                    .foregroundStyle(context.state.isPaused ? Color.secondary : ChronosColors.brandPrimary)
             } compactTrailing: {
                 if context.state.isPaused && !context.state.awaitingAdvance {
                     Image(systemName: "pause.fill")
@@ -111,23 +111,29 @@ struct FocusLiveActivityWidget: Widget {
 private struct FocusSegmentedBar: View {
     let segments: [FocusActivityAttributes.ContentState.PhaseSegmentInfo]
 
+    /// Inter-segment gap; load-bearing for the width math below (n segments → n-1 gaps).
+    private static let segmentGap: CGFloat = 2
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         if segments.count > 1 {
             GeometryReader { geo in
-                HStack(spacing: 2) {
+                HStack(spacing: Self.segmentGap) {
                     ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                         Capsule()
                             .fill(color(for: segment))
                             // Subtract the cumulative inter-segment spacing so widths still sum to the
-                            // available width (n segments → n-1 gaps of 2pt).
-                            .frame(width: max(2, segment.fractionalWidth * availableWidth(geo.size.width)))
+                            // available width (n segments → n-1 gaps of segmentGap).
+                            .frame(width: max(Self.segmentGap, segment.fractionalWidth * availableWidth(geo.size.width)))
                             // Gentle active-phase pulse: the current segment, while actively running
                             // (not paused / ending-soon handled by color), breathes to draw the eye —
-                            // the Live-Activity analogue of the in-app active-dot pulse. ActivityKit
-                            // animates ContentState transitions; we drive a repeating opacity here.
-                            .opacity(isRunningCurrent(segment) ? 0.7 : 1.0)
+                            // the Live-Activity analogue of the in-app active-dot pulse. Decorative motion
+                            // is a first-class branch: when Reduce Motion is on we hold the segment static
+                            // (opacity 1.0, no repeating animation) rather than breathing.
+                            .opacity((isRunningCurrent(segment) && !reduceMotion) ? 0.7 : 1.0)
                             .animation(
-                                isRunningCurrent(segment)
+                                (isRunningCurrent(segment) && !reduceMotion)
                                     ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
                                     : .default,
                                 value: isRunningCurrent(segment))
@@ -147,7 +153,7 @@ private struct FocusSegmentedBar: View {
     }
 
     private func availableWidth(_ total: CGFloat) -> CGFloat {
-        max(0, total - CGFloat(max(segments.count - 1, 0)) * 2)
+        max(0, total - CGFloat(max(segments.count - 1, 0)) * Self.segmentGap)
     }
 
     /// Maps a segment's portable color kind (break / current-with-state / steady work) to the

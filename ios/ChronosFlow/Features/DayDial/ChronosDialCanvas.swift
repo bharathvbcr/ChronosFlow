@@ -21,6 +21,9 @@ struct ChronosDialCanvas: View {
     /// Sleep window for the night band, in minute-of-day. Default 21:00→07:00 mirrors Android.
     var nightStartMinute: Int = 21 * 60
     var nightEndMinute: Int = 7 * 60
+    /// False when the dial renders a day other than today (Android `showNowHand`): the now hand and
+    /// the live now/next hub lines would be wrong against another day's blocks.
+    var showNowHand: Bool = true
     var onTapBlock: (TimeBlock) -> Void = { _ in }
     /// Called when a block becomes the active drag target, so the screen can show its handles.
     var onSelectBlock: (_ blockID: String) -> Void = { _ in }
@@ -59,6 +62,7 @@ struct ChronosDialCanvas: View {
 
             ZStack {
                 Canvas { context, _ in
+                    drawDialFace(&context, center: center, maxRadius: maxRadius)
                     drawNightBand(&context, center: center, maxRadius: maxRadius)
                     drawHourTicks(&context, center: center, maxRadius: maxRadius)
                     drawFreeTime(&context, center: center, maxRadius: maxRadius)
@@ -70,6 +74,10 @@ struct ChronosDialCanvas: View {
                 }
                 centerSummary
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(accessibilitySummary)
+            .accessibilityHint("Double tap to add a block")
+            .accessibilityAction { onCreate(geometry.snap(nowMinute, grid: grid)) }
             .contentShape(Circle())
             .gesture(
                 SpatialTapGesture()
@@ -86,6 +94,26 @@ struct ChronosDialCanvas: View {
 
     // MARK: Drawing
 
+    /// The static face beneath everything: a faint track circle per lane (so the three rings read
+    /// as structure even on an empty day) and a soft hub disc grounding the centre summary.
+    private func drawDialFace(_ context: inout GraphicsContext, center: CGPoint, maxRadius: Double) {
+        let lane = geometry.laneWidth(maxRadius: maxRadius)
+        for ring in [DialRing.outer, .middle, .inner] {
+            let r = geometry.radius(for: ring, maxRadius: maxRadius)
+            let track = Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r,
+                                               width: r * 2, height: r * 2))
+            context.stroke(track, with: .color(.secondary.opacity(0.08)), lineWidth: lane - 3)
+        }
+        let hub = hubRadius(maxRadius: maxRadius)
+        let hubRect = CGRect(x: center.x - hub, y: center.y - hub, width: hub * 2, height: hub * 2)
+        context.fill(Circle().path(in: hubRect), with: .color(.secondary.opacity(0.07)))
+    }
+
+    /// Radius of the hub disc — just inside the inner lane so it never touches block arcs.
+    private func hubRadius(maxRadius: Double) -> Double {
+        geometry.ringBand(for: .inner, maxRadius: maxRadius).inner - 6
+    }
+
     /// A soft indigo arc over the sleep window, beneath the blocks, so the night reads as part of
     /// the dial face. Drawn across all three lanes' span for a full-depth band.
     private func drawNightBand(_ context: inout GraphicsContext, center: CGPoint, maxRadius: Double) {
@@ -99,7 +127,7 @@ struct ChronosDialCanvas: View {
                     startAngle: .degrees(arc.startAngleDegrees),
                     endAngle: .degrees(arc.startAngleDegrees + arc.sweepDegrees),
                     clockwise: false)
-        context.stroke(path, with: .color(ChronosColors.brandPrimary.opacity(0.22)),
+        context.stroke(path, with: .color(ChronosColors.brandPrimary.opacity(0.15)),
                        style: StrokeStyle(lineWidth: outer - inner, lineCap: .butt))
     }
 
@@ -113,10 +141,12 @@ struct ChronosDialCanvas: View {
             var path = Path()
             path.move(to: point(center, angle, outer))
             path.addLine(to: point(center, angle, inner))
-            context.stroke(path, with: .color(.secondary.opacity(isMajor ? 0.7 : 0.35)),
-                           lineWidth: isMajor ? 2 : 1)
+            context.stroke(path, with: .color(.secondary.opacity(isMajor ? 0.55 : 0.22)),
+                           lineWidth: isMajor ? 1.5 : 1)
             if isMajor {
-                let label = Text("\(hour)").font(.caption2).foregroundStyle(.secondary)
+                let label = Text("\(hour)")
+                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    .foregroundStyle(.secondary)
                 context.draw(label, at: point(center, angle, inner - 12))
             }
         }
@@ -137,9 +167,9 @@ struct ChronosDialCanvas: View {
                         startAngle: .degrees(arc.startAngleDegrees),
                         endAngle: .degrees(arc.startAngleDegrees + arc.sweepDegrees),
                         clockwise: false)
-            context.stroke(path, with: .color(ChronosColors.brandSecondary.opacity(0.32)),
-                           style: StrokeStyle(lineWidth: geometry.laneWidth(maxRadius: maxRadius) * 0.34,
-                                              lineCap: .round, dash: [4, 7]))
+            context.stroke(path, with: .color(ChronosColors.brandSecondary.opacity(0.28)),
+                           style: StrokeStyle(lineWidth: geometry.laneWidth(maxRadius: maxRadius) * 0.30,
+                                              lineCap: .round, dash: [3, 6]))
         }
     }
 
@@ -239,38 +269,76 @@ struct ChronosDialCanvas: View {
         }
     }
 
+    /// The now hand runs hub-edge → rim (not through the centre, where it would strike through the
+    /// hub summary text) and carries a small dot at each end.
     private func drawNowHand(_ context: inout GraphicsContext, center: CGPoint, maxRadius: Double) {
+        guard showNowHand else { return }
         let angle = geometry.minuteToAngle(nowMinute) * .pi / 180
+        let base = point(center, angle, hubRadius(maxRadius: maxRadius))
+        let tip = point(center, angle, maxRadius - 4)
         var path = Path()
-        path.move(to: center)
-        path.addLine(to: point(center, angle, maxRadius - 4))
+        path.move(to: base)
+        path.addLine(to: tip)
         context.stroke(path, with: .color(ChronosColors.brandAccent),
                        style: StrokeStyle(lineWidth: 2, lineCap: .round))
-        let dot = CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8)
-        context.fill(Circle().path(in: dot), with: .color(ChronosColors.brandAccent))
+        let baseDot = CGRect(x: base.x - 3, y: base.y - 3, width: 6, height: 6)
+        context.fill(Circle().path(in: baseDot), with: .color(ChronosColors.brandAccent))
+        let tipDot = CGRect(x: tip.x - 3.5, y: tip.y - 3.5, width: 7, height: 7)
+        context.fill(Circle().path(in: tipDot), with: .color(ChronosColors.brandAccent))
     }
 
     private var centerSummary: some View {
-        VStack(spacing: 2) {
-            Text(nowMinute.clockTime)
-                .font(.chronosTitle)
-                .monospacedDigit()
+        VStack(spacing: 3) {
+            if showNowHand {
+                Text(nowMinute.clockTime)
+                    .font(.chronosTitle)
+                    .monospacedDigit()
+            }
             // Contextual now/next status (parity with the Android dial hub) instead of a bare count.
-            if let current = currentBlock {
-                Text(current.title).font(.chronosCaption).lineLimit(1)
-                Text("Ends in \(durationLabel(current.startMinuteOfDay + current.durationMinutes - nowMinute))")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            // The category dot ties the hub line to the matching arc + list row colour.
+            if !showNowHand {
+                Text(blockCountLabel)
+                    .font(.chronosCaption).foregroundStyle(.secondary)
+            } else if let current = currentBlock {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(ChronosColors.category(current.category))
+                        .frame(width: 6, height: 6)
+                    Text(current.title).font(.chronosLabel).lineLimit(1)
+                }
+                Text("ends in \(durationLabel(current.startMinuteOfDay + current.durationMinutes - nowMinute))")
+                    .font(.chronosCaption).foregroundStyle(.secondary)
             } else if let next = nextBlock {
-                Text("Next: \(next.title)").font(.chronosCaption).lineLimit(1)
-                Text("at \(next.startMinuteOfDay.clockTime)")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(next.title).font(.chronosLabel).lineLimit(1)
+                Text("next · \(next.startMinuteOfDay.clockTime)")
+                    .font(.chronosCaption).foregroundStyle(.secondary)
             } else {
-                Text("\(blocks.count) blocks")
+                Text(blockCountLabel)
                     .font(.chronosCaption).foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: 116)
+        .frame(maxWidth: 110)
         .multilineTextAlignment(.center)
+    }
+
+    /// "Nothing planned" / "1 block" / "n blocks" for the hub's fallback line.
+    private var blockCountLabel: String {
+        blocks.isEmpty ? "Nothing planned" : "\(blocks.count) block\(blocks.count == 1 ? "" : "s")"
+    }
+
+    /// Spoken summary of the dial state for VoiceOver — mirrors the visible `centerSummary` text
+    /// so the canvas (which is otherwise invisible to assistive tech) announces now/next/count.
+    private var accessibilitySummary: String {
+        if !showNowHand {
+            return blockCountLabel
+        } else if let current = currentBlock {
+            let remaining = durationLabel(current.startMinuteOfDay + current.durationMinutes - nowMinute)
+            return "Now: \(current.title), ends in \(remaining)"
+        } else if let next = nextBlock {
+            return "Next: \(next.title) at \(next.startMinuteOfDay.clockTime)"
+        } else {
+            return blockCountLabel
+        }
     }
 
     /// The block covering the current minute (same-day lanes; midnight-crossing handled coarsely).

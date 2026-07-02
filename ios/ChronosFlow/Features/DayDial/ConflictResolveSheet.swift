@@ -27,6 +27,7 @@ struct ConflictResolveSheet: View {
     /// Drives the Repair-with-AI fallback panel.
     @State private var unresolvedCount = 0
     @State private var didApply = false
+    @State private var applyFeedback = false
 
     private var moves: [Move] { computeMoves() }
 
@@ -46,6 +47,7 @@ struct ConflictResolveSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .sensoryFeedback(.success, trigger: applyFeedback)
     }
 
     @ViewBuilder private var content: some View {
@@ -125,7 +127,8 @@ struct ConflictResolveSheet: View {
         // Recount overlaps post-move. Anything left is structurally unmovable (fixed/locked).
         // `PlannerMath` is qualified — ChronosCore exports a same-named type, so the bare name is ambiguous.
         unresolvedCount = ChronosFlow.PlannerMath.conflicts(in: blocks).count
-        withAnimation(.smooth) { didApply = true }
+        applyFeedback.toggle()
+        withAnimation(ChronosMotion.smooth) { didApply = true }
         // Deterministic mode just confirms and closes once there's nothing more to do.
         if mode == .deterministic && unresolvedCount == 0 { dismiss() }
     }
@@ -188,10 +191,10 @@ private struct ConflictAIFallback: View {
                     }
                 } else {
                     Button { Task { await askForAdvice() } } label: {
-                        Label(modelAvailable ? "Ask AI for ideas" : "Show ideas",
-                              systemImage: "wand.and.stars").frame(maxWidth: .infinity)
+                        Label("Get ideas", systemImage: "wand.and.stars")
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .buttonStyle(.borderedProminent).controlSize(.large).pressable()
                 }
                 if let errorMessage {
                     Text(errorMessage).font(.chronosCaption).foregroundStyle(ChronosColors.brandAccent)

@@ -7,6 +7,7 @@ struct AssistantSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var assistant = ChronosAssistant()
     @State private var draft = ""
+    @State private var suggestionTapped = 0
     @FocusState private var composerFocused: Bool
 
     /// Stable id for the in-flight streaming bubble, so we can scroll it into view as it grows.
@@ -79,15 +80,20 @@ struct AssistantSheet: View {
                 .font(.chronosLabel)
                 .foregroundStyle(.secondary)
             ForEach(suggestions, id: \.self) { suggestion in
-                Button { send(suggestion) } label: {
+                Button {
+                    suggestionTapped += 1
+                    send(suggestion)
+                } label: {
                     Text(suggestion)
                         .font(.chronosLabel)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, ChronosSpacing.small)
                         .padding(.horizontal, ChronosSpacing.standard)
-                        .background(.thinMaterial, in: .rect(cornerRadius: 14))
+                        .background(.thinMaterial, in: .rect(cornerRadius: ChronosRadius.medium))
                 }
                 .buttonStyle(.plain)
+                .pressable()
+                .sensoryFeedback(.impact, trigger: suggestionTapped)
             }
         }
         .padding(.vertical, ChronosSpacing.medium)
@@ -101,7 +107,7 @@ struct AssistantSheet: View {
             .padding(.horizontal, ChronosSpacing.standard)
             .background(
                 isUser ? AnyShapeStyle(ChronosColors.brandAccent.opacity(0.22)) : AnyShapeStyle(.thinMaterial),
-                in: .rect(cornerRadius: 16))
+                in: .rect(cornerRadius: ChronosRadius.medium))
             .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 
@@ -111,7 +117,7 @@ struct AssistantSheet: View {
             .font(.chronosLabel)
             .padding(.vertical, ChronosSpacing.small)
             .padding(.horizontal, ChronosSpacing.standard)
-            .background(.thinMaterial, in: .rect(cornerRadius: 16))
+            .background(.thinMaterial, in: .rect(cornerRadius: ChronosRadius.medium))
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -128,11 +134,15 @@ struct AssistantSheet: View {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 30))
                     .symbolRenderingMode(.hierarchical)
+                    .pressable()
             }
             .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || assistant.isResponding)
+            .accessibilityLabel("Send")
+            .accessibilityHint("Sends your message to the assistant")
         }
         .padding(ChronosSpacing.standard)
         .background(.bar)
+        .sensoryFeedback(.impact, trigger: assistant.messages.count)
     }
 
     private func unavailable(_ reason: String) -> some View {
@@ -140,6 +150,13 @@ struct AssistantSheet: View {
             Label("Assistant unavailable", systemImage: "sparkles.slash")
         } description: {
             Text(reason)
+        } actions: {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            .buttonStyle(.borderedProminent)
         }
     }
 

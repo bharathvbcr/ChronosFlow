@@ -71,11 +71,15 @@ private struct GlassBackground<S: InsettableShape>: ViewModifier {
 /// Tactile press-and-release feedback — the signature "everything you touch reacts" behaviour.
 struct PressableScale: ViewModifier {
     @State private var pressed = false
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { ChronosSettings.shared.motionDisabled(systemReduceMotion) }
+
     func body(content: Content) -> some View {
         content
             .scaleEffect(pressed ? 0.96 : 1)
-            .animation(ChronosMotion.bouncy, value: pressed)
+            .animation(reduceMotion ? .none : ChronosMotion.bouncy, value: pressed)
             .onLongPressGesture(minimumDuration: 0, pressing: { pressed = $0 }, perform: {})
+            .sensoryFeedback(.impact(weight: .light), trigger: pressed) { old, new in !old && new }
     }
 }
 

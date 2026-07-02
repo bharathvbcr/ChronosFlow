@@ -31,6 +31,9 @@ struct DayDialScreen: View {
     @State private var history = PlannerCommandHistory()
     /// Transient toast for duplicate success/failure (mirrors Android's PlannerOperationResult toast).
     @State private var toast: String?
+    /// Drives Confirm/Reject haptics on toast events (mirrors SleepView's syncFeedback idiom).
+    private enum ToastOutcome: Equatable { case success, failure }
+    @State private var toastFeedback: ToastOutcome?
     private let calendarProvider = CalendarOverlayProvider()
 
     @Query private var allBlocks: [TimeBlock]
@@ -88,6 +91,7 @@ struct DayDialScreen: View {
                             selectedBlockID: selectedBlockID,
                             overlayEvents: showCalendar ? overlayEvents : [],
                             conflictBlockIDs: conflictBlockIDs,
+                            showNowHand: Calendar.current.isDateInToday(selectedDate),
                             onTapBlock: { activeSheet = .edit($0) },
                             onSelectBlock: { selectedBlockID = $0 },
                             onCreate: { activeSheet = .create(minute: $0) },
@@ -150,7 +154,8 @@ struct DayDialScreen: View {
                     } label: {
                         Image(systemName: "wand.and.stars")
                     }
-                    .accessibilityLabel("Plan")
+                    .accessibilityLabel("Planning tools")
+                    .accessibilityHint("AI plan, fill free time, calendar overlay, fix schedule")
                     Button { activeSheet = .create(minute: nowMinute) } label: { Image(systemName: "plus") }
                         .accessibilityLabel("Add block")
                 }
@@ -181,6 +186,9 @@ struct DayDialScreen: View {
                 }
             }
             .overlay(alignment: .bottom) { toastView }
+            // Confirm/Reject haptics on toast events, parity with SleepView's sync feedback.
+            .sensoryFeedback(.success, trigger: toastFeedback) { _, new in new == .success }
+            .sensoryFeedback(.error, trigger: toastFeedback) { _, new in new == .failure }
         }
     }
 
@@ -243,27 +251,64 @@ struct DayDialScreen: View {
         }
     }
 
-    private var blockList: some View {
-        VStack(spacing: ChronosSpacing.small) {
-            ForEach(dayBlocks) { block in
-                Button { activeSheet = .edit(block) } label: { BlockRow(block: block) }
-                    .buttonStyle(.plain)
-                    // Smart duplicate (free-gap heuristics) + delete, both undoable. Mirrors the
-                    // Android swipe/long-press actions on the timeline row.
-                    .contextMenu {
-                        Button { duplicate(block) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
-                        Button(role: .destructive) { deleteBlock(block) } label: { Label("Delete", systemImage: "trash") }
-                    }
-                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                        Button { duplicate(block) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
-                            .tint(ChronosColors.brandSecondary)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) { deleteBlock(block) } label: { Label("Delete", systemImage: "trash") }
-                    }
+    @ViewBuilder private var blockList: some View {
+        if dayBlocks.isEmpty {
+            ContentUnavailableView {
+                Label("Nothing planned", systemImage: "calendar.badge.plus")
+            } description: {
+                Text("Block out your first commitment, or let AI draft the day.")
+            } actions: {
+                Button("Add block") { activeSheet = .create(minute: nowMinute) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ChronosColors.brandPrimary)
+                Button("AI day plan") { activeSheet = .ai }
+                    .buttonStyle(.bordered)
             }
+            .padding(.horizontal, ChronosSpacing.standard)
+        } else {
+            VStack(spacing: ChronosSpacing.small) {
+                timelineHeader
+                ForEach(dayBlocks) { block in
+                    Button { activeSheet = .edit(block) } label: { BlockRow(block: block) }
+                        .buttonStyle(.plain)
+                        // Smart duplicate (free-gap heuristics) + delete, both undoable. Mirrors the
+                        // Android swipe/long-press actions on the timeline row.
+                        .contextMenu {
+                            // Start a focus session from a plan block (Android's block → focus
+                            // action). Today-only: focus runs against the live day. Routed through
+                            // the FocusCommandBridge queue, which FocusView drains on appear, so
+                            // switching to the Focus tab starts the session with this block.
+                            if shell != nil, Calendar.current.isDateInToday(block.date) {
+                                Button { startFocus(block) } label: { Label("Start focus", systemImage: "timer") }
+                            }
+                            Button { duplicate(block) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                            Button(role: .destructive) { deleteBlock(block) } label: { Label("Delete", systemImage: "trash") }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button { duplicate(block) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                                .tint(ChronosColors.brandSecondary)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) { deleteBlock(block) } label: { Label("Delete", systemImage: "trash") }
+                        }
+                }
+            }
+            .padding(.horizontal, ChronosSpacing.standard)
         }
-        .padding(.horizontal, ChronosSpacing.standard)
+    }
+
+    /// Section header over the day's rows: name + a "n blocks · Xh Ym planned" summary, so the
+    /// list reads as a section of the screen instead of cards floating under the dial.
+    private var timelineHeader: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Timeline").font(.chronosHeadline)
+            Spacer()
+            Text("\(dayBlocks.count) block\(dayBlocks.count == 1 ? "" : "s") · \(plannedDurationText(dayBlocks.map(\.durationMinutes).reduce(0, +))) planned")
+                .font(.chronosCaption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, ChronosSpacing.micro)
+        .padding(.bottom, ChronosSpacing.micro)
     }
 
     // MARK: - Command-history-backed edits (mirror DayDialBlockDelegate)
@@ -296,7 +341,7 @@ struct DayDialScreen: View {
         let planBlocks = dayBlocks.map(plannerBlock(from:))
         guard let source = planBlocks.first(where: { $0.id == block.id }),
               let placement = nextDuplicatePlacement(dayBlocks: planBlocks, source: source) else {
-            showToast("No free time to place a copy")
+            showToast("No free time to place a copy", outcome: .failure)
             return
         }
         let copy = makeDuplicate(of: source, placement: placement, newId: UUID().uuidString)
@@ -304,7 +349,14 @@ struct DayDialScreen: View {
         context.insert(inserted)
         history.push(.create(id: UUID().uuidString, block: copy))
         try? context.save()
-        showToast("Duplicated to \(copy.startMinuteOfDay.clockTime)")
+        showToast("Duplicated to \(copy.startMinuteOfDay.clockTime)", outcome: .success)
+    }
+
+    /// Enqueue a focus start for `block` and land on the Focus tab. FocusView's appear-time
+    /// `drainFocusCommands` resolves the block and starts the timer (same path as the widget).
+    private func startFocus(_ block: TimeBlock) {
+        FocusCommandBridge.post(.start(blockID: block.id))
+        shell?.select(.focus)
     }
 
     /// Delete routed through the undo stack: snapshot the block first so undo re-creates it exactly.
@@ -359,11 +411,12 @@ struct DayDialScreen: View {
         try? context.save()
     }
 
-    private func showToast(_ message: String) {
-        withAnimation(.smooth) { toast = message }
+    private func showToast(_ message: String, outcome: ToastOutcome = .success) {
+        toastFeedback = outcome
+        withAnimation(ChronosMotion.smooth) { toast = message }
         Task {
             try? await Task.sleep(nanoseconds: 2_200_000_000)
-            withAnimation(.smooth) { toast = nil }
+            withAnimation(ChronosMotion.smooth) { toast = nil }
         }
     }
 

@@ -12,13 +12,25 @@ struct RoutineEditorSheet: View {
     @State private var isActive: Bool
     @State private var newStepTitle = ""
 
-    private let categories = ["ROUTINE", "FOCUS", "BREAK", "MEAL", "EXERCISE", "STUDY"]
+    /// Static so callers building step drafts (RoutinesView's "Save today as routine") can clamp
+    /// their categories to the picker's set.
+    static let categories = ["ROUTINE", "FOCUS", "BREAK", "MEAL", "EXERCISE", "STUDY"]
 
     init(routine: Routine?) {
         self.existing = routine
         _title = State(initialValue: routine?.title ?? "")
         _steps = State(initialValue: routine?.steps.sorted { $0.offsetMinute < $1.offsetMinute } ?? [])
         _isActive = State(initialValue: routine?.isActive ?? true)
+    }
+
+    /// Compose a brand-new routine pre-filled from a draft (Android's saveCurrentAsTemplate flow:
+    /// the editor opens in create mode with a suggested name + today's blocks so the user names it
+    /// before anything is persisted).
+    init(prefillTitle: String, prefillSteps: [RoutineStep]) {
+        self.existing = nil
+        _title = State(initialValue: prefillTitle)
+        _steps = State(initialValue: prefillSteps.sorted { $0.offsetMinute < $1.offsetMinute })
+        _isActive = State(initialValue: true)
     }
 
     var body: some View {
@@ -35,9 +47,11 @@ struct RoutineEditorSheet: View {
                         VStack(alignment: .leading, spacing: ChronosSpacing.small) {
                             TextField("Step", text: $step.title)
                             Picker("Category", selection: $step.category) {
-                                ForEach(categories, id: \.self) { Text($0.capitalized).tag($0) }
+                                ForEach(Self.categories, id: \.self) { Text($0.capitalized).tag($0) }
                             }
-                            Stepper("Offset: +\(step.offsetMinute)m", value: $step.offsetMinute, in: 0...720, step: 5)
+                            // Full-day range: day snapshots carry absolute start minutes, so evening
+                            // blocks need offsets past the old 12-hour cap.
+                            Stepper("Offset: +\(step.offsetMinute)m", value: $step.offsetMinute, in: 0...1435, step: 5)
                             Stepper("Duration: \(step.durationMinutes)m", value: $step.durationMinutes, in: 5...240, step: 5)
                             Picker("Energy", selection: $step.energyLevel) {
                                 ForEach(EnergyIntensity.allCases, id: \.rawValue) { e in

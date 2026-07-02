@@ -320,4 +320,164 @@ final class LocalPlanningHeuristicsTests: XCTestCase {
         let out = distinctBy(items) { $0.1 }
         XCTAssertEqual(out.map { $0.0 }, [1, 2])
     }
+
+    // MARK: - PlanRegeneration (planning toggles)
+
+    private func candidate(
+        _ id: String, _ start: Int, _ duration: Int, category: String = "WORK", title: String = "Block"
+    ) -> RegenCandidateBlock {
+        RegenCandidateBlock(id: id, title: title, category: category, startMinute: start, durationMinutes: duration)
+    }
+
+    private func existing(
+        _ id: String, _ start: Int, _ duration: Int, category: String = "WORK",
+        isManual: Bool = false, isLocked: Bool = false, isProtected: Bool = false
+    ) -> RegenExistingBlock {
+        RegenExistingBlock(id: id, category: category, startMinute: start, durationMinutes: duration,
+                           isManual: isManual, isLocked: isLocked, isProtected: isProtected)
+    }
+
+    func testProtectFocusDropsOverlappingCandidateWhenOn() {
+        let outcome = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 540, 60)],
+            existing: [existing("focus", 540, 60, category: "FOCUS")],
+            toggles: PlanningToggles(protectFocusBlocks: true, addBreaksAutomatically: false,
+                                     preserveManualBlocks: false))
+        XCTAssertTrue(outcome.acceptedCandidates.isEmpty)
+        XCTAssertTrue(outcome.displacedExistingIDs.isEmpty)
+    }
+
+    func testProtectFocusOffDisplacesFocusBlock() {
+        let outcome = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 540, 60)],
+            existing: [existing("focus", 540, 60, category: "FOCUS")],
+            toggles: PlanningToggles(protectFocusBlocks: false, addBreaksAutomatically: false,
+                                     preserveManualBlocks: false))
+        XCTAssertEqual(outcome.acceptedCandidates.map(\.id), ["c1"])
+        XCTAssertEqual(outcome.displacedExistingIDs, ["focus"])
+    }
+
+    func testPreserveManualKeepsHandPlacedBlock() {
+        let toggles = PlanningToggles(protectFocusBlocks: false, addBreaksAutomatically: false,
+                                      preserveManualBlocks: true)
+        let outcome = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 600, 30)],
+            existing: [existing("manual", 600, 45, category: "ADMIN", isManual: true)],
+            toggles: toggles)
+        XCTAssertTrue(outcome.acceptedCandidates.isEmpty)
+        XCTAssertTrue(outcome.displacedExistingIDs.isEmpty)
+    }
+
+    func testPreserveManualOffReplacesHandPlacedBlock() {
+        let toggles = PlanningToggles(protectFocusBlocks: false, addBreaksAutomatically: false,
+                                      preserveManualBlocks: false)
+        let outcome = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 600, 30)],
+            existing: [existing("manual", 600, 45, category: "ADMIN", isManual: true)],
+            toggles: toggles)
+        XCTAssertEqual(outcome.acceptedCandidates.map(\.id), ["c1"])
+        XCTAssertEqual(outcome.displacedExistingIDs, ["manual"])
+    }
+
+    func testLockedAndProtectedBlocksAreAlwaysImmovable() {
+        let toggles = PlanningToggles(protectFocusBlocks: false, addBreaksAutomatically: false,
+                                      preserveManualBlocks: false)
+        let outcome = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 540, 60), candidate("c2", 660, 60)],
+            existing: [
+                existing("locked", 540, 60, category: "ADMIN", isLocked: true),
+                existing("protected", 660, 60, category: "ADMIN", isProtected: true),
+            ],
+            toggles: toggles)
+        XCTAssertTrue(outcome.acceptedCandidates.isEmpty)
+        XCTAssertTrue(outcome.displacedExistingIDs.isEmpty)
+    }
+
+    func testCandidateOverlapsAreFirstWinsInStartOrder() {
+        let outcome = PlanRegeneration.resolve(
+            candidates: [candidate("late", 570, 60), candidate("early", 540, 60)],
+            existing: [],
+            toggles: PlanningToggles(addBreaksAutomatically: false))
+        // Sorted by start: "early" wins, the overlapping "late" drops.
+        XCTAssertEqual(outcome.acceptedCandidates.map(\.id), ["early"])
+    }
+
+    func testNonOverlappingCandidateSurvivesUntouched() {
+        let outcome = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 900, 45)],
+            existing: [existing("focus", 540, 60, category: "FOCUS", isManual: true)],
+            toggles: PlanningToggles())
+        XCTAssertEqual(outcome.acceptedCandidates.map(\.id), ["c1"])
+        XCTAssertTrue(outcome.displacedExistingIDs.isEmpty)
+    }
+
+    func testBreakInsertedAfterLongDemandingStretch() {
+        // 9:00–10:30 accepted WORK candidate (90m) with free time after → one 20m recovery break.
+        let outcome = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 540, 90)],
+            existing: [],
+            toggles: PlanningToggles(addBreaksAutomatically: true),
+            breakIDProvider: sequentialIDs())
+        XCTAssertEqual(outcome.insertedBreaks.count, 1)
+        let brk = outcome.insertedBreaks[0]
+        XCTAssertEqual(brk.startMinute, 630)
+        XCTAssertEqual(brk.durationMinutes, 20)
+        XCTAssertEqual(brk.category, "RECOVERY")
+        XCTAssertEqual(brk.title, "Recovery break")
+    }
+
+    func testBreakSpansContiguousExistingAndCandidateRun() {
+        // Existing 60m FOCUS run flows into an adjacent 45m candidate: 105m total → break after.
+        let outcome = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 600, 45)],
+            existing: [existing("focus", 540, 60, category: "FOCUS")],
+            toggles: PlanningToggles(addBreaksAutomatically: true),
+            breakIDProvider: sequentialIDs())
+        XCTAssertEqual(outcome.insertedBreaks.map(\.startMinute), [645])
+    }
+
+    func testNoBreakWhenToggleOff() {
+        let outcome = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 540, 120)],
+            existing: [],
+            toggles: PlanningToggles(addBreaksAutomatically: false))
+        XCTAssertTrue(outcome.insertedBreaks.isEmpty)
+    }
+
+    func testNoBreakUnderStretchThresholdOrWithoutGap() {
+        // 60m run is under the 90m stretch threshold.
+        let short = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 540, 60)],
+            existing: [],
+            toggles: PlanningToggles(addBreaksAutomatically: true))
+        XCTAssertTrue(short.insertedBreaks.isEmpty)
+        // 120m run but the next block starts 10m later — under the 15m minimum placement.
+        let crowded = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 540, 120)],
+            existing: [existing("next", 670, 30, category: "MEAL", isManual: true)],
+            toggles: PlanningToggles(addBreaksAutomatically: true))
+        XCTAssertTrue(crowded.insertedBreaks.isEmpty)
+    }
+
+    func testBreakShrinksToFitTightGap(){
+        // 90m run then a manual block 16m later: break fits but shrinks to the 16m gap.
+        let outcome = PlanRegeneration.resolve(
+            candidates: [candidate("c1", 540, 90)],
+            existing: [existing("next", 646, 30, category: "MEAL", isManual: true)],
+            toggles: PlanningToggles(addBreaksAutomatically: true))
+        XCTAssertEqual(outcome.insertedBreaks.map(\.durationMinutes), [16])
+    }
+
+    func testNonDemandingBlockResetsTheRun() {
+        // WORK 60m → MEAL 30m → WORK 60m: neither work stint reaches 90m on its own.
+        let outcome = PlanRegeneration.resolve(
+            candidates: [
+                candidate("c1", 540, 60),
+                candidate("meal", 600, 30, category: "MEAL"),
+                candidate("c2", 630, 60),
+            ],
+            existing: [],
+            toggles: PlanningToggles(addBreaksAutomatically: true))
+        XCTAssertTrue(outcome.insertedBreaks.isEmpty)
+    }
 }

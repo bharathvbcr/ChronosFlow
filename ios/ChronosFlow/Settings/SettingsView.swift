@@ -28,7 +28,10 @@ struct SettingsView: View {
                 dataSection
                 aboutSection
             }
+            .scrollContentBackground(.hidden)
+            .background { ChronosBackdrop() }
             .navigationTitle("Settings")
+            .chronosScrollMinimizedBar()
         }
     }
 

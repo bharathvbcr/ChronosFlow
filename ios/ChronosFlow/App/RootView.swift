@@ -21,6 +21,9 @@ struct RootView: View {
     /// Share Extension handoff: pending text written by ChronosShareExtension via App Group.
     @State private var pendingShareText: String?
     @State private var showingShareTaskEditor = false
+    /// Bottom inset reserved so scrollable content clears the floating shell bar
+    /// (no existing ChronosSpacing token composes to this; named here to avoid a magic literal).
+    private let floatingBarClearance: CGFloat = 64
 
     var body: some View {
         @Bindable var shell = shell
@@ -31,11 +34,18 @@ struct RootView: View {
                 .environment(shell)
                 // Reserve room so scrollable content clears the floating bar (Android compact-shell
                 // bottom clearance), instead of hiding behind it.
-                .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 64) }
+                .safeAreaInset(edge: .bottom) { Color.clear.frame(height: floatingBarClearance) }
 
             // The floating bar + Quick-Add FAB, over the content (Android compact shell).
             ShellBottomBar(shell: shell, settings: settings, focusActive: focus.phase != .idle)
-                .padding(.bottom, 8)
+                .padding(.bottom, ChronosSpacing.small)
+        }
+        // ⌘K toggles the command palette on hardware keyboards (Android Ctrl+K). Hidden zero-size
+        // button — the shortcut is the only way to reach it.
+        .background {
+            Button("Toggle command palette") { shell.commandPaletteShown.toggle() }
+                .keyboardShortcut("k", modifiers: .command)
+                .hidden()
         }
         .preferredColorScheme(settings.themeMode.colorScheme)
         .fullScreenCover(isPresented: Binding(get: { !hasOnboarded }, set: { hasOnboarded = !$0 })) {
@@ -95,7 +105,9 @@ struct RootView: View {
     @ViewBuilder
     private func routeView(for route: ShellRoute) -> some View {
         switch route {
-        case .tasks:      TasksView()
+        // The DayDial shortcut dismisses the Tasks page and lands on the Plan tab
+        // (Android `onOpenDayDial`); `select` already clears `presentedRoute`.
+        case .tasks:      TasksView(onOpenDayDial: { shell.select(.plan) })
         case .habits:     HabitsView()
         case .goals:      GoalsView()
         case .medication: MedicationView()

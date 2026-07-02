@@ -48,6 +48,17 @@ enum ChronosColors {
         }
     }
 
+    /// Semantic status indicators (connection / health / supply dots) — one meaning app-wide.
+    static let success = Color(red: 0.30, green: 0.74, blue: 0.45) // green — online / healthy / done
+    static let warning = Color(red: 0.95, green: 0.62, blue: 0.24) // amber — degraded / low supply
+    static let danger = Color(red: 0.86, green: 0.27, blue: 0.34)  // red — offline / error / critical
+
+    /// Readable on-color for brand-tinted fills (selected tab text, FAB glyph, filter chips).
+    static let onBrand = Color.white
+
+    /// Shared elevation shadow for floating shell chrome (nav bar, quick-add menu).
+    static let shellShadow = Color.black.opacity(0.18)
+
     /// Provenance tints — where a block came from (manual/routine/ai/calendar…).
     static func provenance(_ p: BlockProvenance) -> Color {
         switch p {

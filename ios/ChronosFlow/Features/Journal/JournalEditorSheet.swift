@@ -45,6 +45,10 @@ struct JournalEditorSheet: View {
     @State private var selectedMood: JournalMood = .unset
     @State private var timeText = ""
     @State private var dictation = DictationController()
+    /// On-device text tools backing the per-field "✨" polish menus (Android JournalAiAssistButton).
+    @State private var textTools = ChronosTextTools()
+    /// Transient outcome line for the last AI action ("Updated by AI…" / "Reverted"), auto-cleared.
+    @State private var aiMessage: String?
     @State private var pendingPhotos: [PhotosPickerItem] = []
     @State private var pendingPhotoData: [Data] = []
     @State private var showDetails = false
@@ -57,6 +61,9 @@ struct JournalEditorSheet: View {
     @State private var endDate: Date = .now
 
     @State private var didPrefill = false
+
+    /// Toggled in `save()` to fire a success haptic on commit (mirrors SleepView's save feedback).
+    @State private var saveFeedback = false
 
     private let cal = Calendar.current
 
@@ -122,6 +129,13 @@ struct JournalEditorSheet: View {
                     }
                 }
             }
+            .sensoryFeedback(.success, trigger: saveFeedback)
+            // Auto-clear the AI outcome line after a few seconds (Android shows it as a snackbar).
+            .task(id: aiMessage) {
+                guard aiMessage != nil else { return }
+                try? await Task.sleep(for: .seconds(4))
+                withAnimation(ChronosMotion.smooth) { aiMessage = nil }
+            }
             .onAppear { prefill() }
             .onChange(of: dictation.transcript) { _, new in
                 guard !new.isEmpty else { return }
@@ -172,6 +186,18 @@ struct JournalEditorSheet: View {
                     Spacer()
                     Text(journalMeterLabel(serializedDraft))
                         .font(.chronosCaption).foregroundStyle(.secondary)
+                    if textTools.isAvailable {
+                        JournalAiPolishMenu(
+                            text: draft, tools: textTools,
+                            onApply: { polished in withAnimation(ChronosMotion.smooth) { draft = polished } },
+                            onMessage: showAiMessage)
+                    }
+                }
+
+                if let aiMessage {
+                    Text(aiMessage)
+                        .font(.chronosCaption).foregroundStyle(.secondary)
+                        .transition(.opacity)
                 }
 
                 if isOnlyPrompts {
@@ -341,6 +367,13 @@ struct JournalEditorSheet: View {
                         get: { idx < highlights.count ? highlights[idx] : "" },
                         set: { if idx < highlights.count { highlights[idx] = $0 } }))
                         .font(.chronosBody)
+                    if textTools.isAvailable {
+                        JournalAiPolishMenu(
+                            text: idx < highlights.count ? highlights[idx] : "",
+                            tools: textTools,
+                            onApply: { if idx < highlights.count { highlights[idx] = $0 } },
+                            onMessage: showAiMessage)
+                    }
                     Button {
                         withAnimation(ChronosMotion.snappy) {
                             if idx < highlights.count { highlights.remove(at: idx) }
@@ -537,6 +570,11 @@ struct JournalEditorSheet: View {
         }
     }
 
+    /// Surface (and animate in) the transient AI outcome line; `.task(id:)` clears it later.
+    private func showAiMessage(_ message: String) {
+        withAnimation(ChronosMotion.snappy) { aiMessage = message }
+    }
+
     private func appendDictation(_ transcript: String) {
         let pieces = [draft.trimmingCharacters(in: .whitespacesAndNewlines),
                       transcript.trimmingCharacters(in: .whitespacesAndNewlines)]
@@ -591,6 +629,7 @@ struct JournalEditorSheet: View {
                 context.insert(entry)
             }
         }
+        saveFeedback.toggle()
         try? context.save()
         dismiss()
     }
@@ -631,6 +670,78 @@ struct JournalEditorSheet: View {
         for uri in uris {
             guard let url = URL(string: uri) else { continue }
             try? FileManager.default.removeItem(at: url)
+        }
+    }
+}
+
+// MARK: - Per-field AI polish menu
+
+/// A "✨" affordance for a single text field: a menu offering on-device grammar fix and
+/// expand/rewrite, plus one-tap undo of the last AI apply so the edit is non-destructive.
+/// Ports Android's `JournalAiAssistButton` (JournalScreen.kt), backed by the shared
+/// Foundation Models text tools instead of ML Kit.
+private struct JournalAiPolishMenu: View {
+    let text: String
+    let tools: ChronosTextTools
+    let onApply: (String) -> Void
+    let onMessage: (String) -> Void
+
+    @State private var busy = false
+    /// Field text from before the last AI apply, offered as "Undo AI edit".
+    @State private var undoTo: String?
+
+    var body: some View {
+        Menu {
+            Button {
+                run { await tools.run(.proofread, on: $0) }
+            } label: {
+                Label("Fix grammar", systemImage: "text.badge.checkmark")
+            }
+            Button {
+                run { await tools.expandReflection($0) }
+            } label: {
+                Label("Expand / rewrite", systemImage: "text.append")
+            }
+            if let original = undoTo {
+                Button {
+                    onApply(original)
+                    undoTo = nil
+                    onMessage("Reverted")
+                } label: {
+                    Label("Undo AI edit", systemImage: "arrow.uturn.backward")
+                }
+            }
+        } label: {
+            if busy {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "sparkles")
+                    .font(.chronosBody)
+                    .foregroundStyle(ChronosColors.brandPrimary)
+            }
+        }
+        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
+        .accessibilityLabel("Polish with AI")
+    }
+
+    /// Run a transform on the field's current text and apply/report the outcome
+    /// (Android `JournalAiAssistButton.handle`).
+    private func run(_ transform: @escaping (String) async -> String?) {
+        let original = text
+        busy = true
+        Task { @MainActor in
+            defer { busy = false }
+            guard let result = await transform(original) else {
+                onMessage("On-device AI isn't available right now")
+                return
+            }
+            if result == original {
+                onMessage("AI had no changes to suggest")
+            } else {
+                onApply(result)
+                undoTo = original
+                onMessage("Updated by AI — undo from the ✨ menu")
+            }
         }
     }
 }

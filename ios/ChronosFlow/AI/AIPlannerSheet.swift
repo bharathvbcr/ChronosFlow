@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import ChronosCore
 
 /// Review-before-apply sheet for the on-device AI day planner. Mirrors the Android rule that
 /// AI suggestions are always shown for review before they change the plan.
@@ -51,7 +52,7 @@ struct AIPlannerSheet: View {
                 Text("Generate a balanced plan around your fixed blocks, on device.")
                     .multilineTextAlignment(.center).font(.chronosBody).foregroundStyle(.secondary)
                 if case .failed(let m) = planner.state {
-                    Text(m).font(.chronosCaption).foregroundStyle(ChronosColors.brandAccent)
+                    Text(m).font(.chronosCaption).foregroundStyle(ChronosColors.danger)
                 }
                 Button {
                     Task { await planner.generatePlan(date: date, existingBlocks: existingBlocks, readiness: readiness) }
@@ -88,9 +89,21 @@ struct AIPlannerSheet: View {
                     }
                 }
                 Button {
-                    let created = planner.materialize(suggestion, on: date, existing: existingBlocks,
-                                                      readiness: readiness)
-                    created.forEach(context.insert)
+                    // Planning toggles come from Settings → Planning at apply time (read-only here);
+                    // they mirror Android's protect-focus / auto-breaks / preserve-manual flags.
+                    let settings = ChronosSettings.shared
+                    let plan = planner.materialize(
+                        suggestion, on: date, existing: existingBlocks,
+                        readiness: readiness,
+                        toggles: PlanningToggles(
+                            protectFocusBlocks: settings.protectFocusBlocks,
+                            addBreaksAutomatically: settings.addBreaksAutomatically,
+                            preserveManualBlocks: settings.preserveManualBlocks))
+                    // Regeneration may replace unprotected blocks a suggestion overlaps.
+                    for block in existingBlocks where plan.displacedExistingIDs.contains(block.id) {
+                        context.delete(block)
+                    }
+                    plan.created.forEach(context.insert)
                     try? context.save()
                     dismiss()
                 } label: {

@@ -35,6 +35,15 @@ struct TaskEditorSheet: View {
     /// Optional recurrence start/end window (Android `startsOn` / `endsOn`).
     @State private var hasRecurrenceEnd: Bool
     @State private var recurrenceEnd: Date
+    /// Per-occurrence reminder drafts for a recurring task (Android `reminderDrafts`).
+    @State private var recurrenceReminders: [RecurrenceSpec.Reminder]
+    /// Schedule preferences (Android TaskFormSheet's Schedule section): estimated block length,
+    /// target day, and preferred start — the fields `scheduleToday` and the dial already consume.
+    @State private var preferredDuration: Int?
+    @State private var targetDayOption: TargetDayOption
+    @State private var customTargetDate: Date
+    @State private var hasPreferredStart: Bool
+    @State private var preferredStart: Date
     /// Linked goal id (Android `goalId`); empty = unlinked.
     @State private var goalID: String
     @State private var checklist: [ChecklistItem]
@@ -86,6 +95,12 @@ struct TaskEditorSheet: View {
         _hasRecurrenceEnd = State(initialValue: task?.recurrence?.endsOn != nil)
         _recurrenceEnd = State(initialValue: task?.recurrence?.endsOn
             ?? Calendar.current.date(byAdding: .month, value: 3, to: .now) ?? .now)
+        _recurrenceReminders = State(initialValue: task?.recurrence?.reminders ?? [])
+        _preferredDuration = State(initialValue: task?.preferredDurationMinutes)
+        _targetDayOption = State(initialValue: TargetDayOption.resolve(task?.targetDate))
+        _customTargetDate = State(initialValue: task?.targetDate ?? .now)
+        _hasPreferredStart = State(initialValue: task?.preferredStartMinuteOfDay != nil)
+        _preferredStart = State(initialValue: TaskEditorSheet.date(atMinute: task?.preferredStartMinuteOfDay ?? 9 * 60))
         _goalID = State(initialValue: task?.goalID ?? "")
         _checklist = State(initialValue: task?.checklist.sorted { $0.order < $1.order } ?? [])
     }
@@ -110,7 +125,7 @@ struct TaskEditorSheet: View {
                         }
                         .font(.chronosCaption)
                         .padding(.horizontal, ChronosSpacing.small)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, ChronosSpacing.micro)
                         .background(ChronosColors.brandSecondary.opacity(0.15), in: Capsule())
                         .foregroundStyle(ChronosColors.brandSecondary)
                         .listRowSeparator(.hidden)
@@ -144,10 +159,11 @@ struct TaskEditorSheet: View {
                     }
                 }
 
-                if let fill = smartFill, fill.hasDetection {
+                if let fill = smartFill, !fill.typedDetections.isEmpty {
                     Section {
                         SmartFillPreviewCard(
                             fill: fill,
+                            onApply: { applyDetectionChip($0, from: fill) },
                             onApplyAll: { applyAll(fill) },
                             onDismiss: { withAnimation(ChronosMotion.snappy) { smartFill = nil } }
                         )
@@ -217,6 +233,7 @@ struct TaskEditorSheet: View {
                         DatePicker("Due", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
                     }
                 }
+                scheduleSection
                 Section("Repeat") {
                     Toggle("Repeats", isOn: $repeats.animation(ChronosMotion.snappy))
                     if repeats {
@@ -255,6 +272,19 @@ struct TaskEditorSheet: View {
                         if hasRecurrenceEnd {
                             DatePicker("End date", selection: $recurrenceEnd, displayedComponents: [.date])
                         }
+                        // Per-occurrence reminders (Android `reminderDrafts`: AT_TIME / BEFORE_OCCURRENCE).
+                        ForEach($recurrenceReminders) { $reminder in
+                            RecurrenceReminderRow(
+                                reminder: $reminder,
+                                hasPreferredStart: hasPreferredStart,
+                                onRemove: { removeRecurrenceReminder(reminder.id) })
+                        }
+                        Button {
+                            addRecurrenceReminder()
+                        } label: {
+                            Label("Add recurring reminder", systemImage: "bell.badge.plus")
+                                .font(.chronosCaption)
+                        }
                     }
                 }
                 Section("Checklist") {
@@ -290,6 +320,16 @@ struct TaskEditorSheet: View {
                             context.delete(existing); try? context.save(); dismiss()
                         }
                     }
+                } else {
+                    // Explainer for the bottom-bar "Add & new" button (Android "Keep adding after
+                    // this" subtitle, TaskFormSheet ~1398). Rendered as the form's last footer so it
+                    // sits directly above the bottom bar.
+                    Section {
+                    } footer: {
+                        Text("“Add & new” stays here and resets the form so you can add several tasks in a row.")
+                            .font(.chronosCaption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle(existing == nil ? "New task" : "Edit task")
@@ -323,6 +363,142 @@ struct TaskEditorSheet: View {
         }
     }
 
+    // MARK: - Schedule (Android TaskFormSheet's contextual schedule section)
+
+    /// Target-day choice (Android `scheduleDateOptions`: "Any day", "Today", "Tomorrow", "Custom").
+    enum TargetDayOption: String, CaseIterable, Identifiable {
+        case anyDay = "Any day", today = "Today", tomorrow = "Tomorrow", custom = "Custom"
+        var id: String { rawValue }
+
+        /// The option a stored target date round-trips to (Android `resolveScheduleDateOption`).
+        static func resolve(_ targetDate: Date?, calendar: Calendar = .current) -> TargetDayOption {
+            guard let targetDate else { return .anyDay }
+            if calendar.isDateInToday(targetDate) { return .today }
+            if calendar.isDateInTomorrow(targetDate) { return .tomorrow }
+            return .custom
+        }
+    }
+
+    /// Duration presets in minutes (Android `durationPresets`).
+    private static let durationPresets = [15, 30, 45, 60, 90, 120]
+
+    /// Duration / target-day / preferred-start pickers plus the scheduling-summary line
+    /// (Android TaskFormSheet ~1421–1536). All three write the existing model fields
+    /// (`preferredDurationMinutes`, `targetDate`, `preferredStartMinuteOfDay`).
+    private var scheduleSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+                Text("Duration")
+                    .font(.chronosCaption)
+                    .foregroundStyle(.secondary)
+                ChipFlowLayout(spacing: ChronosSpacing.small) {
+                    ForEach(TaskEditorSheet.durationPresets, id: \.self) { minutes in
+                        SelectChip(label: TaskEditorSheet.durationLabel(minutes),
+                                   selected: preferredDuration == minutes) {
+                            withAnimation(ChronosMotion.snappy) { preferredDuration = minutes }
+                        }
+                    }
+                    SelectChip(label: "Any length", selected: preferredDuration == nil) {
+                        withAnimation(ChronosMotion.snappy) { preferredDuration = nil }
+                    }
+                }
+            }
+            Picker("Target day", selection: $targetDayOption.animation(ChronosMotion.snappy)) {
+                ForEach(TargetDayOption.allCases) { Text($0.rawValue).tag($0) }
+            }
+            if targetDayOption == .custom {
+                DatePicker("Target date", selection: $customTargetDate, displayedComponents: [.date])
+            }
+            Toggle("Preferred start time", isOn: $hasPreferredStart.animation(ChronosMotion.snappy))
+            if hasPreferredStart {
+                DatePicker("Preferred start", selection: $preferredStart, displayedComponents: [.hourAndMinute])
+            }
+        } header: {
+            Text("Schedule")
+        } footer: {
+            // "Scheduling summary" line (Android: "Targeting today • 1h block • ends ~10:00 AM").
+            Text(schedulingSummary)
+                .font(.chronosCaption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Mirrors the Android scheduling-summary buildString.
+    private var schedulingSummary: String {
+        var summary = switch targetDayOption {
+        case .today: "Targeting today"
+        case .tomorrow: "Targeting tomorrow"
+        case .custom: "Targeting \(customTargetDate.formatted(.dateTime.month().day()))"
+        case .anyDay: "No specific day"
+        }
+        summary += " • "
+        summary += preferredDuration.map { "\(TaskEditorSheet.durationLabel($0)) block" } ?? "Flexible duration"
+        if hasPreferredStart {
+            let start = TaskEditorSheet.minuteOfDay(of: preferredStart)
+            summary += " • Start around \(formatDisplayMinute(start))"
+            if let duration = preferredDuration {
+                let end = start + duration
+                summary += " → ends ~\(formatDisplayMinute(end))"
+                if end >= 24 * 60 { summary += " (next day)" }
+            }
+        }
+        return summary
+    }
+
+    /// "15m" / "1h" / "1h 30m" (Android `formatTaskDurationBlock`).
+    static func durationLabel(_ minutes: Int) -> String {
+        let h = minutes / 60, m = minutes % 60
+        if h > 0 && m > 0 { return "\(h)h \(m)m" }
+        if h > 0 { return "\(h)h" }
+        return "\(minutes)m"
+    }
+
+    /// The concrete target day the chips resolve to (start-of-day), or nil for "Any day".
+    private var resolvedTargetDate: Date? {
+        let cal = Calendar.current
+        return switch targetDayOption {
+        case .anyDay: nil
+        case .today: cal.startOfDay(for: .now)
+        case .tomorrow: cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: .now))
+        case .custom: cal.startOfDay(for: customTargetDate)
+        }
+    }
+
+    /// The preferred start as minutes after midnight, or nil when unset.
+    private var preferredStartMinute: Int? {
+        hasPreferredStart ? TaskEditorSheet.minuteOfDay(of: preferredStart) : nil
+    }
+
+    static func minuteOfDay(of date: Date, calendar: Calendar = .current) -> Int {
+        calendar.component(.hour, from: date) * 60 + calendar.component(.minute, from: date)
+    }
+
+    /// Today's date at a given minute-of-day (for seeding the time pickers).
+    static func date(atMinute minute: Int, calendar: Calendar = .current) -> Date {
+        calendar.date(bySettingHour: minute / 60, minute: minute % 60, second: 0,
+                      of: calendar.startOfDay(for: .now)) ?? .now
+    }
+
+    // MARK: - Recurring reminders (Android `reminderDrafts`)
+
+    /// New drafts default like Android's "Add recurring reminder": a 30-minute lead when a preferred
+    /// start exists, otherwise a fixed-time reminder (seeded at 9:00 AM so it's always schedulable).
+    private func addRecurrenceReminder() {
+        let start = preferredStartMinute
+        withAnimation(ChronosMotion.snappy) {
+            recurrenceReminders.append(RecurrenceSpec.Reminder(
+                trigger: start != nil ? .beforeOccurrence : .atTime,
+                minuteOfDay: start ?? 9 * 60,
+                offsetMinutesBefore: start != nil ? 30 : nil))
+        }
+    }
+
+    private func removeRecurrenceReminder(_ id: String) {
+        withAnimation(ChronosMotion.snappy) {
+            recurrenceReminders.removeAll { $0.id == id }
+        }
+    }
+
     // MARK: - Templates
 
     @ViewBuilder private var templatesMenu: some View {
@@ -353,6 +529,7 @@ struct TaskEditorSheet: View {
             title = template.name
             detail = template.detail ?? ""
             priority = template.priority
+            preferredDuration = template.durationMinutes
             checklist = template.checklist.enumerated().map { ChecklistItem(text: $1, order: $0) }
             if let rec = template.recurrence {
                 repeats = true
@@ -361,8 +538,10 @@ struct TaskEditorSheet: View {
                 weekdays = rec.weekdays
                 ordinal = rec.ordinal
                 ordinalWeekday = rec.ordinalWeekday
+                recurrenceReminders = rec.reminders
             } else {
                 repeats = false
+                recurrenceReminders = []
             }
             smartFill = nil
         }
@@ -373,7 +552,7 @@ struct TaskEditorSheet: View {
             name: templateName,
             detail: detail.isEmpty ? nil : detail,
             priority: priority,
-            durationMinutes: nil,
+            durationMinutes: preferredDuration,
             checklist: checklist,
             recurrence: recurrenceSpec)
         templateStore.save(template)
@@ -386,6 +565,9 @@ struct TaskEditorSheet: View {
             hasDueDate = false; dueDate = .now
             repeats = false; frequency = .daily; interval = 1; weekdays = []
             ordinal = 1; ordinalWeekday = 2; hasRecurrenceEnd = false
+            recurrenceReminders = []
+            preferredDuration = nil; targetDayOption = .anyDay; customTargetDate = .now
+            hasPreferredStart = false; preferredStart = TaskEditorSheet.date(atMinute: 9 * 60)
             goalID = ""
             checklist = []; newChecklistItem = ""
             smartFill = nil; actionHint = nil
@@ -407,7 +589,8 @@ struct TaskEditorSheet: View {
             weekdays: frequency == .weekly ? weekdays : [],
             ordinal: ordinal,
             ordinalWeekday: ordinalWeekday,
-            endsOn: hasRecurrenceEnd ? Calendar.current.startOfDay(for: recurrenceEnd) : nil)
+            endsOn: hasRecurrenceEnd ? Calendar.current.startOfDay(for: recurrenceEnd) : nil,
+            reminders: recurrenceReminders)
     }
 
     // MARK: - Duplicate detection & goal linking
@@ -456,11 +639,33 @@ struct TaskEditorSheet: View {
     // MARK: - Smart fill
 
     /// Run the offline parser over the current title and stash the result for the preview card.
-    /// Pure detection — nothing is applied to the draft until the user taps "Apply all".
+    /// Detection only — unless the auto-apply setting is on for a NEW task, nothing touches the
+    /// draft until the user taps a chip or "Apply all".
     private func detectSmartFill(_ text: String) {
         let result = parseSmartFill(text, now: .now)
         withAnimation(ChronosMotion.snappy) {
             smartFill = (result.hasDetection || result.actionHint != nil) ? result : nil
+        }
+        autoApplyDetections(result)
+    }
+
+    /// Auto-apply detections on a NEW task when "Auto-apply form suggestions" is on (Android
+    /// KEY_ASSIST_AUTO_APPLY + `autoApplicableTaskAssistSuggestionIds`): non-destructive — only
+    /// fields still unset are filled, and the title is never rewritten while the user types.
+    private func autoApplyDetections(_ fill: SmartFillResult) {
+        guard existing == nil, ChronosSettings.shared.autoApplyAssist else { return }
+        withAnimation(ChronosMotion.snappy) {
+            for detection in fill.typedDetections {
+                let fieldOpen = switch detection.kind {
+                case .date: !hasDueDate && targetDayOption == .anyDay
+                case .time: !hasPreferredStart
+                case .duration: preferredDuration == nil
+                case .priority: priority == 0
+                case .recurrence: !repeats
+                case .action: actionHint == nil
+                }
+                if fieldOpen { applyDetection(detection.kind, from: fill) }
+            }
         }
     }
 
@@ -468,31 +673,55 @@ struct TaskEditorSheet: View {
     private func applyAll(_ fill: SmartFillResult) {
         withAnimation(ChronosMotion.snappy) {
             title = fill.cleanedTitle
+            for detection in fill.typedDetections {
+                applyDetection(detection.kind, from: fill)
+            }
+            smartFill = nil
+        }
+    }
 
+    /// Apply a single detection chip (Android's per-suggestion apply), leaving the title as typed.
+    /// The consumed chip disappears; the card collapses once every chip has been applied.
+    private func applyDetectionChip(_ detection: SmartFillDetection, from fill: SmartFillResult) {
+        withAnimation(ChronosMotion.snappy) {
+            applyDetection(detection.kind, from: fill)
+            smartFill?.typedDetections.removeAll { $0.id == detection.id }
+            smartFill?.detections.removeAll { $0 == detection.label }
+            if smartFill?.typedDetections.isEmpty == true { smartFill = nil }
+        }
+    }
+
+    /// Write one detected field onto the draft (shared by Apply all / per-chip / auto-apply).
+    private func applyDetection(_ kind: SmartFillDetection.Kind, from fill: SmartFillResult) {
+        switch kind {
+        case .date:
             if let due = fill.dueDate {
                 hasDueDate = true
-                dueDate = due
-            } else if let minute = fill.timeMinuteOfDay {
-                // Time-only: fold the time into today's date.
-                hasDueDate = true
-                dueDate = Calendar.current.date(
-                    bySettingHour: minute / 60, minute: minute % 60, second: 0,
-                    of: Calendar.current.startOfDay(for: .now)) ?? dueDate
+                dueDate = due  // already carries a detected time-of-day, folded in by the parser
+                // A detected day also drives the Schedule target-day pick (Android smart fill
+                // resolves the scheduleDateOption / targetDate the same way).
+                targetDayOption = TargetDayOption.resolve(due)
+                customTargetDate = due
             }
-
-            if let p = fill.priority {
-                priority = priorityInt(p)
+        case .time:
+            if let minute = fill.timeMinuteOfDay {
+                // Android maps a detected clock time to the preferred start, not the due date.
+                hasPreferredStart = true
+                preferredStart = TaskEditorSheet.date(atMinute: minute)
             }
+        case .duration:
+            if let minutes = fill.durationMinutes { preferredDuration = minutes }
+        case .priority:
+            if let p = fill.priority { priority = priorityInt(p) }
+        case .recurrence:
             if let rule = fill.recurrence {
                 repeats = true
                 frequency = mapFrequency(rule.frequency)
                 interval = max(rule.interval, 1)
                 weekdays = rule.frequency == .weekly ? rule.weekdays : []
             }
-            if let action = fill.actionHint {
-                actionHint = action
-            }
-            smartFill = nil
+        case .action:
+            if let action = fill.actionHint { actionHint = action }
         }
     }
 
@@ -596,16 +825,24 @@ struct TaskEditorSheet: View {
             existing.detail = detail.isEmpty ? nil : detail
             existing.priority = priority
             existing.dueDate = hasDueDate ? dueDate : nil
+            existing.preferredDurationMinutes = preferredDuration
+            existing.preferredStartMinuteOfDay = preferredStartMinute
+            existing.targetDate = resolvedTargetDate
             existing.recurrence = recurrenceSpec
             existing.goalID = linkedGoal
             existing.checklist = checklist
             existing.updatedAt = .now
             task = existing
         } else {
+            // "Any day" + a due date still pins the target to the due day (the pre-schedule-section
+            // behaviour), so a due-dated task keeps landing on the dial.
+            let target = resolvedTargetDate ?? (hasDueDate ? dueDate : nil)
             let newTask = TaskItem(
                 title: cleanTitle, detail: detail.isEmpty ? nil : detail,
                 priority: priority, dueDate: hasDueDate ? dueDate : nil,
-                targetDate: hasDueDate ? dueDate : nil, goalID: linkedGoal,
+                preferredDurationMinutes: preferredDuration,
+                preferredStartMinuteOfDay: preferredStartMinute,
+                targetDate: target, goalID: linkedGoal,
                 recurrence: recurrenceSpec, checklist: checklist)
             context.insert(newTask)
             task = newTask
@@ -624,10 +861,12 @@ struct TaskEditorSheet: View {
 
 // MARK: - Preview card
 
-/// The glassy "Detected in your text" card. Shows the detection chips in a flowing layout and
-/// offers a one-tap "Apply all" plus a dismiss. Mirrors the Android `TaskTitleSmartFillCard`.
+/// The glassy "Detected in your text" card. Each detection chip carries its reason and applies
+/// just that detail on tap (Android `ChronosAssistSuggestionChips`); "Apply all" and "Dismiss"
+/// remain for the one-tap path. Mirrors the Android `TaskTitleSmartFillCard`.
 private struct SmartFillPreviewCard: View {
     let fill: SmartFillResult
+    let onApply: (SmartFillDetection) -> Void
     let onApplyAll: () -> Void
     let onDismiss: () -> Void
 
@@ -639,16 +878,29 @@ private struct SmartFillPreviewCard: View {
                     .foregroundStyle(.secondary)
 
                 ChipFlowLayout(spacing: ChronosSpacing.small) {
-                    ForEach(Array(fill.detections.enumerated()), id: \.offset) { _, chip in
-                        Text(chip)
-                            .font(.chronosCaption)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(.thinMaterial, in: Capsule())
+                    ForEach(fill.typedDetections) { detection in
+                        Button {
+                            onApply(detection)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(detection.label)
+                                    .font(.chronosCaption)
+                                    .foregroundStyle(.primary)
+                                Text(detection.reason)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, ChronosSpacing.small)
+                            .padding(.vertical, ChronosSpacing.micro)
+                            .background(.thinMaterial,
+                                        in: RoundedRectangle(cornerRadius: ChronosRadius.small, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Apply suggestion: \(detection.label). \(detection.reason)")
                     }
                 }
 
-                Text("Tidy the title to “\(fill.cleanedTitle)” and fill in the detected details.")
+                Text("Tap a detail to apply just that, or tidy the title to “\(fill.cleanedTitle)” and fill in everything.")
                     .font(.chronosCaption)
                     .foregroundStyle(.secondary)
 
@@ -668,6 +920,84 @@ private struct SmartFillPreviewCard: View {
         }
         .padding(.horizontal)
         .transition(.scale(scale: 0.96).combined(with: .opacity))
+    }
+}
+
+// MARK: - Schedule chips & recurring-reminder row
+
+/// A pill-shaped single-select option chip for the Schedule section (Android `ChronosOptionChips`).
+private struct SelectChip: View {
+    let label: String
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.chronosCaption)
+                .padding(.horizontal, ChronosSpacing.compact)
+                .padding(.vertical, ChronosSpacing.small)
+                .background(selected ? ChronosColors.brandPrimary : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(selected ? ChronosColors.onBrand : .primary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// One recurring-reminder draft: a fixed clock time on each occurrence day, or a lead offset
+/// before the preferred start (Android's reminder-draft card, AT_TIME / BEFORE_OCCURRENCE).
+private struct RecurrenceReminderRow: View {
+    @Binding var reminder: RecurrenceSpec.Reminder
+    let hasPreferredStart: Bool
+    let onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+            HStack {
+                Picker("Reminder", selection: $reminder.trigger.animation(ChronosMotion.snappy)) {
+                    Text("At a time").tag(RecurrenceSpec.Reminder.Trigger.atTime)
+                    Text("Before start").tag(RecurrenceSpec.Reminder.Trigger.beforeOccurrence)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Button(action: onRemove) {
+                    Image(systemName: "minus.circle")
+                        .foregroundStyle(ChronosColors.brandAccent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove reminder")
+            }
+            if reminder.trigger == .atTime {
+                DatePicker("Reminder time", selection: timeBinding, displayedComponents: [.hourAndMinute])
+                    .font(.chronosCaption)
+            } else {
+                Stepper("\(reminder.offsetMinutesBefore ?? 30) min before start",
+                        value: offsetBinding, in: 5...240, step: 5)
+                    .font(.chronosCaption)
+                if !hasPreferredStart {
+                    // Android's `recurringRemindersValid` rule: a lead offset needs a preferred start.
+                    Text("Set a preferred start time so this reminder knows when the task begins.")
+                        .font(.chronosCaption)
+                        .foregroundStyle(ChronosColors.brandAccent)
+                }
+            }
+        }
+    }
+
+    /// Bridges the stored minute-of-day to the hour-and-minute picker (defaults 9:00 AM).
+    private var timeBinding: Binding<Date> {
+        Binding(
+            get: { TaskEditorSheet.date(atMinute: reminder.minuteOfDay ?? 9 * 60) },
+            set: { reminder.minuteOfDay = TaskEditorSheet.minuteOfDay(of: $0) }
+        )
+    }
+
+    private var offsetBinding: Binding<Int> {
+        Binding(
+            get: { reminder.offsetMinutesBefore ?? 30 },
+            set: { reminder.offsetMinutesBefore = $0 }
+        )
     }
 }
 
@@ -697,11 +1027,16 @@ private struct WeekdaySelector: View {
                         .frame(width: 30, height: 30)
                         .background(on ? ChronosColors.brandPrimary : Color(.tertiarySystemFill),
                                     in: Circle())
-                        .foregroundStyle(on ? .white : .primary)
+                        .foregroundStyle(on ? ChronosColors.onBrand : .primary)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(RecurrenceSpec.weekdayName(day.weekday))
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Repeat on weekdays")
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import EventKit
 import ChronosCore
 
@@ -13,15 +14,28 @@ import ChronosCore
 //      rationale copy in DayDialCalendarPermissions.kt / SidebarPageContent.kt.
 //   3. A source-filtered "Detailed calendar" timeline with the three segmented presets
 //      (All / Schedule / Calendar — CalendarTimelinePreset) and a per-source filter menu, rendering
-//      imported calendar events grouped by source (Android: buildSidebarTimelineItems).
+//      all six sources grouped like Android's buildSidebarTimelineItems: EventKit events (Calendar /
+//      All-day calendar) plus the SwiftData schedule-side sources (Task / Habit / Medication / Plan)
+//      with per-row quick actions (Complete for tasks/habits, Take/Missed for medication doses).
 //
 // Calendar events are read read-only via the shared `CalendarOverlayProvider` (EventKit). The
-// schedule-side sources (Task / Habit / Medication / Plan) are surfaced as preset/filter rows with a
-// clearly-commented placeholder empty state — wiring those into the SwiftData stores lives outside
-// this view's owned files, exactly as Android renders an empty section when a source has no items.
+// schedule-side rows reuse the write patterns of TasksView / HabitsView / MedicationView (recurring
+// tasks spawn their next occurrence, doses go through acknowledgeDose/recordDose) without touching
+// those views.
 
 struct CalendarManagementView: View {
     @State private var model = CalendarManagementModel()
+    @Environment(\.modelContext) private var context
+
+    // Schedule-side sources for the timeline (Android: DayQuickItemsUiState + the day's TimeBlocks).
+    // Queried unfiltered and narrowed to the selected date at build time, since the date is dynamic.
+    @Query private var blocks: [TimeBlock]
+    @Query private var tasks: [TaskItem]
+    @Query private var habits: [Habit]
+    @Query private var medications: [MedicationPlan]
+
+    /// Bumps after each quick action to fire the success haptic.
+    @State private var actionTick = 0
 
     var body: some View {
         Form {
@@ -32,6 +46,7 @@ struct CalendarManagementView: View {
         .navigationTitle("Calendars")
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.refresh() }
+        .sensoryFeedback(.success, trigger: actionTick)
     }
 
     // MARK: Month picker (Android: the month-grid navigation card)
@@ -55,10 +70,10 @@ struct CalendarManagementView: View {
     private var syncStatusSection: some View {
         Section {
             LabeledContent("Status") {
-                HStack(spacing: 4) {
+                HStack(spacing: ChronosSpacing.micro) {
                     Circle()
                         .fill(model.statusColor)
-                        .frame(width: 8, height: 8)
+                        .frame(width: ChronosSpacing.small, height: ChronosSpacing.small)
                     Text(model.connectionSummary)
                         .foregroundStyle(.secondary)
                 }
@@ -104,7 +119,7 @@ struct CalendarManagementView: View {
             }
             .pickerStyle(.segmented)
             .onChange(of: model.preset) { _, newValue in
-                model.applyPreset(newValue)
+                withAnimation(ChronosMotion.snappy) { model.applyPreset(newValue) }
             }
 
             // Per-source filter + hide-completed menu (Android: the filter dropdown).
@@ -133,56 +148,177 @@ struct CalendarManagementView: View {
 
     @ViewBuilder
     private var timelineContent: some View {
-        let grouped = model.groupedTimeline()
+        let grouped = model.groupedTimeline(scheduleItems: scheduleTimelineItems())
         if grouped.isEmpty {
-            Text(model.emptyStateMessage)
-                .font(.chronosCaption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            ContentUnavailableView {
+                Label(model.permission == .fullAccess ? "No timeline items" : "Calendar not connected",
+                      systemImage: "calendar")
+            } description: {
+                Text(model.emptyStateMessage)
+            } actions: {
+                switch model.permission {
+                case .notDetermined:
+                    Button("Connect calendar") { Task { await model.requestAccess() } }
+                        .buttonStyle(.borderedProminent)
+                        .tint(ChronosColors.brandPrimary)
+                case .denied, .restricted, .writeOnly:
+                    Button("Open Settings") { model.openSystemSettings() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(ChronosColors.brandPrimary)
+                case .fullAccess:
+                    EmptyView()
+                }
+            }
         } else {
             ForEach(grouped, id: \.source) { group in
+                let sourceColor = ChronosColors.category(group.source.label)
                 // Source header with count (Android: "{sourceLabel} ({count})").
                 HStack(spacing: ChronosSpacing.small) {
                     Image(systemName: group.source.symbol)
-                        .foregroundStyle(ChronosColors.category(group.source.label))
+                        .foregroundStyle(sourceColor)
                     Text("\(group.source.label) (\(group.items.count))")
                         .font(.chronosLabel)
-                        .foregroundStyle(ChronosColors.brandPrimary)
+                        .foregroundStyle(sourceColor)
                 }
                 ForEach(group.items) { item in
-                    CalendarTimelineRow(item: item, sourceColor: ChronosColors.category(group.source.label))
+                    CalendarTimelineRow(item: item, sourceColor: sourceColor, onAction: perform)
                 }
             }
         }
+    }
+
+    // MARK: Schedule-side timeline items (Android: buildSidebarTimelineItems' quick-item half)
+
+    /// Builds the Task / Habit / Medication / Plan rows for the selected date. Each list is sorted
+    /// like Android: scheduled minute first (unscheduled last), then title.
+    private func scheduleTimelineItems() -> [CalendarTimelineSource: [CalendarTimelineItem]] {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: model.selectedDate)
+        var items: [CalendarTimelineSource: [CalendarTimelineItem]] = [:]
+        items[.plan] = blocks
+            .filter { cal.isDate($0.date, inSameDayAs: day) && $0.calendarEventID == nil }
+            .map(CalendarTimelineItem.init(block:))
+            .sorted()
+        items[.task] = tasks
+            .filter { task in
+                // Android `belongsToDate`: slotted onto this day or due this day.
+                task.targetDate.map { cal.isDate($0, inSameDayAs: day) } ?? false
+                    || task.dueDate.map { cal.isDate($0, inSameDayAs: day) } ?? false
+            }
+            .map(CalendarTimelineItem.init(task:))
+            .sorted()
+        items[.habit] = habits
+            .filter(\.isActive)
+            .map { CalendarTimelineItem(habit: $0, day: day) }
+            .sorted()
+        items[.medication] = medications
+            .filter { plan in
+                guard plan.isActive, !plan.isPaused(on: day) else { return false }
+                if let start = plan.startAt, day < cal.startOfDay(for: start) { return false }
+                if let end = plan.endAt, day > cal.startOfDay(for: end) { return false }
+                return true
+            }
+            .flatMap { plan in
+                plan.reminderMinutes.sorted().map { CalendarTimelineItem(plan: plan, minute: $0, day: day) }
+            }
+            .sorted()
+        return items
+    }
+
+    /// Executes a row's quick action with the same model writes the owning feature screens use.
+    private func perform(_ action: CalendarTimelineQuickAction) {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: model.selectedDate)
+        withAnimation(ChronosMotion.snappy) {
+            switch action {
+            case .completeTask(let id):
+                guard let task = tasks.first(where: { $0.id == id }), !task.isCompleted else { return }
+                // Mirrors TasksView.complete: completing a recurring task spawns its next occurrence.
+                task.isCompleted = true
+                if let rec = task.recurrence {
+                    let anchor = task.dueDate ?? task.targetDate ?? .now
+                    if let next = rec.nextDate(after: anchor) {
+                        context.insert(TaskItem(
+                            title: task.title, detail: task.detail, priority: task.priority,
+                            dueDate: task.dueDate != nil ? next : nil,
+                            targetDate: task.targetDate != nil ? next : nil,
+                            goalID: task.goalID, recurrence: rec,
+                            checklist: task.checklist.map {
+                                ChecklistItem(text: $0.text, isDone: false, order: $0.order)
+                            }))
+                    }
+                }
+            case .completeHabit(let id):
+                guard let habit = habits.first(where: { $0.id == id }),
+                      !habit.isCompleted(on: day) else { return }
+                habit.toggleCompletion(on: day)
+            case .takeDose(let id, let minute):
+                guard let plan = medications.first(where: { $0.id == id }) else { return }
+                plan.acknowledgeDose(at: doseTimestamp(day: day, minute: minute))
+            case .missDose(let id, let minute):
+                guard let plan = medications.first(where: { $0.id == id }) else { return }
+                plan.recordDose(.missed, at: doseTimestamp(day: day, minute: minute), reason: "Marked missed")
+            }
+            try? context.save()
+        }
+        actionTick += 1
+    }
+
+    /// The scheduled dose instant on the viewed day, so history lands on the right date.
+    private func doseTimestamp(day: Date, minute: Int) -> Date {
+        Calendar.current.date(byAdding: .minute, value: minute, to: day) ?? day
     }
 }
 
 // MARK: - Timeline row
 
-/// One imported-calendar timeline item, mirroring Android's SidebarTimelineItem rendering
-/// (left accent bar, time, title, detail/status).
+/// One timeline item, mirroring Android's SidebarTimelineItemRow rendering
+/// (left accent bar, time, title, detail/status, quick-action buttons).
 private struct CalendarTimelineRow: View {
     let item: CalendarTimelineItem
     let sourceColor: Color
+    var onAction: (CalendarTimelineQuickAction) -> Void = { _ in }
 
     var body: some View {
-        HStack(spacing: ChronosSpacing.compact) {
+        HStack(alignment: .top, spacing: ChronosSpacing.compact) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(sourceColor)
-                .frame(width: 4)
+                .frame(width: ChronosSpacing.micro)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
                     .font(.chronosBody)
                 Text(item.timeLabel)
                     .font(.chronosCaption)
                     .foregroundStyle(.secondary)
+                if let detail = item.detail {
+                    Text(detail)
+                        .font(.chronosCaption)
+                        .foregroundStyle(.secondary)
+                }
+                if let status = item.status {
+                    Text(status)
+                        .font(.chronosCaption.weight(.semibold))
+                        .foregroundStyle(item.isDone ? ChronosColors.brandPrimary : .secondary)
+                }
+                if item.primaryAction != nil || item.secondaryAction != nil {
+                    HStack(spacing: ChronosSpacing.small) {
+                        if let action = item.primaryAction {
+                            Button(action.label) { onAction(action) }
+                                .buttonStyle(.borderedProminent)
+                                .tint(ChronosColors.brandPrimary)
+                        }
+                        if let action = item.secondaryAction {
+                            Button(action.label) { onAction(action) }
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
+                    .font(.chronosCaption)
+                    .padding(.top, 2)
+                }
             }
             Spacer()
-            if item.isAllDay {
-                Text("All day")
-                    .font(.chronosCaption)
-                    .foregroundStyle(.secondary)
-            }
         }
         .padding(.vertical, 2)
     }
@@ -251,7 +387,7 @@ final class CalendarManagementModel {
         guard permission == .fullAccess else { calendarEvents = []; return }
         let timed = await provider.events(on: selectedDate)
         let allDay = await provider.allDayContext(on: selectedDate)
-        calendarEvents = timed + allDay
+        withAnimation(ChronosMotion.snappy) { calendarEvents = timed + allDay }
         lastRefresh = .now
     }
 
@@ -273,10 +409,12 @@ final class CalendarManagementModel {
     }
 
     /// Build the source-grouped timeline. Calendar / All-day-calendar sources are populated from
-    /// EventKit; the schedule-side sources (Task / Habit / Medication / Plan) render an empty group
-    /// when enabled — the SwiftData queries for those live outside this view's owned files, so this
-    /// matches Android's behaviour of showing an empty section rather than hiding the source.
-    func groupedTimeline() -> [CalendarTimelineGroup] {
+    /// EventKit; the schedule-side sources (Task / Habit / Medication / Plan) come from the view's
+    /// SwiftData queries via `scheduleItems`. Mirrors Android's buildSidebarTimelineItems filter:
+    /// hide-completed drops done items, and "connected calendar only" limits to calendar sources.
+    func groupedTimeline(
+        scheduleItems: [CalendarTimelineSource: [CalendarTimelineItem]] = [:]
+    ) -> [CalendarTimelineGroup] {
         var groups: [CalendarTimelineGroup] = []
         for source in CalendarTimelineSource.allCases where enabledSources.contains(source) {
             switch source {
@@ -289,9 +427,10 @@ final class CalendarManagementModel {
                     if !items.isEmpty { groups.append(.init(source: source, items: items)) }
                 }
             case .task, .habit, .medication, .plan:
-                // PLACEHOLDER: schedule-side sources are owned by the SwiftData stores outside this
-                // view. They appear in the filter/preset model (parity) but render no rows here yet.
-                break
+                guard !connectedCalendarOnly else { break }
+                var items = scheduleItems[source] ?? []
+                if hideCompleted { items.removeAll(where: \.isDone) }
+                if !items.isEmpty { groups.append(.init(source: source, items: items)) }
             }
         }
         return groups
@@ -352,11 +491,38 @@ struct CalendarTimelineGroup: Identifiable {
     var id: String { source.rawValue }
 }
 
-struct CalendarTimelineItem: Identifiable, Equatable {
+/// A quick action a schedule-side timeline row exposes, mirroring Android's per-row
+/// primary/secondary actions (Complete for tasks/habits, Take/Missed for medication doses).
+enum CalendarTimelineQuickAction: Equatable {
+    case completeTask(String)
+    case completeHabit(String)
+    case takeDose(planID: String, minute: Int)
+    case missDose(planID: String, minute: Int)
+
+    var label: String {
+        switch self {
+        case .completeTask, .completeHabit: "Complete"
+        case .takeDose: "Take"
+        case .missDose: "Missed"
+        }
+    }
+}
+
+struct CalendarTimelineItem: Identifiable, Equatable, Comparable {
     let id: String
     let title: String
     let timeLabel: String
     let isAllDay: Bool
+    var detail: String?
+    var status: String?
+    var isDone = false
+    var primaryAction: CalendarTimelineQuickAction?
+    var secondaryAction: CalendarTimelineQuickAction?
+    /// In-group sort key (Android sortMinute; unscheduled items sink to the bottom).
+    var sortMinute = 0
+
+    /// Android UNSCHEDULED_TIMELINE_MINUTE — items without a time sort after every scheduled one.
+    private static let unscheduledMinute = 24 * 60 + 10
 
     init(_ event: CalendarOverlayEvent) {
         self.id = event.id
@@ -369,6 +535,90 @@ struct CalendarTimelineItem: Identifiable, Equatable {
             let end = Self.clock(event.startMinute + event.durationMinutes)
             self.timeLabel = "\(start) – \(end)"
         }
+        self.sortMinute = event.isAllDay ? 0 : event.startMinute
+    }
+
+    /// A planner block on the day (Android: the TimeBlock half of buildSidebarTimelineItems —
+    /// no quick action, status "Planned").
+    init(block: TimeBlock) {
+        self.id = "block:\(block.id)"
+        self.title = block.title.isEmpty ? "Focus block" : block.title
+        self.isAllDay = false
+        self.timeLabel = "\(Self.clock(block.startMinuteOfDay)) – \(Self.clock(block.startMinuteOfDay + block.durationMinutes))"
+        self.detail = block.category
+        self.status = "Planned"
+        self.sortMinute = block.startMinuteOfDay
+    }
+
+    /// A task due on the day (Android: DayQuickItemUiModel TASK).
+    init(task: TaskItem) {
+        self.id = "task:\(task.id)"
+        self.title = task.title.isEmpty ? "Untitled task" : task.title
+        self.isAllDay = false
+        self.timeLabel = task.preferredStartMinuteOfDay.map(Self.clock) ?? "Unscheduled"
+        var parts: [String] = []
+        if let duration = task.preferredDurationMinutes { parts.append("\(duration)m") }
+        let stepsLeft = task.checklist.filter { !$0.isDone }.count
+        if stepsLeft > 0 { parts.append("\(stepsLeft) steps left") }
+        self.detail = parts.isEmpty ? "Task" : parts.joined(separator: " · ")
+        self.isDone = task.isCompleted
+        self.status = task.isCompleted ? "Done" : "Due today"
+        self.primaryAction = task.isCompleted ? nil : .completeTask(task.id)
+        self.sortMinute = task.preferredStartMinuteOfDay ?? Self.unscheduledMinute
+    }
+
+    /// An active habit on the day (Android: DayQuickItemUiModel HABIT).
+    init(habit: Habit, day: Date) {
+        self.id = "habit:\(habit.id)"
+        self.title = habit.title.isEmpty ? "Untitled habit" : habit.title
+        self.isAllDay = false
+        self.timeLabel = Self.clock(habit.effectiveStartMinute)
+        self.detail = "\(Self.clock(habit.windowStartMinute)) – \(Self.clock(habit.windowEndMinute))"
+        let completed = habit.isCompleted(on: day)
+        let skipped = habit.isSkipped(on: day)
+        self.isDone = completed || skipped
+        self.status = completed ? "Done"
+            : skipped ? "Skipped"
+            : habit.isPaused(on: day) ? "Paused"
+            : "Due today"
+        self.primaryAction = isDone ? nil : .completeHabit(habit.id)
+        self.sortMinute = habit.effectiveStartMinute
+    }
+
+    /// One scheduled dose of a medication plan (Android: DayQuickItemUiModel MEDICATION).
+    /// Doneness is day-level, matching MedicationView's `takenToday` convention: any terminal dose
+    /// event on the day that carries no minute (the acknowledgeDose path) settles every dose row.
+    init(plan: MedicationPlan, minute: Int, day: Date) {
+        self.id = "med:\(plan.id):\(minute)"
+        self.title = plan.name.isEmpty ? "Medication" : plan.name
+        self.isAllDay = false
+        self.timeLabel = Self.clock(minute)
+        var parts = ["\(plan.dosage) \(plan.unit)".trimmingCharacters(in: .whitespaces)]
+        if plan.takeWithFood { parts.append("with food") }
+        self.detail = parts.filter { !$0.isEmpty }.joined(separator: " · ")
+        let cal = Calendar.current
+        let event = (plan.doseEvents ?? []).first { event in
+            cal.isDate(event.date, inSameDayAs: day)
+                && [.taken, .missed, .skipped].contains(event.status)
+                && (event.scheduledMinuteOfDay == nil || event.scheduledMinuteOfDay == minute)
+        }
+        self.isDone = event != nil
+        self.status = switch event?.status {
+        case .taken: "Taken"
+        case .missed: "Missed"
+        case .skipped: "Skipped"
+        default: "Due \(Self.clock(minute))"
+        }
+        self.primaryAction = isDone ? nil : .takeDose(planID: plan.id, minute: minute)
+        self.secondaryAction = isDone ? nil : .missDose(planID: plan.id, minute: minute)
+        self.sortMinute = minute
+    }
+
+    /// Android's in-source ordering: scheduled minute, then case-insensitive title.
+    static func < (lhs: CalendarTimelineItem, rhs: CalendarTimelineItem) -> Bool {
+        lhs.sortMinute != rhs.sortMinute
+            ? lhs.sortMinute < rhs.sortMinute
+            : lhs.title.lowercased() < rhs.title.lowercased()
     }
 
     /// Minute-of-day → "h:mm a" wall-clock label.
@@ -384,4 +634,5 @@ struct CalendarTimelineItem: Identifiable, Equatable {
 
 #Preview {
     NavigationStack { CalendarManagementView() }
+        .modelContainer(ChronosStore.previewContainer())
 }

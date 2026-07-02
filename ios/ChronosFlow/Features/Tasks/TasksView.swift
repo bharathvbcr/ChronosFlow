@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UserNotifications
 import ChronosCore
 
 /// The Tasks tab — the iOS port of Android `feature/tasks/TaskScreen.kt`. Brought to parity with the
@@ -22,9 +23,17 @@ struct TasksView: View {
     /// Dismissed-permission state so the alerts behave like Android's dismissible attention cards.
     @State private var notificationAlertDismissed = false
     @State private var alarmAlertDismissed = false
+    /// Whether notification authorization is actually granted (Android `notificationPermissionGranted`).
+    /// Starts optimistic (`true`) so the attention card never flashes before the async check lands.
+    @State private var notificationsAuthorized = true
     /// Candidates drained from a multi-line / .txt / .ics share (written by ChronosShareExtension to
     /// the App Group under `share.pendingBulkTasks`). Non-nil drives the bulk-import review sheet.
     @State private var bulkImportCandidates: [String]?
+    /// Drives a one-shot sensory tick on the key task actions (mirrors SleepView's feedback idiom).
+    @State private var actionFeedback: ActionFeedback?
+
+    /// The outcome that just occurred, so `.sensoryFeedback` can play the matching haptic.
+    private enum ActionFeedback { case completed, deleted }
 
     /// App Group the Share Extension writes pending shares into.
     private static let appGroup = "group.com.chronosflow.shared"
@@ -62,43 +71,47 @@ struct TasksView: View {
         }
     }
 
+    // Extracted so the `body` modifier chain stays within the SwiftUI type-checker budget.
+    private var taskList: some View {
+        LazyVStack(spacing: ChronosSpacing.compact) {
+            header
+            if !tasks.isEmpty { metricTiles }
+            addButton
+            if !tasks.isEmpty {
+                TaskStatsCard(tasks: tasks)
+                assistantTriageCard
+            }
+            permissionAlerts
+            filterRow
+            if visibleTasks.isEmpty {
+                emptyState
+            } else {
+                ForEach(visibleTasks) { task in
+                    TaskRow(
+                        task: task,
+                        onToggle: { complete(task) },
+                        onTap: { contextTask = task },
+                        onSchedule: { scheduleToday(task) },
+                        onDuplicate: { duplicate(task) },
+                        onEdit: { activeSheet = .edit(task) },
+                        onDelete: { delete(task) }
+                    )
+                }
+            }
+        }
+        .padding(ChronosSpacing.standard)
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: ChronosSpacing.compact) {
-                    header
-                    if !tasks.isEmpty { metricTiles }
-                    addButton
-                    if !tasks.isEmpty {
-                        TaskStatsCard(tasks: tasks)
-                        assistantTriageCard
-                    }
-                    permissionAlerts
-                    filterRow
-                    if visibleTasks.isEmpty {
-                        emptyState
-                    } else {
-                        ForEach(visibleTasks) { task in
-                            TaskRow(
-                                task: task,
-                                onToggle: { complete(task) },
-                                onTap: { contextTask = task },
-                                onSchedule: { scheduleToday(task) },
-                                onDuplicate: { duplicate(task) },
-                                onEdit: { activeSheet = .edit(task) },
-                                onDelete: { delete(task) }
-                            )
-                        }
-                    }
-                }
-                .padding(ChronosSpacing.standard)
-            }
+            ScrollView { taskList }
             .background { ChronosBackdrop() }
             .navigationTitle("Tasks")
             .chronosScrollMinimizedBar()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { activeSheet = .new } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Add task")
                 }
             }
             .sheet(item: $activeSheet) { sheet in
@@ -127,8 +140,20 @@ struct TasksView: View {
                 TaskBulkImportSheet(candidates: box.candidates)
             }
             .onAppear { drainPendingBulkImport() }
+            .task { await refreshNotificationAuthorization() }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { drainPendingBulkImport() }
+                if phase == .active {
+                    drainPendingBulkImport()
+                    // Re-check on foreground so granting access in Settings clears the card.
+                    Task { await refreshNotificationAuthorization() }
+                }
+            }
+            .sensoryFeedback(trigger: actionFeedback) { _, new in
+                switch new {
+                case .completed: .success
+                case .deleted: .warning
+                case nil: nil
+                }
             }
         }
     }
@@ -200,9 +225,11 @@ struct TasksView: View {
 
     /// Urgent-task permission attention cards (Android `TaskAttentionCard`). iOS surfaces notification
     /// authorization; exact-alarm scheduling is the OS's job here (no exact-alarm permission to grant),
-    /// so the alarm card explains the iOS notification-time fallback instead.
+    /// so the alarm card explains the iOS notification-time fallback instead. The notification card
+    /// only shows when authorization is actually missing (Android gates on
+    /// `!notificationPermissionGranted && urgentCount > 0`).
     @ViewBuilder private var permissionAlerts: some View {
-        if urgentCount > 0 && !notificationAlertDismissed {
+        if urgentCount > 0 && !notificationsAuthorized && !notificationAlertDismissed {
             TaskAttentionCard(
                 title: "Notifications are off",
                 message: "Urgent task reminders need notification access.",
@@ -262,24 +289,39 @@ struct TasksView: View {
 
     // MARK: - Actions
 
-    /// Toggle completion; when completing a recurring task, spawn its next occurrence.
+    /// Toggle completion; when completing a recurring task, spawn its next occurrence (carrying the
+    /// schedule preferences so per-occurrence reminders keep firing) and refresh both tasks'
+    /// notifications — completing cancels the old ones, the spawn arms the next occurrence's.
     private func complete(_ task: TaskItem) {
+        var spawned: TaskItem?
         withAnimation(ChronosMotion.snappy) {
             let wasCompleted = task.isCompleted
             task.isCompleted.toggle()
             if !wasCompleted, let rec = task.recurrence {
                 let anchor = task.dueDate ?? task.targetDate ?? .now
                 if let next = rec.nextDate(after: anchor) {
-                    context.insert(TaskItem(
+                    let copy = TaskItem(
                         title: task.title, detail: task.detail, priority: task.priority,
                         dueDate: task.dueDate != nil ? next : nil,
+                        preferredDurationMinutes: task.preferredDurationMinutes,
+                        preferredStartMinuteOfDay: task.preferredStartMinuteOfDay,
                         targetDate: task.targetDate != nil ? next : nil,
                         goalID: task.goalID, recurrence: rec,
-                        checklist: task.checklist.map { ChecklistItem(text: $0.text, isDone: false, order: $0.order) }))
+                        checklist: task.checklist.map { ChecklistItem(text: $0.text, isDone: false, order: $0.order) })
+                    context.insert(copy)
+                    spawned = copy
                 }
             }
             try? context.save()
         }
+        let toggled = task
+        let next = spawned
+        Task {
+            await ChronosNotifications.shared.scheduleTask(toggled)
+            if let next { await ChronosNotifications.shared.scheduleTask(next) }
+        }
+        actionFeedback = nil
+        actionFeedback = .completed
     }
 
     /// Slot the task onto today's dial by setting its target date to today (Android `scheduleTaskToday`).
@@ -291,6 +333,8 @@ struct TasksView: View {
             task.updatedAt = .now
             try? context.save()
         }
+        actionFeedback = nil
+        actionFeedback = .completed
     }
 
     /// Duplicate a task with reset completion / checklist progress (Android `duplicateTask`).
@@ -303,6 +347,8 @@ struct TasksView: View {
             checklist: task.checklist.map { ChecklistItem(text: $0.text, isDone: false, order: $0.order) })
         context.insert(copy)
         try? context.save()
+        actionFeedback = nil
+        actionFeedback = .completed
     }
 
     private func delete(_ task: TaskItem) {
@@ -310,16 +356,27 @@ struct TasksView: View {
             context.delete(task)
             try? context.save()
         }
+        actionFeedback = nil
+        actionFeedback = .deleted
     }
 
-    /// Ask for notification authorization so urgent reminders can fire. The alert dismisses either way.
+    /// Ask for notification authorization so urgent reminders can fire, then re-check the actual
+    /// status — the card clears itself once access is granted (and stays if the user declines).
     private func requestNotifications() {
         Task {
             await ChronosNotifications.shared.requestAuthorization()
-            await MainActor.run {
-                withAnimation(ChronosMotion.snappy) { notificationAlertDismissed = true }
-            }
+            await refreshNotificationAuthorization()
         }
+    }
+
+    /// Read the real authorization status; `.denied` / `.notDetermined` surface the attention card.
+    private func refreshNotificationAuthorization() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let granted = switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral: true
+        default: false
+        }
+        withAnimation(ChronosMotion.snappy) { notificationsAuthorized = granted }
     }
 
     // MARK: - Bulk import plumbing
@@ -477,6 +534,8 @@ private struct TaskRow: View {
             Spacer(minLength: 0)
             Button(action: onDuplicate) {
                 Image(systemName: "doc.on.doc")
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -484,6 +543,8 @@ private struct TaskRow: View {
 
             Button(action: onEdit) {
                 Image(systemName: "pencil")
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -491,6 +552,8 @@ private struct TaskRow: View {
 
             Button(action: onDelete) {
                 Image(systemName: "trash")
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(ChronosColors.brandAccent)
@@ -706,9 +769,10 @@ private struct FilterChip: View {
                 .padding(.horizontal, ChronosSpacing.compact)
                 .padding(.vertical, ChronosSpacing.small)
                 .background(selected ? tint : Color(.tertiarySystemFill), in: Capsule())
-                .foregroundStyle(selected ? .white : .primary)
+                .foregroundStyle(selected ? ChronosColors.onBrand : .primary)
         }
         .buttonStyle(.plain)
+        .pressable()
     }
 }
 

@@ -78,6 +78,7 @@ struct MedicationView: View {
 
                     if !refillPlans.isEmpty {
                         RefillSummaryCard(plans: refillPlans)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
                     AdherenceTrendCard(plans: plans)
@@ -86,7 +87,12 @@ struct MedicationView: View {
                         AdherenceSuggestionPanel(
                             suggestions: suggestions,
                             onApply: applySuggestion,
-                            onDismiss: { dismissedSuggestionPlanIDs.insert($0.plan.id) })
+                            onDismiss: { suggestion in
+                                withAnimation(ChronosMotion.smooth) {
+                                    _ = dismissedSuggestionPlanIDs.insert(suggestion.plan.id)
+                                }
+                            })
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
                     if plans.isEmpty {
@@ -111,6 +117,7 @@ struct MedicationView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { startCreate() } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Add medication")
                 }
             }
             .sheet(isPresented: $creating, onDismiss: { prefillName = nil }) {
@@ -129,6 +136,7 @@ struct MedicationView: View {
                 .foregroundStyle(ChronosColors.category("MEDICATION"))
             VStack(alignment: .leading, spacing: 2) {
                 Text("Medication tracking").font(.chronosHeadline)
+                    .accessibilityAddTraits(.isHeader)
                 Text("Track active plans and get exact reminders for critical doses.")
                     .font(.chronosCaption).foregroundStyle(.secondary)
             }
@@ -174,7 +182,7 @@ struct MedicationView: View {
         plan.reminderMinutes = [suggestion.suggestedReminderMinute]
         try? context.save()
         Task { await ChronosNotifications.shared.scheduleMedication(plan) }
-        dismissedSuggestionPlanIDs.insert(plan.id)
+        withAnimation(ChronosMotion.smooth) { _ = dismissedSuggestionPlanIDs.insert(plan.id) }
     }
 }
 
@@ -318,6 +326,7 @@ private struct RefillSummaryCard: View {
             Label {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Refill soon").font(.chronosHeadline)
+                        .accessibilityAddTraits(.isHeader)
                     Text(message).font(.chronosCaption).foregroundStyle(.secondary)
                 }
             } icon: {
@@ -380,6 +389,7 @@ private struct AdherenceTrendCard: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Dose history").font(.chronosHeadline)
+                                .accessibilityAddTraits(.isHeader)
                             Text(headline).font(.chronosCaption).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -519,6 +529,9 @@ private struct MedicationCard: View {
     @State private var expanded = false
     /// Drives the Android-style context action sheet (taken/missed, discrete snooze, skip, pause).
     @State private var showingActions = false
+    /// Haptic triggers tied to the dose mutations (so card, action sheet, and context menu all tick).
+    @State private var takeTick = 0
+    @State private var missTick = 0
 
     private var takenToday: Bool { plan.isTaken(on: .now) }
     private var paused: Bool { plan.isPaused() }
@@ -568,7 +581,8 @@ private struct MedicationCard: View {
                         .background(ChronosColors.brandAccent.opacity(0.12),
                                     in: RoundedRectangle(cornerRadius: ChronosRadius.small, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: ChronosRadius.small, style: .continuous)
-                            .strokeBorder(ChronosColors.brandAccent.opacity(0.5), lineWidth: 1.5))
+                            .strokeBorder(ChronosColors.brandAccent.opacity(0.5), lineWidth: 1))
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 actionRow
@@ -577,6 +591,8 @@ private struct MedicationCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .sensoryFeedback(.success, trigger: takeTick)
+        .sensoryFeedback(.warning, trigger: missTick)
         .contextMenu { contextMenu }
         .confirmationDialog("Archive \"\(plan.name)\"?", isPresented: $confirmingArchive, titleVisibility: .visible) {
             Button("Archive", role: .destructive) { archive() }
@@ -600,8 +616,8 @@ private struct MedicationCard: View {
                     Text(plan.name).font(.chronosHeadline)
                     if soon {
                         Label("Low Supply", systemImage: "exclamationmark.circle.fill")
-                            .font(.caption2.bold())
-                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .font(.chronosCaption.weight(.bold))
+                            .padding(.horizontal, ChronosSpacing.small).padding(.vertical, 2)
                             .background(ChronosColors.brandAccent.opacity(0.18), in: Capsule())
                             .foregroundStyle(ChronosColors.brandAccent)
                     }
@@ -611,14 +627,20 @@ private struct MedicationCard: View {
             Spacer()
             HStack(spacing: ChronosSpacing.micro) {
                 Button { editing = true } label: { Image(systemName: "pencil") }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                     .accessibilityLabel("Edit \(plan.name)")
                 Button { confirmingArchive = true } label: { Image(systemName: "archivebox") }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                     .accessibilityLabel("Archive \(plan.name)")
                 Button {
                     withAnimation(ChronosMotion.snappy) { expanded.toggle() }
                 } label: {
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                 }
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
                 .accessibilityLabel("\(expanded ? "Hide" : "Show") details for \(plan.name)")
             }
             .buttonStyle(.plain)
@@ -653,7 +675,7 @@ private struct MedicationCard: View {
         HStack(spacing: ChronosSpacing.small) {
             Button {
                 withAnimation(ChronosMotion.bouncy) {
-                    if !takenToday { plan.acknowledgeDose(); try? context.save() }
+                    if !takenToday { plan.acknowledgeDose(); try? context.save(); takeTick += 1 }
                 }
             } label: {
                 Label(takenToday ? "Taken" : "Take", systemImage: "checkmark.circle.fill")
@@ -749,7 +771,7 @@ private struct MedicationCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: ChronosSpacing.small) {
-                    Button { act { plan.acknowledgeDose() } } label: {
+                    Button { act { plan.acknowledgeDose(); takeTick += 1 } } label: {
                         Label("Taken", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent).tint(ChronosColors.brandPrimary)
@@ -865,6 +887,7 @@ private struct MedicationCard: View {
     private func markMissedInline() {
         plan.recordDose(.missed, reason: "Marked missed")
         plan.missedCount += 1
+        missTick += 1
     }
 
     /// Records a snoozed dose event for the adherence history (mirrors Android `snoozeReminder`).
@@ -949,7 +972,7 @@ private struct MedicationInfoPill: View {
             Text(label).font(.caption2).foregroundStyle(content.opacity(0.85))
             Text(value).font(.chronosCaption.weight(.semibold)).foregroundStyle(content)
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
+        .padding(.horizontal, ChronosSpacing.small).padding(.vertical, ChronosSpacing.micro)
         .background(container, in: RoundedRectangle(cornerRadius: ChronosRadius.small, style: .continuous))
     }
 }
@@ -1117,6 +1140,14 @@ struct MedicationEditorSheet: View {
     /// Collapsed by default to keep the create flow short (Android's "Safety & Details" section).
     @State private var showSafety: Bool
 
+    /// Form-assist suggestions from the deterministic ChronosCore planner (Android
+    /// `MedicationAssistPlanner`), each applied into the fields via an Apply button.
+    @State private var assistSuggestions: [MedicationAssistSuggestion] = []
+    @State private var assistLoading = false
+    /// On-device text tools: medication-name proofread refinement + the notes rewrite menu
+    /// (Android `refineName` / `rewriteNotes`). Falls back to planner-only when AI is unavailable.
+    @State private var textTools = ChronosTextTools()
+
     /// New plans launched from a quick-add chip / command-palette capture (Android `prefillName`).
     /// Additive parameter with a default so existing `MedicationEditorSheet(plan:)` callers compile.
     init(plan: MedicationPlan? = nil, prefillName: String? = nil) {
@@ -1150,10 +1181,12 @@ struct MedicationEditorSheet: View {
                     HStack {
                         TextField("Dosage", text: $dosage).keyboardType(.decimalPad)
                         Picker("Unit", selection: $unit) {
-                            ForEach(["mg", "mcg", "mL", "IU", "tablet"], id: \.self) { Text($0).tag($0) }
+                            ForEach(unitOptions, id: \.self) { Text($0).tag($0) }
                         }.labelsHidden()
                     }
                 }
+
+                assistSection
                 Section("Reminders") {
                     ForEach(reminderTimes.indices, id: \.self) { index in
                         DatePicker("Time \(index + 1)", selection: $reminderTimes[index],
@@ -1199,7 +1232,23 @@ struct MedicationEditorSheet: View {
                         Label("Safety & details", systemImage: "cross.case")
                     }
                 }
-                Section("Notes") { TextField("Notes", text: $notes, axis: .vertical) }
+                Section("Notes") {
+                    TextField("Notes", text: $notes, axis: .vertical)
+                    // Tone/length rewrite for the free-text notes only (Android `rewriteNotes`) —
+                    // the name, dose, and frequency fields are never rewritten so real drug names
+                    // and amounts stay exactly as typed. Same menu pattern as the task editor.
+                    if textTools.isAvailable && !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Menu {
+                            ForEach(ChronosTextOp.allCases) { op in
+                                Button { rewriteNotes(op) } label: { Label(op.label, systemImage: op.systemImage) }
+                            }
+                        } label: {
+                            Label(textTools.isWorking ? "Rewriting…" : "AI rewrite", systemImage: "wand.and.sparkles")
+                                .font(.chronosCaption)
+                        }
+                        .disabled(textTools.isWorking)
+                    }
+                }
             }
             .navigationTitle(editing == nil ? "New medication" : "Edit medication")
             .toolbarTitleDisplayMode(.inline)
@@ -1211,6 +1260,111 @@ struct MedicationEditorSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// Base units plus whatever the plan already stores / a suggestion applied, so the picker
+    /// selection is always representable.
+    private var unitOptions: [String] {
+        let base = ["mg", "mcg", "mL", "IU", "tablet", "capsule", "drop", "dose"]
+        return base.contains(unit) ? base : base + [unit]
+    }
+
+    // MARK: Form assist (Android MedicationFormSheet assist chips → MedicationAssistPlanner)
+
+    private var assistSection: some View {
+        Section {
+            Button { requestAssist() } label: {
+                Label(assistLoading ? "Drafting suggestions…"
+                        : (assistSuggestions.isEmpty ? "Suggest details with AI" : "Refresh suggestions"),
+                      systemImage: "wand.and.sparkles")
+                    .font(.chronosLabel)
+            }
+            .disabled(assistLoading || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            ForEach(assistSuggestions) { suggestion in
+                HStack(alignment: .center, spacing: ChronosSpacing.compact) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(suggestion.label).font(.chronosLabel)
+                        Text(suggestion.reason).font(.chronosCaption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Button("Apply") { apply(suggestion) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(ChronosColors.brandSecondary)
+                        .controlSize(.small)
+                }
+            }
+        } footer: {
+            if !assistSuggestions.isEmpty {
+                Text("Organizes what you typed into tracking fields — never medical advice. Nothing changes until you tap Apply.")
+            }
+        }
+    }
+
+    /// Deterministic ChronosCore suggestions from the current fields, plus an optional on-device
+    /// name refinement (Android `refineName`: proofread-only, so a real drug or brand name is
+    /// tidied but never rewritten). Planner-only when Apple Intelligence is unavailable.
+    private func requestAssist() {
+        assistLoading = true
+        Task { @MainActor in
+            defer { assistLoading = false }
+            var result = medicationAssistSuggestions(MedicationAssistInput(
+                name: name, dosage: dosage, unit: unit, notes: notes,
+                primaryReminderMinute: reminderTimes.first.map(minuteOfDay) ?? 8 * 60,
+                reminderCount: reminderTimes.count,
+                takeWithFood: withFood, tracksSupply: trackSupply))
+            let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let plannerHasName = result.contains {
+                if case .details(.some, _, _) = $0.change { return true }
+                return false
+            }
+            if textTools.isAvailable, trimmedName.count >= 3, !plannerHasName,
+               let cleaned = await textTools.run(.proofread, on: trimmedName),
+               cleaned.caseInsensitiveCompare(trimmedName) != .orderedSame {
+                result.insert(MedicationAssistSuggestion(
+                    id: "ai:medication:proofread", label: cleaned,
+                    reason: "Tidied the medication name spelling on-device.",
+                    change: .details(name: cleaned, dosage: nil, unit: nil)), at: 0)
+            }
+            withAnimation(ChronosMotion.smooth) { assistSuggestions = result }
+        }
+    }
+
+    /// Fill the form fields from an accepted suggestion, then drop it from the panel
+    /// (Android `applyMedicationAssistSuggestion`).
+    private func apply(_ suggestion: MedicationAssistSuggestion) {
+        switch suggestion.change {
+        case let .details(newName, newDosage, newUnit):
+            if let newName, !newName.isEmpty { name = newName }
+            if let newDosage, !newDosage.isEmpty { dosage = newDosage }
+            if let newUnit, !newUnit.isEmpty { unit = newUnit }
+        case let .reminders(minutes):
+            let cal = Calendar.current
+            reminderTimes = minutes.compactMap { minute in
+                cal.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: .now)
+            }
+        case .takeWithFood:
+            withFood = true
+        case let .unit(newUnit):
+            unit = newUnit
+        case let .trackSupply(dosesLeft):
+            trackSupply = true
+            supply = Double(dosesLeft)
+        case let .note(text):
+            notes = text
+        }
+        withAnimation(ChronosMotion.smooth) {
+            assistSuggestions.removeAll { $0.id == suggestion.id }
+        }
+    }
+
+    /// Run an on-device text tool over the notes and replace them with the result.
+    private func rewriteNotes(_ op: ChronosTextOp) {
+        let input = notes
+        Task {
+            if let result = await textTools.run(op, on: input) {
+                withAnimation(ChronosMotion.snappy) { notes = result }
+            }
+        }
     }
 
     private func save() {

@@ -9,6 +9,7 @@ import ChronosCore
 struct FocusView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var timer = FocusTimerModel.shared
     /// Drives the repeating opacity pulse on the active phase dot (see `phaseDots`).
     @State private var pulseOpacity: Double = 1.0
@@ -72,6 +73,13 @@ struct FocusView: View {
             .onReceive(NotificationCenter.default.publisher(for: FocusCommandObserver.didReceive)) { _ in
                 drainFocusCommands()
             }
+            // Tactile feedback for the key focus transitions, keyed to observable timer state so it
+            // fires regardless of which control (in-app, Live Activity, widget) drove the change.
+            // `.sensoryFeedback` automatically respects the system haptics setting.
+            // Phase flips on start and at every boundary advance (start / advance / break transitions).
+            .sensoryFeedback(.impact, trigger: timer.phase)
+            // A focus-phase completion accent — mirrors SleepView's `.success` precedent.
+            .sensoryFeedback(.success, trigger: timer.completedWorkSessions)
         }
     }
 
@@ -114,14 +122,14 @@ struct FocusView: View {
                 .stroke(ringColor.gradient, style: StrokeStyle(lineWidth: 16, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(ChronosMotion.smooth, value: timer.progress)
-            VStack(spacing: 4) {
+            VStack(spacing: ChronosSpacing.micro) {
                 if timer.awaitingPhaseAdvance {
                     Image(systemName: timer.nextPhase?.kind == .break ? "cup.and.saucer.fill" : "checkmark.circle.fill")
                         .font(.system(size: 44, weight: .semibold))
                         .foregroundStyle(ringColor)
                         .symbolEffect(.bounce, value: timer.awaitingPhaseAdvance)
                 } else {
-                    HStack(spacing: 8) {
+                    HStack(spacing: ChronosSpacing.small) {
                         if timer.phase != .idle {
                             Image(systemName: timer.isPaused ? "pause.fill" : "circle.fill")
                                 .font(.caption2)
@@ -150,13 +158,18 @@ struct FocusView: View {
 
     // MARK: Phase dots
 
-    /// True while the current phase is actively running (drives the active-dot pulse).
+    /// Honors the system/app reduced-motion setting (same source as `PressableScale`), so the
+    /// decorative dot pulse never runs when motion is disabled (UX principles §4).
+    private var reduceMotion: Bool { ChronosSettings.shared.motionDisabled(systemReduceMotion) }
+
+    /// True while the current phase is actively running AND motion is allowed (drives the
+    /// active-dot pulse). Gating here stops the purely decorative pulse under reduced motion.
     private var phaseIsRunning: Bool {
-        timer.phase != .idle && !timer.isPaused && !timer.awaitingPhaseAdvance
+        timer.phase != .idle && !timer.isPaused && !timer.awaitingPhaseAdvance && !reduceMotion
     }
 
     private var phaseDots: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: ChronosSpacing.small) {
             ForEach(0..<timer.totalPhases, id: \.self) { index in
                 let isCurrent = index == timer.phaseNumber - 1
                 Circle()
@@ -169,7 +182,7 @@ struct FocusView: View {
                     .animation(ChronosMotion.bouncy, value: timer.phaseNumber)
                     .animation(
                         isCurrent && phaseIsRunning
-                            ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
+                            ? ChronosMotion.smooth.repeatForever(autoreverses: true)
                             : .default,
                         value: pulseOpacity)
             }
@@ -285,12 +298,14 @@ struct FocusView: View {
                 Image(systemName: timer.isPaused ? "play.fill" : "pause.fill").font(.title)
             }
             .buttonStyle(.bordered).buttonBorderShape(.circle).controlSize(.large)
+            .accessibilityLabel(timer.isPaused ? "Resume" : "Pause")
 
             Button { timer.stop(context: context) } label: {
                 Image(systemName: "stop.fill").font(.title)
             }
             .buttonStyle(.borderedProminent).tint(ChronosColors.brandAccent)
             .buttonBorderShape(.circle).controlSize(.large)
+            .accessibilityLabel("Stop session")
 
             // Skip advances to the next phase boundary (Android's ⏭ skip). Only meaningful for a
             // multi-phase split session — for a flat session there's no next phase to skip into, so

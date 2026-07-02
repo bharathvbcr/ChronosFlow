@@ -55,7 +55,7 @@ struct GoalsView: View {
 
                     if !goals.isEmpty { metricTiles }
                     if overdueCount > 0 { overdueBanner }
-                    addGoalButton
+                    if !goals.isEmpty { addGoalButton }
                     if categoriesInUse.count >= 2 { categoryFilter }
 
                     let active = filtered(activeGoals)
@@ -80,6 +80,8 @@ struct GoalsView: View {
                                 withAnimation(ChronosMotion.snappy) { showCompleted.toggle() }
                             }
                             .font(.chronosCaption)
+                            .foregroundStyle(ChronosColors.brandPrimary)
+                            .buttonStyle(.plain)
                         }
                         if showCompleted {
                             ForEach(completed) { card(for: $0) }
@@ -93,16 +95,21 @@ struct GoalsView: View {
             .chronosScrollMinimizedBar()
             .overlay {
                 if goals.isEmpty {
-                    ContentUnavailableView(
-                        "No goals yet",
-                        systemImage: "flag",
-                        description: Text("Add a goal, then link tasks and habits so completing them moves you forward.")
-                    )
+                    ContentUnavailableView {
+                        Label("No goals yet", systemImage: "flag")
+                    } description: {
+                        Text("Add a goal, then link tasks and habits so completing them moves you forward.")
+                    } actions: {
+                        Button("Add goal") { creating = true }
+                            .buttonStyle(.borderedProminent)
+                            .tint(ChronosColors.brandPrimary)
+                    }
                 }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { creating = true } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Add goal")
                 }
             }
             .sheet(isPresented: $creating) { GoalEditorSheet(goal: nil) }
@@ -242,6 +249,7 @@ private struct GoalCard: View {
                             .foregroundStyle(goal.isCompleted ? tint : .secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(goal.isCompleted ? "Mark \(goal.title) incomplete" : "Mark \(goal.title) complete")
 
                     Text(goal.title).font(.chronosHeadline).strikethrough(goal.isCompleted)
                     Spacer()
@@ -270,9 +278,11 @@ private struct GoalCard: View {
                     Spacer()
                     Button { editing = true } label: { Image(systemName: "pencil") }
                         .buttonStyle(.bordered).buttonBorderShape(.capsule)
+                        .frame(minWidth: 44, minHeight: 44)
                         .accessibilityLabel("Edit goal")
                     Button { adjust(-1) } label: { Image(systemName: "minus") }
                         .buttonStyle(.bordered).buttonBorderShape(.capsule)
+                        .frame(minWidth: 44, minHeight: 44)
                         .disabled(goal.progressValue <= 0)
                         .accessibilityLabel("Decrease progress")
                     // Raw manual progress value (mirrors Android's "Manual progress" row).
@@ -282,6 +292,7 @@ private struct GoalCard: View {
                         .accessibilityLabel("Manual progress \(goal.progressValue)")
                     Button("+1") { adjust(1) }
                         .buttonStyle(.bordered).buttonBorderShape(.capsule)
+                        .frame(minWidth: 44, minHeight: 44)
                         .accessibilityLabel("Increase progress")
                 }
                 .font(.chronosCaption)
@@ -290,7 +301,10 @@ private struct GoalCard: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
+        .pressable()
         .sheet(isPresented: $editing) { GoalEditorSheet(goal: goal) }
+        .sensoryFeedback(.success, trigger: goal.isCompleted) { _, done in done }
+        .sensoryFeedback(.selection, trigger: goal.progressValue)
     }
 
     /// Manual progress adjustment, clamped to 0...targetValue (mirrors Android `adjustProgress`).
@@ -360,9 +374,11 @@ struct GoalEditorSheet: View {
     @State private var targetDate: Date
     @State private var detailsExpanded: Bool
 
-    init(goal: Goal?) {
+    /// `initialTitle` seeds the title field for a new goal (palette / quick-capture prefill,
+    /// the Android `prefillName` pattern); ignored when editing an existing goal.
+    init(goal: Goal?, initialTitle: String? = nil) {
         self.goal = goal
-        _title = State(initialValue: goal?.title ?? "")
+        _title = State(initialValue: goal?.title ?? initialTitle ?? "")
         _detail = State(initialValue: goal?.detail ?? "")
         _category = State(initialValue: goal?.category ?? GoalLabels.defaultCategory)
         _target = State(initialValue: goal?.targetValue ?? 10)

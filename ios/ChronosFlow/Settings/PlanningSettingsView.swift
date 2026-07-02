@@ -38,6 +38,7 @@ struct PlanningSettingsView: View {
                 .foregroundStyle(.secondary)
 
             Toggle("Auto-apply AI day plan", isOn: $settings.autoApplyPlan)
+            Toggle("Auto-apply form suggestions", isOn: $settings.autoApplyAssist)
 
             // Android parity: SidebarPageContent.kt lines 961–963.
             Toggle("Protect focus blocks", isOn: $settings.protectFocusBlocks)
@@ -55,6 +56,11 @@ struct PlanningSettingsView: View {
         lines.append(settings.autoApplyPlan
                      ? "AI plans are applied automatically. You can still review and undo."
                      : "AI never changes your plan silently — you review every suggestion before it’s applied.")
+        if settings.autoApplyAssist {
+            // Android parity copy: "New Task … forms fill empty fields from AI suggestions
+            // automatically. Fields you have already set are never overwritten."
+            lines.append("New task forms fill empty fields from detected suggestions automatically; fields you have already set are never overwritten.")
+        }
         if settings.protectFocusBlocks {
             lines.append("Existing focus blocks are kept when the plan regenerates.")
         }

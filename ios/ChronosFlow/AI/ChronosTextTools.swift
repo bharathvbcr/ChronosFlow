@@ -93,21 +93,40 @@ final class ChronosTextTools {
     /// Run a text op on `input`, returning the transformed text (or `nil` on failure/empty).
     /// Honors `ChronosSettings.privacyMode` (N01): when DISABLED, no on-device generation runs.
     func run(_ op: ChronosTextOp, on input: String) async -> String? {
+        await transform(key: op.rawValue, instruction: op.instruction,
+                        temperature: GenerationProfile.balanced.temperature, input: input)
+    }
+
+    /// Expand a terse journal note into a fuller first-person reflection of one or two sentences.
+    /// Android parity: `JournalViewModel.expandText` → `journalExpandPrompt`, run at the CREATIVE
+    /// profile. Not a `ChronosTextOp` case on purpose — the journal-voiced rewrite shouldn't appear
+    /// in the generic notes-rewrite menus that iterate `ChronosTextOp.allCases`.
+    func expandReflection(_ input: String) async -> String? {
+        await transform(
+            key: "journalExpand",
+            instruction: "Expand this short personal journal note into a fuller, natural "
+                + "first-person reflection of one or two sentences. Keep the original meaning, "
+                + "tone, and any facts; do not invent events. Return only the rewritten note.",
+            temperature: GenerationProfile.creative.temperature,
+            input: input)
+    }
+
+    private func transform(key: String, instruction: String, temperature: Double, input: String) async -> String? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard ChronosSettings.shared.privacyMode.allowsOnDeviceGeneration,
               isAvailable, !trimmed.isEmpty, !isWorking else { return nil }
         // Replay an identical transform without a cold inference.
-        if let cached = cache.value(op: op.rawValue, input: trimmed) { return cached }
+        if let cached = cache.value(op: key, input: trimmed) { return cached }
         isWorking = true
         defer { isWorking = false }
-        let session = LanguageModelSession(instructions: Instructions { op.instruction })
+        let session = LanguageModelSession(instructions: Instructions { instruction })
         do {
             let response = try await session.respond(
                 to: trimmed,
-                options: GenerationOptions(temperature: GenerationProfile.balanced.temperature))
+                options: GenerationOptions(temperature: temperature))
             let out = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !out.isEmpty else { return nil }
-            cache.store(op: op.rawValue, input: trimmed, result: out)
+            cache.store(op: key, input: trimmed, result: out)
             return out
         } catch {
             return nil

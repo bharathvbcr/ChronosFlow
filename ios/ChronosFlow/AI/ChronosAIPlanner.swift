@@ -265,8 +265,22 @@ final class ChronosAIPlanner {
             })
     }
 
-    /// Turn accepted suggestions into real TimeBlocks (provenance = .ai), skipping any that
-    /// would overlap an existing block — the planner shows suggestions for review before applying.
+    /// The blocks a materialize pass produces plus the existing blocks it replaced. The caller
+    /// deletes `displacedExistingIDs` before inserting `created` (regeneration semantics).
+    struct MaterializedPlan {
+        let created: [TimeBlock]
+        let displacedExistingIDs: [String]
+    }
+
+    /// Turn accepted suggestions into real TimeBlocks (provenance = .ai) — the planner shows
+    /// suggestions for review before applying.
+    ///
+    /// Planning toggles (Android parity: protect_focus_blocks / add_breaks_automatically /
+    /// preserve_manual_blocks): `ChronosCore.PlanRegeneration` decides deterministically which
+    /// existing blocks are immovable (locked/protected always; FOCUS-class when protecting focus;
+    /// hand-placed when preserving manual), drops candidates that collide with them, reports
+    /// unprotected blocks an accepted candidate replaces, and inserts recovery breaks after long
+    /// demanding stretches when auto-breaks is on.
     ///
     /// Readiness-aware (Part B): the model is only *hinted* about readiness in the prompt, so we also
     /// enforce it deterministically. After a DEPLETED night, demanding blocks (FOCUS/WORK/STUDY/TASK)
@@ -277,48 +291,67 @@ final class ChronosAIPlanner {
         _ suggestion: AIPlanSuggestion,
         on date: Date,
         existing: [TimeBlock],
-        readiness: SleepReadiness = .unknown
-    ) -> [TimeBlock] {
-        // First materialize candidate (clamped, non-overlapping) blocks.
-        var candidates: [(suggestion: AISuggestedBlock, start: Int, duration: Int)] = []
-        for s in suggestion.blocks {
-            let start = min(max(s.startMinuteOfDay, 0), 1439)
-            let duration = min(max(s.durationMinutes, 1), 1440)
-            let overlaps = existing.contains { b in
-                start < b.startMinuteOfDay + b.durationMinutes &&
-                b.startMinuteOfDay < start + duration
-            }
-            guard !overlaps else { continue }
-            candidates.append((s, start, duration))
+        readiness: SleepReadiness = .unknown,
+        toggles: PlanningToggles = PlanningToggles()
+    ) -> MaterializedPlan {
+        // Clamped candidates, keyed "ai-idx" so titles/categories map back after the core passes.
+        let suggestionsByID = Dictionary(uniqueKeysWithValues: suggestion.blocks.enumerated().map {
+            ("ai-\($0.offset)", $0.element)
+        })
+        let candidates = suggestion.blocks.enumerated().map { idx, s in
+            RegenCandidateBlock(
+                id: "ai-\(idx)",
+                title: s.title,
+                category: s.category,
+                startMinute: min(max(s.startMinuteOfDay, 0), 1439),
+                durationMinutes: min(max(s.durationMinutes, 1), 1440))
         }
+        let existingBlocks = existing.map {
+            RegenExistingBlock(
+                id: $0.id,
+                category: $0.category,
+                startMinute: $0.startMinuteOfDay,
+                durationMinutes: $0.durationMinutes,
+                isManual: $0.provenance == .manual,
+                isLocked: $0.isLocked,
+                isProtected: $0.isProtected)
+        }
+        let outcome = PlanRegeneration.resolve(
+            candidates: candidates, existing: existingBlocks, toggles: toggles)
+        let kept = existing.filter { !outcome.displacedExistingIDs.contains($0.id) }
+        let placed = outcome.acceptedCandidates + outcome.insertedBreaks
 
-        // Deterministic readiness shift. Demanding := high-energy categories; existing blocks are
-        // immovable obstacles so AI blocks never land on the user's locked plan.
+        // Deterministic readiness shift. Demanding := high-energy categories; kept existing blocks
+        // are immovable obstacles so AI blocks never land on the user's surviving plan.
         let coreReadiness = ChronosCore.SleepReadiness(rawValue: readiness.rawValue) ?? .unknown
-        let demandingCategories: Set<String> = ["FOCUS", "WORK", "STUDY", "TASK", "DEEP WORK"]
-        let obstacles = existing.map {
+        let obstacles = kept.map {
             ReadinessPlanBlock(id: "existing-\($0.id)", startMinute: $0.startMinuteOfDay,
                                durationMinutes: $0.durationMinutes,
                                energyLevel: 1, isFixed: true)
         }
-        let planBlocks = candidates.enumerated().map { idx, c in
+        let planBlocks = placed.map { c in
             ReadinessPlanBlock(
-                id: "ai-\(idx)",
-                startMinute: c.start,
-                durationMinutes: c.duration,
-                energyLevel: demandingCategories.contains(c.suggestion.category.uppercased())
+                id: c.id,
+                startMinute: c.startMinute,
+                durationMinutes: c.durationMinutes,
+                energyLevel: PlanRegeneration.demandingCategories.contains(c.category.uppercased())
                     ? ReadinessSchedule.demandingEnergyLevel : 1,
                 isFixed: false)
         }
         let shifted = applyReadiness(to: obstacles + planBlocks, readiness: coreReadiness)
         let shiftedByID = Dictionary(uniqueKeysWithValues: shifted.map { ($0.id, $0.startMinute) })
 
-        return candidates.enumerated().map { idx, c in
-            let start = shiftedByID["ai-\(idx)"] ?? c.start
+        let created = placed.map { c in
+            let start = shiftedByID[c.id] ?? c.startMinute
+            let isInsertedBreak = suggestionsByID[c.id] == nil
             return TimeBlock(
-                date: date, title: c.suggestion.title, category: c.suggestion.category,
-                startMinuteOfDay: min(max(start, 0), 1439), durationMinutes: c.duration,
-                provenance: .ai, flexibility: .movable, source: "ai")
+                date: date, title: c.title, category: c.category,
+                startMinuteOfDay: min(max(start, 0), 1439), durationMinutes: c.durationMinutes,
+                provenance: .ai, flexibility: .movable,
+                // Inserted breaks are low-energy recovery; model suggestions keep the default.
+                energyLevel: isInsertedBreak ? .low : .moderate,
+                source: "ai")
         }
+        return MaterializedPlan(created: created, displacedExistingIDs: outcome.displacedExistingIDs)
     }
 }

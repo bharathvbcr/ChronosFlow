@@ -190,6 +190,7 @@ private struct LockedOverlay: View {
                 .font(.system(size: 44, weight: .semibold, design: .rounded))
                 .foregroundStyle(area.tint)
                 .symbolEffect(.bounce, value: lock.isAuthenticating)
+                .accessibilityHidden(true)
 
             VStack(spacing: ChronosSpacing.micro) {
                 Text(area.lockedTitle)
@@ -203,11 +204,18 @@ private struct LockedOverlay: View {
             Button {
                 Task { await lock.unlock() }
             } label: {
-                Label(lock.isAuthenticating ? "Unlocking…" : "Unlock",
-                      systemImage: "faceid")
-                    .font(.chronosLabel)
-                    .padding(.horizontal, ChronosSpacing.standard)
-                    .padding(.vertical, ChronosSpacing.small)
+                HStack(spacing: ChronosSpacing.micro) {
+                    if lock.isAuthenticating {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "faceid")
+                    }
+                    Text(lock.isAuthenticating ? "Unlocking…" : "Unlock")
+                }
+                .font(.chronosLabel)
+                .padding(.horizontal, ChronosSpacing.standard)
+                .padding(.vertical, ChronosSpacing.small)
             }
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.capsule)
@@ -232,6 +240,8 @@ private struct LockedOverlay: View {
         .frame(maxWidth: 360)
         .modifier(LockedOverlayBackground())
         .padding(ChronosSpacing.standard)
+        .sensoryFeedback(.success, trigger: lock.isUnlocked) { old, new in !old && new }
+        .sensoryFeedback(.error, trigger: lock.lastError) { _, new in new != nil }
     }
 }
 

@@ -83,6 +83,17 @@ struct SleepView: View {
                                 .frame(maxWidth: .infinity)
                             }
                         }
+                    } else {
+                        ChronosGlassCard(tone: .quiet) {
+                            ContentUnavailableView {
+                                Label("No nights logged", systemImage: "moon.zzz")
+                            } description: {
+                                Text("Log a night to see trends and readiness.")
+                            } actions: {
+                                Button("Log night") { logging = true }
+                                    .buttonStyle(.borderedProminent)
+                            }
+                        }
                     }
                 }
                 .padding(ChronosSpacing.standard)
@@ -93,6 +104,7 @@ struct SleepView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { logging = true } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Log night")
                 }
             }
             .sheet(isPresented: $logging) { SleepLogSheet() }
@@ -382,13 +394,15 @@ struct SleepLogSheet: View {
                                 (refreshed == rating
                                  ? ChronosColors.brandPrimary.opacity(0.20)
                                  : Color.secondary.opacity(0.10)),
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                in: RoundedRectangle(cornerRadius: ChronosRadius.small, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .pressable()
                     .accessibilityLabel("How refreshed you feel \(rating) of 5, \(SleepEmoji.refreshedLabel(rating))")
                     .accessibilityAddTraits(refreshed == rating ? .isSelected : [])
                 }
             }
+            .animation(ChronosMotion.snappy, value: refreshed)
         }
     }
 
@@ -444,7 +458,7 @@ struct SleepLogSheet: View {
     @ViewBuilder
     private var healthSyncButton: some View {
         if importer.availability != .unavailable {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
                 Button {
                     Task { await runOneTimeSync() }
                 } label: {
@@ -544,7 +558,7 @@ struct SleepLogSheet: View {
                 if SleepLogHints.isOvernight(bedMinute: bedMinute, wakeMinute: wakeMinute) {
                     Text("Overnight")
                         .font(.chronosCaption)
-                        .padding(.horizontal, 8).padding(.vertical, 2)
+                        .padding(.horizontal, ChronosSpacing.small).padding(.vertical, 2)
                         .background(ChronosColors.brandSecondary.opacity(0.18), in: Capsule())
                 }
             }

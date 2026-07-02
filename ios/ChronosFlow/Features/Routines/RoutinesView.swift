@@ -18,12 +18,13 @@ struct RoutinesView: View {
     }
 
     private enum RoutineSheet: Identifiable {
-        case edit(Routine), new, apply(Routine)
+        case edit(Routine), new, apply(Routine), saveToday
         var id: String {
             switch self {
             case .edit(let r): "edit-\(r.id)"
             case .new: "new"
             case .apply(let r): "apply-\(r.id)"
+            case .saveToday: "save-today"
             }
         }
     }
@@ -56,6 +57,18 @@ struct RoutinesView: View {
                                     onCopy: { copy(routine) },
                                     onComplete: { markComplete(routine) })
                     }
+                    // "Save current day as routine" (Android SidebarPageContent.kt 535): snapshot
+                    // today's blocks into a routine draft and open the editor for naming before save.
+                    Button {
+                        activeSheet = .saveToday
+                    } label: {
+                        Label("Save today as routine", systemImage: "square.and.arrow.down")
+                            .font(.chronosLabel)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ChronosColors.brandPrimary)
+                    .disabled(todaysBlocks.isEmpty)
                 }
                 .padding(ChronosSpacing.standard)
             }
@@ -64,13 +77,21 @@ struct RoutinesView: View {
             .chronosScrollMinimizedBar()
             .overlay {
                 if routines.isEmpty {
-                    ContentUnavailableView("No routines", systemImage: "repeat",
-                                           description: Text("Bundle steps you do together — a morning or wind-down routine"))
+                    ContentUnavailableView {
+                        Label("No routines", systemImage: "repeat")
+                    } description: {
+                        Text("Bundle steps you do together — a morning or wind-down routine")
+                    } actions: {
+                        Button("New routine") { activeSheet = .new }
+                            .buttonStyle(.borderedProminent)
+                            .tint(ChronosColors.brandPrimary)
+                    }
                 }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { activeSheet = .new } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("New routine")
                 }
             }
             .sheet(item: $activeSheet) { sheet in
@@ -78,6 +99,9 @@ struct RoutinesView: View {
                 case .edit(let r): RoutineEditorSheet(routine: r)
                 case .new: RoutineEditorSheet(routine: nil)
                 case .apply(let r): ApplyRoutineSheet(routine: r)
+                case .saveToday:
+                    RoutineEditorSheet(prefillTitle: suggestedRoutineName(),
+                                       prefillSteps: stepsFromToday())
                 }
             }
         }
@@ -86,8 +110,10 @@ struct RoutinesView: View {
     /// Mark a routine done for today without re-instantiating its blocks — the iOS analogue of
     /// CompleteRoutineForDateUseCase (markCompleted). Separate from Apply, which only creates blocks.
     private func markComplete(_ routine: Routine) {
-        routine.lastCompletedDate = Calendar.current.startOfDay(for: .now)
-        try? context.save()
+        withAnimation(ChronosMotion.snappy) {
+            routine.lastCompletedDate = Calendar.current.startOfDay(for: .now)
+            try? context.save()
+        }
     }
 
     /// "Seed day": instantly populate today with the routine's blocks at their default offsets,
@@ -105,6 +131,34 @@ struct RoutinesView: View {
                 routineID: routine.id))
         }
         try? context.save()
+    }
+
+    /// Today's blocks as routine steps, sorted by start. Mirrors Android's `saveCurrentAsTemplate`
+    /// draft mapping (DayDialTemplateState.kt 278–295): each block's start becomes the step offset
+    /// (seed/apply anchor 0 treats offsets as absolute minute-of-day) with its duration and title.
+    /// Android drafts every block including calendar imports, so no source is skipped here either.
+    /// Categories outside the editor's picker collapse to ROUTINE so the picker stays valid.
+    private func stepsFromToday() -> [RoutineStep] {
+        todaysBlocks.sorted { $0.startMinuteOfDay < $1.startMinuteOfDay }.map { block in
+            let category = block.category.uppercased()
+            return RoutineStep(
+                title: block.title.isEmpty ? "Focus block" : block.title,
+                category: RoutineEditorSheet.categories.contains(category) ? category : "ROUTINE",
+                offsetMinute: block.startMinuteOfDay,
+                durationMinutes: min(max(block.durationMinutes, 1), 1440),
+                energyLevel: block.energyLevel.rawValue)
+        }
+    }
+
+    /// "My Day Routine", suffixed until unique against existing titles — mirrors Android's
+    /// `suggestDayDialTemplateName` ("My Day Template" 2, 3, …).
+    private func suggestedRoutineName() -> String {
+        let base = "My Day Routine"
+        let existing = Set(routines.map { $0.title.trimmingCharacters(in: .whitespaces).lowercased() })
+        if !existing.contains(base.lowercased()) { return base }
+        var suffix = 2
+        while existing.contains("\(base) \(suffix)".lowercased()) { suffix += 1 }
+        return "\(base) \(suffix)"
     }
 
     /// "Copy": duplicate a routine into a new, independent blueprint (fresh ids, "Copy" suffix).
@@ -200,6 +254,8 @@ private struct RoutineCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .contentShape(Rectangle())
+        .pressable()
     }
 }
 

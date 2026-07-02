@@ -39,6 +39,23 @@ public struct ActionHint: Sendable, Equatable {
     }
 }
 
+/// One typed detection for the preview card: which field it fills, the chip label, and a short
+/// human reason (mirroring the Android per-suggestion `reason` strings) so a UI can apply chips
+/// individually instead of only all-at-once.
+public struct SmartFillDetection: Sendable, Equatable, Hashable, Identifiable {
+    public enum Kind: String, Sendable, Equatable { case action, priority, duration, time, date, recurrence }
+    public var kind: Kind
+    public var label: String
+    public var reason: String
+    public var id: String { kind.rawValue + "|" + label }
+
+    public init(kind: Kind, label: String, reason: String) {
+        self.kind = kind
+        self.label = label
+        self.reason = reason
+    }
+}
+
 /// Everything the parser pulled out of a typed task title.
 public struct SmartFillResult: Sendable, Equatable {
     /// The title with recognised scheduling/priority/action tokens removed and tidied.
@@ -57,6 +74,9 @@ public struct SmartFillResult: Sendable, Equatable {
     public var actionHint: ActionHint?
     /// Human-readable chips for the "Detected in your text" preview card.
     public var detections: [String]
+    /// The same detections, typed (kind + reason) so each chip can be applied individually.
+    /// Parallel to `detections`; defaults empty so hand-built results stay source-compatible.
+    public var typedDetections: [SmartFillDetection]
 
     public init(
         cleanedTitle: String,
@@ -66,7 +86,8 @@ public struct SmartFillResult: Sendable, Equatable {
         priority: TaskPriorityHint? = nil,
         recurrence: RecurrenceRule? = nil,
         actionHint: ActionHint? = nil,
-        detections: [String] = []
+        detections: [String] = [],
+        typedDetections: [SmartFillDetection] = []
     ) {
         self.cleanedTitle = cleanedTitle
         self.dueDate = dueDate
@@ -76,6 +97,7 @@ public struct SmartFillResult: Sendable, Equatable {
         self.recurrence = recurrence
         self.actionHint = actionHint
         self.detections = detections
+        self.typedDetections = typedDetections
     }
 
     /// True when at least one schedulable/actionable field was detected (drives whether the UI
@@ -106,39 +128,58 @@ public func parseSmartFill(
         return SmartFillResult(cleanedTitle: capture)
     }
     let normalized = capture.lowercased()
-    var chips: [String] = []
+    // Typed detections carry a per-chip reason (mirroring the Android suggestion `reason` copy);
+    // the plain `detections` chip strings are derived from them so the two stay aligned.
+    var typed: [SmartFillDetection] = []
 
     // --- Action (email / phone / url) -------------------------------------------------------
     let action = SmartFillParser.detectAction(capture)
-    if let action { chips.append(action.label) }
+    if let action {
+        typed.append(SmartFillDetection(
+            kind: .action, label: action.label, reason: SmartFillParser.actionReason(action.kind)))
+    }
 
     // --- Priority ---------------------------------------------------------------------------
     let priority = SmartFillParser.detectPriority(normalized)
     if let priority {
-        chips.append(SmartFillParser.priorityChip(priority))
+        typed.append(SmartFillDetection(
+            kind: .priority, label: SmartFillParser.priorityChip(priority),
+            reason: priority == .high
+                ? "The task text looks time-sensitive."
+                : "The task text names a priority."))
     }
 
     // --- Duration ---------------------------------------------------------------------------
     let duration = SmartFillParser.detectDurationMinutes(normalized)
     if let duration {
-        chips.append(SmartFillParser.durationChip(duration))
+        typed.append(SmartFillDetection(
+            kind: .duration, label: SmartFillParser.durationChip(duration),
+            reason: "The task text names a duration."))
     }
 
     // --- Time-of-day ------------------------------------------------------------------------
     let minuteOfDay = SmartFillParser.detectMinuteOfDay(capture, normalized: normalized)
     if let minuteOfDay {
-        chips.append(SmartFillParser.timeChip(minuteOfDay))
+        typed.append(SmartFillDetection(
+            kind: .time, label: SmartFillParser.timeChip(minuteOfDay),
+            reason: "The task text names a start time."))
     }
 
     // --- Date -------------------------------------------------------------------------------
     let (dueDate, dateChip) = SmartFillParser.detectDate(normalized, now: now, calendar: calendar)
-    if let dateChip { chips.append(dateChip) }
+    if let dateChip {
+        typed.append(SmartFillDetection(
+            kind: .date, label: dateChip, reason: "The task text names a target day."))
+    }
 
     // --- Recurrence -------------------------------------------------------------------------
     let recurrence = SmartFillParser.detectRecurrence(normalized)
     if let recurrence {
-        chips.append(SmartFillParser.recurrenceChip(recurrence))
+        typed.append(SmartFillDetection(
+            kind: .recurrence, label: SmartFillParser.recurrenceChip(recurrence),
+            reason: "The task text names a repeating cadence."))
     }
+    let chips = typed.map(\.label)
 
     // --- Cleaned title ----------------------------------------------------------------------
     let cleaned = SmartFillParser.cleanedTitle(from: capture, action: action)
@@ -158,7 +199,8 @@ public func parseSmartFill(
         priority: priority,
         recurrence: recurrence,
         actionHint: action,
-        detections: chips
+        detections: chips,
+        typedDetections: typed
     )
 }
 
@@ -637,6 +679,15 @@ enum SmartFillParser {
 
     private static func digitCount(_ s: String) -> Int {
         s.reduce(0) { $0 + ($1.isNumber ? 1 : 0) }
+    }
+
+    /// Per-kind reason line for an action chip (mirrors the Android assist `reason` copy).
+    static func actionReason(_ kind: ActionHint.Kind) -> String {
+        switch kind {
+        case .email: return "The task text includes an email address."
+        case .phone: return "The task text includes a phone number."
+        case .url: return "The task text includes a link."
+        }
     }
 
     // MARK: Cleaned title

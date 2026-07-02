@@ -11,6 +11,9 @@ struct OnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     var onFinish: () -> Void
     @State private var page = 0
+    /// Decorative hero-icon sizes that track Dynamic Type (optical 72pt page badge / 56pt selector badge).
+    @ScaledMetric private var pageIconSize: CGFloat = 72
+    @ScaledMetric private var headerIconSize: CGFloat = 56
     /// `@Observable` settings — the selector toggles write straight through to the App-Group store,
     /// mirroring the Android feature-selector page that writes `ChronosFeatureFlags`.
     @State private var settings = ChronosSettings.shared
@@ -53,6 +56,7 @@ struct OnboardingView: View {
                 .controlSize(.large)
                 .padding(.horizontal, ChronosSpacing.large)
                 .padding(.bottom, ChronosSpacing.medium)
+                .sensoryFeedback(.impact(weight: .light), trigger: page)
 
                 if page < pageCount - 1 {
                     Button("Skip") { finish() }
@@ -73,10 +77,11 @@ struct OnboardingView: View {
         VStack(spacing: ChronosSpacing.medium) {
             VStack(spacing: ChronosSpacing.small) {
                 Image(systemName: "square.grid.2x2.fill")
-                    .font(.system(size: 56))
+                    .font(.system(size: headerIconSize, design: .rounded))
                     .foregroundStyle(ChronosColors.brandPrimary)
                     .padding(ChronosSpacing.medium)
                     .background(.ultraThinMaterial, in: Circle())
+                    .accessibilityHidden(true)
                 Text("Choose your tools").font(.chronosTitleLarge).multilineTextAlignment(.center)
                 Text("Turn on what fits your life. You can change any of these later in Settings.")
                     .font(.chronosBody).foregroundStyle(.secondary)
@@ -103,20 +108,20 @@ struct OnboardingView: View {
     }
 
     private func featureRow(_ title: String, _ icon: String, _ detail: String, isOn: Binding<Bool>) -> some View {
-        Toggle(isOn: isOn) {
-            HStack(spacing: ChronosSpacing.standard) {
-                Image(systemName: icon)
-                    .font(.title3)
-                    .foregroundStyle(ChronosColors.brandPrimary)
-                    .frame(width: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.chronosBody)
-                    Text(detail).font(.chronosCaption).foregroundStyle(.secondary)
+        ChronosGlassCard {
+            Toggle(isOn: isOn) {
+                HStack(spacing: ChronosSpacing.standard) {
+                    Image(systemName: icon)
+                        .font(.title3)
+                        .foregroundStyle(ChronosColors.brandPrimary)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.chronosBody)
+                        Text(detail).font(.chronosCaption).foregroundStyle(.secondary)
+                    }
                 }
             }
         }
-        .padding(ChronosSpacing.standard)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: ChronosRadius.large, style: .continuous))
     }
 
     // MARK: - Permission priming
@@ -134,10 +139,11 @@ struct OnboardingView: View {
         VStack(spacing: ChronosSpacing.medium) {
             Spacer()
             Image(systemName: page.icon)
-                .font(.system(size: 72))
+                .font(.system(size: pageIconSize, design: .rounded))
                 .foregroundStyle(ChronosColors.brandPrimary)
                 .padding(ChronosSpacing.large)
                 .background(.ultraThinMaterial, in: Circle())
+                .accessibilityHidden(true)
             Text(page.title).font(.chronosTitleLarge).multilineTextAlignment(.center)
             Text(page.body).font(.chronosBody).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -173,6 +179,8 @@ struct OnboardingView: View {
 private struct PermissionsPrimingPage: View {
     let settings: ChronosSettings
 
+    /// Decorative hero-icon size that tracks Dynamic Type (optical 56pt badge).
+    @ScaledMetric private var headerIconSize: CGFloat = 56
     @State private var notificationsGranted = false
     @State private var showNotificationRationale = false
     @State private var sleepImporter = HealthKitSleepImporter()
@@ -187,10 +195,11 @@ private struct PermissionsPrimingPage: View {
         VStack(spacing: ChronosSpacing.medium) {
             VStack(spacing: ChronosSpacing.small) {
                 Image(systemName: "bell.badge.fill")
-                    .font(.system(size: 56))
+                    .font(.system(size: headerIconSize, design: .rounded))
                     .foregroundStyle(ChronosColors.brandPrimary)
                     .padding(ChronosSpacing.medium)
                     .background(.ultraThinMaterial, in: Circle())
+                    .accessibilityHidden(true)
                 Text("Permissions you'll need").font(.chronosTitleLarge).multilineTextAlignment(.center)
                 Text("We only ask for what your choices require, and you can grant these later in Settings. Nothing here is required to start using the planner.")
                     .font(.chronosBody).foregroundStyle(.secondary)
@@ -296,31 +305,35 @@ private struct PermissionCard: View {
     let onGrant: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-            HStack(spacing: ChronosSpacing.standard) {
-                Image(systemName: icon)
-                    .font(.title3)
-                    .foregroundStyle(ChronosColors.brandPrimary)
-                    .frame(width: 28)
-                Text(title).font(.chronosBody.weight(.semibold))
-            }
-            Text(why).font(.chronosCaption).foregroundStyle(.secondary)
-            if granted {
-                HStack(spacing: ChronosSpacing.micro) {
-                    Image(systemName: "checkmark.circle.fill")
+        ChronosGlassCard {
+            VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+                HStack(spacing: ChronosSpacing.standard) {
+                    Image(systemName: icon)
+                        .font(.title3)
                         .foregroundStyle(ChronosColors.brandPrimary)
-                    Text(grantedLabel).font(.chronosCaption.weight(.medium))
-                        .foregroundStyle(ChronosColors.brandPrimary)
+                        .frame(width: 28)
+                    Text(title).font(.chronosBody.weight(.semibold))
                 }
-                .padding(.top, ChronosSpacing.micro)
-            } else {
-                Button(actionLabel, action: onGrant)
-                    .buttonStyle(.bordered)
+                Text(why).font(.chronosCaption).foregroundStyle(.secondary)
+                if granted {
+                    HStack(spacing: ChronosSpacing.micro) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(ChronosColors.brandPrimary)
+                        Text(grantedLabel).font(.chronosCaption.weight(.medium))
+                            .foregroundStyle(ChronosColors.brandPrimary)
+                    }
                     .padding(.top, ChronosSpacing.micro)
+                    .transition(.opacity.combined(with: .scale))
+                } else {
+                    Button(actionLabel, action: onGrant)
+                        .buttonStyle(.bordered)
+                        .padding(.top, ChronosSpacing.micro)
+                        .transition(.opacity.combined(with: .scale))
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(ChronosMotion.snappy, value: granted)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(ChronosSpacing.standard)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: ChronosRadius.large, style: .continuous))
+        .sensoryFeedback(.success, trigger: granted) { old, new in new && !old }
     }
 }

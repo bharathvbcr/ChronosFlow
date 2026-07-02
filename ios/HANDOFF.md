@@ -1,5 +1,32 @@
 # ChronosFlow iOS — macOS build & verification handoff
 
+## 0. Parity status (2026-07-01)
+
+A full verification pass re-audited every divergence in `PARITY_GAP_REPORTS.json` against the
+current tree, then closed the remaining actionable gaps. Landed in this pass: Today-tab dial +
+shared browsed date + meds quick items + running-focus card + missed-block badge; start-focus from
+Plan blocks; quick-capture intent classification (task/med/habit, ported CaptureIntentClassifier +
+tests) with routing + question→assistant; palette recents + digest row + ⌘K; journal composer from
+Quick-Add + per-field AI polish; task permission-alert accuracy, per-chip smart-fill apply with
+reasons, contextual schedule section, recurring reminders, auto-apply assist setting; habit editor
+recurrence presets/templates/history hints; medication form AI-assist (MedicationAssist planner +
+tests); Insights journal-history/evening-reflection/sleep cards; calendar timeline schedule-side
+sources with quick actions; save-today-as-routine; planning toggles wired into plan regeneration
+(PlanRegeneration policy + tests).
+
+**Consciously deferred (known, accepted divergences):**
+- iPad adaptive navigation rail (compact pill everywhere; Android shows a rail on tablets).
+- Unified cross-tab undo/redo (iOS history is Plan-scoped; Android shares one stack).
+- Review as a 4th in-dial tab (iOS presents Review as a sheet route — accepted shell redesign).
+- Task external actions/contacts/attachments UI (model carries none; see
+  `docs/task-attachments-design.md`).
+- Semantic palette search + AI command re-ranking (recents + digest landed; Android also ranks
+  via SemanticPlanningIndex).
+- DeviceActivity-backed screen-time insights (restricted entitlement; card remains a placeholder).
+- Habit every-N-days/quota custom schedules (needs a HabitSchedule model; cadence presets +
+  custom weekdays landed).
+- Android manual-missed registry (iOS derives missed blocks from scheduled end + no actual end).
+
 This port was authored on Windows; the portable logic core (`ChronosCore`) is compiled and
 unit-tested there (**223 tests, 0 failures**), but the app/watch/widget targets link Apple
 frameworks and can only be built on **macOS + Xcode 27 (iOS 27 SDK)**. This doc is the ordered

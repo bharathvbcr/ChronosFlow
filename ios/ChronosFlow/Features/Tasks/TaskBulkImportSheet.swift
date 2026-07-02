@@ -18,6 +18,8 @@ struct TaskBulkImportSheet: View {
 
     /// Per-candidate selection, all on by default (mirrors Android `checked = candidates.map { true }`).
     @State private var selected: [Bool]
+    /// Drives a success haptic when the import commits (parity with SleepView's syncFeedback pattern).
+    @State private var importedTick = 0
 
     init(candidates: [String], onImported: (() -> Void)? = nil) {
         self.candidates = candidates
@@ -57,6 +59,14 @@ struct TaskBulkImportSheet: View {
                         .accessibilityAddTraits(.isButton)
                     }
                 }
+                if selectedCount == 0 {
+                    Section {
+                        Text("Select at least one item to import.")
+                            .font(.chronosCaption)
+                            .foregroundStyle(.secondary)
+                            .listRowSeparator(.hidden)
+                    }
+                }
             }
             .navigationTitle("Import tasks")
             .toolbarTitleDisplayMode(.inline)
@@ -70,6 +80,7 @@ struct TaskBulkImportSheet: View {
                         .fontWeight(.semibold)
                 }
             }
+            .sensoryFeedback(.success, trigger: importedTick)
         }
     }
 
@@ -105,6 +116,7 @@ struct TaskBulkImportSheet: View {
         }
         try? context.save()
         onImported?()
+        importedTick += 1
         dismiss()
     }
 
