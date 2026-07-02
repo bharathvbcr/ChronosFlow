@@ -520,7 +520,8 @@ private struct TaskRow: View {
         return "Tap for actions · Edit and schedule"
     }
 
-    /// Schedule (open-only) on the left; Duplicate / Edit / Delete on the right (Android footer row).
+    /// Schedule (open-only) + primary external action on the left; Duplicate / Edit / Delete on the
+    /// right (Android footer row).
     private var footer: some View {
         HStack(spacing: ChronosSpacing.small) {
             if !task.isCompleted {
@@ -530,6 +531,19 @@ private struct TaskRow: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(ChronosColors.brandSecondary)
+            }
+            if let action = task.primaryAction {
+                Button {
+                    TaskExternalAction.open(action)
+                } label: {
+                    Label(action.label.isEmpty ? action.type.shortLabel : action.label,
+                          systemImage: TaskEditorSheet.actionSymbol(action.type))
+                        .font(.chronosCaption)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.bordered)
+                .tint(ChronosColors.brandPrimary)
+                .accessibilityLabel("\(action.type.shortLabel) \(task.title)")
             }
             Spacer(minLength: 0)
             Button(action: onDuplicate) {
@@ -569,9 +583,9 @@ private struct TaskRow: View {
 // MARK: - Context command sheet
 
 /// Quick-action sheet for a task (Android `TaskContextCommandSheet`): shows the best next action
-/// emphasized, then the remaining internal options (Schedule / Edit / Complete). The iOS task model
-/// carries no external contact/app commands at runtime, so this surfaces the internal actions Android
-/// always includes.
+/// emphasized, then the remaining options. External call/email/link actions (from the task's linked
+/// contact + action drafts) sort ahead of the internal options (Schedule / Complete / Edit), so a
+/// task with a primary action surfaces it as the emphasized best action, mirroring Android.
 private struct TaskContextCommandSheet: View {
     @Environment(\.dismiss) private var dismiss
     let task: TaskItem
@@ -590,6 +604,19 @@ private struct TaskContextCommandSheet: View {
 
     private var commands: [Command] {
         var list: [Command] = []
+        // External actions first (Android surfaces the primary action as the best next action).
+        let externals = task.actionList.sorted { lhs, rhs in
+            if lhs.isPrimary != rhs.isPrimary { return lhs.isPrimary }
+            return lhs.type.sortPriority < rhs.type.sortPriority
+        }
+        for action in externals {
+            list.append(Command(
+                label: action.label.isEmpty ? action.type.shortLabel : action.label,
+                description: action.value,
+                shortLabel: action.type.shortLabel,
+                icon: TaskEditorSheet.actionSymbol(action.type),
+                action: { TaskExternalAction.open(action) }))
+        }
         if !task.isCompleted {
             list.append(Command(
                 label: (task.targetDate != nil || task.recurrence != nil) ? "Add DayDial occurrence" : "Schedule on DayDial",
@@ -691,6 +718,18 @@ private struct TaskContextCommandSheet: View {
             }
             .buttonStyle(.plain)
         }
+    }
+}
+
+// MARK: - External action launcher
+
+/// Opens a task's external action (call / email / map / link) via the system, using the pure
+/// `TaskActionDTO.launchURLString` derivation (unit-tested in ChronosCore). Mirrors Android
+/// `buildTaskActionIntent` + `startActivity`.
+enum TaskExternalAction {
+    static func open(_ action: TaskActionDTO) {
+        guard let string = action.launchURLString, let url = URL(string: string) else { return }
+        UIApplication.shared.open(url)
     }
 }
 

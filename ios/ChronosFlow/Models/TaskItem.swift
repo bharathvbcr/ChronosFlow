@@ -38,6 +38,15 @@ final class TaskItem {
     /// `attachmentList` accessor for the Android-equivalent "empty list" semantics.
     var attachments: [AttachmentDTO]?
 
+    /// Contact snapshot linked to this task (Android `Task.linkedContact: TaskContactSnapshot?`).
+    /// Optional with a `nil` default — a zero-migration, lightweight-migration-safe addition.
+    var linkedContact: ContactSnapshotDTO?
+
+    /// External actions (call / email / link…) attached to this task. Mirrors Android
+    /// `Task.actions: List<TaskAction>` (default empty). Optional + `nil` default for the same
+    /// zero-migration reason as `attachments`; use `actionList` for empty-list semantics.
+    var actions: [TaskActionDTO]?
+
     init(
         id: String = UUID().uuidString,
         title: String,
@@ -53,7 +62,9 @@ final class TaskItem {
         goalID: String? = nil,
         recurrence: RecurrenceSpec? = nil,
         checklist: [ChecklistItem] = [],
-        attachments: [AttachmentDTO]? = nil
+        attachments: [AttachmentDTO]? = nil,
+        linkedContact: ContactSnapshotDTO? = nil,
+        actions: [TaskActionDTO]? = nil
     ) {
         self.id = id
         self.title = title
@@ -70,6 +81,8 @@ final class TaskItem {
         self.recurrence = recurrence
         self.checklist = checklist
         self.attachments = attachments
+        self.linkedContact = linkedContact
+        self.actions = actions
     }
 
     /// Android-equivalent non-optional view of `attachments` (treats `nil` as the empty list, the
@@ -77,6 +90,19 @@ final class TaskItem {
     var attachmentList: [AttachmentDTO] {
         get { attachments ?? [] }
         set { attachments = newValue.isEmpty ? nil : newValue }
+    }
+
+    /// Android-equivalent non-optional view of `actions` (nil = empty list).
+    var actionList: [TaskActionDTO] {
+        get { actions ?? [] }
+        set { actions = newValue.isEmpty ? nil : newValue }
+    }
+
+    /// The action a row's external button fires: explicit primary first, then Android's type order
+    /// (call → email → link → …). Mirrors `TaskContextCommandSet.primaryExternalCommand` for actions.
+    var primaryAction: TaskActionDTO? {
+        let sorted = actionList.sorted { $0.type.sortPriority < $1.type.sortPriority }
+        return sorted.first(where: \.isPrimary) ?? sorted.first
     }
 
     var priorityLabel: String {
@@ -137,17 +163,40 @@ final class TaskItem {
         return "\(minutes)m"
     }
 
-    /// A descriptor for linked connections (goal / attachments). Mirrors Android `taskConnectionSummary`
-    /// (the iOS model carries goal links + attachments; contacts/actions live only in the editor draft).
+    /// A descriptor for linked connections (contact / actions / attachments). Mirrors Android
+    /// `taskConnectionSummary`: "Contact: X • Action: Y • File: Z (+ N more)".
     var connectionSummary: String? {
         var parts: [String] = []
-        let count = attachmentList.count
-        if count == 1 {
-            parts.append("1 attachment")
-        } else if count > 1 {
-            parts.append("\(count) attachments")
+        if let contact = linkedContact, !contact.displayName.isEmpty {
+            parts.append("Contact: \(contact.displayName)")
+        }
+        let actions = actionList
+        if !actions.isEmpty {
+            let primaryLabel = (actions.first(where: \.isPrimary) ?? actions.first)?.label
+            parts.append(TaskItem.namedConnectionPart(
+                label: "Action", fallbackSingular: "action", fallbackPlural: "actions",
+                count: actions.count, primaryName: primaryLabel))
+        }
+        let attachments = attachmentList
+        if !attachments.isEmpty {
+            let featuredName = (attachments.first(where: \.isFeaturedImage) ?? attachments.first)?.displayName
+            parts.append(TaskItem.namedConnectionPart(
+                label: "File", fallbackSingular: "attachment", fallbackPlural: "attachments",
+                count: attachments.count, primaryName: featuredName))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " • ")
+    }
+
+    /// Mirrors Android `taskNamedConnectionPart`.
+    private static func namedConnectionPart(
+        label: String, fallbackSingular: String, fallbackPlural: String,
+        count: Int, primaryName: String?
+    ) -> String {
+        let name = primaryName?.trimmingCharacters(in: .whitespaces)
+        if let name, !name.isEmpty {
+            return count > 1 ? "\(label): \(name) + \(count - 1) more" : "\(label): \(name)"
+        }
+        return count == 1 ? "1 \(fallbackSingular)" : "\(count) \(fallbackPlural)"
     }
 }
 

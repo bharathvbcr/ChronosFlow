@@ -102,6 +102,165 @@ public struct AttachmentDTO: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+// MARK: - Contact / action DTOs (mirror domain TaskContactSnapshot + TaskAction)
+
+/// Codable, Foundation-only mirror of Android `ContactMethodKind`.
+public enum ContactMethodKindDTO: String, Codable, Sendable, CaseIterable {
+    case phone = "PHONE"
+    case email = "EMAIL"
+}
+
+/// Codable mirror of Android `TaskContactMethod` for backup/restore round-tripping.
+public struct ContactMethodDTO: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let kind: ContactMethodKindDTO
+    public let label: String?
+    public let value: String
+    public let normalizedValue: String?
+    public let isPrimary: Bool
+
+    public init(
+        id: String,
+        kind: ContactMethodKindDTO,
+        label: String? = nil,
+        value: String,
+        normalizedValue: String? = nil,
+        isPrimary: Bool = false
+    ) {
+        self.id = id
+        self.kind = kind
+        self.label = label
+        self.value = value
+        self.normalizedValue = normalizedValue
+        self.isPrimary = isPrimary
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, label, value, normalizedValue, isPrimary
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        kind = try c.decode(ContactMethodKindDTO.self, forKey: .kind)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+        value = try c.decode(String.self, forKey: .value)
+        normalizedValue = try c.decodeIfPresent(String.self, forKey: .normalizedValue)
+        // Match Kotlin defaults when the key is absent in an older export.
+        isPrimary = try c.decodeIfPresent(Bool.self, forKey: .isPrimary) ?? false
+    }
+}
+
+/// Codable mirror of Android `TaskContactSnapshot` (the contact linked to a task).
+public struct ContactSnapshotDTO: Codable, Sendable, Equatable {
+    public let displayName: String
+    public let lookupKey: String?
+    public let methods: [ContactMethodDTO]
+
+    public init(displayName: String, lookupKey: String? = nil, methods: [ContactMethodDTO] = []) {
+        self.displayName = displayName
+        self.lookupKey = lookupKey
+        self.methods = methods
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case displayName, lookupKey, methods
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        displayName = try c.decode(String.self, forKey: .displayName)
+        lookupKey = try c.decodeIfPresent(String.self, forKey: .lookupKey)
+        methods = try c.decodeIfPresent([ContactMethodDTO].self, forKey: .methods) ?? []
+    }
+}
+
+/// Codable, Foundation-only mirror of Android `TaskActionType`.
+public enum TaskActionKind: String, Codable, Sendable, CaseIterable {
+    case website = "WEBSITE"
+    case document = "DOCUMENT"
+    case phone = "PHONE"
+    case email = "EMAIL"
+    case map = "MAP"
+    case app = "APP"
+    case customDeepLink = "CUSTOM_DEEP_LINK"
+
+    /// Short button label, mirroring Android `TaskContextCommand.shortLabel` per action type.
+    public var shortLabel: String {
+        switch self {
+        case .phone: return "Call"
+        case .email: return "Email"
+        case .map: return "Map"
+        case .app: return "Open app"
+        case .website: return "Visit link"
+        case .document: return "Open file"
+        case .customDeepLink: return "Open"
+        }
+    }
+
+    /// Resolution order for command lists, mirroring Android `taskActionTypePriority`.
+    public var sortPriority: Int {
+        switch self {
+        case .phone: return 0
+        case .email: return 1
+        case .website: return 2
+        case .document: return 3
+        case .map: return 4
+        case .app: return 5
+        case .customDeepLink: return 6
+        }
+    }
+}
+
+/// Codable mirror of Android `TaskAction` (an external call/email/link action on a task).
+public struct TaskActionDTO: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let type: TaskActionKind
+    public let label: String
+    public let value: String
+    public let isPrimary: Bool
+
+    public init(id: String, type: TaskActionKind, label: String, value: String, isPrimary: Bool = false) {
+        self.id = id
+        self.type = type
+        self.label = label
+        self.value = value
+        self.isPrimary = isPrimary
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, label, value, isPrimary
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        type = try c.decode(TaskActionKind.self, forKey: .type)
+        label = try c.decode(String.self, forKey: .label)
+        value = try c.decode(String.self, forKey: .value)
+        isPrimary = try c.decodeIfPresent(Bool.self, forKey: .isPrimary) ?? false
+    }
+
+    /// The URL this action opens (`tel:` / `mailto:` / maps / https). Pure string derivation so the
+    /// launch behavior mirrors Android `buildTaskActionIntent` and is unit-testable off-device.
+    public var launchURLString: String? {
+        let raw = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        switch type {
+        case .phone:
+            let digits = raw.filter { $0.isNumber || $0 == "+" }
+            return digits.isEmpty ? nil : "tel:\(digits)"
+        case .email:
+            return "mailto:\(raw)"
+        case .map:
+            let query = raw.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? raw
+            return "maps://?q=\(query)"
+        case .website, .document, .app, .customDeepLink:
+            return raw.contains("://") ? raw : "https://\(raw)"
+        }
+    }
+}
+
 // MARK: - Detection result (mirror restoreFullFormat / Unreadable reasons)
 
 /// What kind of file a candidate backup payload is. Mirrors the branch in

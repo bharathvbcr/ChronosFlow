@@ -53,6 +53,10 @@ struct ChronosBackup: Codable {
         /// so a pre-BK03 export (no key) decodes as `nil` (treated as empty), and a cross-platform
         /// export decodes the shared `AttachmentDTO` unchanged.
         var attachments: [AttachmentDTO]? = nil
+        /// Linked contact + external actions. Optional/nil-default for the same round-trip reason:
+        /// an older export omits the keys and decodes as nil.
+        var linkedContact: ContactSnapshotDTO? = nil
+        var actions: [TaskActionDTO]? = nil
     }
     struct HabitDTO: Codable {
         var id: String; var title: String; var cadence: String; var windowStart: Int; var windowEnd: Int
@@ -102,7 +106,7 @@ struct ChronosBackup: Codable {
         Table.blocks: ["id", "date", "title", "category", "start", "duration", "provenance",
                        "flexibility", "energy", "isLocked", "taskID", "habitID", "goalID"],
         Table.tasks: ["id", "title", "detail", "isCompleted", "priority", "dueDate", "targetDate",
-                      "goalID", "recurrence", "checklist", "attachments"],
+                      "goalID", "recurrence", "checklist", "attachments", "linkedContact", "actions"],
         Table.habits: ["id", "title", "cadence", "windowStart", "windowEnd", "difficulty", "streak",
                        "isActive", "goalID", "completions"],
         Table.goals: ["id", "title", "detail", "category", "target", "startDate", "targetDate",
@@ -168,7 +172,8 @@ enum ChronosBackupService {
                   recurrence: $0.recurrence, checklist: $0.checklist,
                   // BK03: round-trip task attachments. `nil` (no attachments) stays nil so the key is
                   // omitted, matching Android's default-empty-list semantics.
-                  attachments: $0.attachments)
+                  attachments: $0.attachments,
+                  linkedContact: $0.linkedContact, actions: $0.actions)
         } ?? []
         backup.habits = (try? context.fetch(FetchDescriptor<Habit>()))?.map {
             .init(id: $0.id, title: $0.title, cadence: $0.cadence, windowStart: $0.windowStartMinute,
@@ -295,7 +300,8 @@ enum ChronosBackupService {
                 priority: $0.priority, dueDate: $0.dueDate, targetDate: $0.targetDate, goalID: $0.goalID,
                 recurrence: $0.recurrence, checklist: $0.checklist,
                 // BK03: restore task attachments (nil/empty stays empty, matching Android default).
-                attachments: $0.attachments))
+                attachments: $0.attachments,
+                linkedContact: $0.linkedContact, actions: $0.actions))
         }
         applyTable(ChronosBackup.Table.habits, backup.habits) {
             context.insert(Habit(id: $0.id, title: $0.title, cadence: $0.cadence, windowStartMinute: $0.windowStart,

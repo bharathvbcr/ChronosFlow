@@ -365,4 +365,60 @@ final class BackupImportValidatorTests: XCTestCase {
             try JSONDecoder().decode(AttachmentDTO.self, from: Data(json.utf8))
         )
     }
+
+    // MARK: - Contact / action DTOs
+
+    func testTaskActionDTORoundTrip() throws {
+        let original = TaskActionDTO(id: "a1", type: .phone, label: "Call plumber",
+                                     value: "+1 (555) 010-2000", isPrimary: true)
+        let data = try JSONEncoder().encode(original)
+        XCTAssertEqual(try JSONDecoder().decode(TaskActionDTO.self, from: data), original)
+    }
+
+    func testTaskActionDTODecodesOldExportWithoutIsPrimary() throws {
+        // A pre-actions export omits isPrimary; it must default to false, not fail.
+        let json = #"{"id":"a2","type":"EMAIL","label":"Email","value":"a@b.com"}"#
+        let dto = try JSONDecoder().decode(TaskActionDTO.self, from: Data(json.utf8))
+        XCTAssertEqual(dto.type, .email)
+        XCTAssertFalse(dto.isPrimary)
+    }
+
+    func testTaskActionLaunchURLDerivations() {
+        func url(_ type: TaskActionKind, _ value: String) -> String? {
+            TaskActionDTO(id: "x", type: type, label: "", value: value).launchURLString
+        }
+        XCTAssertEqual(url(.phone, "+1 (555) 010-2000"), "tel:+15550102000")
+        XCTAssertEqual(url(.email, "a@b.com"), "mailto:a@b.com")
+        XCTAssertEqual(url(.website, "example.com"), "https://example.com")
+        XCTAssertEqual(url(.website, "https://x.io/y"), "https://x.io/y")
+        XCTAssertEqual(url(.map, "1 Infinite Loop"), "maps://?q=1%20Infinite%20Loop")
+        XCTAssertNil(url(.phone, "   "))
+    }
+
+    func testTaskActionSortPriorityOrdersCallEmailLinkFirst() {
+        let types: [TaskActionKind] = [.customDeepLink, .website, .email, .phone]
+        XCTAssertEqual(types.sorted { $0.sortPriority < $1.sortPriority },
+                       [.phone, .email, .website, .customDeepLink])
+    }
+
+    func testContactSnapshotDTORoundTrip() throws {
+        let original = ContactSnapshotDTO(
+            displayName: "Dana Lee", lookupKey: "abc",
+            methods: [
+                ContactMethodDTO(id: "m1", kind: .phone, label: "Mobile",
+                                 value: "555-1000", normalizedValue: "5551000", isPrimary: true),
+                ContactMethodDTO(id: "m2", kind: .email, value: "dana@x.com")
+            ])
+        let data = try JSONEncoder().encode(original)
+        XCTAssertEqual(try JSONDecoder().decode(ContactSnapshotDTO.self, from: data), original)
+    }
+
+    func testContactSnapshotDTODecodesMinimalJSON() throws {
+        // No lookupKey, no methods → empty list, nil key (older/cross-platform export).
+        let json = #"{"displayName":"Solo"}"#
+        let dto = try JSONDecoder().decode(ContactSnapshotDTO.self, from: Data(json.utf8))
+        XCTAssertEqual(dto.displayName, "Solo")
+        XCTAssertNil(dto.lookupKey)
+        XCTAssertTrue(dto.methods.isEmpty)
+    }
 }

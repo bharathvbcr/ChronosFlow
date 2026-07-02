@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+import Contacts
+import ContactsUI
+import UniformTypeIdentifiers
 import ChronosCore
 
 /// Create / edit a task, including a reorderable checklist and an offline smart-fill title
@@ -48,6 +51,19 @@ struct TaskEditorSheet: View {
     @State private var goalID: String
     @State private var checklist: [ChecklistItem]
     @State private var newChecklistItem = ""
+
+    /// Connected context (Android TaskFormSheet "Connect" / "Connected files"): file attachments,
+    /// a linked contact snapshot, and external call/email/link actions.
+    @State private var attachments: [AttachmentDTO]
+    @State private var linkedContact: ContactSnapshotDTO?
+    @State private var actions: [TaskActionDTO]
+    @State private var connectedFilesExpanded = false
+    @State private var showFileImporter = false
+    @State private var showContactPicker = false
+    /// Draft fields for a new external action (Android `newActionType/Label/Value`).
+    @State private var newActionType: TaskActionKind = .website
+    @State private var newActionLabel = ""
+    @State private var newActionValue = ""
 
     /// Invoked with an existing task's id when the user taps "Open the existing task instead" on the
     /// duplicate warning, so the presenter can re-present that task for editing (Android
@@ -103,6 +119,9 @@ struct TaskEditorSheet: View {
         _preferredStart = State(initialValue: TaskEditorSheet.date(atMinute: task?.preferredStartMinuteOfDay ?? 9 * 60))
         _goalID = State(initialValue: task?.goalID ?? "")
         _checklist = State(initialValue: task?.checklist.sorted { $0.order < $1.order } ?? [])
+        _attachments = State(initialValue: task?.attachmentList ?? [])
+        _linkedContact = State(initialValue: task?.linkedContact)
+        _actions = State(initialValue: task?.actionList ?? [])
     }
 
     var body: some View {
@@ -314,6 +333,9 @@ struct TaskEditorSheet: View {
                         }
                     }
                 }
+                contactSection
+                actionsSection
+                connectedFilesSection
                 if let existing {
                     Section {
                         Button("Delete task", role: .destructive) {
@@ -360,7 +382,284 @@ struct TaskEditorSheet: View {
             } message: {
                 Text("Reuse this task's fields later from the Templates menu.")
             }
+            .fileImporter(isPresented: $showFileImporter,
+                          allowedContentTypes: [.item],
+                          allowsMultipleSelection: true) { result in
+                importFiles(result)
+            }
+            .sheet(isPresented: $showContactPicker) {
+                ContactPickerSheet { contact in
+                    withAnimation(ChronosMotion.snappy) {
+                        linkedContact = TaskEditorSheet.snapshot(from: contact)
+                    }
+                }
+            }
         }
+    }
+
+    // MARK: - Connect (Android TaskFormSheet "Connect" / "Context details" / "Connected files")
+
+    /// Linked-contact row (Android's contact card): pick via the system contact picker (out-of-process,
+    /// no Contacts permission needed), snapshotting name + phone/email methods onto the task.
+    private var contactSection: some View {
+        Section("Contact") {
+            if let contact = linkedContact {
+                VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
+                    Text(contact.displayName).font(.chronosLabel)
+                    ForEach(contact.methods) { method in
+                        Text(methodLine(method))
+                            .font(.chronosCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if contact.methods.isEmpty {
+                        Text("This contact did not expose any phone or email entries through the picker.")
+                            .font(.chronosCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                Text("Pick a contact to snapshot their saved phone numbers and email addresses into this task.")
+                    .font(.chronosCaption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Button(linkedContact == nil ? "Pick contact" : "Change contact") {
+                    showContactPicker = true
+                }
+                if linkedContact != nil {
+                    Spacer()
+                    Button("Remove contact", role: .destructive) {
+                        withAnimation(ChronosMotion.snappy) { linkedContact = nil }
+                    }
+                }
+            }
+            .font(.chronosCaption)
+            .buttonStyle(.borderless)
+        }
+    }
+
+    /// "Phone (Mobile): +1 555… • primary" line, mirroring the Android contact-method rows.
+    private func methodLine(_ method: ContactMethodDTO) -> String {
+        var line = method.kind == .phone ? "Phone" : "Email"
+        if let label = method.label, !label.isEmpty { line += " (\(label))" }
+        line += ": \(method.value)"
+        if method.isPrimary { line += " • primary" }
+        return line
+    }
+
+    /// External actions (Android's action drafts): list with make-primary / remove, plus an
+    /// add-action row (type + label + destination).
+    private var actionsSection: some View {
+        Section("Actions") {
+            ForEach(actions) { action in
+                HStack(spacing: ChronosSpacing.compact) {
+                    Image(systemName: TaskEditorSheet.actionSymbol(action.type))
+                        .foregroundStyle(ChronosColors.brandPrimary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(action.label.isEmpty ? action.type.shortLabel : action.label)
+                            .font(.chronosLabel)
+                        Text(action.value)
+                            .font(.chronosCaption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Button {
+                        makePrimary(action)
+                    } label: {
+                        Image(systemName: action.isPrimary ? "star.fill" : "star")
+                            .foregroundStyle(action.isPrimary ? ChronosColors.brandAccent : .secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(action.isPrimary ? "Primary action" : "Make primary")
+                }
+            }
+            .onDelete { offsets in
+                withAnimation(ChronosMotion.snappy) { actions.remove(atOffsets: offsets) }
+            }
+            Picker("New action type", selection: $newActionType) {
+                Text("Link").tag(TaskActionKind.website)
+                Text("Call").tag(TaskActionKind.phone)
+                Text("Email").tag(TaskActionKind.email)
+                Text("Map").tag(TaskActionKind.map)
+            }
+            .pickerStyle(.segmented)
+            TextField("Action label", text: $newActionLabel)
+            HStack {
+                TextField(actionValuePlaceholder, text: $newActionValue)
+                    .keyboardType(newActionType == .phone ? .phonePad : (newActionType == .email ? .emailAddress : .URL))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Add") { addAction() }
+                    .disabled(newActionValue.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+
+    private var actionValuePlaceholder: String {
+        switch newActionType {
+        case .phone: "Phone number"
+        case .email: "Email address"
+        case .map: "Address or place"
+        default: "https://…"
+        }
+    }
+
+    static func actionSymbol(_ type: TaskActionKind) -> String {
+        switch type {
+        case .phone: "phone"
+        case .email: "envelope"
+        case .map: "map"
+        case .app: "app.badge"
+        case .document: "doc"
+        case .website, .customDeepLink: "safari"
+        }
+    }
+
+    private func makePrimary(_ action: TaskActionDTO) {
+        withAnimation(ChronosMotion.snappy) {
+            actions = actions.map {
+                TaskActionDTO(id: $0.id, type: $0.type, label: $0.label, value: $0.value,
+                              isPrimary: $0.id == action.id)
+            }
+        }
+    }
+
+    private func addAction() {
+        let value = newActionValue.trimmingCharacters(in: .whitespaces)
+        guard !value.isEmpty else { return }
+        let label = newActionLabel.trimmingCharacters(in: .whitespaces)
+        withAnimation(ChronosMotion.snappy) {
+            actions.append(TaskActionDTO(
+                id: UUID().uuidString, type: newActionType,
+                label: label.isEmpty ? newActionType.shortLabel : label, value: value,
+                isPrimary: !actions.contains(where: \.isPrimary)))
+        }
+        newActionLabel = ""; newActionValue = ""
+    }
+
+    /// Collapsible "Connected files" section (Android TaskFormSheet ~2367): attachment rows with
+    /// icon + name + size, add via the document picker (imported copy), swipe/row remove.
+    private var connectedFilesSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $connectedFilesExpanded.animation(ChronosMotion.snappy)) {
+                if attachments.isEmpty {
+                    Text("No files or images attached yet")
+                        .font(.chronosCaption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(attachments) { attachment in
+                    HStack(spacing: ChronosSpacing.compact) {
+                        Image(systemName: attachment.kind == .image ? "photo" : "doc")
+                            .foregroundStyle(ChronosColors.brandSecondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(attachment.displayName).font(.chronosLabel).lineLimit(1)
+                            Text(attachmentDetail(attachment))
+                                .font(.chronosCaption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .onDelete { offsets in removeAttachments(at: offsets) }
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Label("Add file", systemImage: "paperclip")
+                        .font(.chronosCaption)
+                }
+            } label: {
+                HStack {
+                    Text("Connected files")
+                    Spacer()
+                    Text(attachments.isEmpty ? "No files attached yet" : "\(attachments.count) attached")
+                        .font(.chronosCaption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// "Image • Imported • 1.2 MB" descriptor line (Android's attachment meta line).
+    private func attachmentDetail(_ attachment: AttachmentDTO) -> String {
+        var parts = [attachment.kind == .image ? "Image" : "File",
+                     attachment.storageMode == .linked ? "Linked" : "Imported"]
+        if let size = attachment.sizeBytes {
+            parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+        }
+        return parts.joined(separator: " • ")
+    }
+
+    /// App-container directory imported attachment bytes live in (Android `files/task_attachments/`).
+    /// References stored on the task are RELATIVE to Application Support so container moves survive.
+    static var attachmentsDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = base.appendingPathComponent("task_attachments", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Copy picked documents into the app container and append `AttachmentDTO`s (imported mode,
+    /// relative reference + original name + byte size — the iOS analogue of Android "Import copy").
+    private func importFiles(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result else { return }
+        var added: [AttachmentDTO] = []
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let name = url.lastPathComponent
+            let id = UUID().uuidString
+            let destination = TaskEditorSheet.attachmentsDirectory.appendingPathComponent("\(id)-\(name)")
+            guard (try? FileManager.default.copyItem(at: url, to: destination)) != nil else { continue }
+            let size = (try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int64) ?? nil
+            let contentType = UTType(filenameExtension: url.pathExtension)
+            added.append(AttachmentDTO(
+                id: id, displayName: name,
+                mimeType: contentType?.preferredMIMEType, sizeBytes: size,
+                kind: contentType?.conforms(to: .image) == true ? .image : .file,
+                storageMode: .imported,
+                reference: "task_attachments/\(id)-\(name)"))
+        }
+        guard !added.isEmpty else { return }
+        withAnimation(ChronosMotion.snappy) {
+            attachments.append(contentsOf: added)
+            connectedFilesExpanded = true
+        }
+    }
+
+    /// Remove attachments, deleting the imported bytes so the container doesn't leak orphans.
+    private func removeAttachments(at offsets: IndexSet) {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        for index in offsets {
+            let attachment = attachments[index]
+            if attachment.storageMode == .imported {
+                try? FileManager.default.removeItem(at: base.appendingPathComponent(attachment.reference))
+            }
+        }
+        withAnimation(ChronosMotion.snappy) { attachments.remove(atOffsets: offsets) }
+    }
+
+    /// Snapshot a picked `CNContact` into the cross-platform DTO (Android
+    /// `resolveTaskContactSnapshot`): display name + every phone/email method, first one primary.
+    static func snapshot(from contact: CNContact) -> ContactSnapshotDTO {
+        var methods: [ContactMethodDTO] = []
+        for phone in contact.phoneNumbers {
+            let value = phone.value.stringValue
+            methods.append(ContactMethodDTO(
+                id: UUID().uuidString, kind: .phone,
+                label: phone.label.map { CNLabeledValue<NSString>.localizedString(forLabel: $0) },
+                value: value,
+                normalizedValue: value.filter { $0.isNumber || $0 == "+" },
+                isPrimary: methods.isEmpty))
+        }
+        for email in contact.emailAddresses {
+            methods.append(ContactMethodDTO(
+                id: UUID().uuidString, kind: .email,
+                label: email.label.map { CNLabeledValue<NSString>.localizedString(forLabel: $0) },
+                value: email.value as String,
+                isPrimary: !methods.contains { $0.kind == .email }))
+        }
+        let name = CNContactFormatter.string(from: contact, style: .fullName) ?? "Contact"
+        return ContactSnapshotDTO(displayName: name, lookupKey: contact.identifier, methods: methods)
     }
 
     // MARK: - Schedule (Android TaskFormSheet's contextual schedule section)
@@ -721,8 +1020,28 @@ struct TaskEditorSheet: View {
                 weekdays = rule.frequency == .weekly ? rule.weekdays : []
             }
         case .action:
-            if let action = fill.actionHint { actionHint = action }
+            if let action = fill.actionHint {
+                actionHint = action
+                addDetectedAction(action)
+            }
         }
+    }
+
+    /// Promote a detected link/email/phone into a persisted external action (Android smart fill adds
+    /// a `TaskAction` for the detection). Deduped by (type, value) so re-applying is idempotent.
+    private func addDetectedAction(_ hint: ActionHint) {
+        let kind: TaskActionKind
+        switch hint.kind {
+        case .email: kind = .email
+        case .phone: kind = .phone
+        case .url: kind = .website
+        }
+        let value = hint.value.trimmingCharacters(in: .whitespaces)
+        guard !value.isEmpty,
+              !actions.contains(where: { $0.type == kind && $0.value == value }) else { return }
+        actions.append(TaskActionDTO(
+            id: UUID().uuidString, type: kind, label: kind.shortLabel, value: value,
+            isPrimary: !actions.contains(where: \.isPrimary)))
     }
 
     private func priorityInt(_ p: TaskPriorityHint) -> Int {
@@ -831,6 +1150,9 @@ struct TaskEditorSheet: View {
             existing.recurrence = recurrenceSpec
             existing.goalID = linkedGoal
             existing.checklist = checklist
+            existing.attachmentList = attachments
+            existing.linkedContact = linkedContact
+            existing.actionList = actions
             existing.updatedAt = .now
             task = existing
         } else {
@@ -843,7 +1165,10 @@ struct TaskEditorSheet: View {
                 preferredDurationMinutes: preferredDuration,
                 preferredStartMinuteOfDay: preferredStartMinute,
                 targetDate: target, goalID: linkedGoal,
-                recurrence: recurrenceSpec, checklist: checklist)
+                recurrence: recurrenceSpec, checklist: checklist,
+                attachments: attachments.isEmpty ? nil : attachments,
+                linkedContact: linkedContact,
+                actions: actions.isEmpty ? nil : actions)
             context.insert(newTask)
             task = newTask
         }
@@ -1087,6 +1412,32 @@ private struct ChipFlowLayout: Layout {
             view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+/// System contact picker (`CNContactPickerViewController`) as a SwiftUI sheet. It runs
+/// out-of-process, so linking a contact needs **no** Contacts entitlement or usage string — the
+/// user hands us a single contact and we snapshot it (see `TaskEditorSheet.snapshot(from:)`).
+struct ContactPickerSheet: UIViewControllerRepresentable {
+    var onPick: (CNContact) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
+
+    func makeUIViewController(context: Context) -> CNContactPickerViewController {
+        let picker = CNContactPickerViewController()
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ picker: CNContactPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, CNContactPickerDelegate {
+        private let onPick: (CNContact) -> Void
+        init(onPick: @escaping (CNContact) -> Void) { self.onPick = onPick }
+
+        func contactPicker(_ picker: CNContactPickerViewController, didSelect contact: CNContact) {
+            onPick(contact)
         }
     }
 }
