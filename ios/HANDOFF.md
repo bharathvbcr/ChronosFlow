@@ -14,17 +14,21 @@ tests); Insights journal-history/evening-reflection/sleep cards; calendar timeli
 sources with quick actions; save-today-as-routine; planning toggles wired into plan regeneration
 (PlanRegeneration policy + tests).
 
+A follow-up pass then closed four of the deferred items: the **iPad adaptive navigation rail**
+(regular-width leading rail + FAB, shared badge derivations); **task attachments / linked contact /
+external actions** (persisted model fields, editor Connect sections, row + context-sheet action
+buttons, backup round-trip, ChronosCore DTOs + tests); **command-palette entity search** ("Your
+data" across tasks/habits/goals/meds/routines/journal via `rankCommands`); and **cadence-aware
+habit scheduling** (every-N-days / weekly-interval / quota due-derivation in ChronosCore, parsed
+from the cadence string so no schema change, honored by the Habits pill + Today quick-list).
+
 **Consciously deferred (known, accepted divergences):**
-- iPad adaptive navigation rail (compact pill everywhere; Android shows a rail on tablets).
 - Unified cross-tab undo/redo (iOS history is Plan-scoped; Android shares one stack).
 - Review as a 4th in-dial tab (iOS presents Review as a sheet route — accepted shell redesign).
-- Task external actions/contacts/attachments UI (model carries none; see
-  `docs/task-attachments-design.md`).
-- Semantic palette search + AI command re-ranking (recents + digest landed; Android also ranks
-  via SemanticPlanningIndex).
+- Command-palette on-device LLM re-rank (`rankCommandIdsWithAssist`) + AppSearch-backed
+  `SemanticPlanningIndex` (iOS has deterministic name-ranked entity search; no per-keystroke model
+  call, no AppSearch analogue).
 - DeviceActivity-backed screen-time insights (restricted entitlement; card remains a placeholder).
-- Habit every-N-days/quota custom schedules (needs a HabitSchedule model; cadence presets +
-  custom weekdays landed).
 - Android manual-missed registry (iOS derives missed blocks from scheduled end + no actual end).
 
 This port was authored on Windows; the portable logic core (`ChronosCore`) is compiled and
