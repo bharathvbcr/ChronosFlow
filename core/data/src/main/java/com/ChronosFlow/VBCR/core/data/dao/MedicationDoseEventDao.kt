@@ -20,4 +20,7 @@ interface MedicationDoseEventDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvent(event: MedicationDoseEventEntity)
+
+    @Query("DELETE FROM medication_dose_events WHERE id = :id")
+    suspend fun deleteEventById(id: String)
 }

@@ -118,38 +118,50 @@ struct JournalView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
-                    headerCard
-                    calendarOverview
-                    aiInsightCard
-                    workoutImportCard
-                    pointsSection
-                    historySection
-                }
-                .padding(ChronosSpacing.standard)
-            }
-            // Tapping a calendar day scrolls the history to that day's group (Android parity for the
-            // tappable month grid). Only days with entries are tappable, so the target always exists.
-            .onChange(of: scrollTarget) { _, target in
-                guard let target else { return }
-                withAnimation(ChronosMotion.snappy) { proxy.scrollTo(target, anchor: .top) }
-                scrollTarget = nil
-            }
-            .background { ChronosBackdrop() }
-            .navigationTitle("Journal")
-            .chronosScrollMinimizedBar()
+            chromedSurface
             .onAppear { workouts.refreshAvailability() }
-            // The composer is a modal sheet (Android's JournalComposerSheet), not inline. Editing the
-            // day's existing entry, or composing a new one for a specific day.
             .sheet(item: $editorTarget) { target in
                 JournalEditorSheet(editing: target.entry,
                                    initialDate: target.date,
                                    streak: currentStreak)
             }
+        }
+    }
+
+    private var chromedSurface: some View {
+        journalSurface
+            .navigationTitle("Journal")
+            .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
+    }
+
+    private var journalSurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
+                        journalSection { headerCard }
+                        journalSection { calendarOverview }
+                        journalSection { aiInsightCard }
+                        journalSection { workoutImportCard }
+                        journalSection { pointsSection }
+                        journalSection { historySection }
+                    }
+                    .padding(.vertical, ChronosSpacing.standard)
+                }
+                .scrollContentBackground(.hidden)
+                .onChange(of: scrollTarget) { _, target in
+                    guard let target else { return }
+                    withAnimation(ChronosMotion.snappy) { proxy.scrollTo(target, anchor: .top) }
+                    scrollTarget = nil
+                }
             }
         }
+    }
+
+    private func journalSection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().padding(.horizontal, ChronosSpacing.standard)
     }
 
     // MARK: Header card
@@ -825,6 +837,14 @@ private struct JournalHistoryCard: View {
         // Tap to edit (skipped for read-only workout points). The expand/collapse "Show more" button
         // has its own hit target, so a long entry can still be expanded without opening the editor.
         .onTapGesture { onTap() }
+        // VoiceOver: combine into one element (Text exposes its full content regardless of the visual
+        // "Show more" truncation, so nothing is lost), make it a button that opens the editor for
+        // editable entries, and expose Delete as a rotor action so it isn't context-menu-only (§7).
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isWorkout ? [] : .isButton)
+        .accessibilityHint(isWorkout ? "" : "Opens the entry editor")
+        .accessibilityAction { if !isWorkout { onTap() } }
+        .accessibilityAction(named: Text("Delete entry")) { onDelete() }
         // The history list lives in a ScrollView (not a List), so `.swipeActions` wouldn't fire here;
         // a context menu is the portable delete affordance.
         .contextMenu {

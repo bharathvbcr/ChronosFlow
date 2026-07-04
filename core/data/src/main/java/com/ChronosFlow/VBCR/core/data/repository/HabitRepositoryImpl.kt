@@ -112,6 +112,11 @@ class HabitRepositoryImpl @Inject constructor(
         habitEventDao.insertEvent(event.toEntity())
     }
 
+    override suspend fun deleteHabitEvent(eventId: String) = habitEventDao.deleteEventById(eventId)
+
+    override suspend fun getHabitEvents(habitId: String): List<HabitEvent> =
+        habitEventDao.getEventsForHabit(habitId).map { it.toDomain() }
+
     override fun observeHabitEventsBetween(
         start: java.time.LocalDate,
         end: java.time.LocalDate

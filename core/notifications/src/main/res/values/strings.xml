@@ -28,6 +28,13 @@
     <string name="current_block_upnext_subtext">Up next</string>
     <string name="current_block_default_title">Current block</string>
     <string name="current_block_action_start_focus">Start focus</string>
+    <string name="folded_reminder_generic_title">Reminder</string>
+    <string name="folded_reminder_subtext_now">Reminder · now</string>
+    <string name="folded_reminder_subtext_overdue">Reminder · overdue</string>
+    <string name="folded_reminder_subtext_count">%1$d reminders due</string>
+    <string name="folded_reminder_action_take">Take</string>
+    <string name="folded_reminder_action_complete">Complete</string>
+    <string name="folded_reminder_action_mark">Mark done</string>
     <!-- Label for the Android 17 MetricStyle live count-down metric on the focus notification. -->
     <string name="focus_metric_remaining_label">Remaining</string>
     <!-- Live notification body showing the next scheduled block title and start time. -->

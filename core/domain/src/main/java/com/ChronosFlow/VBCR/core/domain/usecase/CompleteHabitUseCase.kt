@@ -52,7 +52,7 @@ class CompleteHabitUseCase @Inject constructor(
  * derived from the habit's recurrence rule. A daily habit breaks on any gap > 1 day;
  * a weekly habit on any gap > 7 days; weekday-only habits allow up to 3 days (Fri→Mon).
  */
-private fun habitStreakWindowDays(habit: Habit): Long {
+internal fun habitStreakWindowDays(habit: Habit): Long {
     val rule = habit.schedule?.resolvedRecurrenceRule ?: return 1L
     return when (rule) {
         is HabitRecurrenceRule.Quota -> 31L  // quota habits: generous window, streak is less meaningful
@@ -76,4 +76,27 @@ private fun habitStreakWindowDays(habit: Habit): Long {
             PlannerRecurrenceType.PRN -> 0L  // as-needed: never extend streak
         }
     }
+}
+
+/**
+ * The streak implied by a habit's [sortedCompletionDates] (ascending, distinct) under [windowDays]:
+ * the count of consecutive completions ending at the latest date whose day-gaps all fall within the
+ * window. This is the exact inverse of [CompleteHabitUseCase]'s forward increment, so it restores
+ * the correct streak when a completion is undone (including the "gap too large → reset to 1" case
+ * that the stored streakCount alone can't reconstruct). Empty history means a streak of 0.
+ */
+internal fun habitStreakFromHistory(sortedCompletionDates: List<LocalDate>, windowDays: Long): Int {
+    if (sortedCompletionDates.isEmpty()) return 0
+    var streak = 1
+    var i = sortedCompletionDates.lastIndex
+    while (i > 0) {
+        val gap = ChronoUnit.DAYS.between(sortedCompletionDates[i - 1], sortedCompletionDates[i])
+        if (gap in 1L..windowDays) {
+            streak++
+            i--
+        } else {
+            break
+        }
+    }
+    return streak
 }

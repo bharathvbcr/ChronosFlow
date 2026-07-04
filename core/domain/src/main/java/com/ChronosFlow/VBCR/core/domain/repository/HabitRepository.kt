@@ -12,6 +12,10 @@ interface HabitRepository {
     suspend fun saveHabit(habit: Habit)
     suspend fun saveHabitSchedule(schedule: HabitSchedule)
     suspend fun addHabitEvent(event: HabitEvent)
+    /** Removes a single habit event by id — used to reverse a completion (see UndoHabitCompletionUseCase). */
+    suspend fun deleteHabitEvent(eventId: String)
+    /** Every recorded event for one habit (all types, no window) — the basis for recomputing a streak. */
+    suspend fun getHabitEvents(habitId: String): List<HabitEvent>
     fun observeHabitEventsBetween(start: LocalDate, end: LocalDate): Flow<List<HabitEvent>>
     suspend fun deleteHabit(habit: Habit)
 }

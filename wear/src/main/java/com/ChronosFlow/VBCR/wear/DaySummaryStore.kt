@@ -1,12 +1,15 @@
 package com.ChronosFlow.VBCR.wear
 
 import android.content.Context
+import com.ChronosFlow.VBCR.wear.model.WearFoldedReminder
+import com.ChronosFlow.VBCR.wear.model.WearFoldedReminderKind
 import com.ChronosFlow.VBCR.wear.model.WearBlock
 import com.ChronosFlow.VBCR.wear.model.WearDaySummary
 import com.ChronosFlow.VBCR.wear.model.WearHabit
 import com.ChronosFlow.VBCR.wear.model.WearMed
 import com.ChronosFlow.VBCR.wear.model.WearTask
 import com.ChronosFlow.VBCR.wear.model.parseBlocks
+import com.ChronosFlow.VBCR.wear.model.parseFoldedReminders
 import com.ChronosFlow.VBCR.wear.model.parseHabits
 import com.ChronosFlow.VBCR.wear.model.parseMeds
 import com.ChronosFlow.VBCR.wear.model.parseTasks
@@ -67,6 +70,10 @@ object DaySummaryStore {
             .putInt(KEY_MEDS_DUE_COUNT, summary.medsDueCount)
             .putString(KEY_MED_ENTRIES, summary.meds.joinToString(LINE_SEP) { packMed(it) })
             .putString(KEY_DIGEST, summary.digest.orEmpty())
+            .putString(
+                KEY_FOLDED_REMINDER_ENTRIES,
+                summary.foldedReminders.joinToString(LINE_SEP) { packFoldedReminder(it) }
+            )
             .putLong(KEY_RECEIVED_AT, summary.receivedAtMillis)
             .apply()
         ensureFlow(context).value = summary
@@ -102,6 +109,9 @@ object DaySummaryStore {
             medsDueCount = prefs.getInt(KEY_MEDS_DUE_COUNT, 0),
             meds = parseMeds(prefs.getString(KEY_MED_ENTRIES, null).toLines()),
             digest = prefs.getString(KEY_DIGEST, null)?.takeIf { it.isNotBlank() },
+            foldedReminders = parseFoldedReminders(
+                prefs.getString(KEY_FOLDED_REMINDER_ENTRIES, null).toLines()
+            ),
             receivedAtMillis = prefs.getLong(KEY_RECEIVED_AT, 0L)
         )
     }
@@ -113,6 +123,8 @@ object DaySummaryStore {
         "${h.id}$FIELD_SEP${if (h.done) 1 else 0}$FIELD_SEP${h.streak}$FIELD_SEP${h.title.sanitize()}"
     private fun packMed(m: WearMed) =
         "${m.id}$FIELD_SEP${if (m.taken) 1 else 0}$FIELD_SEP${m.reminderMinute}$FIELD_SEP${m.doseLabel.sanitize()}$FIELD_SEP${m.name.sanitize()}"
+    private fun packFoldedReminder(r: WearFoldedReminder) =
+        "${r.kind.ordinal}$FIELD_SEP${r.entityId}$FIELD_SEP${r.title.sanitize()}$FIELD_SEP${r.detail.sanitize()}$FIELD_SEP${if (r.isOverdue) 1 else 0}"
 
     /** Strip newlines so a title with an embedded newline can't corrupt the line-per-record format. */
     private fun String.sanitize() = replace('\n', ' ').replace('\r', ' ')
@@ -143,5 +155,6 @@ object DaySummaryStore {
     private const val KEY_MEDS_DUE_COUNT = "meds_due_count"
     private const val KEY_MED_ENTRIES = "med_entries"
     private const val KEY_DIGEST = "digest"
+    private const val KEY_FOLDED_REMINDER_ENTRIES = "folded_reminder_entries"
     private const val KEY_RECEIVED_AT = "received_at"
 }

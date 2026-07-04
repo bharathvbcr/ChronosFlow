@@ -44,6 +44,10 @@ struct ChronosFlowApp: App {
             if ChronosSettings.shared.logReminderEnabled {
                 await ChronosNotifications.shared.scheduleLogReminder()
             }
+            await ChronosNotifications.shared.refreshFoldableReminders()
+            BlockLiveActivityCoordinator.refreshToday()
+            BlockLiveActivityCoordinator.startStaleObserver()
+            ChronosBlockLiveRefreshRouter.startObserving()
         }
     }
 
@@ -91,8 +95,46 @@ enum ChronosFocusCommandRouter {
     /// Apply and clear every queued cross-process focus command, routing each into the shared timer.
     static func drain() {
         FocusCommandBridge.drain { command in
-            FocusTimerModel.shared.apply(command: command)
+            switch command {
+            case .start(let blockID):
+                let context = ChronosStore.shared.mainContext
+                let id = blockID
+                let block = try? context.fetch(
+                    FetchDescriptor<TimeBlock>(predicate: #Predicate { $0.id == id })
+                ).first
+                FocusTimerModel.shared.start(
+                    blockTitle: block?.title ?? "Focus session",
+                    blockID: blockID,
+                    blockMinutes: block?.durationMinutes ?? 25)
+            default:
+                FocusTimerModel.shared.apply(command: command)
+            }
         }
+    }
+}
+
+// MARK: - Block live refresh router (widget chip actions → app)
+
+/// Drains cross-process nudges from `LiveActivityRefreshBridge` so chip actions update folded
+/// reminders immediately without waiting for the next stale-date wakeup.
+@MainActor
+enum ChronosBlockLiveRefreshRouter {
+    private static var started = false
+
+    static func startObserving() {
+        guard !started else { return }
+        started = true
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            nil,
+            { _, _, _, _, _ in
+                Task { @MainActor in
+                    BlockLiveActivityCoordinator.refreshToday()
+                }
+            },
+            LiveActivityRefreshBridge.darwinName,
+            nil,
+            .deliverImmediately)
     }
 }
 
@@ -112,9 +154,13 @@ enum ChronosBackgroundSync {
     static let interopTaskIdentifier = "com.chronosflow.interop.sync"
     /// 7-day calendar sync window refresh (Android calendar background sync parity).
     static let calendarTaskIdentifier = "com.chronosflow.calendar.sync"
+    /// Re-render the schedule Live Activity mid-block (Android boundary-alarm parity).
+    static let blockLiveTaskIdentifier = "com.chronosflow.blocklive.refresh"
 
     private static let interopInterval: TimeInterval = 6 * 60 * 60
     private static let calendarInterval: TimeInterval = 24 * 60 * 60
+    /// Fallback cadence when no live activity is active to anchor a boundary time.
+    private static let blockLiveFallbackInterval: TimeInterval = 15 * 60
 
     /// Identifiers actually permitted by Info.plist — registering an unlisted identifier traps, so we
     /// gate on this set and silently no-op for anything not yet declared.
@@ -138,6 +184,11 @@ enum ChronosBackgroundSync {
                 handle(task, identifier: calendarTaskIdentifier, interval: calendarInterval)
             }
         }
+        if permitted.contains(blockLiveTaskIdentifier) {
+            BGTaskScheduler.shared.register(forTaskWithIdentifier: blockLiveTaskIdentifier, using: nil) { task in
+                handleBlockLive(task)
+            }
+        }
     }
 
     /// Enqueue the next run for each permitted task. Safe to call repeatedly; the scheduler de-dupes
@@ -146,6 +197,28 @@ enum ChronosBackgroundSync {
         let permitted = permittedIdentifiers
         if permitted.contains(interopTaskIdentifier) { schedule(interopTaskIdentifier, after: interopInterval) }
         if permitted.contains(calendarTaskIdentifier) { schedule(calendarTaskIdentifier, after: calendarInterval) }
+        if permitted.contains(blockLiveTaskIdentifier),
+           ChronosSettings.shared.currentBlockLiveActivityEnabled {
+            scheduleBlockLive()
+        }
+    }
+
+    /// Enqueue a block-live refresh at the next stale/boundary time, or the fallback cadence.
+    static func scheduleBlockLive(at date: Date? = nil) {
+        guard permittedIdentifiers.contains(blockLiveTaskIdentifier),
+              ChronosSettings.shared.currentBlockLiveActivityEnabled else { return }
+        let request = BGAppRefreshTaskRequest(identifier: blockLiveTaskIdentifier)
+        if let date, date > .now {
+            request.earliestBeginDate = date
+        } else {
+            request.earliestBeginDate = Date(timeIntervalSinceNow: blockLiveFallbackInterval)
+        }
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    static func cancelBlockLive() {
+        guard permittedIdentifiers.contains(blockLiveTaskIdentifier) else { return }
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: blockLiveTaskIdentifier)
     }
 
     private static func schedule(_ identifier: String, after interval: TimeInterval) {
@@ -160,5 +233,14 @@ enum ChronosBackgroundSync {
     private static func handle(_ task: BGTask, identifier: String, interval: TimeInterval) {
         schedule(identifier, after: interval)
         task.setTaskCompleted(success: true)
+    }
+
+    private static func handleBlockLive(_ task: BGTask) {
+        let work = Task { @MainActor in
+            BlockLiveActivityCoordinator.refreshToday()
+            scheduleBlockLive()
+            task.setTaskCompleted(success: true)
+        }
+        task.expirationHandler = { work.cancel() }
     }
 }

@@ -41,7 +41,15 @@ object ChronosWidgetHub {
                 }
             }
         }
-        publishWearDaySummary(appContext)
+        publishWearSummary(appContext)
+    }
+
+    /**
+     * Pushes the day summary to the paired watch without re-rendering widgets. Used when folded
+     * reminder state changes on the live notification surface (fold toggle, boundary refresh).
+     */
+    suspend fun publishWearSummary(context: Context) {
+        publishWearDaySummary(context.applicationContext)
     }
 
     /** True while at least one instance of any ChronosFlow widget is placed on a home screen. */

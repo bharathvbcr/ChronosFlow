@@ -431,6 +431,63 @@ class DayDialReminderDelegateTest {
         assertEquals("No upcoming reminders for this day", delegate.reminderScheduleStatus.value)
     }
 
+    @Test
+    fun `current block live skips planner block start but keeps habit start`() = runTest(UnconfinedTestDispatcher()) {
+        val repository = FakeTimeBlockRepository(
+            listOf(
+                timeBlock(
+                    id = "focus-block",
+                    date = date,
+                    startMinute = 9 * 60,
+                    durationMinutes = 45
+                )
+            )
+        )
+        every { habitRepository.observeHabits() } returns flowOf(
+            listOf(
+                habit(
+                    id = "journal",
+                    title = "Journal",
+                    startMinute = 20 * 60
+                )
+            )
+        )
+        coEvery { alarmRequestRepository.getAlarmRequest(any()) } returns null
+        every {
+            alarmScheduler.scheduleExactAlarm("daydial:$date:focus-block:start", any(), any(), any(), any())
+        } answers {
+            throw AssertionError("planner block starts should not schedule when live surface is on")
+        }
+        every {
+            alarmScheduler.scheduleExactAlarm("daydial:$date:habit-journal:start", any(), "Journal", "Journal starts now", any())
+        } returns com.ChronosFlow.VBCR.core.notifications.AlarmScheduleResult.Scheduled(
+            "daydial:$date:habit-journal:start",
+            exact = true
+        )
+        val delegate = DayDialReminderDelegate(repository, alarmScheduler, alarmRequestRepository, habitRepository)
+
+        delegate.refreshReminderSchedule(
+            scope = this,
+            date = date,
+            blockStartReminders = true,
+            breakReminders = false,
+            missedAlerts = false,
+            endDayReviewReminder = false,
+            sleepScheduleEnabled = false,
+            sleepScheduleStartMinute = 21 * 60,
+            sleepScheduleEndMinute = 7 * 60,
+            currentBlockLiveEnabled = true
+        )
+
+        assertEquals("Scheduled 1 upcoming reminders", delegate.reminderScheduleStatus.value)
+        coVerify(exactly = 0) {
+            alarmScheduler.scheduleExactAlarm("daydial:$date:focus-block:start", any(), any(), any(), any())
+        }
+        coVerify {
+            alarmScheduler.scheduleExactAlarm("daydial:$date:habit-journal:start", any(), "Journal", "Journal starts now", any())
+        }
+    }
+
     private fun timeBlock(
         id: String,
         date: LocalDate,

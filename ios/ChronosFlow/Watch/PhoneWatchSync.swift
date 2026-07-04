@@ -121,7 +121,96 @@ final class PhoneWatchSync: NSObject, WCSessionDelegate {
                              medsDueCount: medsDueCount,
                              digest: digest,
                              focus: currentFocusState(),
+                             foldedReminders: buildFoldedReminders(
+                                settings: ChronosSettings.shared,
+                                redacted: redacted,
+                                today: today,
+                                nowMinute: {
+                                    let c = cal.dateComponents([.hour, .minute], from: .now)
+                                    return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+                                }()),
                              receivedAtMillis: Int64(Date.now.timeIntervalSince1970 * 1000))
+    }
+
+    /// Ranked folded reminder chips for the watch live surface — mirrors `BlockLiveActivityCoordinator`.
+    private func buildFoldedReminders(
+        settings: ChronosSettings,
+        redacted: Bool,
+        today: Date,
+        nowMinute: Int
+    ) -> [WatchFoldedReminder] {
+        guard settings.remindersFoldedIntoLiveActivity else { return [] }
+        let context = ChronosStore.shared.mainContext
+        let cal = Calendar.current
+        let startToday = cal.startOfDay(for: today)
+        var candidates: [FoldedReminder] = []
+        if settings.medicationRemindersEnabled {
+            let plans = ((try? context.fetch(FetchDescriptor<MedicationPlan>())) ?? [])
+                .filter { $0.isActive && !$0.isPaused() }
+                .map { plan in
+                    MedicationFoldInput(
+                        id: plan.id,
+                        name: plan.name,
+                        dosage: plan.dosage,
+                        unit: plan.unit,
+                        isActive: true,
+                        reminderMinutes: plan.reminderMinutes,
+                        pausedUntil: plan.pausedUntil,
+                        takenScheduledMinutes: Set(
+                            plan.reminderMinutes.filter { plan.isDoseTaken(on: today, scheduledMinute: $0) }))
+                }
+            candidates += buildMedicationFoldedReminders(plans: plans, today: today, nowMinute: nowMinute)
+        }
+        if settings.taskRemindersEnabled {
+            let tasks = ((try? context.fetch(FetchDescriptor<TaskItem>())) ?? [])
+                .map {
+                    TaskFoldInput(
+                        id: $0.id,
+                        title: $0.title,
+                        isCompleted: $0.isCompleted,
+                        dueDate: $0.dueDate,
+                        priority: $0.priority)
+                }
+            candidates += buildTaskFoldedReminders(tasks: tasks, today: today, nowMinute: nowMinute)
+        }
+        if settings.habitRemindersEnabled {
+            let habits = ((try? context.fetch(FetchDescriptor<Habit>())) ?? [])
+                .map { habit in
+                    HabitFoldInput(
+                        id: habit.id,
+                        title: habit.title,
+                        isActive: habit.isActive,
+                        isDueToday: habit.isDue(),
+                        isCompletedToday: habit.isCompleted(on: today),
+                        isSkippedToday: habit.isSkipped(on: today),
+                        isPausedToday: habit.pausedUntil.map { startToday < cal.startOfDay(for: $0) } ?? false,
+                        windowOpenMinute: habit.deferUntilMinuteOfDay ?? habit.windowStartMinute,
+                        streakCount: habit.streakCount)
+                }
+            candidates += buildHabitFoldedReminders(habits: habits, nowMinute: nowMinute)
+        }
+        return rankFoldedReminders(candidates).map { folded in
+            WatchFoldedReminder(
+                kind: {
+                    switch folded.kind {
+                    case .medication: .medication
+                    case .task: .task
+                    case .habit: .habit
+                    }
+                }(),
+                entityId: folded.entityID,
+                title: redacted ? genericFoldedTitle(for: folded.kind) : folded.title,
+                detail: redacted ? "Due now" : folded.detail,
+                isOverdue: folded.isOverdue)
+        }
+    }
+
+    private func genericFoldedTitle(for kind: FoldedReminderKind) -> String {
+        switch kind {
+        case .medication: "Medication"
+        case .task: "Task"
+        case .habit: "Habit"
+        }
     }
 
     /// The phone's live focus state, if any. The `FocusTimerModel` is in-memory in the app process,

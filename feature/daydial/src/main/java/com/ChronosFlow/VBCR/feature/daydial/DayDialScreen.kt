@@ -54,6 +54,8 @@ import com.ChronosFlow.VBCR.feature.daydial.model.DayQuickItemsUiState
 import com.ChronosFlow.VBCR.feature.daydial.model.SheetTarget
 import com.ChronosFlow.VBCR.feature.daydial.model.SidebarPage
 import com.ChronosFlow.VBCR.feature.daydial.ui.SidebarPageContent
+import com.ChronosFlow.VBCR.feature.daydial.ui.NotificationPreferenceKeys
+import com.ChronosFlow.VBCR.feature.daydial.ui.rememberNotifCrossPlatformBoolean
 import com.ChronosFlow.VBCR.feature.daydial.ui.isFocusSessionActiveForTab
 import java.io.File
 import java.time.LocalDate
@@ -389,12 +391,26 @@ private fun DayDialDataScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val isViewingToday = vmState.selectedDate == LocalDate.now()
     ChronosShellViewedDateReporter(vmState.selectedDate)
-    val currentBlockNotificationEnabled by rememberPersistentBoolean(
-        "notifications.currentBlockLive",
-        false
+    val currentBlockNotificationEnabled by rememberNotifCrossPlatformBoolean(
+        iosKey = NotificationPreferenceKeys.CURRENT_BLOCK_LIVE,
+        legacyUiKey = "notifications.currentBlockLive",
+        defaultValue = true
+    )
+    val foldRemindersIntoLive by rememberNotifCrossPlatformBoolean(
+        iosKey = NotificationPreferenceKeys.FOLD_REMINDERS,
+        legacyUiKey = "notifications.foldReminders",
+        defaultValue = true
     )
     LaunchedEffect(currentBlockNotificationEnabled) {
         viewModel.setCurrentBlockNotificationEnabled(currentBlockNotificationEnabled)
+    }
+    LaunchedEffect(foldRemindersIntoLive, currentBlockNotificationEnabled) {
+        if (currentBlockNotificationEnabled && foldRemindersIntoLive) {
+            viewModel.reconcileSeparateFoldableAlarms()
+        }
+        if (currentBlockNotificationEnabled) {
+            viewModel.refreshCurrentBlockNotification()
+        }
     }
     LaunchedEffect(vmState.timeBlocks) {
         if (currentBlockNotificationEnabled) {
@@ -455,7 +471,14 @@ private fun DayDialDataScreen(
         }
     }
 
-    DayDialScreenEffects(viewModel, vmState, uiState, settings, snackbarHostState)
+    DayDialScreenEffects(
+        viewModel,
+        vmState,
+        uiState,
+        settings,
+        snackbarHostState,
+        currentBlockLiveEnabled = currentBlockNotificationEnabled
+    )
 
     ChronosShellChromeSuppression("day-sheet", uiState.activeSheet != null)
 

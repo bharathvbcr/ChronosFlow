@@ -11,6 +11,7 @@ import com.ChronosFlow.VBCR.wear.presentation.WearStartPage
 import com.google.common.util.concurrent.ListenableFuture
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -84,7 +85,10 @@ class ChronosTodayTileProviderTest {
         assertTrue(rendered.contains("until 14:30"))
         assertTrue(rendered.contains("Next: Gym"))
         assertTrue(rendered.contains("3 tasks open"))
-        assertTrue(rendered.contains("File taxes"))
+        // The individual task title is intentionally not on the tile: it duplicated the open-task
+        // count and, as the lowest row, was the first to clip on a round bezel. It lives on the Now
+        // app page's actionable reminders instead; the "N tasks open" count above still carries it.
+        assertFalse(rendered.contains("File taxes"))
     }
 
     @Test

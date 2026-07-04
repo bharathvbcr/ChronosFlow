@@ -1,0 +1,39 @@
+<!-- Tile-picker preview for the "Meds" tile (ChronosMedsTileProvider): today's doses due and the
+     next few to take with their time, on the round watch surface. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="400dp"
+    android:height="400dp"
+    android:viewportWidth="400"
+    android:viewportHeight="400">
+
+    <!-- Dark tile surface (system clips to the watch shape). -->
+    <path
+        android:fillColor="#16191D"
+        android:pathData="M0,0 L400,0 L400,400 L0,400 Z" />
+
+    <!-- "Meds" title (brand teal). -->
+    <path
+        android:fillColor="#18B8A6"
+        android:pathData="M165,78 L235,78 A12,12 0 0 1 235,102 L165,102 A12,12 0 0 1 165,78 Z" />
+
+    <!-- "1 dose due" caption. -->
+    <path
+        android:fillColor="#E5E7EB"
+        android:pathData="M150,141 L250,141 A9,9 0 0 1 250,159 L150,159 A9,9 0 0 1 150,141 Z" />
+
+    <!-- Dose row 1: pending dot + name·time. -->
+    <path
+        android:fillColor="#3A4048"
+        android:pathData="M110,210 a10,10 0 1 0 20,0 a10,10 0 1 0 -20,0 Z" />
+    <path
+        android:fillColor="#E5E7EB"
+        android:pathData="M145,201 L285,201 A9,9 0 0 1 285,219 L145,219 A9,9 0 0 1 145,201 Z" />
+
+    <!-- Dose row 2: taken check dot + name·time. -->
+    <path
+        android:fillColor="#18B8A6"
+        android:pathData="M110,255 a10,10 0 1 0 20,0 a10,10 0 1 0 -20,0 Z" />
+    <path
+        android:fillColor="#E5E7EB"
+        android:pathData="M145,246 L270,246 A9,9 0 0 1 270,264 L145,264 A9,9 0 0 1 145,246 Z" />
+</vector>

@@ -12,6 +12,8 @@ cd "$(dirname "$0")"
 
 MODE="${1:-app}"
 SCHEME="ChronosFlow"
+# Prefer the newest Pro simulator when present; fall back to generic destination when none match
+# (CI / Xcode version skew — e.g. Xcode 26 simulators vs iOS 27 deployment target).
 SIM_DEVICE="${SIM_DEVICE:-iPhone 17 Pro}"
 WATCH_SIM_DEVICE="${WATCH_SIM_DEVICE:-Apple Watch Series 11 (46mm)}"
 
@@ -52,9 +54,17 @@ elif [[ "$MODE" == "device" ]]; then
     -destination 'generic/platform=iOS' -configuration Debug \
     build
 else
-  echo "==> Building $SCHEME for the iOS Simulator ($SIM_DEVICE)"
+  DEST="generic/platform=iOS Simulator"
+  if xcodebuild -project ChronosFlow.xcodeproj -scheme "$SCHEME" -showdestinations 2>/dev/null \
+       | grep -Fq "name:$SIM_DEVICE"; then
+    DEST="platform=iOS Simulator,name=$SIM_DEVICE"
+  else
+    echo "warning: no runnable destination for '$SIM_DEVICE' (deployment target may exceed installed runtimes); using generic/platform=iOS Simulator" >&2
+  fi
+  echo "==> Building $SCHEME ($DEST)"
   xcodebuild -project ChronosFlow.xcodeproj -scheme "$SCHEME" \
-    -destination "platform=iOS Simulator,name=$SIM_DEVICE" -configuration Debug \
+    -destination "$DEST" -configuration Debug \
+    CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS=arm64 \
     build
 fi
 

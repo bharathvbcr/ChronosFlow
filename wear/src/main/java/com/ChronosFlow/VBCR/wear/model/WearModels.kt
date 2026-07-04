@@ -5,6 +5,18 @@ import com.ChronosFlow.VBCR.core.domain.wear.WearDaySummaryContract
 /** A single open task mirrored from the phone. */
 data class WearTask(val id: String, val title: String)
 
+/** Kind code for a folded reminder chip mirrored from the phone live surface. */
+enum class WearFoldedReminderKind { MEDICATION, TASK, HABIT }
+
+/** One ranked folded reminder (medication dose, task, or habit) from the phone live surface. */
+data class WearFoldedReminder(
+    val kind: WearFoldedReminderKind,
+    val entityId: String,
+    val title: String,
+    val detail: String,
+    val isOverdue: Boolean
+)
+
 /** A schedule block as times only (titles never travel for the dial); minutes-of-day. */
 data class WearBlock(val startMinute: Int, val endMinute: Int)
 
@@ -54,6 +66,8 @@ data class WearDaySummary(
     val meds: List<WearMed> = emptyList(),
     /** One-line AI day digest mirrored from the phone; absent when redacted or not yet generated. */
     val digest: String? = null,
+    /** Ranked folded reminder chips from the phone live surface; empty when folding is off. */
+    val foldedReminders: List<WearFoldedReminder> = emptyList(),
     /**
      * Wall-clock epoch millis when the phone last pushed this summary (0 = never synced on this
      * device). Lets the watch flag a schedule that may be out of date when the phone has been out
@@ -117,3 +131,36 @@ fun parseMeds(entries: List<String>): List<WearMed> =
             name = parts[4]
         )
     }
+
+fun parseFoldedReminders(entries: List<String>): List<WearFoldedReminder> =
+    entries.mapNotNull { entry ->
+        val parts = entry.split(SEP, limit = 5)
+        if (parts.size < 5) return@mapNotNull null
+        val kind = when (parts[0].toIntOrNull()) {
+            0 -> WearFoldedReminderKind.MEDICATION
+            1 -> WearFoldedReminderKind.TASK
+            2 -> WearFoldedReminderKind.HABIT
+            else -> return@mapNotNull null
+        }
+        WearFoldedReminder(
+            kind = kind,
+            entityId = parts[1],
+            title = parts[2],
+            detail = parts[3],
+            isOverdue = parts[4] == "1"
+        )
+    }
+
+/**
+ * Drop folded task chips that duplicate the "Top task" row on the Now screen (same entity id).
+ * Medication and habit folds are unaffected.
+ */
+fun dedupeFoldedRemindersAgainstTopTask(
+    topTaskId: String?,
+    foldedReminders: List<WearFoldedReminder>
+): List<WearFoldedReminder> {
+    val topId = topTaskId?.takeIf { it.isNotBlank() } ?: return foldedReminders
+    return foldedReminders.filterNot { reminder ->
+        reminder.kind == WearFoldedReminderKind.TASK && reminder.entityId == topId
+    }
+}

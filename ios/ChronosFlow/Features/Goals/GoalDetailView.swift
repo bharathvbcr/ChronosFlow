@@ -50,24 +50,40 @@ struct GoalDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
-                    header
-                    if isEmpty { emptyState }
-                    if !linkedTasks.isEmpty { tasksSection }
-                    if !linkedHabits.isEmpty { habitsSection }
-                }
-                .padding(ChronosSpacing.standard)
-            }
-            .background { ChronosBackdrop() }
-            .navigationTitle(goal.title)
-            .toolbarTitleDisplayMode(.inline)
+            chromedSurface
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Edit goal") { editing = true } }
             }
             .sheet(isPresented: $editing) { GoalEditorSheet(goal: goal) }
         }
+    }
+
+    private var chromedSurface: some View {
+        detailSurface
+            .navigationTitle(goal.title)
+            .toolbarTitleDisplayMode(.inline)
+            .chronosScrollMinimizedBar()
+    }
+
+    private var detailSurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollView {
+                VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
+                    detailSection { header }
+                    if isEmpty { detailSection { emptyState } }
+                    if !linkedTasks.isEmpty { detailSection { tasksSection } }
+                    if !linkedHabits.isEmpty { detailSection { habitsSection } }
+                }
+                .padding(.vertical, ChronosSpacing.standard)
+            }
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    private func detailSection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().padding(.horizontal, ChronosSpacing.standard)
     }
 
     // MARK: Header

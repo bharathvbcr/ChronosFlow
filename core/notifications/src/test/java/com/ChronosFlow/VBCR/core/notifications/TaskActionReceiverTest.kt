@@ -21,9 +21,11 @@ import org.robolectric.annotation.Config
 class TaskActionReceiverTest {
 
     private val toggleTaskCompletionUseCase: ToggleTaskCompletionUseCase = mockk(relaxed = true)
+    private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator = mockk(relaxed = true)
 
     private val receiver = TaskActionReceiver().apply {
         this.toggleTaskCompletionUseCase = this@TaskActionReceiverTest.toggleTaskCompletionUseCase
+        this.currentBlockNotificationCoordinator = this@TaskActionReceiverTest.currentBlockNotificationCoordinator
         markInjected(this)
     }
 

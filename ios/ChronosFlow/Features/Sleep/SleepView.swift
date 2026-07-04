@@ -27,6 +27,7 @@ enum SleepEmoji {
 /// analogue of the Android Health Connect read-only sleep import. Ports the sleep tracking layer.
 struct SleepView: View {
     @Environment(\.modelContext) private var context
+    @Environment(ShellState.self) private var shell: ShellState?
     @Query(sort: \SleepTrack.date, order: .reverse) private var nights: [SleepTrack]
     @State private var logging = false
     @State private var importer = HealthKitSleepImporter()
@@ -50,66 +51,96 @@ struct SleepView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
-                    readinessCard
-                    appleHealthCard
-                    if let trends = sleepTrends { trendsCard(trends) }
-                    if !nights.isEmpty {
-                        Text("Recent nights").font(.chronosTitle)
-                        ForEach(nights) { night in
-                            ChronosGlassCard {
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        Text(night.date.formatted(.dateTime.weekday().month().day()))
-                                            .font(.chronosHeadline)
-                                        if let d = night.durationMinutes {
-                                            Text("\(d / 60)h \(d % 60)m · \(SleepEmoji.qualityEmoji(night.sleepQuality)) quality \(night.sleepQuality)/5")
-                                                .font(.chronosCaption).foregroundStyle(.secondary)
-                                        }
-                                        if night.refreshedRating > 0 {
-                                            Text("\(SleepEmoji.refreshedEmoji(night.refreshedRating)) \(SleepEmoji.refreshedLabel(night.refreshedRating))")
-                                                .font(.chronosCaption).foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    Spacer()
-                                    if night.source == .healthKit {
-                                        Label("Apple Health", systemImage: "heart.fill")
-                                            .labelStyle(.titleAndIcon)
-                                            .font(.chronosCaption)
-                                            .foregroundStyle(.pink)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                        }
-                    } else {
-                        ChronosGlassCard(tone: .quiet) {
-                            ContentUnavailableView {
-                                Label("No nights logged", systemImage: "moon.zzz")
-                            } description: {
-                                Text("Log a night to see trends and readiness.")
-                            } actions: {
-                                Button("Log night") { logging = true }
-                                    .buttonStyle(.borderedProminent)
-                            }
-                        }
-                    }
+            chromedSurface
+            .sheet(isPresented: $logging) { SleepLogSheet() }
+            .onAppear {
+                if shell?.pendingOpenSleepLog == true {
+                    shell?.pendingOpenSleepLog = false
+                    logging = true
                 }
-                .padding(ChronosSpacing.standard)
             }
-            .background { ChronosBackdrop() }
+            .task { await scheduleLogReminder() }
+        }
+    }
+
+    private var chromedSurface: some View {
+        sleepSurface
             .navigationTitle("Sleep")
             .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { logging = true } label: { Image(systemName: "plus") }
                         .accessibilityLabel("Log night")
                 }
             }
-            .sheet(isPresented: $logging) { SleepLogSheet() }
-            .task { await scheduleLogReminder() }
+    }
+
+    private var sleepSurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollView {
+                VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
+                    sleepSection { readinessCard }
+                    sleepSection { appleHealthCard }
+                    if let trends = sleepTrends {
+                        sleepSection { trendsCard(trends) }
+                    }
+                    if !nights.isEmpty {
+                        sleepSection {
+                            Text("Recent nights").font(.chronosTitle)
+                        }
+                        ForEach(nights) { night in
+                            sleepSection {
+                                ChronosGlassCard {
+                                    HStack {
+                                        VStack(alignment: .leading) {
+                                            Text(night.date.formatted(.dateTime.weekday().month().day()))
+                                                .font(.chronosHeadline)
+                                            if let d = night.durationMinutes {
+                                                Text("\(d / 60)h \(d % 60)m · \(SleepEmoji.qualityEmoji(night.sleepQuality)) quality \(night.sleepQuality)/5")
+                                                    .font(.chronosCaption).foregroundStyle(.secondary)
+                                            }
+                                            if night.refreshedRating > 0 {
+                                                Text("\(SleepEmoji.refreshedEmoji(night.refreshedRating)) \(SleepEmoji.refreshedLabel(night.refreshedRating))")
+                                                    .font(.chronosCaption).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        Spacer()
+                                        if night.source == .healthKit {
+                                            Label("Apple Health", systemImage: "heart.fill")
+                                                .labelStyle(.titleAndIcon)
+                                                .font(.chronosCaption)
+                                                .foregroundStyle(.pink)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                            }
+                        }
+                    } else {
+                        sleepSection {
+                            ChronosGlassCard(tone: .quiet) {
+                                ContentUnavailableView {
+                                    Label("No nights logged", systemImage: "moon.zzz")
+                                } description: {
+                                    Text("Log a night to see trends and readiness.")
+                                } actions: {
+                                    Button("Log night") { logging = true }
+                                        .buttonStyle(.borderedProminent)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, ChronosSpacing.standard)
+            }
+            .scrollContentBackground(.hidden)
         }
+    }
+
+    private func sleepSection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().padding(.horizontal, ChronosSpacing.standard)
     }
 
     // MARK: Sleep trends (mirrors ChronosCore.sleepTrends, unit-tested)
@@ -357,6 +388,8 @@ struct SleepLogSheet: View {
                             .font(.chronosCaption).foregroundStyle(ChronosColors.brandPrimary)
                     }
                     Slider(value: $quality, in: 1...5, step: 1)
+                        .accessibilityLabel("Sleep quality")
+                        .accessibilityValue("\(Int(quality)) of 5")
                 }
                 Stepper("Interruptions: \(Int(interruptions))", value: $interruptions, in: 0...10)
                 Text("Overall · \(SleepLogHints.restfulnessLabel(quality: Int(quality), interruptions: Int(interruptions)))")

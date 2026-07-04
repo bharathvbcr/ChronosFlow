@@ -98,6 +98,20 @@ class AlarmScheduler @Inject constructor(
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val bootReceiverComponent = ComponentName(context.applicationContext, ReminderBootReceiver::class.java)
 
+    private fun skipIfFoldedIntoLiveActivity(
+        id: String,
+        request: AlarmRequest? = null
+    ): AlarmScheduleResult? {
+        if (!ReminderFoldScheduling.skipsSeparateRemindersWhenFolded(context)) return null
+        val foldable = request?.let(ReminderFoldScheduling::isSeparateFoldableReminder)
+            ?: ReminderFoldScheduling.isSeparateFoldableReminderAlarmId(id)
+        return if (foldable) {
+            recordSkipped(id, FOLDED_REMINDER_SKIP_REASON)
+        } else {
+            null
+        }
+    }
+
     fun scheduleExactAlarm(
         id: String,
         time: Instant,
@@ -108,6 +122,7 @@ class AlarmScheduler @Inject constructor(
         if (!hasSchedulingCapacity()) {
             return recordSkipped(id, "Maximum scheduled reminder capacity reached")
         }
+        skipIfFoldedIntoLiveActivity(id)?.let { return it }
         val canUseExact = canScheduleExactAlarms()
         val result: AlarmScheduleResult = when (
             resolveAlarmSchedulePath(
@@ -157,6 +172,7 @@ class AlarmScheduler @Inject constructor(
         if (!hasSchedulingCapacity()) {
             return recordSkipped(id, "Maximum scheduled reminder capacity reached")
         }
+        skipIfFoldedIntoLiveActivity(id)?.let { return it }
         if (!canPostReminders()) {
             val result = AlarmScheduleResult.PermissionDenied(id)
             pending[id] = result
@@ -187,6 +203,7 @@ class AlarmScheduler @Inject constructor(
     }
 
     fun scheduleAlarmRequest(request: AlarmRequest): AlarmScheduleResult {
+        skipIfFoldedIntoLiveActivity(request.id, request)?.let { return it }
         return scheduleAlarm(
             id = request.id,
             time = request.scheduledFor,
@@ -358,6 +375,9 @@ class AlarmScheduler @Inject constructor(
      * Cancels every scheduled alarm persisted by this scheduler. Used by the "Delete all my data"
      * flow to remove all pending PendingIntents from the AlarmManager before the database is wiped.
      */
+    /** Persisted alarm ids (for fold-mode reconciliation and diagnostics). */
+    internal fun getPersistedAlarmIds(): Set<String> = getPersistedIds().toSet()
+
     fun cancelAllAlarms() {
         getPersistedIds().toSet().forEach { id -> cancelAlarm(id) }
         // Also clear the entire alarm SharedPreferences file so no stale IDs or request-code

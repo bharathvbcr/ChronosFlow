@@ -1,23 +1,30 @@
 package com.ChronosFlow.VBCR.wear.presentation
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberOverscrollEffect
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -25,8 +32,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -63,13 +73,17 @@ import androidx.wear.compose.material3.openOnPhoneDialogCurvedText
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
+import com.ChronosFlow.VBCR.core.domain.model.BlockCategories
 import com.ChronosFlow.VBCR.wear.PhoneHandoff
 import com.ChronosFlow.VBCR.wear.WearFocusStateStore
 import com.ChronosFlow.VBCR.wear.model.WearDaySummary
+import com.ChronosFlow.VBCR.wear.model.WearFoldedReminderKind
 import com.ChronosFlow.VBCR.wear.model.currentBlock
+import com.ChronosFlow.VBCR.wear.model.dedupeFoldedRemindersAgainstTopTask
 import com.ChronosFlow.VBCR.wear.model.sortMedsForGlance
-import com.ChronosFlow.VBCR.wear.model.upcomingBlockCount
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import java.time.LocalTime
 
 private object Routes {
@@ -196,6 +210,25 @@ fun WearApp(
             curvedText = { confirmationDialogCurvedText(failure.orEmpty(), curvedTextStyle) },
             content = { ConfirmationDialogDefaults.ConnectionFailureIcon() }
         )
+        // Task / habit / dose completions offer a brief "Undo" instead of the plain success flash —
+        // a mis-tap on a small round screen is then recoverable in place (the phone reverses it).
+        val undoable by viewModel.undoable.collectAsStateWithLifecycle()
+        if (undoable != null) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                Button(
+                    onClick = viewModel::undo,
+                    label = { Text("Undo", maxLines = 1) },
+                    icon = {
+                        Icon(
+                            Icons.Filled.Undo,
+                            contentDescription = null,
+                            modifier = Modifier.size(ButtonDefaults.IconSize)
+                        )
+                    },
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+        }
     }
 }
 
@@ -238,6 +271,27 @@ private fun HomePager(
         val target = pages.indexOf(homePageFor(startPage)).coerceAtLeast(0)
         if (target != pagerState.currentPage) pagerState.animateScrollToPage(target)
     }
+    // Confirm each committed page change on the wrist. Every in-page action already buzzes; the
+    // most frequent gesture — swiping between the primary pages — was the one silent interaction.
+    val haptics = LocalHapticFeedback.current
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }
+            .drop(1)
+            .collect { haptics.performHapticFeedback(HapticFeedbackType.SegmentTick) }
+    }
+    // Let the Now page's overdue-med alert jump straight to the Meds page (present only on dose
+    // days), so an urgent signal is actionable where it's seen instead of a 1–3 swipe hunt. Null
+    // when there is no Meds page — which is exactly when there can be no overdue dose anyway.
+    val scope = rememberCoroutineScope()
+    val medsPageIndex = pages.indexOf(HomePage.MEDS)
+    val onOpenMeds: (() -> Unit)? = if (medsPageIndex >= 0) {
+        {
+            haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+            scope.launch { pagerState.animateScrollToPage(medsPageIndex) }
+        }
+    } else {
+        null
+    }
     HorizontalPagerScaffold(pagerState = pagerState) {
         HorizontalPager(
             state = pagerState,
@@ -252,10 +306,20 @@ private fun HomePager(
         ) { page ->
             AnimatedPage(pageIndex = page, pagerState = pagerState) {
                 when (pages.getOrElse(page) { HomePage.NOW }) {
-                    HomePage.NOW -> NowScreen(summary, focus, syncPhase, onOpenFocus, onCompleteNowBlock, onCompleteTask)
-                    HomePage.HABITS -> HabitsScreen(summary, onMarkHabitDone)
-                    HomePage.TASKS -> TasksScreen(summary, onCompleteTask)
-                    HomePage.MEDS -> MedsScreen(summary, onTakeDose)
+                    HomePage.NOW -> NowScreen(
+                        summary,
+                        focus,
+                        syncPhase,
+                        onOpenFocus,
+                        onCompleteNowBlock,
+                        onCompleteTask,
+                        onTakeDose,
+                        onMarkHabitDone,
+                        onOpenMeds
+                    )
+                    HomePage.HABITS -> HabitsScreen(summary, focus, onOpenFocus, onMarkHabitDone)
+                    HomePage.TASKS -> TasksScreen(summary, focus, onOpenFocus, onCompleteTask)
+                    HomePage.MEDS -> MedsScreen(summary, focus, onOpenFocus, onTakeDose)
                 }
             }
         }
@@ -269,7 +333,10 @@ private fun NowScreen(
     syncPhase: WearViewModel.SyncPhase,
     onOpenFocus: () -> Unit,
     onCompleteNowBlock: () -> Unit,
-    onCompleteTask: (String) -> Unit
+    onCompleteTask: (String) -> Unit,
+    onTakeDose: (String) -> Unit,
+    onMarkHabitDone: (String) -> Unit,
+    onOpenMeds: (() -> Unit)? = null
 ) {
     val neverSynced = summary.receivedAtMillis == 0L
     val syncing = neverSynced && syncPhase == WearViewModel.SyncPhase.SYNCING
@@ -318,19 +385,26 @@ private fun NowScreen(
             "Focus ${WearFormat.mmss(secondsLeft)}"
         }
     }
+    // Offer "Start focus" only where a session makes sense: a running session's countdown always
+    // shows (to return to it), but during a rest block (break/sleep/meal) the invitation to start a
+    // focus timer is suppressed — which is exactly what the mirrored nowCategory was carried for.
+    // The Focus tile still routes to the picker, so this is a soft gate, not a lockout.
+    val showFocusButton = focus.active || BlockCategories.supportsFocus(summary.nowCategory)
     ScreenScaffold(
         scrollState = state,
         edgeButton = {
-            EdgeButton(
-                onClick = onOpenFocus,
-                modifier = Modifier.scrollable(
-                    state,
-                    orientation = Orientation.Vertical,
-                    reverseDirection = true,
-                    overscrollEffect = rememberOverscrollEffect()
-                )
-            ) {
-                Text(focusLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (showFocusButton) {
+                EdgeButton(
+                    onClick = onOpenFocus,
+                    modifier = Modifier.scrollable(
+                        state,
+                        orientation = Orientation.Vertical,
+                        reverseDirection = true,
+                        overscrollEffect = rememberOverscrollEffect()
+                    )
+                ) {
+                    Text(focusLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     ) { contentPadding ->
@@ -349,17 +423,6 @@ private fun NowScreen(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center
-                        )
-                    }
-                }
-                staleLabel?.let { label ->
-                    item { Caption("⚠ $label", color = MaterialTheme.colorScheme.error) }
-                }
-                if (overdueMedCount > 0) {
-                    item {
-                        Caption(
-                            "💊 $overdueMedCount med${if (overdueMedCount == 1) "" else "s"} overdue",
-                            color = MaterialTheme.colorScheme.error
                         )
                     }
                 }
@@ -389,8 +452,9 @@ private fun NowScreen(
                     item { Prominent(WearFormat.remainingLabel(summary.nowEndMinute, nowMinute)) }
                     blockProgress?.let { progress ->
                         item {
+                            val animated by animateFloatAsState(progress, label = "blockProgress")
                             LinearProgressIndicator(
-                                progress = { progress },
+                                progress = { animated },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .semantics { contentDescription = "Current block progress" }
@@ -452,6 +516,28 @@ private fun NowScreen(
                         }
                     }
                 }
+                // Warnings sit here, below the block info, so the title and its countdown stay
+                // contiguous at the top of the glance. A missed dose carries real weight, so it
+                // reads as a bold alert; a stale mirror is only a caveat, so it stays a quiet note.
+                if (overdueMedCount > 0) {
+                    item {
+                        Prominent(
+                            "💊 $overdueMedCount med${if (overdueMedCount == 1) "" else "s"} overdue",
+                            color = MaterialTheme.colorScheme.error,
+                            spoken = "$overdueMedCount medication${if (overdueMedCount == 1) "" else "s"} overdue",
+                            onClick = onOpenMeds
+                        )
+                    }
+                }
+                staleLabel?.let { label ->
+                    item {
+                        Caption(
+                            "⚠ $label",
+                            style = MaterialTheme.typography.labelSmall,
+                            spoken = label
+                        )
+                    }
+                }
                 // The single most-urgent open task, completable right here so you needn't swipe to
                 // the Tasks page. Only when the phone sent task entries (privacy redaction strips
                 // them; the day line below still carries the open count).
@@ -469,11 +555,38 @@ private fun NowScreen(
                         )
                     }
                 }
-                dayLine(summary, upcomingBlockCount(summary.blocks, nowMinute))?.let { line ->
-                    item { Caption(line) }
+                val topTaskId = summary.tasks.firstOrNull()?.id
+                dedupeFoldedRemindersAgainstTopTask(topTaskId, summary.foldedReminders).forEach { reminder ->
+                    item {
+                        val secondary = buildString {
+                            if (reminder.isOverdue) append("Overdue · ")
+                            append(reminder.detail)
+                        }
+                        CheckboxButton(
+                            checked = false,
+                            onCheckedChange = {
+                                if (!it) return@CheckboxButton
+                                when (reminder.kind) {
+                                    WearFoldedReminderKind.MEDICATION -> onTakeDose(reminder.entityId)
+                                    WearFoldedReminderKind.TASK -> onCompleteTask(reminder.entityId)
+                                    WearFoldedReminderKind.HABIT -> onMarkHabitDone(reminder.entityId)
+                                }
+                            },
+                            label = { Text(reminder.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                            secondaryLabel = { Text(secondary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            modifier = Modifier.fillMaxWidth()
+                                .minimumVerticalContentPadding(ButtonDefaults.minimumVerticalListContentPadding)
+                                .transformedHeight(this, taskSpec),
+                            transformation = SurfaceTransformation(taskSpec)
+                        )
+                    }
                 }
-                summary.digest?.let { digest ->
-                    item { Caption(digest) }
+                // The AI day digest is a whole-day glance — most useful when nothing is running,
+                // and just noise below the block info during one — so surface it only when idle.
+                // The day-line tally it used to sit beside (blocks/habits/tasks/meds counts) is
+                // dropped: every part already lives on its own page and on the dial.
+                if (summary.nowTitle == null) {
+                    summary.digest?.let { digest -> item { Caption(digest) } }
                 }
             }
         }
@@ -486,22 +599,64 @@ private fun minuteOfDayNow(): Int {
     return now.hour * 60 + now.minute
 }
 
+/**
+ * An [EdgeButton] that returns to the running focus session with its live countdown. Rendered as
+ * the edge button on the Habits/Tasks/Meds pages only while a session is active, so a focus started
+ * from Now (or a tile) stays visible and one tap away from anywhere — instead of a dead-end that a
+ * wearer could only get back to by swiping all the way to Now.
+ */
 @Composable
-private fun HabitsScreen(summary: WearDaySummary, onMarkDone: (String) -> Unit) {
+private fun FocusReturnEdgeButton(focus: WearFocusStateStore.FocusState, onOpenFocus: () -> Unit) {
+    // Tick each second while running so the countdown stays live; paused time is frozen.
+    val nowMillis by produceState(initialValue = System.currentTimeMillis(), focus) {
+        while (focus.active && !focus.paused) {
+            value = System.currentTimeMillis()
+            delay(1000L)
+        }
+    }
+    val label = if (focus.paused) {
+        "Paused ${WearFormat.mmss(focus.pausedTimeLeftSeconds)}"
+    } else {
+        val secondsLeft = ((focus.plannedEndAtMillis - nowMillis) / 1000L).toInt().coerceAtLeast(0)
+        "Focus ${WearFormat.mmss(secondsLeft)}"
+    }
+    EdgeButton(onClick = onOpenFocus) {
+        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun HabitsScreen(
+    summary: WearDaySummary,
+    focus: WearFocusStateStore.FocusState,
+    onOpenFocus: () -> Unit,
+    onMarkDone: (String) -> Unit
+) {
     val state = rememberTransformingLazyColumnState()
     val spec = rememberTransformationSpec()
-    ScreenScaffold(scrollState = state) { contentPadding ->
+    ScreenScaffold(
+        scrollState = state,
+        // A running session's return button; empty (the default) when idle, so it costs no space.
+        edgeButton = { if (focus.active) FocusReturnEdgeButton(focus, onOpenFocus) }
+    ) { contentPadding ->
         TransformingLazyColumn(state = state, contentPadding = contentPadding) {
             item { ListHeader { Text("Habits") } }
             if (summary.habitsTotal > 0) {
                 if (summary.habitsDone >= summary.habitsTotal) {
-                    item { Prominent("✓ All done") }
+                    item { Prominent("✓ All done", spoken = "All habits done") }
                 } else {
                     item { Caption("${summary.habitsDone} of ${summary.habitsTotal} done") }
                     item {
+                        val target = summary.habitsDone.toFloat() / summary.habitsTotal
+                        val animated by animateFloatAsState(target, label = "habitsProgress")
                         LinearProgressIndicator(
-                            progress = { summary.habitsDone.toFloat() / summary.habitsTotal },
-                            modifier = Modifier.fillMaxWidth()
+                            progress = { animated },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .semantics {
+                                    contentDescription =
+                                        "${summary.habitsDone} of ${summary.habitsTotal} habits done"
+                                }
                         )
                     }
                 }
@@ -521,11 +676,21 @@ private fun HabitsScreen(summary: WearDaySummary, onMarkDone: (String) -> Unit) 
                     enabled = !habit.done,
                     label = { Text(habit.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     secondaryLabel = if (habit.streak > 0) {
-                        { Text("🔥 ${habit.streak}", maxLines = 1) }
+                        {
+                            Text(
+                                "🔥 ${habit.streak}",
+                                maxLines = 1,
+                                modifier = Modifier.semantics {
+                                    contentDescription = "${habit.streak} day streak"
+                                }
+                            )
+                        }
                     } else null,
                     modifier = Modifier.fillMaxWidth()
                         .minimumVerticalContentPadding(ButtonDefaults.minimumVerticalListContentPadding)
-                        .transformedHeight(this, spec),
+                        .transformedHeight(this, spec)
+                        .semantics { stateDescription = if (habit.done) "Completed" else "Not completed" }
+                        .animateItem(),
                     transformation = SurfaceTransformation(spec)
                 )
             }
@@ -534,10 +699,19 @@ private fun HabitsScreen(summary: WearDaySummary, onMarkDone: (String) -> Unit) 
 }
 
 @Composable
-private fun TasksScreen(summary: WearDaySummary, onComplete: (String) -> Unit) {
+private fun TasksScreen(
+    summary: WearDaySummary,
+    focus: WearFocusStateStore.FocusState,
+    onOpenFocus: () -> Unit,
+    onComplete: (String) -> Unit
+) {
     val state = rememberTransformingLazyColumnState()
     val spec = rememberTransformationSpec()
-    ScreenScaffold(scrollState = state) { contentPadding ->
+    ScreenScaffold(
+        scrollState = state,
+        // A running session's return button; empty (the default) when idle, so it costs no space.
+        edgeButton = { if (focus.active) FocusReturnEdgeButton(focus, onOpenFocus) }
+    ) { contentPadding ->
         TransformingLazyColumn(state = state, contentPadding = contentPadding) {
             item { ListHeader { Text("Tasks") } }
             if (summary.openTaskCount > 0) {
@@ -548,7 +722,7 @@ private fun TasksScreen(summary: WearDaySummary, onComplete: (String) -> Unit) {
                     item { Caption("Hidden for privacy") }
                     item { OpenOnPhoneButton() }
                 } else {
-                    item { Prominent("✓ All clear") }
+                    item { Prominent("✓ All clear", spoken = "All tasks clear") }
                 }
             }
             items(summary.tasks, key = { it.id }) { task ->
@@ -558,7 +732,8 @@ private fun TasksScreen(summary: WearDaySummary, onComplete: (String) -> Unit) {
                     label = { Text(task.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     modifier = Modifier.fillMaxWidth()
                         .minimumVerticalContentPadding(ButtonDefaults.minimumVerticalListContentPadding)
-                        .transformedHeight(this, spec),
+                        .transformedHeight(this, spec)
+                        .animateItem(),
                     transformation = SurfaceTransformation(spec)
                 )
             }
@@ -567,17 +742,34 @@ private fun TasksScreen(summary: WearDaySummary, onComplete: (String) -> Unit) {
 }
 
 @Composable
-private fun MedsScreen(summary: WearDaySummary, onTake: (String) -> Unit) {
+private fun MedsScreen(
+    summary: WearDaySummary,
+    focus: WearFocusStateStore.FocusState,
+    onOpenFocus: () -> Unit,
+    onTake: (String) -> Unit
+) {
     val state = rememberTransformingLazyColumnState()
     val spec = rememberTransformationSpec()
     val now = LocalTime.now()
     val nowMinute = now.hour * 60 + now.minute
-    ScreenScaffold(scrollState = state) { contentPadding ->
+    // The soonest still-to-take dose, so the page can look forward ("Next in 2h · Metformin") the
+    // way the Now page does for blocks — not just report a backward-looking due tally.
+    val nextDose = summary.meds
+        .filter { !it.taken && it.reminderMinute > nowMinute }
+        .minByOrNull { it.reminderMinute }
+    ScreenScaffold(
+        scrollState = state,
+        // A running session's return button; empty (the default) when idle, so it costs no space.
+        edgeButton = { if (focus.active) FocusReturnEdgeButton(focus, onOpenFocus) }
+    ) { contentPadding ->
         TransformingLazyColumn(state = state, contentPadding = contentPadding) {
             item { ListHeader { Text("Medication") } }
             when {
                 summary.medsDueCount > 0 -> item { Caption("${summary.medsDueCount} due") }
-                summary.meds.isNotEmpty() -> item { Prominent("✓ All taken") }
+                summary.meds.isNotEmpty() -> item { Prominent("✓ All taken", spoken = "All medication taken") }
+            }
+            nextDose?.let { dose ->
+                item { Caption("Next ${WearFormat.startsInLabel(dose.reminderMinute, nowMinute)} · ${dose.name}") }
             }
             if (summary.meds.isEmpty()) {
                 if (summary.medsDueCount > 0) {
@@ -605,7 +797,9 @@ private fun MedsScreen(summary: WearDaySummary, onTake: (String) -> Unit) {
                     },
                     modifier = Modifier.fillMaxWidth()
                         .minimumVerticalContentPadding(ButtonDefaults.minimumVerticalListContentPadding)
-                        .transformedHeight(this, spec),
+                        .transformedHeight(this, spec)
+                        .semantics { stateDescription = if (med.taken) "Taken" else "Not taken" }
+                        .animateItem(),
                     transformation = SurfaceTransformation(spec)
                 )
             }
@@ -617,28 +811,46 @@ private fun MedsScreen(summary: WearDaySummary, onTake: (String) -> Unit) {
 private fun Caption(
     text: String,
     color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    style: TextStyle = MaterialTheme.typography.bodySmall,
+    spoken: String? = null
 ) {
     Text(
         text = text,
-        style = MaterialTheme.typography.bodySmall,
+        style = style,
         color = color,
         textAlign = TextAlign.Center,
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (spoken != null) Modifier.semantics { contentDescription = spoken } else Modifier)
     )
 }
 
-/** The Now page's single at-a-glance headline (time remaining / time to next), in primary tint. */
+/**
+ * The Now page's single at-a-glance headline (time remaining / time to next), in primary tint by
+ * default. [color] lets an alert (e.g. overdue meds) reuse the same weight in the error tint, and
+ * [spoken] gives TalkBack a clean phrase when the visible text leans on a glyph.
+ */
 @Composable
-private fun Prominent(text: String) {
+private fun Prominent(
+    text: String,
+    color: Color = MaterialTheme.colorScheme.primary,
+    spoken: String? = null,
+    onClick: (() -> Unit)? = null
+) {
     Text(
         text = text,
         style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
+        color = color,
         textAlign = TextAlign.Center,
-        maxLines = 1,
+        // Two lines so a long value like "Next in 1h 45m" keeps its number at large font scales
+        // instead of ellipsizing to "Next in 1h…" — the number is the whole point of this line.
+        maxLines = 2,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (spoken != null) Modifier.semantics { contentDescription = spoken } else Modifier)
     )
 }
 
@@ -671,16 +883,3 @@ private fun OpenOnPhoneButton() {
     )
 }
 
-/**
- * One-line day digest for the Now page, e.g. "3 blocks left · 2/5 habits · 3 tasks · 1 med due".
- * [blocksLeft] is how many scheduled blocks remain after the current one.
- */
-private fun dayLine(summary: WearDaySummary, blocksLeft: Int): String? {
-    val parts = buildList {
-        if (blocksLeft > 0) add("$blocksLeft block${if (blocksLeft == 1) "" else "s"} left")
-        if (summary.habitsTotal > 0) add("${summary.habitsDone}/${summary.habitsTotal} habits")
-        if (summary.openTaskCount > 0) add("${summary.openTaskCount} tasks")
-        if (summary.medsDueCount > 0) add("${summary.medsDueCount} meds due")
-    }
-    return parts.joinToString(" · ").ifBlank { null }
-}

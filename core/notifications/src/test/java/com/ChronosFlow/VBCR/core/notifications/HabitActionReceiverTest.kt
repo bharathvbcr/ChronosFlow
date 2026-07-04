@@ -22,9 +22,11 @@ import java.time.LocalDate
 class HabitActionReceiverTest {
 
     private val completeHabitByIdUseCase: CompleteHabitByIdUseCase = mockk(relaxed = true)
+    private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator = mockk(relaxed = true)
 
     private val receiver = HabitActionReceiver().apply {
         this.completeHabitByIdUseCase = this@HabitActionReceiverTest.completeHabitByIdUseCase
+        this.currentBlockNotificationCoordinator = this@HabitActionReceiverTest.currentBlockNotificationCoordinator
         markInjected(this)
     }
 

@@ -43,6 +43,7 @@ class AlarmDeliveryCoordinatorTest {
     private val habitRepository: HabitRepository = mockk(relaxed = true)
     private val alarmScheduler: AlarmScheduler = mockk(relaxed = true)
     private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator = mockk(relaxed = true)
+    private val foldedReminderResolver: FoldedReminderResolver = mockk(relaxed = true)
     private lateinit var coordinator: AlarmDeliveryCoordinator
     private lateinit var notificationManager: NotificationManager
     private lateinit var shadowNotificationManager: ShadowNotificationManager
@@ -57,10 +58,14 @@ class AlarmDeliveryCoordinatorTest {
             timeBlockRepository,
             habitRepository,
             alarmScheduler,
-            currentBlockNotificationCoordinator
+            currentBlockNotificationCoordinator,
+            foldedReminderResolver
         )
         notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         shadowNotificationManager = shadowOf(notificationManager)
+        every { currentBlockNotificationCoordinator.isFoldRemindersEnabled() } returns false
+        coEvery { foldedReminderResolver.resolve(any(), any(), any()) } returns emptyList()
+        coEvery { currentBlockNotificationCoordinator.refresh(now = any(), alert = any()) } returns Unit
     }
 
     @Test
@@ -205,6 +210,52 @@ class AlarmDeliveryCoordinatorTest {
 
         val notification = shadowNotificationManager.allNotifications.single()
         assertEquals("Review planned, actual, and missed blocks.", shadowOf(notification).contentText)
+    }
+
+    @Test
+    fun `folded medication dose suppresses separate banner and refreshes live surface`() = runTest {
+        every { currentBlockNotificationCoordinator.isFoldRemindersEnabled() } returns true
+        val requestId = "med-fold-1"
+        val planId = "plan-fold"
+        val intent = Intent().apply {
+            putExtra(AlarmDeliveryCoordinator.EXTRA_ID, requestId)
+            putExtra(AlarmDeliveryCoordinator.EXTRA_TITLE, "Time for Aspirin")
+            putExtra(AlarmDeliveryCoordinator.EXTRA_MESSAGE, "Mark it taken once you've had your dose.")
+        }
+        coEvery { alarmRequestRepository.getAlarmRequest(requestId) } returns AlarmRequest(
+            id = requestId,
+            type = AlarmRequestType.MEDICATION,
+            scheduledFor = Instant.now(),
+            title = "Time for Aspirin",
+            message = "Mark it taken once you've had your dose.",
+            medicationPlanId = planId,
+            blockId = null,
+            reliability = AlarmReliability.EXACT,
+            deliveryState = AlarmDeliveryState.PENDING,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now()
+        )
+        coEvery {
+            foldedReminderResolver.resolve(any(), any(), any())
+        } returns listOf(
+            FoldedReminder(
+                kind = FoldedReminderKind.MEDICATION,
+                entityId = planId,
+                title = "Aspirin",
+                detail = "Due 9:00 AM",
+                dueMinute = 9 * 60,
+                isOverdue = false
+            )
+        )
+
+        coordinator.deliverFromAlarmIntent(intent, MedicationAlarmReceiver::class.java)
+
+        assertTrue(
+            "Expected no separate banner when folded on live surface",
+            shadowNotificationManager.allNotifications.isEmpty()
+        )
+        coVerify(exactly = 1) { currentBlockNotificationCoordinator.refresh(now = any(), alert = false) }
+        coVerify { alarmScheduler.cancelAlarm(requestId) }
     }
 
     private fun reviewIntent(requestId: String): Intent = Intent().apply {

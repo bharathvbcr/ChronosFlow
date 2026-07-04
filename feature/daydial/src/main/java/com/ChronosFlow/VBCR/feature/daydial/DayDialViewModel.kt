@@ -51,6 +51,7 @@ import com.ChronosFlow.VBCR.core.domain.usecase.ToggleTaskCompletionUseCase
 import com.ChronosFlow.VBCR.core.notifications.AlarmCapabilityRefresher
 import com.ChronosFlow.VBCR.core.notifications.CurrentBlockNotificationCoordinator
 import com.ChronosFlow.VBCR.core.notifications.HabitReminderScheduler
+import com.ChronosFlow.VBCR.core.notifications.SeparateFoldableAlarmReconciler
 import com.ChronosFlow.VBCR.feature.daydial.delegate.DayDialAiDelegate
 import androidx.fragment.app.FragmentActivity
 import com.ChronosFlow.VBCR.core.data.security.AppLockAuthResult
@@ -186,6 +187,7 @@ class DayDialViewModel @Inject constructor(
     private val routineAssistPlanner: RoutineAssistPlanner,
     private val genAiAssistCoordinator: GenAiAssistCoordinator,
     private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator,
+    private val separateFoldableAlarmReconciler: SeparateFoldableAlarmReconciler,
     private val appEventLog: AppEventLog,
     private val deleteAllDataUseCase: DeleteAllDataUseCase,
     private val focusPhaseAdvanceBus: FocusPhaseAdvanceBus
@@ -792,7 +794,8 @@ class DayDialViewModel @Inject constructor(
             sleepScheduleEndMinute = sleepScheduleEndMinute,
             journalRemindersEnabled = journalRemindersEnabled,
             sleepJournalLogReminder = sleepJournalLogReminder,
-            sleepJournalRemindersEnabled = sleepJournalRemindersEnabled
+            sleepJournalRemindersEnabled = sleepJournalRemindersEnabled,
+            currentBlockLiveEnabled = currentBlockNotificationCoordinator.isEnabled()
         )
     }
 
@@ -815,6 +818,16 @@ class DayDialViewModel @Inject constructor(
     fun setCurrentBlockNotificationEnabled(enabled: Boolean) {
         viewModelScope.launch {
             currentBlockNotificationCoordinator.setEnabled(enabled)
+            separateFoldableAlarmReconciler.cancelWhenFoldModeActive()
+            refreshReminderScheduleFromStoredPreferences()
+        }
+    }
+
+    /** Clears separate med/task/habit OS alarms when fold-into-live turns on. */
+    fun reconcileSeparateFoldableAlarms() {
+        viewModelScope.launch {
+            separateFoldableAlarmReconciler.cancelWhenFoldModeActive()
+            refreshReminderScheduleFromStoredPreferences()
         }
     }
 

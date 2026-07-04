@@ -48,6 +48,26 @@ final class ChronosNotifications {
     /// Snooze interval for every reminder type (matches the Android 15-minute snooze).
     static let snoozeMinutes = 15
 
+    /// When fold + block Live Activity are on, separate med/task/habit schedules are omitted — the
+    /// live surface + BG refresh carry reminders instead of passive duplicates in Notification Center.
+    private func skipsSeparateRemindersWhenFolded(_ settings: ChronosSettings) -> Bool {
+        ReminderFoldScheduling.skipsSeparateRemindersWhenFolded(
+            remindersFoldedIntoLiveActivity: settings.remindersFoldedIntoLiveActivity,
+            currentBlockLiveActivityEnabled: settings.currentBlockLiveActivityEnabled)
+    }
+
+    /// Embeds a tap target for notification default actions and widget parity.
+    private func attachDeepLink(_ content: UNMutableNotificationContent, _ path: String) {
+        var info = content.userInfo
+        info["deepLink"] = "chronosflow://\(path)"
+        content.userInfo = info
+    }
+
+    /// Resolve a `chronosflow://` URL from notification userInfo (explicit deepLink or legacy keys).
+    static func deepLinkURL(from userInfo: [AnyHashable: Any]) -> URL? {
+        NotificationDeepLink.resolveURL(from: userInfo)
+    }
+
     // MARK: Authorization + category registration
 
     func requestAuthorization() async {
@@ -106,7 +126,9 @@ final class ChronosNotifications {
         await requestAuthorization()
         cancel(idPrefix: "med-\(plan.id)-")
         guard settings.remindersEnabled, settings.medicationRemindersEnabled else { return }
+        guard !skipsSeparateRemindersWhenFolded(settings) else { return }
 
+        let folded = settings.remindersFoldedIntoLiveActivity
         let refillLine = refillSoonLine(for: plan)
         for minute in plan.reminderMinutes {
             let fireMinute = QuietHours.nextAllowedMinute(
@@ -122,11 +144,12 @@ final class ChronosNotifications {
             if let notes = plan.notes, !notes.isEmpty { bodyLines.append(notes) }
             if let refillLine { bodyLines.append(refillLine) }
             content.body = bodyLines.isEmpty ? "Mark it taken once you've had your dose." : bodyLines.joined(separator: "\n")
-            content.sound = .default
+            content.sound = folded ? nil : .default
             content.categoryIdentifier = Self.medicationCategory
             content.threadIdentifier = Self.medicationThread
-            content.interruptionLevel = .timeSensitive
+            content.interruptionLevel = folded ? .passive : .timeSensitive
             content.userInfo = ["planID": plan.id, "section": "medication"]
+            attachDeepLink(content, "medication?id=\(plan.id)")
 
             let trigger = UNCalendarNotificationTrigger(
                 dateMatching: clockComponents(fireMinute), repeats: true)
@@ -157,6 +180,7 @@ final class ChronosNotifications {
         await requestAuthorization()
         cancel(idPrefix: "task-\(task.id)")
         guard settings.remindersEnabled, settings.taskRemindersEnabled else { return }
+        guard !skipsSeparateRemindersWhenFolded(settings) else { return }
         guard !task.isCompleted else { return }
 
         if let due = task.dueDate {
@@ -167,7 +191,8 @@ final class ChronosNotifications {
                         [.year, .month, .day, .hour, .minute], from: fireDate),
                     repeats: false)
                 try? await center.add(UNNotificationRequest(
-                    identifier: "task-\(task.id)", content: taskContent(task, body: "This task is due now."),
+                    identifier: "task-\(task.id)",
+                    content: taskContent(task, body: "This task is due now.", folded: settings.remindersFoldedIntoLiveActivity),
                     trigger: trigger))
             }
         }
@@ -176,7 +201,9 @@ final class ChronosNotifications {
     }
 
     /// The shared notification content for a task reminder (title / priority / detail / checklist).
-    private func taskContent(_ task: TaskItem, body fallbackBody: String) -> UNMutableNotificationContent {
+    /// When `folded`, the reminder is demoted to a silent `.passive` delivery — the actionable surface
+    /// is the Live Activity chip, not a banner — so the day's reminders stop stacking as interruptions.
+    private func taskContent(_ task: TaskItem, body fallbackBody: String, folded: Bool) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = task.title
         content.subtitle = task.priority > 0 ? "\(task.priorityLabel) priority" : ""
@@ -187,11 +214,12 @@ final class ChronosNotifications {
             bodyLines.append("Checklist: \(done)/\(task.checklist.count) done.")
         }
         content.body = bodyLines.isEmpty ? fallbackBody : bodyLines.joined(separator: "\n")
-        content.sound = .default
+        content.sound = folded ? nil : .default
         content.categoryIdentifier = Self.taskCategory
         content.threadIdentifier = Self.taskThread
-        content.interruptionLevel = task.priority >= 3 ? .timeSensitive : .active
+        content.interruptionLevel = folded ? .passive : (task.priority >= 3 ? .timeSensitive : .active)
         content.userInfo = ["taskID": task.id, "section": "tasks"]
+        attachDeepLink(content, "tasks?id=\(task.id)")
         return content
     }
 
@@ -244,7 +272,7 @@ final class ChronosNotifications {
                     repeats: false)
                 try? await center.add(UNNotificationRequest(
                     identifier: "task-\(task.id)-rec-\(occurrenceIndex)-\(reminderIndex)",
-                    content: taskContent(task, body: body),
+                    content: taskContent(task, body: body, folded: settings.remindersFoldedIntoLiveActivity),
                     trigger: trigger))
             }
         }
@@ -257,6 +285,7 @@ final class ChronosNotifications {
         await requestAuthorization()
         cancel(idPrefix: "habit-\(habit.id)")
         guard settings.remindersEnabled, settings.habitRemindersEnabled else { return }
+        guard !skipsSeparateRemindersWhenFolded(settings) else { return }
 
         let fireMinute = QuietHours.nextAllowedMinute(
             minute: habit.windowStartMinute,
@@ -269,11 +298,14 @@ final class ChronosNotifications {
         content.body = habit.streakCount > 0
             ? "Your habit window is open — keep your \(habit.streakCount)-day streak going."
             : "Your habit window is open — a great time to start a streak."
-        content.sound = .default
+        // When folding is on, demote to a silent passive nudge — the Live Activity chip is the surface.
+        let folded = settings.remindersFoldedIntoLiveActivity
+        content.sound = folded ? nil : .default
         content.categoryIdentifier = Self.habitCategory
         content.threadIdentifier = Self.habitThread
-        content.interruptionLevel = .active
+        content.interruptionLevel = folded ? .passive : .active
         content.userInfo = ["habitID": habit.id, "section": "habits"]
+        attachDeepLink(content, "habits?id=\(habit.id)")
 
         let trigger = UNCalendarNotificationTrigger(
             dateMatching: clockComponents(fireMinute), repeats: true)
@@ -290,6 +322,8 @@ final class ChronosNotifications {
     func scheduleNextBlockNotification(blocks: [TimeBlock], settings: ChronosSettings = .shared) async {
         await requestAuthorization()
         cancel(idPrefix: "block-next")
+        // The current-block Live Activity is the unified surface when enabled.
+        guard !settings.currentBlockLiveActivityEnabled else { return }
         guard settings.remindersEnabled else { return }
 
         let now = Date()
@@ -316,6 +350,7 @@ final class ChronosNotifications {
         content.threadIdentifier = Self.blockThread
         content.interruptionLevel = .passive
         content.userInfo = ["blockID": next.id, "section": "today"]
+        attachDeepLink(content, "focus?blockId=\(next.id)")
 
         let trigger = UNCalendarNotificationTrigger(
             dateMatching: cal.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate),
@@ -347,6 +382,7 @@ final class ChronosNotifications {
         content.threadIdentifier = Self.logReminderThread
         content.interruptionLevel = .active
         content.userInfo = ["section": "sleep"]
+        attachDeepLink(content, "sleep?log=1")
 
         let trigger = UNCalendarNotificationTrigger(
             dateMatching: clockComponents(fireMinute), repeats: true)
@@ -413,12 +449,21 @@ final class ChronosNotificationDelegate: NSObject, UNUserNotificationCenterDeleg
     static let shared = ChronosNotificationDelegate()
 
     /// Show medication/task/habit alerts even while the app is foregrounded (Android parity:
-    /// these are time-sensitive reminders, not silent).
+    /// these are time-sensitive reminders, not silent). Folded reminders already on the live
+    /// surface are fully suppressed — mirrors Android `shouldSuppressFoldedReminderBanner`.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound, .list]
+        let content = notification.request.content
+        if await ChronosNotifications.shared.shouldSuppressFoldedReminderBanner(for: content) {
+            BlockLiveActivityCoordinator.refreshToday()
+            return []
+        }
+        if content.interruptionLevel == .passive {
+            return [.list]
+        }
+        return [.banner, .sound, .list]
     }
 
     func userNotificationCenter(
@@ -431,8 +476,10 @@ final class ChronosNotificationDelegate: NSObject, UNUserNotificationCenterDeleg
         switch response.actionIdentifier {
         case ChronosNotifications.takeAction:
             handleMedication(info, context: context) { $0.acknowledgeDose() }
+            BlockLiveActivityCoordinator.refreshToday()
         case ChronosNotifications.skipAction:
             handleMedication(info, context: context) { $0.missedCount += 1 }
+            BlockLiveActivityCoordinator.refreshToday()
         case ChronosNotifications.snoozeAction:
             if let plan = medication(from: info, context: context) {
                 await ChronosNotifications.shared.rescheduleSnoozed(
@@ -446,6 +493,7 @@ final class ChronosNotificationDelegate: NSObject, UNUserNotificationCenterDeleg
 
         case ChronosNotifications.completeTaskAction:
             handleTask(info, context: context) { $0.isCompleted = true; $0.updatedAt = .now }
+            BlockLiveActivityCoordinator.refreshToday()
         case ChronosNotifications.snoozeTaskAction:
             if let task = task(from: info, context: context) {
                 await ChronosNotifications.shared.rescheduleSnoozed(
@@ -459,6 +507,7 @@ final class ChronosNotificationDelegate: NSObject, UNUserNotificationCenterDeleg
 
         case ChronosNotifications.markHabitAction:
             handleHabit(info, context: context) { $0.toggleCompletion(on: .now) }
+            BlockLiveActivityCoordinator.refreshToday()
         case ChronosNotifications.snoozeHabitAction:
             if let habit = habit(from: info, context: context) {
                 await ChronosNotifications.shared.rescheduleSnoozed(
@@ -471,7 +520,10 @@ final class ChronosNotificationDelegate: NSObject, UNUserNotificationCenterDeleg
             }
 
         default:
-            break  // default tap (open app) — handled by the app's deep-link layer.
+            if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+               let url = ChronosNotifications.deepLinkURL(from: info) {
+                ChronosPendingDeepLink.enqueue(url)
+            }
         }
     }
 
@@ -521,23 +573,100 @@ final class ChronosNotificationDelegate: NSObject, UNUserNotificationCenterDeleg
 }
 
 extension ChronosNotifications {
+    /// Re-apply passive/active interruption levels when fold or block-live settings change.
+    @MainActor
+    func refreshFoldableReminders(settings: ChronosSettings = .shared) async {
+        guard settings.remindersEnabled else { return }
+        let context = ChronosStore.shared.mainContext
+        let plans = (try? context.fetch(FetchDescriptor<MedicationPlan>())) ?? []
+        for plan in plans where plan.isActive {
+            await scheduleMedication(plan, settings: settings)
+        }
+        let habits = (try? context.fetch(FetchDescriptor<Habit>())) ?? []
+        for habit in habits where habit.isActive {
+            await scheduleHabit(habit, settings: settings)
+        }
+        let tasks = (try? context.fetch(FetchDescriptor<TaskItem>())) ?? []
+        for task in tasks where !task.isCompleted {
+            await scheduleTask(task, settings: settings)
+        }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        let blocks = (try? context.fetch(FetchDescriptor<TimeBlock>()))?
+            .filter { cal.isDate($0.date, inSameDayAs: today) }
+            .sorted { $0.startMinuteOfDay < $1.startMinuteOfDay } ?? []
+        await scheduleNextBlockNotification(blocks: blocks, settings: settings)
+        scheduleBlockLiveNearNextFoldedReminder(settings: settings)
+    }
+
+    /// Enqueue a BG refresh near the next folded reminder due time so LA content updates when killed.
+    @MainActor
+    private func scheduleBlockLiveNearNextFoldedReminder(settings: ChronosSettings) {
+        guard settings.remindersFoldedIntoLiveActivity,
+              settings.currentBlockLiveActivityEnabled else { return }
+        let cal = Calendar.current
+        let nowMinute = cal.component(.hour, from: .now) * 60 + cal.component(.minute, from: .now)
+        guard let fire = FoldedReminderLiveResolver.nextDueFireDate(
+            nowMinute: nowMinute,
+            settings: settings,
+            context: ChronosStore.shared.mainContext) else {
+            return
+        }
+        ChronosBackgroundSync.scheduleBlockLive(at: fire)
+    }
+
     /// Re-schedule a snoozed reminder `snoozeMinutes` from now (one-shot).
     func rescheduleSnoozed(
         identifier: String, title: String, body: String,
-        category: String, thread: String, userInfo: [String: String]
+        category: String, thread: String, userInfo: [String: String],
+        settings: ChronosSettings = .shared
     ) async {
+        let folded = settings.remindersFoldedIntoLiveActivity
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+        content.sound = folded ? nil : .default
         content.categoryIdentifier = category
         content.threadIdentifier = thread
         content.interruptionLevel = .timeSensitive
         content.userInfo = userInfo
+        if let taskID = userInfo["taskID"] {
+            attachDeepLink(content, "tasks?id=\(taskID)")
+        } else if let planID = userInfo["planID"] {
+            attachDeepLink(content, "medication?id=\(planID)")
+        } else if let habitID = userInfo["habitID"] {
+            attachDeepLink(content, "habits?id=\(habitID)")
+        } else if let goalID = userInfo["goalID"] {
+            attachDeepLink(content, "goals?id=\(goalID)")
+        }
 
         let trigger = UNTimeIntervalNotificationTrigger(
             timeInterval: TimeInterval(Self.snoozeMinutes * 60), repeats: false)
         try? await center.add(UNNotificationRequest(
             identifier: identifier, content: content, trigger: trigger))
+    }
+
+    /// When fold is on, skip separate med/task/habit banners already on the block Live Activity.
+    func shouldSuppressFoldedReminderBanner(for content: UNNotificationContent) async -> Bool {
+        let settings = ChronosSettings.shared
+        guard settings.remindersFoldedIntoLiveActivity else { return false }
+        let info = content.userInfo
+        let cal = Calendar.current
+        let nowMinute = cal.component(.hour, from: .now) * 60 + cal.component(.minute, from: .now)
+        let folded = await FoldedReminderLiveResolver.resolveEntityKeys(
+            nowMinute: nowMinute,
+            settings: settings,
+            context: ChronosStore.shared.mainContext)
+        if folded.isEmpty { return false }
+        if let planID = info["planID"] as? String {
+            return folded.contains(FoldedReminderLiveResolver.EntityKey(kind: .medication, id: planID))
+        }
+        if let taskID = info["taskID"] as? String {
+            return folded.contains(FoldedReminderLiveResolver.EntityKey(kind: .task, id: taskID))
+        }
+        if let habitID = info["habitID"] as? String {
+            return folded.contains(FoldedReminderLiveResolver.EntityKey(kind: .habit, id: habitID))
+        }
+        return false
     }
 }

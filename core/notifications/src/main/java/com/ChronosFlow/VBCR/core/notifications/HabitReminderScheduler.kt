@@ -5,17 +5,10 @@ import com.ChronosFlow.VBCR.core.domain.model.AlarmReliability
 import com.ChronosFlow.VBCR.core.domain.model.AlarmRequest
 import com.ChronosFlow.VBCR.core.domain.model.AlarmRequestType
 import com.ChronosFlow.VBCR.core.domain.model.Habit
-import com.ChronosFlow.VBCR.core.domain.model.HabitEventType
-import com.ChronosFlow.VBCR.core.domain.model.HabitRecurrenceRule
-import com.ChronosFlow.VBCR.core.domain.model.PlannerRecurrence
-import com.ChronosFlow.VBCR.core.domain.model.PlannerRecurrenceType
 import com.ChronosFlow.VBCR.core.domain.model.buildLegacyHabitSchedule
 import com.ChronosFlow.VBCR.core.domain.repository.AlarmRequestRepository
-import java.time.DayOfWeek
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
-import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.first
@@ -89,7 +82,7 @@ class HabitReminderScheduler @Inject constructor(
     ): Instant? {
         val localNow = now.atZone(zoneId)
         val today = localNow.toLocalDate()
-        val referenceDate = habit.recentEvents.minOfOrNull { it.eventDate } ?: habit.lastCompletedDate ?: today
+        val referenceDate = habit.recurrenceReferenceDate(today)
         repeat(MAX_HABIT_LOOKAHEAD_DAYS) { offset ->
             val date = today.plusDays(offset.toLong())
             if (habit.isReminderDueOnDate(date, referenceDate)) {
@@ -133,57 +126,6 @@ class HabitReminderScheduler @Inject constructor(
         )
     }
 
-    private fun Habit.isReminderDueOnDate(
-        date: LocalDate,
-        referenceDate: LocalDate
-    ): Boolean {
-        val schedule = this.schedule ?: buildLegacyHabitSchedule(
-            habitId = id,
-            cadence = cadence,
-            windowStartMinute = windowStartMinute,
-            windowEndMinute = windowEndMinute,
-            plannerVisible = isBundled
-        )
-        val recurrenceDue = when (val rule = schedule.resolvedRecurrenceRule) {
-            is HabitRecurrenceRule.Scheduled -> recurrenceOccursOn(
-                date = date,
-                recurrence = rule.recurrence,
-                startDate = referenceDate
-            )
-            is HabitRecurrenceRule.Quota -> true
-        }
-        val completed = lastCompletedDate == date ||
-            recentEvents.any { it.eventDate == date && it.type == HabitEventType.COMPLETED }
-        val skipped = schedule.skipDate == date ||
-            recentEvents.any { it.eventDate == date && it.type == HabitEventType.SKIPPED }
-        val paused = schedule.pausedUntil?.let { !it.isBefore(date) } == true
-        return recurrenceDue && !completed && !skipped && !paused
-    }
-
-    private fun recurrenceOccursOn(
-        date: LocalDate,
-        recurrence: PlannerRecurrence,
-        startDate: LocalDate
-    ): Boolean = when (recurrence.type) {
-        PlannerRecurrenceType.DAILY,
-        PlannerRecurrenceType.MULTIPLE_TIMES_DAILY -> true
-        PlannerRecurrenceType.WEEKDAYS -> date.dayOfWeek in weekdaySet
-        PlannerRecurrenceType.WEEKENDS -> date.dayOfWeek in weekendSet
-        PlannerRecurrenceType.SELECTED_WEEKDAYS ->
-            recurrence.weekdays.isEmpty() || date.dayOfWeek in recurrence.weekdays
-        PlannerRecurrenceType.EVERY_N_DAYS -> {
-            val days = ChronoUnit.DAYS.between(startDate, date)
-            days >= 0 && days % recurrence.interval.coerceAtLeast(1) == 0L
-        }
-        PlannerRecurrenceType.WEEKLY_INTERVAL -> {
-            val allowedDays = recurrence.weekdays.ifEmpty { setOf(startDate.dayOfWeek) }
-            val weeks = ChronoUnit.WEEKS.between(startDate.weekStart(), date.weekStart())
-            weeks >= 0 && weeks % recurrence.interval.coerceAtLeast(1) == 0L &&
-                date.dayOfWeek in allowedDays
-        }
-        PlannerRecurrenceType.PRN -> false
-    }
-
     private fun AlarmRequest.withScheduleResult(
         result: AlarmScheduleResult,
         now: Instant
@@ -214,20 +156,5 @@ class HabitReminderScheduler @Inject constructor(
         )
     }
 
-    private fun LocalDate.weekStart(): LocalDate =
-        minusDays((dayOfWeek.value - DayOfWeek.MONDAY.value).toLong())
-
     private fun habitBlockId(habitId: String): String = "habit-$habitId"
 }
-
-private const val MAX_HABIT_LOOKAHEAD_DAYS = 370
-
-private val weekdaySet = setOf(
-    DayOfWeek.MONDAY,
-    DayOfWeek.TUESDAY,
-    DayOfWeek.WEDNESDAY,
-    DayOfWeek.THURSDAY,
-    DayOfWeek.FRIDAY
-)
-
-private val weekendSet = setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)

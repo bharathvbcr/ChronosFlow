@@ -16,6 +16,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
 import kotlin.math.roundToInt
@@ -74,7 +76,10 @@ private fun MoodEnergyScoreRow(
             onValueChange = { onValueChange(it.roundToInt()) },
             valueRange = 1f..5f,
             steps = 3,
-            modifier = Modifier.fillMaxWidth()
+            // Announce "Mood, 3 of 5" to TalkBack rather than a bare percentage.
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "$label, $value of 5" }
         )
     }
 }

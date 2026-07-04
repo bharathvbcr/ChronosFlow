@@ -58,7 +58,8 @@ internal fun DayDialScreenEffects(
     vmState: DayDialViewModelState,
     uiState: DayDialScreenUiState,
     settings: DayDialSettingsState,
-    snackbarHostState: SnackbarHostState
+    snackbarHostState: SnackbarHostState,
+    currentBlockLiveEnabled: Boolean = false
 ) {
     LaunchedEffect(vmState.selectedBlock) {
         // Selecting a block auto-opens its editor on the timeline tabs (Today/Plan), but NOT on the
@@ -94,7 +95,8 @@ internal fun DayDialScreenEffects(
         settings.sleepScheduleEndMinute,
         settings.featureFlags.journalEnabled,
         settings.featureFlags.sleepEnabled,
-        settings.sleepJournalLogReminder
+        settings.sleepJournalLogReminder,
+        currentBlockLiveEnabled
     ) {
         viewModel.refreshReminderSchedule(
             blockStartReminders = settings.blockStartReminders,

@@ -308,6 +308,9 @@ internal fun SidebarPageContent(
     onQuickMedicationMissed: (String, Int?) -> Unit,
     onOpenBlock: (String?) -> Unit,
     onDeleteAllData: () -> Unit = {},
+    onReminderKindPreferencesChanged: () -> Unit = {},
+    onLiveSurfacePreferencesChanged: (currentBlockLive: Boolean) -> Unit = {},
+    onFocusLiveActivityPreferenceChanged: () -> Unit = {},
     contentTopPadding: Dp = 0.dp,
     contentBottomPadding: Dp = 0.dp,
     showMessage: (String) -> Unit
@@ -974,8 +977,11 @@ internal fun SidebarPageContent(
                 SidebarPage.PRIVACY_SYNC -> {
                     // RECONSTRUCTED collapsible Privacy & Sync page. App lock stays always-visible;
                     // the five sub-sections below are collapsible and persist their expand state in
-                    // the UI-settings DataStore. Default expanded (true) so the page reads the same as
-                    // before — flip any default to false to have that section start collapsed.
+                    // the UI-settings DataStore. The higher-priority privacy sections (app permissions,
+                    // sensitive content) start expanded; the lower-priority integrations (cloud sync,
+                    // watch, companion app) start collapsed so the page opens as a scannable list of
+                    // section summaries rather than an all-expanded wall. Persisted per-section, so a
+                    // user's own expand choice always wins over these defaults.
                     var appPermissionsExpanded by rememberPersistentUiBooleanSetting(
                         "privacy.appPermissions.expanded", true
                     )
@@ -983,13 +989,13 @@ internal fun SidebarPageContent(
                         "privacy.sensitiveContent.expanded", true
                     )
                     var cloudSyncExpanded by rememberPersistentUiBooleanSetting(
-                        "privacy.cloudSync.expanded", true
+                        "privacy.cloudSync.expanded", false
                     )
                     var wearLinkExpanded by rememberPersistentUiBooleanSetting(
-                        "privacy.wearLink.expanded", true
+                        "privacy.wearLink.expanded", false
                     )
                     var companionAppExpanded by rememberPersistentUiBooleanSetting(
-                        "privacy.companionApp.expanded", true
+                        "privacy.companionApp.expanded", false
                     )
 
                     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
@@ -1144,20 +1150,104 @@ internal fun SidebarPageContent(
                             CheckboxSetting("Break reminders", breakReminders, onBreakRemindersChanged)
                             CheckboxSetting("Missed block alerts", missedAlerts, onMissedAlertsChanged)
                             CheckboxSetting("End-of-day review", endDayReviewReminder, onEndDayReviewReminderChanged)
+                            var remindersEnabled by rememberChronosPreferenceBoolean(
+                                NotificationPreferenceKeys.REMINDERS,
+                                true
+                            )
+                            CheckboxSetting(
+                                "Reminders",
+                                remindersEnabled,
+                                onCheckedChange = { remindersEnabled = it }
+                            )
+                            var medicationReminders by rememberChronosPreferenceBoolean(
+                                NotificationPreferenceKeys.MEDICATION,
+                                true
+                            )
+                            var taskReminders by rememberChronosPreferenceBoolean(
+                                NotificationPreferenceKeys.TASKS,
+                                true
+                            )
+                            var habitReminders by rememberChronosPreferenceBoolean(
+                                NotificationPreferenceKeys.HABITS,
+                                true
+                            )
+                            if (remindersEnabled) {
+                                CheckboxSetting(
+                                    "Medication reminders",
+                                    medicationReminders,
+                                    onCheckedChange = { medicationReminders = it }
+                                )
+                                CheckboxSetting(
+                                    "Task reminders",
+                                    taskReminders,
+                                    onCheckedChange = { taskReminders = it }
+                                )
+                                CheckboxSetting(
+                                    "Habit reminders",
+                                    habitReminders,
+                                    onCheckedChange = { habitReminders = it }
+                                )
+                            }
+                            var reminderPrefsInitialized by remember { mutableStateOf(false) }
+                            LaunchedEffect(remindersEnabled, medicationReminders, taskReminders, habitReminders) {
+                                if (!reminderPrefsInitialized) {
+                                    reminderPrefsInitialized = true
+                                } else {
+                                    onReminderKindPreferencesChanged()
+                                }
+                            }
                             CheckboxSetting(
                                 "Log sleep & journal",
                                 sleepJournalLogReminder,
                                 onSleepJournalLogReminderChanged
                             )
-                            var currentBlockLive by rememberPersistentBoolean(
-                                "notifications.currentBlockLive",
-                                false
+                            var currentBlockLive by rememberNotifCrossPlatformBoolean(
+                                iosKey = NotificationPreferenceKeys.CURRENT_BLOCK_LIVE,
+                                legacyUiKey = "notifications.currentBlockLive",
+                                defaultValue = true
+                            )
+                            var foldRemindersIntoLive by rememberNotifCrossPlatformBoolean(
+                                iosKey = NotificationPreferenceKeys.FOLD_REMINDERS,
+                                legacyUiKey = "notifications.foldReminders",
+                                defaultValue = true
                             )
                             CheckboxSetting(
                                 "Current block notification",
                                 currentBlockLive,
                                 onCheckedChange = { currentBlockLive = it }
                             )
+                            if (currentBlockLive) {
+                                CheckboxSetting(
+                                    "Fold reminders into notification",
+                                    foldRemindersIntoLive,
+                                    onCheckedChange = { foldRemindersIntoLive = it }
+                                )
+                            }
+                            var focusLiveActivity by rememberChronosPreferenceBoolean(
+                                NotificationPreferenceKeys.FOCUS_LIVE_ACTIVITY,
+                                true
+                            )
+                            CheckboxSetting(
+                                "Focus live notification",
+                                focusLiveActivity,
+                                onCheckedChange = { focusLiveActivity = it }
+                            )
+                            var liveSurfacePrefsInitialized by remember { mutableStateOf(false) }
+                            LaunchedEffect(currentBlockLive, foldRemindersIntoLive) {
+                                if (!liveSurfacePrefsInitialized) {
+                                    liveSurfacePrefsInitialized = true
+                                } else {
+                                    onLiveSurfacePreferencesChanged(currentBlockLive)
+                                }
+                            }
+                            var focusLivePrefsInitialized by remember { mutableStateOf(false) }
+                            LaunchedEffect(focusLiveActivity) {
+                                if (!focusLivePrefsInitialized) {
+                                    focusLivePrefsInitialized = true
+                                } else {
+                                    onFocusLiveActivityPreferenceChanged()
+                                }
+                            }
                             if (currentBlockLive && !canPostPromotedNotificationsCompat(notificationsContext)) {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(
@@ -1299,6 +1389,14 @@ internal fun SidebarPageContent(
                             CheckboxSetting("High contrast", highContrastEnabled, onHighContrastChanged)
                             var showRingGuide by rememberPersistentBoolean("show_ring_guide", true)
                             CheckboxSetting("Ring guides", showRingGuide, onCheckedChange = { showRingGuide = it })
+                            var compactEditors by rememberPersistentUiBooleanSetting(
+                                ChronosUiSettingsKeys.KEY_ADAPTIVE_EDITOR_ENABLED, true
+                            )
+                            CheckboxSetting(
+                                "Compact editors",
+                                compactEditors,
+                                onCheckedChange = { compactEditors = it }
+                            )
                         }
                     }
                 }

@@ -49,6 +49,40 @@ internal fun DayDialBlockEditorFields(
     onCategorySelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedTextField(
+            value = title,
+            onValueChange = onTitleChange,
+            label = { Text("Title") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        BlockEditorTimeFields(
+            startText = startText,
+            onStartTextChange = onStartTextChange,
+            durationText = durationText,
+            onDurationTextChange = onDurationTextChange,
+        )
+        Text(
+            text = "Category",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        BlockEditorCategoryChipSelector(
+            selectedCategory = category,
+            onCategorySelected = onCategorySelected,
+        )
+    }
+}
+
+@Composable
+internal fun BlockEditorTimeFields(
+    startText: String,
+    onStartTextChange: (String) -> Unit,
+    durationText: String,
+    onDurationTextChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
     val parsedStartMinute = parseMinuteOfDay(startText)
     val startMinute = parsedStartMinute ?: 9 * 60
     val durationMinutes = durationText.toIntOrNull()
@@ -57,13 +91,6 @@ internal fun DayDialBlockEditorFields(
     val endMinute = blockEditorEndMinute(startMinute, durationMinutes)
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedTextField(
-            value = title,
-            onValueChange = onTitleChange,
-            label = { Text("Title") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
         BlockTimeRangeSummary(
             start = startText,
             endTimeStr = formatMinuteOfDay(endMinute),
@@ -79,7 +106,8 @@ internal fun DayDialBlockEditorFields(
                 value = parsedStartMinute?.let(::formatMinuteOfDay) ?: startText.ifBlank { "Pick a time" },
                 selectedMinute = startMinute,
                 onTimeSelected = { onStartTextChange(formatMinuteOfDay(it)) },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                enabled = enabled,
             )
             ChronosTimePickerField(
                 label = "End time",
@@ -88,25 +116,16 @@ internal fun DayDialBlockEditorFields(
                 onTimeSelected = { selectedEnd ->
                     onDurationTextChange(blockEditorDurationFromEnd(startMinute, selectedEnd).toString())
                 },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                enabled = enabled,
             )
         }
 
         ChronosDurationSlider(
             durationMinutes = durationMinutes,
-            onDurationChange = { onDurationTextChange(it.toString()) },
+            onDurationChange = { if (enabled) onDurationTextChange(it.toString()) },
             range = BlockEditorMinDurationMinutes..BlockEditorMaxDurationMinutes,
             label = "Adjust Duration"
-        )
-
-        Text(
-            text = "Category",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        CategoryChipSelector(
-            selectedCategory = category,
-            onCategorySelected = onCategorySelected
         )
     }
 }
@@ -163,9 +182,10 @@ private fun BlockTimeRangeSummary(
 }
 
 @Composable
-private fun CategoryChipSelector(
+internal fun BlockEditorCategoryChipSelector(
     selectedCategory: String,
-    onCategorySelected: (String) -> Unit
+    onCategorySelected: (String) -> Unit,
+    enabled: Boolean = true,
 ) {
     val categories = listOf("WORK", "BREAK", "MEETING", "ROUTINE", "MEDICATION", "RECOVERY", "PERSONAL")
     Row(
@@ -191,7 +211,7 @@ private fun CategoryChipSelector(
                         color = borderCol,
                         shape = MaterialTheme.shapes.small
                     )
-                    .chronosHapticClick(onClick = { onCategorySelected(cat) })
+                    .chronosHapticClick(onClick = { if (enabled) onCategorySelected(cat) }, enabled = enabled)
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

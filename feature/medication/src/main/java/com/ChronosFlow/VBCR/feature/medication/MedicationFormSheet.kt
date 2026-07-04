@@ -45,12 +45,16 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosFormBottomSheet
 import com.ChronosFlow.VBCR.core.ui.components.ChronosModalActionLabels
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFormPreviewCard
 import com.ChronosFlow.VBCR.core.ui.components.commandPaletteSpeechQuery
+import com.ChronosFlow.VBCR.core.ui.components.CardEditorScaffold
+import com.ChronosFlow.VBCR.core.ui.components.CardEditorSection
 import com.ChronosFlow.VBCR.core.ui.components.ChronosCollapsibleSection
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFormSection
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFormSwitchRow
 import com.ChronosFlow.VBCR.core.ui.components.ChronosListCard
 import com.ChronosFlow.VBCR.core.ui.components.ChronosOptionChips
 import com.ChronosFlow.VBCR.core.ui.components.ChronosTimePickerField
+import com.ChronosFlow.VBCR.core.ui.components.EditorQuickAttribute
+import com.ChronosFlow.VBCR.core.ui.components.rememberCardEditorRevealController
 import com.ChronosFlow.VBCR.core.ui.components.formatDisplayMinute
 import com.ChronosFlow.VBCR.core.ui.components.formatDurationLabel
 import com.ChronosFlow.VBCR.core.ui.components.withSelectedOption
@@ -266,23 +270,7 @@ internal fun MedicationFormSheet(
     var reminderWindowMinutes by rememberSaveable(planKey) { mutableStateOf(initialWindowMinutes) }
     var templatesExpanded by rememberSaveable(planKey) { mutableStateOf(false) }
     var historyExpanded by rememberSaveable(planKey) { mutableStateOf(false) }
-    var doseExpanded by rememberSaveable(planKey) { mutableStateOf(initialPlan != null || dosage.isBlank()) }
-    var reminderExpanded by rememberSaveable(planKey) {
-        mutableStateOf(initialPlan != null || medicationReminderCount(frequency) > 1 || reminderPreset == "Custom")
-    }
-    var safetyExpanded by rememberSaveable(planKey) {
-        mutableStateOf(
-            initialPlan?.safetyProfile?.let { profile ->
-                profile.form.isNotBlank() || profile.route.isNotBlank() ||
-                    profile.pharmacyName?.isNotBlank() == true ||
-                    profile.prescriberName?.isNotBlank() == true ||
-                    profile.cautions.isNotEmpty()
-            } == true
-        )
-    }
-    var refillExpanded by rememberSaveable(planKey) {
-        mutableStateOf(hasRefillTracking || notes.isNotBlank())
-    }
+    val revealController = rememberCardEditorRevealController(planKey)
     var lastAutoAssistCapture by rememberSaveable(planKey) { mutableStateOf("") }
 
     val parsedReminder = parseFlexibleMinute(reminder)
@@ -311,7 +299,7 @@ internal fun MedicationFormSheet(
             prefillDraft.route?.let { route = it }
             if (prefillDraft.hasRefillTracking == true) {
                 hasRefillTracking = true
-                refillExpanded = true
+                revealController.reveal("refill")
             }
         }
     }
@@ -350,10 +338,15 @@ internal fun MedicationFormSheet(
         form = medicationForm,
         suggestions = contextualAssistSuggestions
     )
-    val showMedicationDoseDetails = doseExpanded || adaptiveMedicationHints.showDose
-    val showMedicationReminderDetails = reminderExpanded || adaptiveMedicationHints.showReminder
-    val showMedicationSafetyDetails = safetyExpanded || adaptiveMedicationHints.showSafety
-    val showMedicationRefillDetails = refillExpanded || adaptiveMedicationHints.showRefill
+    val hasMedicationSafetyValue = initialPlan?.safetyProfile?.let { profile ->
+        profile.form.isNotBlank() || profile.route.isNotBlank() ||
+            profile.pharmacyName?.isNotBlank() == true ||
+            profile.prescriberName?.isNotBlank() == true ||
+            profile.cautions.isNotEmpty()
+    } == true ||
+        pharmacyName.isNotBlank() ||
+        prescriberName.isNotBlank() ||
+        cautions.isNotBlank()
     val autoAssistCapture = medicationAutoAssistCapture(
         name = medicationContextQuery,
         dosage = dosage,
@@ -510,9 +503,9 @@ internal fun MedicationFormSheet(
                                 setFourth = { fourthReminder = it }
                             )
                         }
-                        reminderExpanded = true
+                        revealController.reveal("reminder")
                     }
-                doseExpanded = true
+                revealController.reveal("dose")
             }
             is MedicationAssistSuggestion.Reminder -> {
                 reminderOverride = formatDisplayMinute(suggestion.primaryMinute)
@@ -528,26 +521,26 @@ internal fun MedicationFormSheet(
                         setFourth = { fourthReminder = it }
                     )
                 }
-                reminderExpanded = true
+                revealController.reveal("reminder")
             }
             is MedicationAssistSuggestion.MealTiming -> {
                 mealTiming = suggestion.mealTiming
                 takeWithFood = suggestion.mealTiming == "With food"
-                reminderExpanded = true
+                revealController.reveal("reminder")
             }
             is MedicationAssistSuggestion.RefillTracking -> {
                 hasRefillTracking = true
                 refillDoses = suggestion.dosesLeft.toString()
-                refillExpanded = true
+                revealController.reveal("refill")
             }
             is MedicationAssistSuggestion.Notes -> {
                 notes = suggestion.notes
-                refillExpanded = true
+                revealController.reveal("refill")
             }
             is MedicationAssistSuggestion.FormRoute -> {
                 medicationForm = suggestion.form
                 route = suggestion.route
-                safetyExpanded = true
+                revealController.reveal("safety")
             }
         }
         supersededMedicationAssistSuggestionIds(suggestion, assistState.suggestions).forEach { id ->
@@ -676,95 +669,504 @@ internal fun MedicationFormSheet(
                 null
             }
         )
-        ChronosFormSection(
-            title = "Essentials",
-            subtitle = "Keep the plan identity visible while details stay grouped."
-        ) {
+        CardEditorScaffold(
+            kind = "medication",
+            stateKey = planKey,
+            revealController = revealController,
+            attributes = listOf(
+                EditorQuickAttribute(
+                    id = "dose",
+                    title = "Dose",
+                    value = dosage.takeIf { it.isNotBlank() }?.let { "$it $unit" },
+                    onReveal = {},
+                ),
+                EditorQuickAttribute(
+                    id = "reminder",
+                    title = "Reminder",
+                    value = if (isAsNeeded) "As needed" else reminderTimeLabels.firstOrNull(),
+                    onReveal = {},
+                ),
+                EditorQuickAttribute(
+                    id = "safety",
+                    title = "Safety",
+                    value = if (
+                        pharmacyName.isNotBlank() ||
+                        prescriberName.isNotBlank() ||
+                        cautions.isNotBlank()
+                    ) {
+                        "Set"
+                    } else {
+                        null
+                    },
+                    onReveal = {},
+                ),
+                EditorQuickAttribute(
+                    id = "refill",
+                    title = "Refill",
+                    value = if (hasRefillTracking) {
+                        parsedRefillCount?.let { "$it left" } ?: "On"
+                    } else {
+                        null
+                    },
+                    onReveal = {},
+                    onClear = { hasRefillTracking = false },
+                ),
+            ),
+            sections = listOf(
+                CardEditorSection(
+                    id = "dose",
+                    title = "Dose",
+                    summary = if (dosage.isBlank()) "Add prescribed amount" else "$dosage $unit",
+                    hasValue = dosage.isNotBlank(),
+                    adaptiveHint = adaptiveMedicationHints.showDose || (initialPlan == null && dosage.isBlank()),
+                ) {
+            Text(
+                text = "Amount",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            ChronosOptionChips(
+                label = "Presets",
+                options = contextualMedicationDosagePresets(
+                    name = medicationContextQuery,
+                    dosage = dosage,
+                    suggestions = contextualAssistSuggestions
+                ).withSelectedOption(dosage),
+                selected = dosage,
+                onSelected = { dosage = it }
+            )
             OutlinedTextField(
-                value = name,
-                onValueChange = {
-                    name = it
-                    if (it.isNotBlank()) nameEverFilled = true
-                },
-                label = { Text("Name") },
-                placeholder = { Text("e.g. Lisinopril") },
+                value = dosage,
+                onValueChange = { dosage = it },
+                label = { Text("Custom amount") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                isError = nameEverFilled && name.isBlank(),
-                supportingText = if (name.isBlank()) {
-                    { Text("Required") }
+                supportingText = if (dosage.isBlank()) {
+                    { Text("Required — type an amount or pick a preset") }
                 } else {
                     null
                 }
             )
             ChronosOptionChips(
-                label = "Context names",
-                options = contextualMedicationNameOptions,
-                selected = name,
-                onSelected = { name = it }
+                label = "Unit",
+                options = contextualMedicationUnitOptions(
+                    name = medicationContextQuery,
+                    selectedUnit = unit,
+                    suggestions = contextualAssistSuggestions
+                ).withSelectedOption(unit),
+                selected = unit,
+                onSelected = {
+                    unit = it
+                    medicationForm = inferMedicationForm(it, name)
+                    route = inferMedicationRoute(medicationForm)
+                }
             )
-            ChronosSpeechInputButton(
-                prompt = "Describe the medication exactly as you want tracked, including dose, timing, and frequency.",
-                label = "Dictate medication",
-                onTranscript = { transcript ->
-                    val capture = commandPaletteSpeechQuery(transcript)
-                    if (capture.isBlank()) return@ChronosSpeechInputButton
-                    medicationCaptureContext = capture
-                    val transcriptDraft = medicationTranscriptDraft(capture)
-                    val requestName = name.ifBlank { transcriptDraft.name ?: capture }
-                    val requestDosage = transcriptDraft.dosage ?: dosage
-                    val requestUnit = transcriptDraft.unit ?: unit
-                    val requestFrequency = transcriptDraft.frequency ?: frequency
-                    val requestMealTiming = transcriptDraft.mealTiming ?: mealTiming
-                    val requestForm = transcriptDraft.form ?: medicationForm
-                    val requestRoute = transcriptDraft.route ?: route
-                    val requestHasRefillTracking = transcriptDraft.hasRefillTracking ?: hasRefillTracking
-                    val requestNotes = if (name.isBlank()) {
-                        notes
-                    } else {
-                        appendMedicationTranscript(notes, capture)
+                },
+                CardEditorSection(
+                    id = "reminder",
+                    title = "Reminder",
+                    summary = buildMedicationScheduleSummary(
+                        parsedReminder = parsedReminder,
+                        needsSecondary = needsSecondary,
+                        parsedSecondary = parsedSecondary,
+                        needsThird = needsThird,
+                        parsedThird = parsedThird,
+                        needsFourth = needsFourth,
+                        parsedFourth = parsedFourth,
+                        isAsNeeded = isAsNeeded,
+                        frequency = frequency,
+                        windowMinutes = normalizedReminderWindowMinutes,
+                    ),
+                    hasValue = initialPlan != null || parsedReminder != null || isAsNeeded,
+                    adaptiveHint = adaptiveMedicationHints.showReminder ||
+                        medicationReminderCount(frequency) > 1 ||
+                        reminderPreset == "Custom",
+                ) {
+            ChronosOptionChips(
+                label = "Frequency",
+                options = contextualMedicationFrequencyOptions(
+                    name = medicationContextQuery,
+                    notes = notes,
+                    frequency = frequency,
+                    suggestions = contextualAssistSuggestions
+                ).withSelectedOption(frequency),
+                selected = frequency,
+                onSelected = { choice ->
+                    frequency = choice
+                    parsedReminder?.let { primary ->
+                        applyEvenMedicationSpacing(
+                            primaryMinute = primary,
+                            count = medicationReminderCount(choice),
+                            setSecondary = { secondaryReminder = it },
+                            setThird = { thirdReminder = it },
+                            setFourth = { fourthReminder = it }
+                        )
                     }
-                    if (name.isBlank()) {
-                        name = requestName
-                    } else {
-                        notes = requestNotes
+                }
+            )
+                if (isAsNeeded) {
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "As needed · no scheduled reminders",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
                     }
-                    transcriptDraft.dosage?.let { dosage = it }
-                    transcriptDraft.unit?.let { unit = it }
-                    transcriptDraft.frequency?.let { frequency = it }
-                    transcriptDraft.mealTiming?.let { mealTiming = it }
-                    transcriptDraft.form?.let { medicationForm = it }
-                    transcriptDraft.route?.let { route = it }
-                    transcriptDraft.hasRefillTracking?.let { hasRefillTracking = it }
-                    onClearAssist?.invoke()
-                    lastAutoAssistCapture = medicationAutoAssistCapture(
-                        name = listOf(requestName, capture)
-                            .map { it.trim() }
-                            .filter { it.isNotBlank() }
-                            .distinct()
-                            .joinToString(" "),
-                        dosage = requestDosage,
-                        unit = requestUnit,
-                        frequency = requestFrequency,
-                        mealTiming = requestMealTiming,
-                        notes = listOf(requestNotes, capture)
-                            .map { it.trim() }
-                            .filter { it.isNotBlank() }
-                            .distinct()
-                            .joinToString(" "),
-                        form = requestForm,
-                        route = requestRoute
+                    ChronosOptionChips(
+                        label = "Meal timing",
+                        options = contextualMedicationMealTimingOptions(
+                            name = name,
+                            notes = notes,
+                            selectedMealTiming = mealTiming,
+                            suggestions = contextualAssistSuggestions,
+                        ).withSelectedOption(mealTiming),
+                        selected = mealTiming,
+                        onSelected = { choice ->
+                            mealTiming = choice
+                            takeWithFood = choice == "With food"
+                        },
                     )
-                    onRequestAssist?.invoke(
-                        MedicationAssistRequest(
-                            name = requestName,
+                } else {
+            ChronosOptionChips(
+                label = "Reminder window",
+                options = medicationReminderWindowOptions.map(Int::toString),
+                selected = normalizedReminderWindowMinutes.toString(),
+                onSelected = { value ->
+                    reminderWindowMinutes = value.toIntOrNull()
+                        ?.coerceIn(5, 240)
+                        ?: normalizedReminderWindowMinutes
+                },
+                optionLabel = { value ->
+                    value.toIntOrNull()?.let(::formatDurationLabel) ?: value
+                }
+            )
+            ChronosOptionChips(
+                label = "Time of day",
+                options = contextualMedicationReminderOptions(
+                    name = name,
+                    notes = notes,
+                    suggestions = contextualAssistSuggestions
+                ).withSelectedOption(reminderPreset),
+                selected = reminderPreset,
+                onSelected = { preset ->
+                    reminderPresetOverride = preset
+                    medicationReminderPresets[preset]?.let { minute ->
+                        reminderOverride = formatDisplayMinute(minute)
+                    }
+                },
+                optionLabel = { preset ->
+                    medicationReminderPresets[preset]?.let { formatDisplayMinute(it) }?.let { time ->
+                        "$preset · $time"
+                    } ?: preset
+                }
+            )
+            if (parsedReminder != null) {
+                ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Reminder at ${formatDisplayMinute(parsedReminder)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                ChronosFilledTonalButton(
+                    onClick = {
+                        reminderOverride = nudgeMinuteText(reminder, -30, parsedReminder ?: 8 * 60)
+                        reminderPresetOverride = "Custom"
+                    },
+                    modifier = Modifier.weight(1f)
+                ) { Text("−30m") }
+                ChronosFilledTonalButton(
+                    onClick = {
+                        reminderOverride = nudgeMinuteText(reminder, 30, parsedReminder ?: 8 * 60)
+                        reminderPresetOverride = "Custom"
+                    },
+                    modifier = Modifier.weight(1f)
+                ) { Text("+30m") }
+            }
+            if (reminderCount > 1 && parsedReminder != null) {
+                ChronosFilledTonalButton(
+                    onClick = {
+                        applyEvenMedicationSpacing(
+                            primaryMinute = parsedReminder,
+                            count = reminderCount,
+                            setSecondary = { secondaryReminder = it },
+                            setThird = { thirdReminder = it },
+                            setFourth = { fourthReminder = it }
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Evenly space reminders")
+                }
+            }
+            if (reminderPreset == "Custom") {
+                ChronosTimePickerField(
+                    label = "Custom time",
+                    value = parsedReminder?.let(::formatDisplayMinute) ?: reminder.ifBlank { "Pick a time" },
+                    selectedMinute = parsedReminder,
+                    onTimeSelected = { minute ->
+                        reminderOverride = formatDisplayMinute(minute)
+                        reminderPresetOverride = "Custom"
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            if (needsSecondary) {
+                if (parsedReminder != null) {
+                    ChronosOptionChips(
+                        label = "Spacing",
+                        options = medicationSecondarySpacingOptions.map(Int::toString),
+                        selected = medicationSecondarySpacingOptions
+                            .firstOrNull { hours ->
+                                parsedSecondary == ((parsedReminder + hours * 60) % (24 * 60))
+                            }?.toString().orEmpty(),
+                        onSelected = { value ->
+                            val hours = value.toIntOrNull() ?: 12
+                            secondaryReminder = formatDisplayMinute((parsedReminder + hours * 60) % (24 * 60))
+                        },
+                        optionLabel = { value ->
+                            value.toIntOrNull()?.let { hours -> formatDurationLabel(hours * 60) } ?: value
+                        }
+                    )
+                }
+                ChronosTimePickerField(
+                    label = "Second reminder",
+                    value = parsedSecondary?.let(::formatDisplayMinute) ?: secondaryReminder.ifBlank { "Pick a time" },
+                    selectedMinute = parsedSecondary ?: parsedReminder,
+                    onTimeSelected = { minute ->
+                        secondaryReminder = formatDisplayMinute(minute)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            if (needsThird) {
+                ChronosTimePickerField(
+                    label = "Third reminder",
+                    value = parsedThird?.let(::formatDisplayMinute) ?: thirdReminder.ifBlank { "Pick a time" },
+                    selectedMinute = parsedThird ?: parsedReminder,
+                    onTimeSelected = { minute ->
+                        thirdReminder = formatDisplayMinute(minute)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            if (needsFourth) {
+                ChronosTimePickerField(
+                    label = "Fourth reminder",
+                    value = parsedFourth?.let(::formatDisplayMinute) ?: fourthReminder.ifBlank { "Pick a time" },
+                    selectedMinute = parsedFourth ?: parsedReminder,
+                    onTimeSelected = { minute ->
+                        fourthReminder = formatDisplayMinute(minute)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            ChronosOptionChips(
+                label = "Meal timing",
+                options = contextualMedicationMealTimingOptions(
+                    name = name,
+                    notes = notes,
+                    selectedMealTiming = mealTiming,
+                    suggestions = contextualAssistSuggestions
+                ).withSelectedOption(mealTiming),
+                selected = mealTiming,
+                onSelected = { choice ->
+                    mealTiming = choice
+                    takeWithFood = choice == "With food"
+                }
+            )
+                }
+                },
+                CardEditorSection(
+                    id = "safety",
+                    title = "Safety",
+                    summary = "${medicationForm.replaceFirstChar(Char::uppercase)} · ${route.replaceFirstChar(Char::uppercase)}",
+                    hasValue = hasMedicationSafetyValue,
+                    adaptiveHint = adaptiveMedicationHints.showSafety,
+                ) {
+            ChronosOptionChips(
+                label = "Dosage form",
+                options = contextualMedicationFormOptions(
+                    name = listOf(name, dosage, unit, frequency, mealTiming, notes)
+                        .joinToString(" "),
+                    selectedForm = medicationForm,
+                    suggestions = contextualAssistSuggestions
+                ).withSelectedOption(medicationForm),
+                selected = medicationForm,
+                onSelected = {
+                    medicationForm = it
+                    route = inferMedicationRoute(it)
+                }
+            )
+            ChronosOptionChips(
+                label = "Route",
+                options = contextualMedicationRouteOptions(
+                    name = listOf(name, dosage, unit, frequency, mealTiming, notes, medicationForm)
+                        .joinToString(" "),
+                    selectedRoute = route,
+                    suggestions = contextualAssistSuggestions
+                ).withSelectedOption(route),
+                selected = route,
+                onSelected = { route = it }
+            )
+            OutlinedTextField(
+                value = pharmacyName,
+                onValueChange = { pharmacyName = it },
+                label = { Text("Pharmacy (optional)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = prescriberName,
+                onValueChange = { prescriberName = it },
+                label = { Text("Prescriber (optional)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = cautions,
+                onValueChange = { cautions = it },
+                label = { Text("Cautions") },
+                placeholder = { Text("e.g. Drowsy, no alcohol") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 1,
+                maxLines = 3
+            )
+                },
+                CardEditorSection(
+                    id = "refill",
+                    title = "Refill & notes",
+                    summary = buildString {
+                        append(if (hasRefillTracking) "Refill tracking on" else "No refill tracking")
+                        if (notes.isNotBlank()) append(" · notes added")
+                    },
+                    hasValue = hasRefillTracking || notes.isNotBlank(),
+                    adaptiveHint = adaptiveMedicationHints.showRefill,
+                ) {
+            ChronosFormSwitchRow(
+                title = "Refill tracking",
+                subtitle = "Alert when doses remaining are low.",
+                checked = hasRefillTracking,
+                onCheckedChange = { hasRefillTracking = it }
+            )
+            if (hasRefillTracking) {
+                ChronosOptionChips(
+                    label = "Doses left",
+                    options = contextualMedicationRefillCountOptions(
+                        selectedRefillDoses = refillDoses,
+                        suggestions = contextualAssistSuggestions
+                    ).withSelectedOption(refillDoses),
+                    selected = refillDoses,
+                    onSelected = { refillDoses = it }
+                )
+                OutlinedTextField(
+                    value = refillDoses,
+                    onValueChange = { refillDoses = it.filter { char -> char.isDigit() } },
+                    label = { Text("Custom count") },
+                    isError = isRefillError,
+                    supportingText = if (isRefillError) {
+                        { Text("Must be a positive number") }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            }
+            OutlinedTextField(
+                value = notes,
+                onValueChange = { notes = it },
+                label = { Text("Notes (optional)") },
+                placeholder = { Text("e.g. Take with water") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+                maxLines = 4
+            )
+            if (onRequestRewrite != null) {
+                ChronosTextRewriteRow(
+                    text = notes,
+                    rewriteState = rewriteState,
+                    onRequestRewrite = onRequestRewrite,
+                    onApplyRewrite = { rewritten ->
+                        notes = rewritten
+                        onClearRewrite?.invoke()
+                    },
+                    onDismissRewrite = { onClearRewrite?.invoke() },
+                    fieldName = "notes"
+                )
+            }
+                },
+            ),
+            essentials = {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = {
+                        name = it
+                        if (it.isNotBlank()) nameEverFilled = true
+                    },
+                    label = { Text("Name") },
+                    placeholder = { Text("e.g. Lisinopril") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    isError = nameEverFilled && name.isBlank(),
+                    supportingText = if (name.isBlank()) {
+                        { Text("Required") }
+                    } else {
+                        null
+                    }
+                )
+                ChronosOptionChips(
+                    label = "Context names",
+                    options = contextualMedicationNameOptions,
+                    selected = name,
+                    onSelected = { name = it }
+                )
+                ChronosSpeechInputButton(
+                    prompt = "Describe the medication exactly as you want tracked, including dose, timing, and frequency.",
+                    label = "Dictate medication",
+                    onTranscript = { transcript ->
+                        val capture = commandPaletteSpeechQuery(transcript)
+                        if (capture.isBlank()) return@ChronosSpeechInputButton
+                        medicationCaptureContext = capture
+                        val transcriptDraft = medicationTranscriptDraft(capture)
+                        val requestName = name.ifBlank { transcriptDraft.name ?: capture }
+                        val requestDosage = transcriptDraft.dosage ?: dosage
+                        val requestUnit = transcriptDraft.unit ?: unit
+                        val requestFrequency = transcriptDraft.frequency ?: frequency
+                        val requestMealTiming = transcriptDraft.mealTiming ?: mealTiming
+                        val requestForm = transcriptDraft.form ?: medicationForm
+                        val requestRoute = transcriptDraft.route ?: route
+                        val requestHasRefillTracking = transcriptDraft.hasRefillTracking ?: hasRefillTracking
+                        val requestNotes = if (name.isBlank()) {
+                            notes
+                        } else {
+                            appendMedicationTranscript(notes, capture)
+                        }
+                        if (name.isBlank()) {
+                            name = requestName
+                        } else {
+                            notes = requestNotes
+                        }
+                        transcriptDraft.dosage?.let { dosage = it }
+                        transcriptDraft.unit?.let { unit = it }
+                        transcriptDraft.frequency?.let { frequency = it }
+                        transcriptDraft.mealTiming?.let { mealTiming = it }
+                        transcriptDraft.form?.let { medicationForm = it }
+                        transcriptDraft.route?.let { route = it }
+                        transcriptDraft.hasRefillTracking?.let { hasRefillTracking = it }
+                        onClearAssist?.invoke()
+                        lastAutoAssistCapture = medicationAutoAssistCapture(
+                            name = listOf(requestName, capture)
+                                .map { it.trim() }
+                                .filter { it.isNotBlank() }
+                                .distinct()
+                                .joinToString(" "),
                             dosage = requestDosage,
                             unit = requestUnit,
                             frequency = requestFrequency,
-                            primaryReminderMinute = parsedReminder ?: primaryInitialReminder,
-                            secondaryReminderMinute = parsedSecondary,
                             mealTiming = requestMealTiming,
-                            hasRefillTracking = requestHasRefillTracking,
                             notes = listOf(requestNotes, capture)
                                 .map { it.trim() }
                                 .filter { it.isNotBlank() }
@@ -773,73 +1175,92 @@ internal fun MedicationFormSheet(
                             form = requestForm,
                             route = requestRoute
                         )
-                    )
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-            if (onRequestAssist != null) {
-                ChronosFilledTonalButton(
-                    onClick = {
-                        onRequestAssist(
+                        onRequestAssist?.invoke(
                             MedicationAssistRequest(
-                                name = name.ifBlank { medicationCaptureContext },
-                                dosage = dosage,
-                                unit = unit,
-                                frequency = frequency,
-                                primaryReminderMinute = parsedReminder ?: 8 * 60,
-                                secondaryReminderMinute = if (needsSecondary) parsedSecondary else null,
-                                mealTiming = mealTiming,
-                                hasRefillTracking = hasRefillTracking,
-                                notes = listOf(notes, medicationCaptureContext)
+                                name = requestName,
+                                dosage = requestDosage,
+                                unit = requestUnit,
+                                frequency = requestFrequency,
+                                primaryReminderMinute = parsedReminder ?: primaryInitialReminder,
+                                secondaryReminderMinute = parsedSecondary,
+                                mealTiming = requestMealTiming,
+                                hasRefillTracking = requestHasRefillTracking,
+                                notes = listOf(requestNotes, capture)
                                     .map { it.trim() }
                                     .filter { it.isNotBlank() }
                                     .distinct()
                                     .joinToString(" "),
-                                form = medicationForm,
-                                route = route
+                                form = requestForm,
+                                route = requestRoute
                             )
                         )
                     },
-                    enabled = !assistState.isLoading,
                     modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        when {
-                            assistState.isLoading -> "Drafting suggestions…"
-                            visibleAssistSuggestions.isNotEmpty() -> "Refresh suggestions"
-                            else -> "Suggest medication fields with AI"
-                        }
+                )
+                if (onRequestAssist != null) {
+                    ChronosFilledTonalButton(
+                        onClick = {
+                            onRequestAssist(
+                                MedicationAssistRequest(
+                                    name = name.ifBlank { medicationCaptureContext },
+                                    dosage = dosage,
+                                    unit = unit,
+                                    frequency = frequency,
+                                    primaryReminderMinute = parsedReminder ?: 8 * 60,
+                                    secondaryReminderMinute = if (needsSecondary) parsedSecondary else null,
+                                    mealTiming = mealTiming,
+                                    hasRefillTracking = hasRefillTracking,
+                                    notes = listOf(notes, medicationCaptureContext)
+                                        .map { it.trim() }
+                                        .filter { it.isNotBlank() }
+                                        .distinct()
+                                        .joinToString(" "),
+                                    form = medicationForm,
+                                    route = route
+                                )
+                            )
+                        },
+                        enabled = !assistState.isLoading,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            when {
+                                assistState.isLoading -> "Drafting suggestions…"
+                                visibleAssistSuggestions.isNotEmpty() -> "Refresh suggestions"
+                                else -> "Suggest medication fields with AI"
+                            }
+                        )
+                    }
+                }
+                assistState.assistSnapshot?.let { snapshot ->
+                    GenAiAssistBanner(
+                        title = snapshot.bannerTitle,
+                        message = snapshot.bannerMessage +
+                            " Type or dictate the medication and AI drafts editable fields — name, dose, timing, form, route, and refill cues. This is extraction only, never medical advice; review before saving.",
+                        ready = snapshot.isReady
                     )
                 }
-            }
-            assistState.assistSnapshot?.let { snapshot ->
-                GenAiAssistBanner(
-                    title = snapshot.bannerTitle,
-                    message = snapshot.bannerMessage +
-                        " Type or dictate the medication and AI drafts editable fields — name, dose, timing, form, route, and refill cues. This is extraction only, never medical advice; review before saving.",
-                    ready = snapshot.isReady
-                )
-            }
-            assistState.message?.let { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (visibleAssistSuggestions.isNotEmpty() || assistState.isLoading) {
-                ChronosAssistSuggestionChips(
-                    suggestions = visibleAssistSuggestions,
-                    isLoading = assistState.isLoading,
-                    onApply = ::applyMedicationAssistSuggestion,
-                    label = { it.label },
-                    reason = { it.reason },
-                    sourceLabel = { GenAiAssistCopy.routineAssistSourceLabel(it.source) },
-                    loadingLabel = "Drafting AI suggestions…",
-                    onApplyAll = ::applyAllAssistSuggestions
-                )
-            }
-        }
+                assistState.message?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (visibleAssistSuggestions.isNotEmpty() || assistState.isLoading) {
+                    ChronosAssistSuggestionChips(
+                        suggestions = visibleAssistSuggestions,
+                        isLoading = assistState.isLoading,
+                        onApply = ::applyMedicationAssistSuggestion,
+                        label = { it.label },
+                        reason = { it.reason },
+                        sourceLabel = { GenAiAssistCopy.routineAssistSourceLabel(it.source) },
+                        loadingLabel = "Drafting AI suggestions…",
+                        onApplyAll = ::applyAllAssistSuggestions
+                    )
+                }
+            },
+        )
         val contextualMedicationTemplateLabels = contextualMedicationTemplateOptions(
             name = name,
             dosage = dosage,
@@ -1140,388 +1561,6 @@ internal fun MedicationFormSheet(
                         }
                     }
                 }
-            }
-        }
-        ChronosCollapsibleSection(
-            title = "Dose",
-            summary = if (dosage.isBlank()) "Add prescribed amount" else "$dosage $unit",
-            expanded = showMedicationDoseDetails,
-            onExpandedChange = { doseExpanded = it }
-        ) {
-            Text(
-                text = "Amount",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            ChronosOptionChips(
-                label = "Presets",
-                options = contextualMedicationDosagePresets(
-                    name = medicationContextQuery,
-                    dosage = dosage,
-                    suggestions = contextualAssistSuggestions
-                ).withSelectedOption(dosage),
-                selected = dosage,
-                onSelected = { dosage = it }
-            )
-            OutlinedTextField(
-                value = dosage,
-                onValueChange = { dosage = it },
-                label = { Text("Custom amount") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                supportingText = if (dosage.isBlank()) {
-                    { Text("Required — type an amount or pick a preset") }
-                } else {
-                    null
-                }
-            )
-            ChronosOptionChips(
-                label = "Unit",
-                options = contextualMedicationUnitOptions(
-                    name = medicationContextQuery,
-                    selectedUnit = unit,
-                    suggestions = contextualAssistSuggestions
-                ).withSelectedOption(unit),
-                selected = unit,
-                onSelected = {
-                    unit = it
-                    medicationForm = inferMedicationForm(it, name)
-                    route = inferMedicationRoute(medicationForm)
-                }
-            )
-        }
-
-        ChronosCollapsibleSection(
-            title = "Reminder",
-            summary = buildMedicationScheduleSummary(
-                parsedReminder = parsedReminder,
-                needsSecondary = needsSecondary,
-                parsedSecondary = parsedSecondary,
-                needsThird = needsThird,
-                parsedThird = parsedThird,
-                needsFourth = needsFourth,
-                parsedFourth = parsedFourth,
-                isAsNeeded = isAsNeeded,
-                frequency = frequency,
-                windowMinutes = normalizedReminderWindowMinutes
-            ),
-            expanded = showMedicationReminderDetails,
-            onExpandedChange = { reminderExpanded = it }
-        ) {
-            ChronosOptionChips(
-                label = "Frequency",
-                options = contextualMedicationFrequencyOptions(
-                    name = medicationContextQuery,
-                    notes = notes,
-                    frequency = frequency,
-                    suggestions = contextualAssistSuggestions
-                ).withSelectedOption(frequency),
-                selected = frequency,
-                onSelected = { choice ->
-                    frequency = choice
-                    parsedReminder?.let { primary ->
-                        applyEvenMedicationSpacing(
-                            primaryMinute = primary,
-                            count = medicationReminderCount(choice),
-                            setSecondary = { secondaryReminder = it },
-                            setThird = { thirdReminder = it },
-                            setFourth = { fourthReminder = it }
-                        )
-                    }
-                }
-            )
-            if (isAsNeeded) {
-                ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "As needed · no scheduled reminders",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                ChronosOptionChips(
-                    label = "Meal timing",
-                    options = contextualMedicationMealTimingOptions(
-                        name = name,
-                        notes = notes,
-                        selectedMealTiming = mealTiming,
-                        suggestions = contextualAssistSuggestions
-                    ).withSelectedOption(mealTiming),
-                    selected = mealTiming,
-                    onSelected = { choice ->
-                        mealTiming = choice
-                        takeWithFood = choice == "With food"
-                    }
-                )
-                return@ChronosCollapsibleSection
-            }
-            ChronosOptionChips(
-                label = "Reminder window",
-                options = medicationReminderWindowOptions.map(Int::toString),
-                selected = normalizedReminderWindowMinutes.toString(),
-                onSelected = { value ->
-                    reminderWindowMinutes = value.toIntOrNull()
-                        ?.coerceIn(5, 240)
-                        ?: normalizedReminderWindowMinutes
-                },
-                optionLabel = { value ->
-                    value.toIntOrNull()?.let(::formatDurationLabel) ?: value
-                }
-            )
-            ChronosOptionChips(
-                label = "Time of day",
-                options = contextualMedicationReminderOptions(
-                    name = name,
-                    notes = notes,
-                    suggestions = contextualAssistSuggestions
-                ).withSelectedOption(reminderPreset),
-                selected = reminderPreset,
-                onSelected = { preset ->
-                    reminderPresetOverride = preset
-                    medicationReminderPresets[preset]?.let { minute ->
-                        reminderOverride = formatDisplayMinute(minute)
-                    }
-                },
-                optionLabel = { preset ->
-                    medicationReminderPresets[preset]?.let { formatDisplayMinute(it) }?.let { time ->
-                        "$preset · $time"
-                    } ?: preset
-                }
-            )
-            if (parsedReminder != null) {
-                ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "Reminder at ${formatDisplayMinute(parsedReminder)}",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                ChronosFilledTonalButton(
-                    onClick = {
-                        reminderOverride = nudgeMinuteText(reminder, -30, parsedReminder ?: 8 * 60)
-                        reminderPresetOverride = "Custom"
-                    },
-                    modifier = Modifier.weight(1f)
-                ) { Text("−30m") }
-                ChronosFilledTonalButton(
-                    onClick = {
-                        reminderOverride = nudgeMinuteText(reminder, 30, parsedReminder ?: 8 * 60)
-                        reminderPresetOverride = "Custom"
-                    },
-                    modifier = Modifier.weight(1f)
-                ) { Text("+30m") }
-            }
-            if (reminderCount > 1 && parsedReminder != null) {
-                ChronosFilledTonalButton(
-                    onClick = {
-                        applyEvenMedicationSpacing(
-                            primaryMinute = parsedReminder,
-                            count = reminderCount,
-                            setSecondary = { secondaryReminder = it },
-                            setThird = { thirdReminder = it },
-                            setFourth = { fourthReminder = it }
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Evenly space reminders")
-                }
-            }
-            if (reminderPreset == "Custom") {
-                ChronosTimePickerField(
-                    label = "Custom time",
-                    value = parsedReminder?.let(::formatDisplayMinute) ?: reminder.ifBlank { "Pick a time" },
-                    selectedMinute = parsedReminder,
-                    onTimeSelected = { minute ->
-                        reminderOverride = formatDisplayMinute(minute)
-                        reminderPresetOverride = "Custom"
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            if (needsSecondary) {
-                if (parsedReminder != null) {
-                    ChronosOptionChips(
-                        label = "Spacing",
-                        options = medicationSecondarySpacingOptions.map(Int::toString),
-                        selected = medicationSecondarySpacingOptions
-                            .firstOrNull { hours ->
-                                parsedSecondary == ((parsedReminder + hours * 60) % (24 * 60))
-                            }?.toString().orEmpty(),
-                        onSelected = { value ->
-                            val hours = value.toIntOrNull() ?: 12
-                            secondaryReminder = formatDisplayMinute((parsedReminder + hours * 60) % (24 * 60))
-                        },
-                        optionLabel = { value ->
-                            value.toIntOrNull()?.let { hours -> formatDurationLabel(hours * 60) } ?: value
-                        }
-                    )
-                }
-                ChronosTimePickerField(
-                    label = "Second reminder",
-                    value = parsedSecondary?.let(::formatDisplayMinute) ?: secondaryReminder.ifBlank { "Pick a time" },
-                    selectedMinute = parsedSecondary ?: parsedReminder,
-                    onTimeSelected = { minute ->
-                        secondaryReminder = formatDisplayMinute(minute)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            if (needsThird) {
-                ChronosTimePickerField(
-                    label = "Third reminder",
-                    value = parsedThird?.let(::formatDisplayMinute) ?: thirdReminder.ifBlank { "Pick a time" },
-                    selectedMinute = parsedThird ?: parsedReminder,
-                    onTimeSelected = { minute ->
-                        thirdReminder = formatDisplayMinute(minute)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            if (needsFourth) {
-                ChronosTimePickerField(
-                    label = "Fourth reminder",
-                    value = parsedFourth?.let(::formatDisplayMinute) ?: fourthReminder.ifBlank { "Pick a time" },
-                    selectedMinute = parsedFourth ?: parsedReminder,
-                    onTimeSelected = { minute ->
-                        fourthReminder = formatDisplayMinute(minute)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            ChronosOptionChips(
-                label = "Meal timing",
-                options = contextualMedicationMealTimingOptions(
-                    name = name,
-                    notes = notes,
-                    selectedMealTiming = mealTiming,
-                    suggestions = contextualAssistSuggestions
-                ).withSelectedOption(mealTiming),
-                selected = mealTiming,
-                onSelected = { choice ->
-                    mealTiming = choice
-                    takeWithFood = choice == "With food"
-                }
-            )
-        }
-
-        ChronosCollapsibleSection(
-            title = "Safety",
-            summary = "${medicationForm.replaceFirstChar(Char::uppercase)} · ${route.replaceFirstChar(Char::uppercase)}",
-            expanded = showMedicationSafetyDetails,
-            onExpandedChange = { safetyExpanded = it }
-        ) {
-            ChronosOptionChips(
-                label = "Dosage form",
-                options = contextualMedicationFormOptions(
-                    name = listOf(name, dosage, unit, frequency, mealTiming, notes)
-                        .joinToString(" "),
-                    selectedForm = medicationForm,
-                    suggestions = contextualAssistSuggestions
-                ).withSelectedOption(medicationForm),
-                selected = medicationForm,
-                onSelected = {
-                    medicationForm = it
-                    route = inferMedicationRoute(it)
-                }
-            )
-            ChronosOptionChips(
-                label = "Route",
-                options = contextualMedicationRouteOptions(
-                    name = listOf(name, dosage, unit, frequency, mealTiming, notes, medicationForm)
-                        .joinToString(" "),
-                    selectedRoute = route,
-                    suggestions = contextualAssistSuggestions
-                ).withSelectedOption(route),
-                selected = route,
-                onSelected = { route = it }
-            )
-            OutlinedTextField(
-                value = pharmacyName,
-                onValueChange = { pharmacyName = it },
-                label = { Text("Pharmacy (optional)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            OutlinedTextField(
-                value = prescriberName,
-                onValueChange = { prescriberName = it },
-                label = { Text("Prescriber (optional)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            OutlinedTextField(
-                value = cautions,
-                onValueChange = { cautions = it },
-                label = { Text("Cautions") },
-                placeholder = { Text("e.g. Drowsy, no alcohol") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 1,
-                maxLines = 3
-            )
-        }
-
-        ChronosCollapsibleSection(
-            title = "Refill & notes",
-            summary = buildString {
-                append(if (hasRefillTracking) "Refill tracking on" else "No refill tracking")
-                if (notes.isNotBlank()) append(" · notes added")
-            },
-            expanded = showMedicationRefillDetails,
-            onExpandedChange = { refillExpanded = it }
-        ) {
-            ChronosFormSwitchRow(
-                title = "Refill tracking",
-                subtitle = "Alert when doses remaining are low.",
-                checked = hasRefillTracking,
-                onCheckedChange = { hasRefillTracking = it }
-            )
-            if (hasRefillTracking) {
-                ChronosOptionChips(
-                    label = "Doses left",
-                    options = contextualMedicationRefillCountOptions(
-                        selectedRefillDoses = refillDoses,
-                        suggestions = contextualAssistSuggestions
-                    ).withSelectedOption(refillDoses),
-                    selected = refillDoses,
-                    onSelected = { refillDoses = it }
-                )
-                OutlinedTextField(
-                    value = refillDoses,
-                    onValueChange = { refillDoses = it.filter { char -> char.isDigit() } },
-                    label = { Text("Custom count") },
-                    isError = isRefillError,
-                    supportingText = if (isRefillError) {
-                        { Text("Must be a positive number") }
-                    } else {
-                        null
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-            }
-            OutlinedTextField(
-                value = notes,
-                onValueChange = { notes = it },
-                label = { Text("Notes (optional)") },
-                placeholder = { Text("e.g. Take with water") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 2,
-                maxLines = 4
-            )
-            if (onRequestRewrite != null) {
-                ChronosTextRewriteRow(
-                    text = notes,
-                    rewriteState = rewriteState,
-                    onRequestRewrite = onRequestRewrite,
-                    onApplyRewrite = { rewritten ->
-                        notes = rewritten
-                        onClearRewrite?.invoke()
-                    },
-                    onDismissRewrite = { onClearRewrite?.invoke() },
-                    fieldName = "notes"
-                )
             }
         }
     }

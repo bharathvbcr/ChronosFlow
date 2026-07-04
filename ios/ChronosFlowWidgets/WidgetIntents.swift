@@ -1,3 +1,4 @@
+import ActivityKit
 import AppIntents
 import SwiftData
 import WidgetKit
@@ -35,6 +36,8 @@ struct CompleteTaskIntent: AppIntent {
             try? context.save()
         }
         WidgetCenter.shared.reloadAllTimelines()
+        BlockLiveActivityChipRefresher.removeEntity(kind: .task, entityID: taskID)
+        LiveActivityRefreshBridge.post()
         return .result()
     }
 }
@@ -59,6 +62,8 @@ struct ToggleHabitIntent: AppIntent {
             try? context.save()
         }
         WidgetCenter.shared.reloadAllTimelines()
+        BlockLiveActivityChipRefresher.removeEntity(kind: .habit, entityID: habitID)
+        LiveActivityRefreshBridge.post()
         return .result()
     }
 }
@@ -84,6 +89,8 @@ struct MarkDoseTakenIntent: AppIntent {
             try? context.save()
         }
         WidgetCenter.shared.reloadAllTimelines()
+        BlockLiveActivityChipRefresher.removeEntity(kind: .medication, entityID: planID)
+        LiveActivityRefreshBridge.post()
         return .result()
     }
 }
@@ -166,26 +173,49 @@ struct FocusAdvanceIntent: AppIntent {
     }
 }
 
+// MARK: - Live Activity refresh bridge (widget/Live-Activity chip → app)
+//
+// Chip actions run in the widget extension and cannot call `BlockLiveActivityCoordinator` directly.
+// Update the live activity in-process when possible, then post Darwin so the app also refreshes.
+enum BlockLiveActivityChipRefresher {
+    @MainActor
+    static func removeEntity(kind: BlockActivityAttributes.ReminderChip.Kind, entityID: String) {
+        for activity in Activity<BlockActivityAttributes>.activities {
+            var state = activity.content.state
+            let before = state.reminders.count
+            state.reminders.removeAll { $0.kind == kind && $0.entityID == entityID }
+            guard state.reminders.count != before else { continue }
+
+            if state.mode == .reminder {
+                if let primary = state.reminders.first {
+                    state.title = primary.title
+                    state.subtitle = primary.detail
+                    state.category = primary.kind.categoryKey
+                } else {
+                    Task { await activity.end(nil, dismissalPolicy: .immediate) }
+                    continue
+                }
+            }
+
+            let content = ActivityContent(state: state, staleDate: activity.content.staleDate)
+            Task { await activity.update(content) }
+        }
+    }
+}
+
+enum LiveActivityRefreshBridge {
+    static let darwinName = "com.chronosflow.blocklive.refresh" as CFString
+
+    static func post() {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName(darwinName), nil, nil, true)
+    }
+}
+
 // MARK: - Focus command bridge (widget/Live-Activity → app)
 //
 // Cross-process hand-off for focus controls. The widget extension writes a command here; the app
-// reads and clears it and applies it to the live FocusTimerModel.
-//
-// TODO (app side — wire in ChronosFlowApp / FocusView, files I was told not to edit):
-//   1. On app foreground AND on launch, call `FocusCommandBridge.drain { command in ... }` and
-//      switch over the command to drive the live `FocusTimerModel`:
-//        .start(let blockID) -> resolve the TimeBlock and call timer.start(blockTitle:blockID:blockMinutes:)
-//        .togglePause        -> timer.togglePause()
-//        .stop               -> timer.stop(context:)
-//        .extend(let mins)   -> add `mins` to the current phase (e.g. bump phaseEndsAt / remaining)
-//        .advance            -> timer.advancePhase()
-//   2. Register a Darwin-notification observer for `FocusCommandBridge.darwinName` so a command that
-//      arrives while the app is already foregrounded is applied without waiting for a scene event:
-//        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), ...,
-//          { _,_,_,_,_ in /* hop to main, drain */ }, FocusCommandBridge.darwinName, nil, .deliverImmediately)
-//   The store-mutating widget intents (CompleteTask/ToggleHabit/MarkDoseTaken) need no app wiring —
-//   they write directly to the shared store. Only the focus controls need this bridge because the
-//   timer is in-memory in the app process.
+// drains it via `ChronosFocusCommandRouter` (Darwin observer + launch/foreground drain).
 enum FocusCommandBridge {
     enum Command: Codable, Equatable {
         case start(blockID: String)

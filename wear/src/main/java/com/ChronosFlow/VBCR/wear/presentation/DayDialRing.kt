@@ -4,14 +4,18 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.MaterialTheme
 import com.ChronosFlow.VBCR.wear.model.WearBlock
+import com.ChronosFlow.VBCR.wear.model.currentBlock
+import com.ChronosFlow.VBCR.wear.model.upcomingBlockCount
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -35,7 +39,28 @@ internal fun DayDialRing(
     val currentColor = MaterialTheme.colorScheme.primary
     val markerColor = MaterialTheme.colorScheme.tertiary
 
-    Canvas(modifier = modifier.fillMaxSize().padding(2.dp)) {
+    // The ring answers "what does my day look like" without any text, so give TalkBack a spoken
+    // equivalent of that glance — otherwise the primary screen's edge context is silent to it.
+    val ringDescription = remember(blocks, nowMinute) {
+        val remaining = upcomingBlockCount(blocks, nowMinute)
+        val remainder = when (remaining) {
+            0 -> "no more blocks today"
+            1 -> "1 block remaining today"
+            else -> "$remaining blocks remaining today"
+        }
+        if (currentBlock(blocks, nowMinute) != null) {
+            "Day schedule, in a scheduled block now, $remainder"
+        } else {
+            "Day schedule, $remainder"
+        }
+    }
+
+    Canvas(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(2.dp)
+            .semantics { contentDescription = ringDescription }
+    ) {
         val stroke = 5.dp.toPx()
         val inset = stroke / 2
         val arcSize = Size(size.width - stroke, size.height - stroke)
@@ -54,7 +79,11 @@ internal fun DayDialRing(
         )
 
         blocks.forEach { block ->
-            val sweep = (block.endMinute - block.startMinute).coerceAtLeast(0) / 1440f * 360f
+            // Wrap-aware span so a block packed across midnight (endMinute < startMinute) still
+            // draws its real duration instead of coercing to zero and silently vanishing.
+            val start = ((block.startMinute % 1440) + 1440) % 1440
+            val span = (((block.endMinute - block.startMinute) % 1440) + 1440) % 1440
+            val sweep = span / 1440f * 360f
             if (sweep <= 0f) return@forEach
             val isCurrent = nowMinute >= block.startMinute && nowMinute < block.endMinute
             val color = when {
@@ -62,14 +91,17 @@ internal fun DayDialRing(
                 block.endMinute <= nowMinute -> pastColor
                 else -> upcomingColor
             }
+            // Butt caps (matching the track) so each arc's angular extent equals its true duration
+            // and adjacent blocks show a crisp boundary — round caps overstate short blocks and
+            // fuse back-to-back ones into a single arc.
             drawArc(
                 color = color,
-                startAngle = angleOf(block.startMinute),
+                startAngle = angleOf(start),
                 sweepAngle = sweep.coerceAtMost(360f),
                 useCenter = false,
                 topLeft = arcTopLeft,
                 size = arcSize,
-                style = Stroke(stroke, cap = StrokeCap.Round)
+                style = Stroke(stroke)
             )
         }
 

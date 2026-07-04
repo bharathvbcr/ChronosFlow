@@ -45,4 +45,27 @@ class WearActionContractTest {
         assertEquals(1500, WearActionContract.focusStartSeconds("start:1500"))
         assertNull(WearActionContract.focusStartSeconds("start"))
     }
+
+    @Test
+    fun `a bare item arg applies the action and stays backward-compatible`() {
+        // What the home-screen widgets (and the watch's forward action) send: a plain id = "apply".
+        val arg = WearActionContract.itemArg("habit-42")
+        assertEquals("habit-42", arg)
+        assertEquals("habit-42", WearActionContract.argId(arg))
+        assertFalse(WearActionContract.isReverse(arg))
+    }
+
+    @Test
+    fun `a reversed item arg carries the id and reads as a reversal`() {
+        val arg = WearActionContract.itemArg("plan-7", reverse = true)
+        assertEquals("plan-7", WearActionContract.argId(arg))
+        assertTrue(WearActionContract.isReverse(arg))
+        // And it survives the on-wire round-trip so the phone's listener sees the same reversal.
+        val (type, decodedArg) = WearActionContract.decode(
+            WearActionContract.encode(WearActionContract.TYPE_DOSE, arg)
+        )!!
+        assertEquals(WearActionContract.TYPE_DOSE, type)
+        assertEquals("plan-7", WearActionContract.argId(decodedArg))
+        assertTrue(WearActionContract.isReverse(decodedArg))
+    }
 }

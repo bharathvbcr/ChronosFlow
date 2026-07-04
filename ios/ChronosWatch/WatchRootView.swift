@@ -216,6 +216,30 @@ struct WatchTodayPage: View {
                             .padding(.top, WatchSpacing.micro)
                     }
 
+                    ForEach(client.snapshot?.foldedReminders ?? []) { reminder in
+                        Button {
+                            switch reminder.kind {
+                            case .medication: client.send(.markDose(id: reminder.entityId))
+                            case .task: client.send(.completeTask(id: reminder.entityId))
+                            case .habit: client.send(.toggleHabit(id: reminder.entityId))
+                            }
+                        } label: {
+                            HStack {
+                                Image(systemName: foldedReminderIcon(reminder.kind))
+                                    .foregroundStyle(reminder.isOverdue ? WatchTokens.brandAccent : WatchTokens.brandPrimary)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(reminder.title).font(.caption).lineLimit(1)
+                                    Text((reminder.isOverdue ? "Overdue · " : "") + reminder.detail)
+                                        .font(.caption2)
+                                        .foregroundStyle(reminder.isOverdue ? Color.red : .secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     HStack {
                         stat("\(client.snapshot?.tasks.count ?? 0)", "tasks")
                         let habits = client.snapshot?.habits ?? []
@@ -247,6 +271,14 @@ struct WatchTodayPage: View {
             Text(label).font(.caption2).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func foldedReminderIcon(_ kind: WatchFoldedReminderKind) -> String {
+        switch kind {
+        case .medication: "pills.fill"
+        case .task: "checkmark.circle"
+        case .habit: "repeat.circle"
+        }
     }
 }
 

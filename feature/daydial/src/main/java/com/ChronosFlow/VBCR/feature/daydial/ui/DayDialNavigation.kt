@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -346,6 +347,11 @@ private fun DrawerPillItem(
             .clip(MaterialTheme.shapes.small)
             .background(animatedBg)
             .chronosHapticClick(onClick = onClick)
+            // Announce the active destination to TalkBack — every other selectable surface
+            // (chips, segmented, nav rail) exposes this; the hand-rolled drawer pill was the
+            // one that didn't, so selection was visual-only here. `this.selected` is qualified
+            // because the unqualified name binds to the `selected` parameter, not the receiver.
+            .semantics { this.selected = selected }
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Row(

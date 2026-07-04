@@ -33,6 +33,8 @@ struct WatchSnapshot: Codable, Equatable, Sendable {
     var digest: String?
     /// Present only while a focus session is running on the phone.
     var focus: WatchFocusState?
+    /// Ranked folded reminder chips from the phone live surface; empty when folding is off.
+    var foldedReminders: [WatchFoldedReminder]
     /// Wall-clock epoch millis when the phone built this snapshot (0 = never synced on this device).
     /// Lets the watch flag a schedule that may be out of date when the phone has been out of reach —
     /// the "now"/"until"/dial claims are time-relative and silently rot otherwise. Feeds
@@ -47,6 +49,7 @@ struct WatchSnapshot: Codable, Equatable, Sendable {
          medsDueCount: Int = 0,
          digest: String? = nil,
          focus: WatchFocusState? = nil,
+         foldedReminders: [WatchFoldedReminder] = [],
          receivedAtMillis: Int64 = 0) {
         self.date = date
         self.blocks = blocks
@@ -56,6 +59,7 @@ struct WatchSnapshot: Codable, Equatable, Sendable {
         self.medsDueCount = medsDueCount
         self.digest = digest
         self.focus = focus
+        self.foldedReminders = foldedReminders
         self.receivedAtMillis = receivedAtMillis
     }
 }
@@ -130,6 +134,21 @@ struct WatchFocusState: Codable, Equatable, Sendable {
     var phaseNumber: Int
     /// Total phases in the planned (block-bounded) sequence.
     var totalPhases: Int
+}
+
+/// One ranked folded reminder chip mirrored from the phone live surface.
+struct WatchFoldedReminder: Codable, Equatable, Identifiable, Sendable {
+    var kind: WatchFoldedReminderKind
+    var entityId: String
+    var title: String
+    var detail: String
+    var isOverdue: Bool
+
+    var id: String { "\(kind.rawValue)-\(entityId)" }
+}
+
+enum WatchFoldedReminderKind: String, Codable, Sendable {
+    case medication, task, habit
 }
 
 /// Quick actions the watch sends back to the phone (watch → phone). The phone applies each to the

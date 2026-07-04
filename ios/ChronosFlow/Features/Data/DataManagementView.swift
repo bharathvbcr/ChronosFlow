@@ -97,7 +97,11 @@ struct DataManagementView: View {
                             refreshAutoBackup()
                         }
                     } footer: {
-                        Text("Tap a snapshot to restore it (replaces all current data). Swipe to delete.")
+                        // The snapshot restore honors the Restore mode picker above, so the footer must
+                        // reflect it rather than always claiming a destructive replace (BK04).
+                        Text(replaceAllOnRestore
+                             ? "Tap a snapshot to restore it — replaces all current data. Swipe to delete."
+                             : "Tap a snapshot to restore it — fills only empty data, keeping what's already here. Swipe to delete.")
                     }
                 }
 

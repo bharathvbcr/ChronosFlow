@@ -56,6 +56,11 @@ enum ChronosColors {
     /// Readable on-color for brand-tinted fills (selected tab text, FAB glyph, filter chips).
     static let onBrand = Color.white
 
+    /// Ambient "night" shading for the dial's sleep window — a quiet, desaturated cool slate so it
+    /// reads as dimmed time-of-day rather than a third brand hue. Deliberately distinct from the
+    /// SLEEP *category* indigo, which can sit on the same arc as an actual sleep block.
+    static let nightBand = Color(red: 0.28, green: 0.31, blue: 0.44)
+
     /// Shared elevation shadow for floating shell chrome (nav bar, quick-add menu).
     static let shellShadow = Color.black.opacity(0.18)
 

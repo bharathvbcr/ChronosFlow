@@ -4,6 +4,7 @@ import androidx.wear.tiles.TileService
 import com.ChronosFlow.VBCR.core.domain.wear.WearDaySummaryContract
 import com.ChronosFlow.VBCR.wear.model.WearDaySummary
 import com.ChronosFlow.VBCR.wear.model.parseBlocks
+import com.ChronosFlow.VBCR.wear.model.parseFoldedReminders
 import com.ChronosFlow.VBCR.wear.model.parseHabits
 import com.ChronosFlow.VBCR.wear.model.parseMeds
 import com.ChronosFlow.VBCR.wear.model.parseTasks
@@ -87,7 +88,11 @@ class DaySummaryWearListenerService : WearableListenerService() {
                                     map.getStringArray(WearDaySummaryContract.KEY_MED_ENTRIES)?.toList().orEmpty()
                                 ),
                                 digest = map.getString(WearDaySummaryContract.KEY_DIGEST)
-                                    ?.takeIf { it.isNotBlank() }
+                                    ?.takeIf { it.isNotBlank() },
+                                foldedReminders = parseFoldedReminders(
+                                    map.getStringArray(WearDaySummaryContract.KEY_FOLDED_REMINDER_ENTRIES)
+                                        ?.toList().orEmpty()
+                                )
                             )
                         )
                         changed = true

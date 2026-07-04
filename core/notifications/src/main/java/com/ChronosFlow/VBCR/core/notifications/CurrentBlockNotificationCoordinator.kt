@@ -11,6 +11,7 @@ import com.ChronosFlow.VBCR.core.domain.model.BlockCategories
 import com.ChronosFlow.VBCR.core.domain.model.TimeBlock
 import com.ChronosFlow.VBCR.core.domain.model.occupiesScheduleTime
 import com.ChronosFlow.VBCR.core.domain.repository.TimeBlockRepository
+import com.ChronosFlow.VBCR.core.domain.wear.WearDaySummaryPublisher
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -34,16 +35,39 @@ import javax.inject.Singleton
 class CurrentBlockNotificationCoordinator @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val timeBlockRepository: TimeBlockRepository,
-    private val liveUpdateGateway: LiveUpdateGateway
+    private val liveUpdateGateway: LiveUpdateGateway,
+    private val foldedReminderResolver: FoldedReminderResolver,
+    private val wearDaySummaryPublisher: WearDaySummaryPublisher
 ) {
     private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+    private val uiPrefs by lazy {
+        context.getSharedPreferences(UI_PREFS_NAME, Context.MODE_PRIVATE)
+    }
     private val alarmManager: AlarmManager?
         get() = context.getSystemService(AlarmManager::class.java)
 
     // Default ON: this is now the single live "now" surface (it replaces the separate block-start
     // reminder + duplicate progress notification). A user who explicitly turned it off in settings
     // keeps that choice and instead gets the fallback block-start reminder (see AlarmDeliveryCoordinator).
-    fun isEnabled(): Boolean = prefs.getBoolean(KEY_ENABLED, true)
+    // Reads the same key the sidebar toggle persists (`notifications.currentBlockLive` in
+    // `daydial_ui_settings`) so boot/refresh honour the user's choice even before DayDial opens.
+    fun isEnabled(): Boolean {
+        if (uiPrefs.contains(UI_KEY)) {
+            return uiPrefs.getBoolean(UI_KEY, true)
+        }
+        // One-time migration from the legacy coordinator-only store.
+        val legacy = prefs.getBoolean(KEY_ENABLED, true)
+        uiPrefs.edit().putBoolean(UI_KEY, legacy).apply()
+        return legacy
+    }
+
+    /**
+     * Mirrors iOS `foldRemindersIntoLiveActivity` — fold the most-imminent due medication / task /
+     * habit onto the live "now" surface as a glanceable chip plus a quick-action button. Gated on the
+     * live surface being on; defaults ON. Reads the DayDial sidebar store, same as [isEnabled].
+     */
+    fun isFoldRemindersEnabled(): Boolean =
+        isEnabled() && uiPrefs.getBoolean(FOLD_UI_KEY, DEFAULT_FOLD_REMINDERS)
 
     // Suppression is stored as an expiry timestamp, not a sticky flag: a running focus session bumps
     // it on every notification update (~5s), so it stays suppressed live, but if the focus process
@@ -63,6 +87,7 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
 
     suspend fun setEnabled(enabled: Boolean) {
         if (isEnabled() == enabled) return
+        uiPrefs.edit().putBoolean(UI_KEY, enabled).apply()
         prefs.edit().putBoolean(KEY_ENABLED, enabled).apply()
         if (enabled) {
             refresh()
@@ -115,23 +140,50 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
         }
         val nowMinute = now.hour * 60 + now.minute
         val (active, next) = selectCurrentAndNextBlock(blocks, nowMinute)
+        val folded = if (isFoldRemindersEnabled()) {
+            try {
+                foldedReminderResolver.resolve(now, ZoneId.systemDefault())
+            } catch (ex: Exception) {
+                Log.w(TAG, "Failed to resolve folded reminders", ex)
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
 
         val notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        val showingUpNext = active == null && next != null &&
+            shouldShowUpNext(next.startMinuteOfDay, UP_NEXT_LOOKAHEAD_MINUTES, nowMinute)
         when {
             // A block is happening now — the primary "now" view. Surface the next break and the next
             // event alongside the active block's name so the live notification reads as a glanceable
             // schedule, not just "current block".
             active != null && notificationsEnabled ->
-                postNotification(active, blocks, nowMinute, alert)
+                postNotification(active, blocks, nowMinute, alert, folded)
             // A gap with the next block approaching — keep the live surface continuous with a
             // countdown. Bounded by a lookahead so an early-morning / long idle stretch doesn't show
             // an hours-long countdown; it appears only once the next block is near.
-            active == null && next != null && notificationsEnabled &&
-                shouldShowUpNext(next.startMinuteOfDay, UP_NEXT_LOOKAHEAD_MINUTES, nowMinute) ->
-                postUpNext(next, previousBlockEndMinute(blocks, nowMinute) ?: nowMinute, nowMinute, blocks)
+            showingUpNext && notificationsEnabled ->
+                postUpNext(next!!, previousBlockEndMinute(blocks, nowMinute) ?: nowMinute, nowMinute, blocks, folded)
+            // No block context, but reminders are pending — keep the live surface alive as a reminder
+            // card (iOS `.reminder` mode parity) instead of relying on separate banners alone.
+            folded.isNotEmpty() && notificationsEnabled ->
+                postReminderOnly(folded)
             else -> cancelNotification()
         }
-        scheduleNextBoundary(active, next, now)
+        scheduleNextBoundary(
+            active = active,
+            next = next,
+            now = now,
+            showingLive = active != null || showingUpNext || folded.isNotEmpty()
+        )
+        publishWearFoldedReminders()
+    }
+
+    /** Mirror iOS `notifyWatchSnapshotChanged()` — keep watch folded chips in sync with the phone. */
+    private suspend fun publishWearFoldedReminders() {
+        runCatching { wearDaySummaryPublisher.publish() }
+            .onFailure { ex -> Log.w(TAG, "Wear day-summary publish failed", ex) }
     }
 
     private fun dismiss() {
@@ -143,7 +195,8 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
         active: TimeBlock,
         blocks: List<TimeBlock>,
         nowMinute: Int,
-        alert: Boolean
+        alert: Boolean,
+        folded: List<FoldedReminder>
     ) {
         ReminderNotificationChannels.ensureCreated(context)
         val redact = redactSensitiveTitles()
@@ -152,11 +205,20 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
         val genericTitle = context.getString(R.string.current_block_default_title)
         // Under redaction, hide the block title and the upcoming items' titles (times are not sensitive).
         val title = if (redact) genericTitle else active.title.ifBlank { genericTitle }
-        val text = if (redact) {
-            redactedCurrentBlockText(active.startMinuteOfDay, endMinute, upcoming)
-        } else {
-            currentBlockNotificationText(active.startMinuteOfDay, endMinute, upcoming)
-        }
+        val text = appendFoldedRemindersToBody(
+            if (redact) {
+                redactedCurrentBlockText(active.startMinuteOfDay, endMinute, upcoming)
+            } else {
+                currentBlockNotificationText(active.startMinuteOfDay, endMinute, upcoming)
+            },
+            folded,
+            redact
+        )
+        val foldedActions = buildFoldedActionSlots(
+            context = context,
+            folded = folded,
+            maxFoldedActions = if (blockSupportsFocus(active.category)) 1 else 2
+        )
         val decision = liveUpdateGateway.decide(
             title = title,
             text = text,
@@ -188,7 +250,13 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
             onlyAlertOnce = !alert,
             // Header shows the "now" label plus how many blocks remain after this one, e.g.
             // "Now · 3 to go" — schedule load at a glance without reading the body.
-            subText = currentBlockSubText(upcomingBlockCount(blocks, nowMinute))
+            subText = currentBlockSubText(upcomingBlockCount(blocks, nowMinute)),
+            foldedActionIntent = foldedActions.primaryIntent,
+            foldedActionLabel = foldedActions.primaryLabel,
+            foldedActionIcon = foldedActions.primaryIcon,
+            secondaryFoldedActionIntent = foldedActions.secondaryIntent,
+            secondaryFoldedActionLabel = foldedActions.secondaryLabel,
+            secondaryFoldedActionIcon = foldedActions.secondaryIcon
         )
         try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
@@ -217,7 +285,13 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
      * (next break or event) so the gap view is as glanceable as the active one. Always silent — the
      * buzz is reserved for the block actually starting.
      */
-    private fun postUpNext(next: TimeBlock, gapStartMinute: Int, nowMinute: Int, blocks: List<TimeBlock>) {
+    private fun postUpNext(
+        next: TimeBlock,
+        gapStartMinute: Int,
+        nowMinute: Int,
+        blocks: List<TimeBlock>,
+        folded: List<FoldedReminder>
+    ) {
         ReminderNotificationChannels.ensureCreated(context)
         val nextStartMinute = next.startMinuteOfDay
         val redact = redactSensitiveTitles()
@@ -225,9 +299,12 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
         // What comes after the upcoming block (its start excludes itself), so the gap view previews
         // the next break/event the same way the active notification does.
         val following = selectUpcomingGlances(blocks, nextStartMinute)
+        val body = upNextNotificationText(nextStartMinute, following, redact)
+        val text = appendFoldedRemindersToBody(body, folded, redact)
+        val foldedActions = buildFoldedActionSlots(context, folded, maxFoldedActions = 2)
         val decision = liveUpdateGateway.decide(
             title = if (redact) genericTitle else next.title.ifBlank { genericTitle },
-            text = upNextNotificationText(nextStartMinute, following, redact),
+            text = text,
             redactSensitiveTitles = false
         )
         val notification = liveUpdateGateway.build(
@@ -241,7 +318,13 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
                 requestCode = NOTIFICATION_ID
             ),
             onlyAlertOnce = true,
-            subText = context.getString(R.string.current_block_upnext_subtext)
+            subText = context.getString(R.string.current_block_upnext_subtext),
+            foldedActionIntent = foldedActions.primaryIntent,
+            foldedActionLabel = foldedActions.primaryLabel,
+            foldedActionIcon = foldedActions.primaryIcon,
+            secondaryFoldedActionIntent = foldedActions.secondaryIntent,
+            secondaryFoldedActionLabel = foldedActions.secondaryLabel,
+            secondaryFoldedActionIcon = foldedActions.secondaryIcon
         )
         try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
@@ -250,11 +333,58 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
         }
     }
 
+    /**
+     * Reminder-only live surface when no block is current/up-next but a dose/task/habit is due.
+     * Mirrors iOS `BlockActivityAttributes.Mode.reminder`.
+     */
+    private fun postReminderOnly(folded: List<FoldedReminder>) {
+        ReminderNotificationChannels.ensureCreated(context)
+        val redact = redactSensitiveTitles()
+        val primary = folded.first()
+        val foldedActions = buildFoldedActionSlots(context, folded, maxFoldedActions = 2)
+        val refreshSeconds = PROGRESS_REFRESH_INTERVAL_MINUTES * 60
+        val decision = liveUpdateGateway.decide(
+            title = foldedReminderTitle(context, folded, redact),
+            text = foldedReminderBody(folded, redact),
+            redactSensitiveTitles = false
+        )
+        val notification = liveUpdateGateway.build(
+            channelId = ReminderNotificationChannels.CURRENT_BLOCK_CHANNEL_ID,
+            decision = decision,
+            timeLeftSeconds = refreshSeconds,
+            totalSeconds = refreshSeconds,
+            contentIntent = buildNotificationContentIntent(
+                context = context,
+                launch = NotificationLaunch(section = SECTION_DAY, dayTarget = DAY_TARGET_TODAY),
+                requestCode = NOTIFICATION_ID
+            ),
+            onlyAlertOnce = true,
+            subText = foldedReminderSubText(context, folded),
+            foldedActionIntent = foldedActions.primaryIntent,
+            foldedActionLabel = foldedActions.primaryLabel,
+            foldedActionIcon = foldedActions.primaryIcon,
+            secondaryFoldedActionIntent = foldedActions.secondaryIntent,
+            secondaryFoldedActionLabel = foldedActions.secondaryLabel,
+            secondaryFoldedActionIcon = foldedActions.secondaryIcon
+        )
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        } catch (ex: SecurityException) {
+            Log.w(TAG, "Notification permission missing for folded-reminder update", ex)
+        }
+    }
+
     private fun cancelNotification() {
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
     }
 
-    private fun scheduleNextBoundary(active: TimeBlock?, next: TimeBlock?, now: LocalDateTime) {
+    private fun scheduleNextBoundary(
+        active: TimeBlock?,
+        next: TimeBlock?,
+        now: LocalDateTime,
+        showingLive: Boolean
+    ) {
+        val zone = ZoneId.systemDefault()
         val nowMinute = now.hour * 60 + now.minute
         val boundaryMinute = when {
             // No active block: wake when the up-next window opens (so a far-off block's countdown
@@ -266,28 +396,27 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
                 nextStartMinute = next?.startMinuteOfDay,
                 nowMinute = nowMinute
             )
-        }
-        // While a live progress surface is actually on screen (an active block, or an in-window
-        // up-next countdown), wake periodically before the boundary too, so the progress bar
-        // advances instead of freezing between boundaries. Gated to "showing" states so a long
-        // idle / pre-day stretch doesn't accrue wake-ups.
-        val showingLive = active != null ||
-            (next != null && shouldShowUpNext(next.startMinuteOfDay, UP_NEXT_LOOKAHEAD_MINUTES, nowMinute))
+        } ?: if (showingLive) nowMinute + PROGRESS_REFRESH_INTERVAL_MINUTES else null
         val wakeMinute = nextRenderMinute(
             boundaryMinute = boundaryMinute,
             nowMinute = nowMinute,
             showingLive = showingLive,
             refreshIntervalMinutes = PROGRESS_REFRESH_INTERVAL_MINUTES
         )
-        if (wakeMinute == null) {
+        val boundaryWakeMs = wakeMinute?.let { boundaryWakeEpochMillis(now, it, zone) }
+        val midnightWakeMs = now.toLocalDate().plusDays(1)
+            .atStartOfDay(zone)
+            .toInstant()
+            .toEpochMilli()
+        val triggerAt = when {
+            boundaryWakeMs != null -> minOf(boundaryWakeMs, midnightWakeMs)
+            showingLive -> midnightWakeMs
+            else -> null
+        }
+        if (triggerAt == null) {
             boundaryPendingIntent(PendingIntent.FLAG_NO_CREATE)?.let { alarmManager?.cancel(it) }
             return
         }
-        val triggerAt = now.toLocalDate()
-            .atStartOfDay(ZoneId.systemDefault())
-            .plusMinutes(wakeMinute.toLong())
-            .toInstant()
-            .toEpochMilli()
         val pendingIntent = boundaryPendingIntent(PendingIntent.FLAG_UPDATE_CURRENT) ?: return
         // RTC_WAKEUP is required for block-boundary transitions: under Doze, plain RTC alarms are
         // deferred to the next maintenance window, leaving the live-now notification showing the
@@ -315,6 +444,11 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
         const val TAG = "CurrentBlockNotif"
         const val PREFS_NAME = "chronos_current_block_notification"
         const val KEY_ENABLED = "enabled"
+        // Sidebar toggle store (feature/daydial `rememberPersistentBoolean` → daydial_ui_settings).
+        const val UI_PREFS_NAME = "daydial_ui_settings"
+        const val UI_KEY = "notifications.currentBlockLive"
+        const val FOLD_UI_KEY = "notifications.foldReminders"
+        const val DEFAULT_FOLD_REMINDERS = true
         // Expiry (epoch millis) until which the "now" notification yields to the focus live update.
         const val KEY_FOCUS_SUPPRESSED_UNTIL = "focus_suppressed_until"
         // Self-heal window: suppression auto-lifts this long after the last focus tick if the process
@@ -330,7 +464,7 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
         // While a block (or in-window up-next) is on screen, re-render at most this often so the
         // progress bar advances visibly between boundaries. Coarse on purpose: inexact, OS-batched
         // wakes — a few per active block, no foreground/ticking service.
-        const val PROGRESS_REFRESH_INTERVAL_MINUTES = 10
+        const val PROGRESS_REFRESH_INTERVAL_MINUTES = 5
         const val NOTIFICATION_ID = 4202
         const val BOUNDARY_REQUEST_CODE = 4203
         // Distinct from the focus content (4201) and phase-boundary (4203) request codes so the
@@ -401,6 +535,19 @@ internal fun nextRenderMinute(
     if (boundaryMinute == null) return null
     if (!showingLive) return boundaryMinute
     return minOf(boundaryMinute, nowMinute + refreshIntervalMinutes)
+}
+
+/** Epoch millis for [wakeMinute] on today, rolling to tomorrow when the minute has already passed. */
+internal fun boundaryWakeEpochMillis(
+    now: LocalDateTime,
+    wakeMinute: Int,
+    zoneId: ZoneId = ZoneId.systemDefault()
+): Long {
+    var target = now.toLocalDate().atStartOfDay(zoneId).plusMinutes(wakeMinute.toLong())
+    if (!target.isAfter(now.atZone(zoneId))) {
+        target = target.plusDays(1)
+    }
+    return target.toInstant().toEpochMilli()
 }
 
 // Break detection and focus eligibility live in the shared [BlockCategories] (core:domain) so the

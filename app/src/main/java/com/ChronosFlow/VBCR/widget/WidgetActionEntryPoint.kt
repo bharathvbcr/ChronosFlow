@@ -8,6 +8,8 @@ import com.ChronosFlow.VBCR.core.domain.usecase.CompleteHabitByIdUseCase
 import com.ChronosFlow.VBCR.core.domain.usecase.GetChronosDayOverviewUseCase
 import com.ChronosFlow.VBCR.core.domain.usecase.RecordMedicationWidgetActionUseCase
 import com.ChronosFlow.VBCR.core.domain.usecase.ToggleTaskCompletionUseCase
+import com.ChronosFlow.VBCR.core.domain.usecase.UndoHabitCompletionUseCase
+import com.ChronosFlow.VBCR.core.domain.usecase.UndoMedicationDoseUseCase
 import com.ChronosFlow.VBCR.feature.focus.FocusWidgetCommandDispatcher
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -18,7 +20,9 @@ import dagger.hilt.components.SingletonComponent
 interface WidgetActionEntryPoint {
     fun dayOverviewUseCase(): GetChronosDayOverviewUseCase
     fun completeHabitByIdUseCase(): CompleteHabitByIdUseCase
+    fun undoHabitCompletionUseCase(): UndoHabitCompletionUseCase
     fun recordMedicationWidgetActionUseCase(): RecordMedicationWidgetActionUseCase
+    fun undoMedicationDoseUseCase(): UndoMedicationDoseUseCase
     fun toggleTaskCompletionUseCase(): ToggleTaskCompletionUseCase
     fun timeBlockRepository(): TimeBlockRepository
     fun timeBlockCompletionHandler(): TimeBlockCompletionHandler

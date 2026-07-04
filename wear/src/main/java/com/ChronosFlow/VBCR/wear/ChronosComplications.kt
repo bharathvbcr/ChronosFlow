@@ -4,9 +4,11 @@ import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
 import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
 import androidx.wear.watchface.complications.data.LongTextComplicationData
+import androidx.wear.watchface.complications.data.MonochromaticImage
 import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.RangedValueComplicationData
 import androidx.wear.watchface.complications.data.ComplicationText
@@ -52,6 +54,11 @@ internal fun buildChronosComplicationData(
     val tap = chronosComplicationTapAction(context, content.tapPage)
     val description = PlainComplicationText.Builder(content.long).build()
     fun plain(value: String) = PlainComplicationText.Builder(value).build()
+    // The ChronosFlow brand mark, so a RANGED_VALUE arc / SHORT_TEXT slot reads as this app rather
+    // than an anonymous ring indistinguishable from steps/battery/activity complications.
+    val icon = MonochromaticImage.Builder(
+        Icon.createWithResource(context, R.drawable.ic_chronosflow_tile)
+    ).build()
     // A live, face-ticked countdown when the datum has an end instant; the static snapshot otherwise.
     val countdown: ComplicationText? = content.countDownToMillis?.let { endMillis ->
         TimeDifferenceComplicationText.Builder(
@@ -65,12 +72,14 @@ internal fun buildChronosComplicationData(
         ComplicationType.SHORT_TEXT -> ShortTextComplicationData.Builder(shortText, description)
             .apply {
                 content.title?.let { setTitle(plain(it)) }
+                setMonochromaticImage(icon)
                 setTapAction(tap)
             }
             .build()
         ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(longText, description)
             .apply {
                 content.title?.let { setTitle(plain(it)) }
+                setMonochromaticImage(icon)
                 setTapAction(tap)
             }
             .build()
@@ -83,6 +92,7 @@ internal fun buildChronosComplicationData(
             .apply {
                 setText(shortText)
                 content.title?.let { setTitle(plain(it)) }
+                setMonochromaticImage(icon)
                 setTapAction(tap)
             }
             .build()

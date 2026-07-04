@@ -110,6 +110,144 @@ import java.util.Locale
 private val BlockEditorActionHeight = 44.dp
 
 @Composable
+internal fun BlockEditorCalendarExportSection(
+    block: TimeBlockUiModel,
+    calendarPermissionStatus: CalendarPermissionStatus,
+    showCalendarPermissionRationale: Boolean,
+    calendarConnectionState: CalendarConnectionState,
+    onOpenCalendarSettings: () -> Unit,
+    onExportBlockToCalendar: (String) -> Unit,
+    onRefreshCalendarExport: (String) -> Unit,
+    onRemoveCalendarExport: (String) -> Unit,
+    onDismissCalendarPermissionRationale: () -> Unit,
+) {
+    when {
+        calendarPermissionStatus.permanentlyDenied -> {
+            ChronosWarningBanner(
+                title = if (calendarPermissionStatus.readGranted) {
+                    "Calendar export access is off"
+                } else {
+                    "Calendar access is off"
+                },
+                message = if (calendarPermissionStatus.readGranted) {
+                    "Calendar imports are connected. Open app settings to re-enable linked exports."
+                } else {
+                    "Open app settings to re-enable calendar imports and linked exports."
+                }
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            ChronosOutlinedButton(onClick = onOpenCalendarSettings, modifier = Modifier.fillMaxWidth()) {
+                Text("Open calendar settings")
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+        showCalendarPermissionRationale && !calendarPermissionStatus.allGranted -> {
+            ChronosWarningBanner(
+                title = "Calendar permission required",
+                message = "ChronosFlow needs calendar access to export this block and keep later edits synced to the same device event."
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                ChronosButton(
+                    onClick = {
+                        if (block.calendarEventId == null) {
+                            onExportBlockToCalendar(block.id)
+                        } else {
+                            onRefreshCalendarExport(block.id)
+                        }
+                    },
+                    enabled = !calendarConnectionState.isWorking,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        sheetBlockCalendarActionLabel(
+                            block,
+                            if (block.calendarEventId == null) {
+                                SheetBlockCalendarAction.Export
+                            } else {
+                                SheetBlockCalendarAction.Update
+                            }
+                        )
+                    )
+                }
+                ChronosTextButton(
+                    onClick = onDismissCalendarPermissionRationale,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Not now")
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+        block.calendarEventId == null -> {
+            ChronosOutlinedButton(
+                onClick = { onExportBlockToCalendar(block.id) },
+                enabled = !calendarConnectionState.isWorking,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        contentDescription = sheetBlockCalendarActionLabel(
+                            block,
+                            SheetBlockCalendarAction.Export
+                        )
+                    }
+            ) {
+                Text(
+                    sheetBlockCalendarActionLabel(block, SheetBlockCalendarAction.Export),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+        else -> {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                ChronosOutlinedButton(
+                    onClick = { onRefreshCalendarExport(block.id) },
+                    enabled = !calendarConnectionState.isWorking,
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics {
+                            contentDescription = sheetBlockCalendarActionLabel(
+                                block,
+                                SheetBlockCalendarAction.Update
+                            )
+                        }
+                ) {
+                    Text(
+                        sheetBlockCalendarActionLabel(block, SheetBlockCalendarAction.Update),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                ChronosOutlinedButton(
+                    onClick = { onRemoveCalendarExport(block.id) },
+                    enabled = !calendarConnectionState.isWorking,
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics {
+                            contentDescription = sheetBlockCalendarActionLabel(
+                                block,
+                                SheetBlockCalendarAction.Remove
+                            )
+                        }
+                ) {
+                    Text(
+                        sheetBlockCalendarActionLabel(block, SheetBlockCalendarAction.Remove),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
 internal fun SheetContent(
     target: SheetTarget,
     selectedBlock: TimeBlockUiModel?,
@@ -220,12 +358,12 @@ internal fun SheetContent(
                     var justSaved by rememberSaveable(block.id) { mutableStateOf(false) }
 
                     Text(
-                        block.title,
+                        if (allDayCalendarImport) "Calendar event" else "Edit block",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     if (allDayCalendarImport) {
                         ChronosWarningBanner(
@@ -246,157 +384,50 @@ internal fun SheetContent(
                             Text(sheetBlockDeleteActionLabel(block), fontWeight = FontWeight.SemiBold)
                         }
                     } else {
-                    var calendarExpanded by rememberSaveable(block.id, showCalendarPermissionRationale, calendarPermissionStatus.allGranted) {
-                        mutableStateOf(showCalendarPermissionRationale && !calendarPermissionStatus.allGranted)
-                    }
                     Column(
                         modifier = Modifier
                             .weight(1f, fill = false)
                             .verticalScroll(rememberScrollState())
                     ) {
-                    DayDialBlockEditorFields(
+                    BlockEditorProgressiveForm(
+                        stateKey = block.id,
                         title = title,
-                        onTitleChange = { title = it; justSaved = false },
+                        onTitleChange = { title = it },
                         startText = start,
-                        onStartTextChange = { start = it; justSaved = false },
+                        onStartTextChange = { start = it },
                         durationText = duration,
-                        onDurationTextChange = { duration = it; justSaved = false },
+                        onDurationTextChange = { duration = it },
                         category = category,
-                        onCategorySelected = { category = it; justSaved = false }
+                        onCategorySelected = { category = it },
+                        locked = locked,
+                        onLockedChange = { locked = it },
+                        isProtected = protectedBlock,
+                        onProtectedChange = { protectedBlock = it },
+                        onFieldEdited = { justSaved = false },
+                        calendarChipValue = block.calendarEventId?.let { "Exporting" },
+                        onClearCalendar = block.calendarEventId?.let {
+                            { onRemoveCalendarExport(block.id) }
+                        },
+                        calendarSectionSummary = calendarConnectionStatusMessage(
+                            calendarPermissionStatus,
+                            calendarConnectionState
+                        ),
+                        calendarDefaultExpandedHint = showCalendarPermissionRationale &&
+                            !calendarPermissionStatus.allGranted,
+                        calendarSection = {
+                            BlockEditorCalendarExportSection(
+                                block = block,
+                                calendarPermissionStatus = calendarPermissionStatus,
+                                showCalendarPermissionRationale = showCalendarPermissionRationale,
+                                calendarConnectionState = calendarConnectionState,
+                                onOpenCalendarSettings = onOpenCalendarSettings,
+                                onExportBlockToCalendar = onExportBlockToCalendar,
+                                onRefreshCalendarExport = onRefreshCalendarExport,
+                                onRemoveCalendarExport = onRemoveCalendarExport,
+                                onDismissCalendarPermissionRationale = onDismissCalendarPermissionRationale,
+                            )
+                        },
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    CheckboxSetting("Locked", locked, onCheckedChange = { locked = it; justSaved = false })
-                    CheckboxSetting("Protected focus", protectedBlock, onCheckedChange = { protectedBlock = it; justSaved = false })
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    ChronosCollapsibleSection(
-                        title = "Calendar export",
-                        summary = calendarConnectionStatusMessage(calendarPermissionStatus, calendarConnectionState),
-                        expanded = calendarExpanded,
-                        onExpandedChange = { calendarExpanded = it }
-                    ) {
-                    when {
-                        calendarPermissionStatus.permanentlyDenied -> {
-                            ChronosWarningBanner(
-                                title = if (calendarPermissionStatus.readGranted) {
-                                    "Calendar export access is off"
-                                } else {
-                                    "Calendar access is off"
-                                },
-                                message = if (calendarPermissionStatus.readGranted) {
-                                    "Calendar imports are connected. Open app settings to re-enable linked exports."
-                                } else {
-                                    "Open app settings to re-enable calendar imports and linked exports."
-                                }
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            ChronosOutlinedButton(onClick = onOpenCalendarSettings, modifier = Modifier.fillMaxWidth()) {
-                                Text("Open calendar settings")
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-                        showCalendarPermissionRationale && !calendarPermissionStatus.allGranted -> {
-                            ChronosWarningBanner(
-                                title = "Calendar permission required",
-                                message = "ChronosFlow needs calendar access to export this block and keep later edits synced to the same device event."
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                ChronosButton(
-                                    onClick = {
-                                        if (block.calendarEventId == null) {
-                                            onExportBlockToCalendar(block.id)
-                                        } else {
-                                            onRefreshCalendarExport(block.id)
-                                        }
-                                    },
-                                    enabled = !calendarConnectionState.isWorking,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        sheetBlockCalendarActionLabel(
-                                            block,
-                                            if (block.calendarEventId == null) SheetBlockCalendarAction.Export else SheetBlockCalendarAction.Update
-                                        )
-                                    )
-                                }
-                                ChronosTextButton(
-                                    onClick = onDismissCalendarPermissionRationale,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Not now")
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-                        block.calendarEventId == null -> {
-                            ChronosOutlinedButton(
-                                onClick = { onExportBlockToCalendar(block.id) },
-                                enabled = !calendarConnectionState.isWorking,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .semantics {
-                                        contentDescription = sheetBlockCalendarActionLabel(
-                                            block,
-                                            SheetBlockCalendarAction.Export
-                                        )
-                                    }
-                            ) {
-                                Text(
-                                    sheetBlockCalendarActionLabel(block, SheetBlockCalendarAction.Export),
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-                        else -> {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                ChronosOutlinedButton(
-                                    onClick = { onRefreshCalendarExport(block.id) },
-                                    enabled = !calendarConnectionState.isWorking,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .semantics {
-                                            contentDescription = sheetBlockCalendarActionLabel(
-                                                block,
-                                                SheetBlockCalendarAction.Update
-                                            )
-                                        }
-                                ) {
-                                    Text(
-                                        sheetBlockCalendarActionLabel(block, SheetBlockCalendarAction.Update),
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                                ChronosOutlinedButton(
-                                    onClick = { onRemoveCalendarExport(block.id) },
-                                    enabled = !calendarConnectionState.isWorking,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .semantics {
-                                            contentDescription = sheetBlockCalendarActionLabel(
-                                                block,
-                                                SheetBlockCalendarAction.Remove
-                                            )
-                                        }
-                                ) {
-                                    Text(
-                                        sheetBlockCalendarActionLabel(block, SheetBlockCalendarAction.Remove),
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-                    }
-                    }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -544,7 +575,6 @@ internal fun SheetContent(
                             }
                         }
                     }
-                    }
                     Spacer(modifier = Modifier.height(8.dp))
                     ChronosTextButton(
                         onClick = onDismiss,
@@ -552,6 +582,7 @@ internal fun SheetContent(
                             .align(Alignment.CenterHorizontally)
                             .semantics { contentDescription = sheetCloseActionLabel(target, block) }
                     ) { Text(sheetCloseActionLabel(target, block)) }
+                    }
         }
     }
 
@@ -751,6 +782,12 @@ internal fun SheetContent(
                         ?: timeBlocks.lastOrNull()?.let { it.startMinuteOfDay + it.durationMinutes }
                         ?: 9 * 60
                 )
+                val newBlockKey = listOf(
+                    target.startMinute,
+                    target.title,
+                    target.category,
+                    target.durationMinutes
+                ).joinToString("-")
                 var title by rememberSaveable(target.startMinute, target.title) {
                     mutableStateOf(target.title)
                 }
@@ -775,14 +812,15 @@ internal fun SheetContent(
                     ?: 25
 
                 Text(
-                    "New Block",
+                    "New block",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(12.dp))
 
-                DayDialBlockEditorFields(
+                BlockEditorProgressiveForm(
+                    stateKey = newBlockKey,
                     title = title,
                     onTitleChange = { title = it },
                     startText = start,
@@ -790,7 +828,7 @@ internal fun SheetContent(
                     durationText = duration,
                     onDurationTextChange = { duration = it },
                     category = category,
-                    onCategorySelected = { category = it }
+                    onCategorySelected = { category = it },
                 )
                 Spacer(Modifier.height(16.dp))
 

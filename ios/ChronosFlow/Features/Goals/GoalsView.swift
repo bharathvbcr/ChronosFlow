@@ -11,6 +11,7 @@ import ChronosCore
 /// due-date chips, linked-work hints) is all delegated to the shared `GoalLabels` helpers.
 struct GoalsView: View {
     @Environment(\.modelContext) private var context
+    @Environment(ShellState.self) private var shell: ShellState?
     @Query(sort: \Goal.startDate, order: .reverse) private var goals: [Goal]
     @Query private var tasks: [TaskItem]
     @Query private var habits: [Habit]
@@ -21,6 +22,8 @@ struct GoalsView: View {
     // Completed goals stay tucked behind a toggle so active work leads the page (mirrors
     // Android's `rememberSaveable { mutableStateOf(false) }` default in GoalScreen.kt).
     @State private var showCompleted = false
+    /// Scroll target for deep links (`chronosflow://goals?id=…`).
+    @State private var scrollTarget: String?
 
     // MARK: Derived collections
 
@@ -47,52 +50,7 @@ struct GoalsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: ChronosSpacing.compact) {
-                    // Top descriptive header (mirrors Android's ChronosSectionHeader with subtitle).
-                    sectionHeader("Goals",
-                                  subtitle: "Long-term objectives that your daily tasks and habits roll up into.")
-
-                    if !goals.isEmpty { metricTiles }
-                    if overdueCount > 0 { overdueBanner }
-                    if !goals.isEmpty { addGoalButton }
-                    if categoriesInUse.count >= 2 { categoryFilter }
-
-                    let active = filtered(activeGoals)
-                    let completed = filtered(completedGoals)
-
-                    if !goals.isEmpty && active.isEmpty && completed.isEmpty {
-                        // A filter is active but nothing matches — mirror Android's
-                        // "Nothing in {category}" empty state instead of a blank list.
-                        filterEmptyState
-                    }
-
-                    if !active.isEmpty {
-                        sectionHeader("Active", subtitle: "\(active.count) in progress")
-                        ForEach(active) { card(for: $0) }
-                    }
-
-                    if !completed.isEmpty {
-                        HStack(alignment: .firstTextBaseline) {
-                            sectionHeader("Completed", subtitle: "\(completed.count) achieved")
-                            Spacer()
-                            Button(showCompleted ? "Hide" : "Show") {
-                                withAnimation(ChronosMotion.snappy) { showCompleted.toggle() }
-                            }
-                            .font(.chronosCaption)
-                            .foregroundStyle(ChronosColors.brandPrimary)
-                            .buttonStyle(.plain)
-                        }
-                        if showCompleted {
-                            ForEach(completed) { card(for: $0) }
-                        }
-                    }
-                }
-                .padding(ChronosSpacing.standard)
-            }
-            .background { ChronosBackdrop() }
-            .navigationTitle("Goals")
-            .chronosScrollMinimizedBar()
+            chromedSurface
             .overlay {
                 if goals.isEmpty {
                     ContentUnavailableView {
@@ -106,15 +64,100 @@ struct GoalsView: View {
                     }
                 }
             }
+            .sheet(isPresented: $creating) { GoalEditorSheet(goal: nil) }
+            .sheet(item: $detail) { GoalDetailView(goal: $0) }
+            .onAppear { drainPendingDeepLinkGoal() }
+            .onChange(of: shell?.pendingGoalID) { _, id in
+                if id != nil { drainPendingDeepLinkGoal() }
+            }
+        }
+    }
+
+    private var chromedSurface: some View {
+        goalsSurface
+            .navigationTitle("Goals")
+            .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { creating = true } label: { Image(systemName: "plus") }
                         .accessibilityLabel("Add goal")
                 }
             }
-            .sheet(isPresented: $creating) { GoalEditorSheet(goal: nil) }
-            .sheet(item: $detail) { GoalDetailView(goal: $0) }
+    }
+
+    private var goalsSurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: ChronosSpacing.compact) {
+                        goalsSection {
+                            sectionHeader("Goals",
+                                          subtitle: "Long-term objectives that your daily tasks and habits roll up into.")
+                        }
+
+                        if !goals.isEmpty { goalsSection { metricTiles } }
+                        if overdueCount > 0 { goalsSection { overdueBanner } }
+                        if !goals.isEmpty { goalsSection { addGoalButton } }
+                        if categoriesInUse.count >= 2 { goalsSection { categoryFilter } }
+
+                        let active = filtered(activeGoals)
+                        let completed = filtered(completedGoals)
+
+                        if !goals.isEmpty && active.isEmpty && completed.isEmpty {
+                            goalsSection { filterEmptyState }
+                        }
+
+                        if !active.isEmpty {
+                            goalsSection {
+                                sectionHeader("Active", subtitle: "\(active.count) in progress")
+                            }
+                            ForEach(active) { goalsSection { card(for: $0) } }
+                        }
+
+                        if !completed.isEmpty {
+                            goalsSection {
+                                HStack(alignment: .firstTextBaseline) {
+                                    sectionHeader("Completed", subtitle: "\(completed.count) achieved")
+                                    Spacer()
+                                    Button(showCompleted ? "Hide" : "Show") {
+                                        withAnimation(ChronosMotion.snappy) { showCompleted.toggle() }
+                                    }
+                                    .font(.chronosCaption)
+                                    .foregroundStyle(ChronosColors.brandPrimary)
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            if showCompleted {
+                                ForEach(completed) { goalsSection { card(for: $0) } }
+                            }
+                        }
+                    }
+                    .padding(.vertical, ChronosSpacing.standard)
+                }
+                .scrollContentBackground(.hidden)
+                .onChange(of: scrollTarget) { _, target in
+                    guard let target else { return }
+                    withAnimation(ChronosMotion.snappy) { proxy.scrollTo(target, anchor: .center) }
+                    scrollTarget = nil
+                }
+            }
         }
+    }
+
+    private func goalsSection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().padding(.horizontal, ChronosSpacing.standard)
+    }
+
+    /// Deep link (`chronosflow://goals?id=…`) — scroll to the goal card and open its detail sheet.
+    private func drainPendingDeepLinkGoal() {
+        guard let id = shell?.pendingGoalID else { return }
+        shell?.pendingGoalID = nil
+        guard let goal = goals.first(where: { $0.id == id }) else { return }
+        if goal.isCompleted { showCompleted = true }
+        scrollTarget = id
+        detail = goal
     }
 
     @ViewBuilder
@@ -126,6 +169,7 @@ struct GoalsView: View {
                 .reduce(0) { $0 + $1.completionDates.count },
             onOpen: { detail = goal }
         )
+        .id(goal.id)
     }
 
     // MARK: Banner / tiles / filter
@@ -301,6 +345,11 @@ private struct GoalCard: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
+        // The whole-card tap opens the goal detail; expose it to VoiceOver too (the inline
+        // edit/±progress buttons stay individually navigable via `.contain`). Additive — no
+        // existing child semantics change.
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: Text("Open goal")) { onOpen() }
         .pressable()
         .sheet(isPresented: $editing) { GoalEditorSheet(goal: goal) }
         .sensoryFeedback(.success, trigger: goal.isCompleted) { _, done in done }
@@ -346,9 +395,12 @@ private struct FilterChip: View {
                 .padding(.horizontal, ChronosSpacing.compact)
                 .padding(.vertical, ChronosSpacing.small)
                 .background(selected ? tint : Color(.tertiarySystemFill), in: Capsule())
-                .foregroundStyle(selected ? .white : .primary)
+                .foregroundStyle(selected ? ChronosColors.onBrand : .primary)
         }
         .buttonStyle(.plain)
+        // Selection is shown by fill color; announce it to VoiceOver too (§7), matching the
+        // canonical `SelectChip`.
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -372,7 +424,6 @@ struct GoalEditorSheet: View {
     @State private var target: Int
     @State private var hasTargetDate: Bool
     @State private var targetDate: Date
-    @State private var detailsExpanded: Bool
 
     /// `initialTitle` seeds the title field for a new goal (palette / quick-capture prefill,
     /// the Android `prefillName` pattern); ignored when editing an existing goal.
@@ -384,8 +435,6 @@ struct GoalEditorSheet: View {
         _target = State(initialValue: goal?.targetValue ?? 10)
         _hasTargetDate = State(initialValue: goal?.targetDate != nil)
         _targetDate = State(initialValue: goal?.targetDate ?? Calendar.current.date(byAdding: .month, value: 1, to: .now) ?? .now)
-        // Auto-expand details when editing a goal that already has a target date.
-        _detailsExpanded = State(initialValue: goal?.targetDate != nil)
     }
 
     private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -411,107 +460,126 @@ struct GoalEditorSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("Goal", text: $title)
-                    TextField("Description (optional)", text: $detail, axis: .vertical)
-                        .lineLimit(1...4)
-                }
+        CardEditorScaffold(
+            kind: "goal",
+            navTitle: goal == nil ? "New goal" : "Edit goal",
+            chips: goalChips,
+            sections: goalSections,
+            saveDisabled: trimmedTitle.isEmpty,
+            onCancel: { dismiss() },
+            onSave: save
+        ) {
+            goalHeader
+        }
+    }
 
-                Section("Category") {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: ChronosSpacing.small) {
-                            ForEach(categoryChoices, id: \.self) { choice in
-                                FilterChip(label: choice.capitalized, selected: category == choice,
-                                           tint: ChronosColors.category(choice)) {
-                                    withAnimation(ChronosMotion.snappy) { category = choice }
-                                }
-                            }
-                        }
-                    }
-                    if let suggestion {
-                        Button {
-                            withAnimation(ChronosMotion.snappy) { category = suggestion }
-                        } label: {
-                            Label("Suggested: \(suggestion.capitalized)", systemImage: "wand.and.stars")
-                                .font(.chronosCaption)
-                        }
-                    }
-                    TextField("Custom category", text: $customCategory)
-                        .onSubmit {
-                            let c = customCategory.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if !c.isEmpty { category = c }
-                        }
-                }
+    // MARK: - Scaffold pieces
 
-                Section("Target") {
-                    Stepper("Target: \(target)", value: $target, in: 1...99999)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: ChronosSpacing.small) {
-                            ForEach(GoalLabels.targetQuickPicks, id: \.self) { pick in
-                                FilterChip(label: "\(pick)", selected: target == pick) {
-                                    withAnimation(ChronosMotion.snappy) { target = pick }
-                                }
-                            }
-                        }
-                    }
-                    if let titleTarget {
-                        Button {
-                            withAnimation(ChronosMotion.snappy) { target = titleTarget }
-                        } label: {
-                            Label("Use \(titleTarget) from title", systemImage: "text.magnifyingglass")
-                                .font(.chronosCaption)
-                        }
-                    }
-                    if let belowProgressWarning {
-                        Text(belowProgressWarning).font(.chronosCaption).foregroundStyle(.red)
-                    }
-                }
+    @ViewBuilder private var goalHeader: some View {
+        TextField("Goal", text: $title)
+        TextField("Description (optional)", text: $detail, axis: .vertical)
+            .lineLimit(1...4)
+    }
 
-                Section(isExpanded: $detailsExpanded) {
-                    Toggle("Set a target date", isOn: $hasTargetDate.animation(ChronosMotion.snappy))
-                    if hasTargetDate {
-                        DatePicker("Target date", selection: $targetDate, displayedComponents: .date)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: ChronosSpacing.small) {
-                                ForEach(GoalLabels.goalDeadlinePresets(today: .now), id: \.label) { preset in
-                                    FilterChip(label: preset.label,
-                                               selected: Calendar.current.isDate(targetDate, inSameDayAs: preset.date)) {
-                                        withAnimation(ChronosMotion.snappy) { targetDate = preset.date }
-                                    }
-                                }
-                            }
-                        }
-                        if let dateWarning {
-                            Text(dateWarning).font(.chronosCaption).foregroundStyle(.red)
-                        }
-                    }
-                } header: {
-                    Text("Details")
-                }
+    private var goalChips: [EditorChip] {
+        [EditorChip(id: "details", systemImage: "calendar", title: "Deadline",
+                    value: hasTargetDate ? targetDate.formatted(date: .abbreviated, time: .omitted) : nil,
+                    onClear: { withAnimation(ChronosMotion.snappy) { hasTargetDate = false } })]
+    }
 
-                if let goal {
-                    Section("Progress") {
-                        ProgressView(value: goalProgressFraction(progressValue: goal.progressValue,
-                                                                 targetValue: target,
-                                                                 isCompleted: goal.isCompleted))
-                            .tint(ChronosColors.category(category))
-                        Text(goalProgressSummary(progress: goal.progressValue, target: target))
-                            .font(.chronosCaption).foregroundStyle(.secondary)
+    private var goalSections: [EditorSection] {
+        var list: [EditorSection] = [
+            EditorSection(id: "category", title: "Category", systemImage: "tag", hasValue: true) { categoryRows },
+            EditorSection(id: "target", title: "Target", systemImage: "target", hasValue: true) { targetRows },
+            EditorSection(id: "details", title: "Details", systemImage: "calendar",
+                          hasValue: hasTargetDate) { detailsRows },
+        ]
+        if goal != nil {
+            list.append(EditorSection(id: "progress", title: "Progress", systemImage: "chart.bar",
+                                      hasValue: true) { progressRows })
+        }
+        return list
+    }
+
+    @ViewBuilder private var categoryRows: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: ChronosSpacing.small) {
+                ForEach(categoryChoices, id: \.self) { choice in
+                    FilterChip(label: choice.capitalized, selected: category == choice,
+                               tint: ChronosColors.category(choice)) {
+                        withAnimation(ChronosMotion.snappy) { category = choice }
                     }
-                }
-            }
-            .navigationTitle(goal == nil ? "New goal" : "Edit goal")
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }.disabled(trimmedTitle.isEmpty)
                 }
             }
         }
-        .presentationDetents([.large])
+        if let suggestion {
+            Button {
+                withAnimation(ChronosMotion.snappy) { category = suggestion }
+            } label: {
+                Label("Suggested: \(suggestion.capitalized)", systemImage: "wand.and.stars")
+                    .font(.chronosCaption)
+            }
+        }
+        TextField("Custom category", text: $customCategory)
+            .onSubmit {
+                let c = customCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !c.isEmpty { category = c }
+            }
+    }
+
+    @ViewBuilder private var targetRows: some View {
+        Stepper("Target: \(target)", value: $target, in: 1...99999)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: ChronosSpacing.small) {
+                ForEach(GoalLabels.targetQuickPicks, id: \.self) { pick in
+                    FilterChip(label: "\(pick)", selected: target == pick) {
+                        withAnimation(ChronosMotion.snappy) { target = pick }
+                    }
+                }
+            }
+        }
+        if let titleTarget {
+            Button {
+                withAnimation(ChronosMotion.snappy) { target = titleTarget }
+            } label: {
+                Label("Use \(titleTarget) from title", systemImage: "text.magnifyingglass")
+                    .font(.chronosCaption)
+            }
+        }
+        if let belowProgressWarning {
+            Text(belowProgressWarning).font(.chronosCaption).foregroundStyle(.red)
+        }
+    }
+
+    @ViewBuilder private var detailsRows: some View {
+        Toggle("Set a target date", isOn: $hasTargetDate.animation(ChronosMotion.snappy))
+        if hasTargetDate {
+            DatePicker("Target date", selection: $targetDate, displayedComponents: .date)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: ChronosSpacing.small) {
+                    ForEach(GoalLabels.goalDeadlinePresets(today: .now), id: \.label) { preset in
+                        FilterChip(label: preset.label,
+                                   selected: Calendar.current.isDate(targetDate, inSameDayAs: preset.date)) {
+                            withAnimation(ChronosMotion.snappy) { targetDate = preset.date }
+                        }
+                    }
+                }
+            }
+            if let dateWarning {
+                Text(dateWarning).font(.chronosCaption).foregroundStyle(.red)
+            }
+        }
+    }
+
+    @ViewBuilder private var progressRows: some View {
+        if let goal {
+            ProgressView(value: goalProgressFraction(progressValue: goal.progressValue,
+                                                     targetValue: target,
+                                                     isCompleted: goal.isCompleted))
+                .tint(ChronosColors.category(category))
+            Text(goalProgressSummary(progress: goal.progressValue, target: target))
+                .font(.chronosCaption).foregroundStyle(.secondary)
+        }
     }
 
     private func save() {

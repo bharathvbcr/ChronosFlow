@@ -124,275 +124,353 @@ struct TaskEditorSheet: View {
         _actions = State(initialValue: task?.actionList ?? [])
     }
 
+    private var titleEmpty: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("Task title", text: $title)
-                        .onChange(of: title) { _, newValue in detectSmartFill(newValue) }
-                        // Pressing Return/Done submits if the form is valid (Android keyboardActions
-                        // onDone). A quick-capture win so a one-field task needs no toolbar tap.
-                        .onSubmit {
-                            if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { save() }
-                        }
-                    if let source = sourceAppLabel {
-                        // "Shared from [App]" provenance chip (Android TaskFormSheet ~1128), shown when
-                        // the draft was pre-filled from another app's share — styled as a pill to match.
-                        HStack(spacing: ChronosSpacing.micro) {
-                            Image(systemName: "square.and.arrow.up").font(.caption2)
-                            Text("Shared from \(source)")
-                        }
-                        .font(.chronosCaption)
-                        .padding(.horizontal, ChronosSpacing.small)
-                        .padding(.vertical, ChronosSpacing.micro)
-                        .background(ChronosColors.brandSecondary.opacity(0.15), in: Capsule())
-                        .foregroundStyle(ChronosColors.brandSecondary)
-                        .listRowSeparator(.hidden)
-                    }
-                    if let duplicate = duplicateTask {
-                        // Gentle duplicate-title warning + jump to the existing task (Android ~1108).
-                        VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
-                            Label("A task named “\(duplicate.title)” already exists.", systemImage: "exclamationmark.circle")
-                                .font(.chronosCaption)
-                                .foregroundStyle(ChronosColors.brandAccent)
-                            Button("Open the existing task instead") {
-                                let id = duplicate.id
-                                dismiss()
-                                onOpenExistingTask?(id)
-                            }
-                            .font(.chronosCaption)
-                        }
-                        .listRowSeparator(.hidden)
-                    }
-                    TextField("Notes", text: $detail, axis: .vertical)
-                    if textTools.isAvailable && !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Menu {
-                            ForEach(ChronosTextOp.allCases) { op in
-                                Button { rewriteNotes(op) } label: { Label(op.label, systemImage: op.systemImage) }
-                            }
-                        } label: {
-                            Label(textTools.isWorking ? "Rewriting…" : "AI rewrite", systemImage: "wand.and.sparkles")
-                                .font(.chronosCaption)
-                        }
-                        .disabled(textTools.isWorking)
-                    }
-                }
-
-                if let fill = smartFill, !fill.typedDetections.isEmpty {
-                    Section {
-                        SmartFillPreviewCard(
-                            fill: fill,
-                            onApply: { applyDetectionChip($0, from: fill) },
-                            onApplyAll: { applyAll(fill) },
-                            onDismiss: { withAnimation(ChronosMotion.snappy) { smartFill = nil } }
-                        )
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                    }
-                }
-
-                // "Suggest details with AI" (Android `onRequestAssist` button + suggestion chips).
-                // On-device assist surfaces an offline smart-fill pass over the title; tapping the
-                // button re-runs detection so the preview card above can be applied.
-                Section {
-                    Button {
-                        requestAssistSuggestions()
-                    } label: {
-                        Label(smartFill?.hasDetection == true ? "Refresh suggestions" : "Suggest details with AI",
-                              systemImage: "wand.and.sparkles")
-                            .font(.chronosLabel)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(ChronosColors.brandPrimary)
-                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                }
-
-                // Goal detection + linking (Android `detectGoalIdFromText` + goal picker). A detection
-                // prompt appears when the typed title/notes name an existing goal that isn't linked yet.
-                if !goals.isEmpty {
-                    Section("Goal") {
-                        if let detected = detectedGoal, detected.id != goalID {
-                            Button {
-                                withAnimation(ChronosMotion.snappy) { goalID = detected.id }
-                            } label: {
-                                Label("Link to goal: \(detected.title)", systemImage: "link.badge.plus")
-                                    .font(.chronosCaption)
-                                    .foregroundStyle(ChronosColors.brandPrimary)
-                            }
-                        }
-                        Picker("Linked goal", selection: $goalID) {
-                            Text("None").tag("")
-                            ForEach(goals) { goal in Text(goal.title).tag(goal.id) }
-                        }
-                    }
-                }
-
-                if let action = actionHint {
-                    Section("Action") {
-                        Button {
-                            open(action)
-                        } label: {
-                            Label(action.label, systemImage: actionIcon(action.kind))
-                        }
-                    }
-                }
-
-                Section("Priority") {
-                    Picker("Priority", selection: $priority) {
-                        Text("None").tag(0); Text("Low").tag(1)
-                        Text("Medium").tag(2); Text("High").tag(3)
-                    }
-                    .pickerStyle(.segmented)
-                }
-                Section("Due") {
-                    Toggle("Has due date", isOn: $hasDueDate.animation(ChronosMotion.snappy))
-                    if hasDueDate {
-                        DatePicker("Due", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
-                    }
-                }
-                scheduleSection
-                Section("Repeat") {
-                    Toggle("Repeats", isOn: $repeats.animation(ChronosMotion.snappy))
-                    if repeats {
-                        Picker("Frequency", selection: $frequency) {
-                            Text("Daily").tag(RecurrenceSpec.Frequency.daily)
-                            Text("Weekly").tag(RecurrenceSpec.Frequency.weekly)
-                            Text("Monthly").tag(RecurrenceSpec.Frequency.monthly)
-                            Text("Monthly (weekday)").tag(RecurrenceSpec.Frequency.monthlyOrdinal)
-                        }
-                        Stepper("Every \(interval) \(unitLabel)", value: $interval, in: 1...30)
-                        if frequency == .weekly {
-                            WeekdaySelector(selection: $weekdays)
-                            if !weekdays.isEmpty {
-                                Text("Repeats on \(RecurrenceSpec.weekdayLabel(for: weekdays)).")
-                                    .font(.chronosCaption).foregroundStyle(.secondary)
-                            }
-                        }
-                        if frequency == .monthlyOrdinal {
-                            // Ordinal (1st…4th / Last) + target weekday (Android monthly-ordinal UI).
-                            Picker("Occurrence", selection: $ordinal) {
-                                ForEach(1...5, id: \.self) { n in
-                                    Text(RecurrenceSpec.ordinalLabel(n)).tag(n)
-                                }
-                            }
-                            Picker("Weekday", selection: $ordinalWeekday) {
-                                ForEach([2, 3, 4, 5, 6, 7, 1], id: \.self) { wd in
-                                    Text(RecurrenceSpec.weekdayName(wd)).tag(wd)
-                                }
-                            }
-                            Text("Repeats on the \(RecurrenceSpec.ordinalLabel(ordinal)) \(RecurrenceSpec.weekdayName(ordinalWeekday)) each month.")
-                                .font(.chronosCaption).foregroundStyle(.secondary)
-                        }
-                        // Optional end date for the series (Android `endsOn`). `startsOn` defaults to
-                        // the task's anchor day so it isn't surfaced as a separate field here.
-                        Toggle("Ends on a date", isOn: $hasRecurrenceEnd.animation(ChronosMotion.snappy))
-                        if hasRecurrenceEnd {
-                            DatePicker("End date", selection: $recurrenceEnd, displayedComponents: [.date])
-                        }
-                        // Per-occurrence reminders (Android `reminderDrafts`: AT_TIME / BEFORE_OCCURRENCE).
-                        ForEach($recurrenceReminders) { $reminder in
-                            RecurrenceReminderRow(
-                                reminder: $reminder,
-                                hasPreferredStart: hasPreferredStart,
-                                onRemove: { removeRecurrenceReminder(reminder.id) })
-                        }
-                        Button {
-                            addRecurrenceReminder()
-                        } label: {
-                            Label("Add recurring reminder", systemImage: "bell.badge.plus")
-                                .font(.chronosCaption)
-                        }
-                    }
-                }
-                Section("Checklist") {
-                    ForEach($checklist) { $item in
-                        HStack {
-                            Button { item.isDone.toggle() } label: {
-                                Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
-                            }.buttonStyle(.plain)
-                            TextField("Item", text: $item.text)
-                        }
-                    }
-                    .onMove { checklist.move(fromOffsets: $0, toOffset: $1); reindex() }
-                    .onDelete { checklist.remove(atOffsets: $0); reindex() }
-                    HStack {
-                        // Pasting a list (newlines or "a; b; c") splits into multiple steps on Add.
-                        TextField("Add a step — or paste a list", text: $newChecklistItem, axis: .vertical)
-                        Button("Add") { addChecklistItem() }
-                            .disabled(newChecklistItem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                    if !descriptionChecklistCandidates.isEmpty {
-                        Button {
-                            extractChecklistFromDescription()
-                        } label: {
-                            Label("Add \(descriptionChecklistCandidates.count) step\(descriptionChecklistCandidates.count == 1 ? "" : "s") from notes",
-                                  systemImage: "text.badge.plus")
-                                .font(.chronosCaption)
-                        }
-                    }
-                }
-                contactSection
-                actionsSection
-                connectedFilesSection
-                if let existing {
-                    Section {
-                        Button("Delete task", role: .destructive) {
-                            context.delete(existing); try? context.save(); dismiss()
-                        }
-                    }
-                } else {
-                    // Explainer for the bottom-bar "Add & new" button (Android "Keep adding after
-                    // this" subtitle, TaskFormSheet ~1398). Rendered as the form's last footer so it
-                    // sits directly above the bottom bar.
-                    Section {
-                    } footer: {
-                        Text("“Add & new” stays here and resets the form so you can add several tasks in a row.")
-                            .font(.chronosCaption)
-                            .foregroundStyle(.secondary)
-                    }
+        CardEditorScaffold(
+            kind: "task",
+            navTitle: existing == nil ? "New task" : "Edit task",
+            chips: taskChips,
+            sections: taskSections,
+            trailingMenu: AnyView(templatesMenu),
+            footer: AnyView(footerRows),
+            saveDisabled: titleEmpty,
+            onCancel: { dismiss() },
+            onSave: save,
+            onAddNew: existing == nil ? { saveDraft(); resetDraft() } : nil
+        ) {
+            headerRows
+        }
+        .alert("Save as template", isPresented: $savingTemplate) {
+            TextField("Template name", text: $templateName)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") { commitTemplate() }
+                .disabled(templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("Reuse this task's fields later from the Templates menu.")
+        }
+        .fileImporter(isPresented: $showFileImporter,
+                      allowedContentTypes: [.item],
+                      allowsMultipleSelection: true) { result in
+            importFiles(result)
+        }
+        .sheet(isPresented: $showContactPicker) {
+            ContactPickerSheet { contact in
+                withAnimation(ChronosMotion.snappy) {
+                    linkedContact = TaskEditorSheet.snapshot(from: contact)
                 }
             }
-            .navigationTitle(existing == nil ? "New task" : "Edit task")
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .topBarTrailing) { templatesMenu }
-                if existing == nil {
-                    ToolbarItem(placement: .bottomBar) {
-                        Button {
-                            saveDraft(); resetDraft()
-                        } label: {
-                            Label("Add & new", systemImage: "plus.circle")
-                        }
-                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
+    // MARK: - Essentials header (always visible)
+
+    @ViewBuilder private var headerRows: some View {
+        TextField("Task title", text: $title)
+            .onChange(of: title) { _, newValue in detectSmartFill(newValue) }
+            // Pressing Return/Done submits if the form is valid (Android keyboardActions onDone).
+            .onSubmit { if !titleEmpty { save() } }
+        if let source = sourceAppLabel {
+            // "Shared from [App]" provenance chip (Android TaskFormSheet ~1128).
+            HStack(spacing: ChronosSpacing.micro) {
+                Image(systemName: "square.and.arrow.up").font(.caption2)
+                Text("Shared from \(source)")
+            }
+            .font(.chronosCaption)
+            .padding(.horizontal, ChronosSpacing.small)
+            .padding(.vertical, ChronosSpacing.micro)
+            .background(ChronosColors.brandSecondary.opacity(0.15), in: Capsule())
+            .foregroundStyle(ChronosColors.brandSecondary)
+            .listRowSeparator(.hidden)
+        }
+        if let duplicate = duplicateTask {
+            // Gentle duplicate-title warning + jump to the existing task (Android ~1108).
+            VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
+                Label("A task named “\(duplicate.title)” already exists.", systemImage: "exclamationmark.circle")
+                    .font(.chronosCaption)
+                    .foregroundStyle(ChronosColors.brandAccent)
+                Button("Open the existing task instead") {
+                    let id = duplicate.id
+                    dismiss()
+                    onOpenExistingTask?(id)
+                }
+                .font(.chronosCaption)
+            }
+            .listRowSeparator(.hidden)
+        }
+        TextField("Notes", text: $detail, axis: .vertical)
+        if textTools.isAvailable && !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Menu {
+                ForEach(ChronosTextOp.allCases) { op in
+                    Button { rewriteNotes(op) } label: { Label(op.label, systemImage: op.systemImage) }
+                }
+            } label: {
+                Label(textTools.isWorking ? "Rewriting…" : "AI rewrite", systemImage: "wand.and.sparkles")
+                    .font(.chronosCaption)
+            }
+            .disabled(textTools.isWorking)
+        }
+        // Manual smart-fill trigger. With auto-apply on (the default) detections already fill the
+        // draft as you type and surface as clearable quick-bar chips; this stays for a manual refresh.
+        if !titleEmpty {
+            Button {
+                requestAssistSuggestions()
+            } label: {
+                Label(smartFill?.hasDetection == true ? "Refresh suggestions" : "Suggest details with AI",
+                      systemImage: "wand.and.sparkles")
+                    .font(.chronosCaption)
+            }
+        }
+    }
+
+    // MARK: - Quick-bar chips
+
+    /// The attribute chips shown under the essentials. Each chip's `value` reflects the current draft
+    /// (so an auto-applied detection reads back here) and its `id` names the section it reveals.
+    private var taskChips: [EditorChip] {
+        var chips: [EditorChip] = [
+            EditorChip(id: "due", systemImage: "calendar", title: "Due",
+                       value: hasDueDate ? dueDate.formatted(date: .abbreviated, time: .shortened) : nil,
+                       onClear: { withAnimation(ChronosMotion.snappy) { hasDueDate = false } }),
+            EditorChip(id: "priority", systemImage: "flag", title: "Priority",
+                       value: priority > 0 ? TaskEditorSheet.priorityLabel(priority) : nil,
+                       onClear: { withAnimation(ChronosMotion.snappy) { priority = 0 } }),
+            EditorChip(id: "schedule", systemImage: "timer", title: "Schedule",
+                       value: scheduleIsSet ? scheduleChipValue : nil,
+                       onClear: { withAnimation(ChronosMotion.snappy) { clearSchedule() } }),
+            EditorChip(id: "repeat", systemImage: "repeat", title: "Repeat",
+                       value: repeats ? repeatChipValue : nil,
+                       onClear: { withAnimation(ChronosMotion.snappy) { repeats = false } }),
+            EditorChip(id: "checklist", systemImage: "checklist", title: "Checklist",
+                       value: checklist.isEmpty ? nil : "\(checklist.count) step\(checklist.count == 1 ? "" : "s")"),
+        ]
+        if !goals.isEmpty {
+            chips.append(EditorChip(id: "goal", systemImage: "target", title: "Goal",
+                value: goalID.isEmpty ? nil : goals.first { $0.id == goalID }?.title,
+                onClear: { withAnimation(ChronosMotion.snappy) { goalID = "" } }))
+        }
+        return chips
+    }
+
+    static func priorityLabel(_ p: Int) -> String {
+        switch p { case 3: "High"; case 2: "Medium"; case 1: "Low"; default: "None" }
+    }
+
+    private var scheduleIsSet: Bool {
+        targetDayOption != .anyDay || preferredDuration != nil || hasPreferredStart
+    }
+
+    private var scheduleChipValue: String {
+        var parts: [String] = []
+        if targetDayOption != .anyDay { parts.append(targetDayOption.rawValue) }
+        if let d = preferredDuration { parts.append(TaskEditorSheet.durationLabel(d)) }
+        if hasPreferredStart { parts.append(preferredStart.formatted(date: .omitted, time: .shortened)) }
+        return parts.isEmpty ? "Scheduled" : parts.joined(separator: " · ")
+    }
+
+    private var repeatChipValue: String {
+        switch frequency {
+        case .daily: interval == 1 ? "Daily" : "Every \(interval) days"
+        case .weekly: interval == 1 ? "Weekly" : "Every \(interval) weeks"
+        case .monthly, .monthlyOrdinal: "Monthly"
+        }
+    }
+
+    private func clearSchedule() {
+        targetDayOption = .anyDay
+        preferredDuration = nil
+        hasPreferredStart = false
+    }
+
+    // MARK: - Sections (progressively disclosed)
+
+    private var taskSections: [EditorSection] {
+        var list: [EditorSection] = []
+        // Manual-apply suggestion card — only when auto-apply is off (otherwise chips are the surface).
+        if smartFill?.typedDetections.isEmpty == false, !ChronosSettings.shared.autoApplyAssist {
+            list.append(EditorSection(id: "assist", title: "Suggestions",
+                                      systemImage: "wand.and.sparkles", alwaysPrimary: true) { assistRows })
+        }
+        list.append(EditorSection(id: "priority", title: "Priority", systemImage: "flag",
+                                  hasValue: priority > 0) { priorityRows })
+        list.append(EditorSection(id: "due", title: "Due", systemImage: "calendar",
+                                  hasValue: hasDueDate) { dueRows })
+        list.append(EditorSection(id: "schedule", title: "Schedule", systemImage: "timer",
+                                  hasValue: scheduleIsSet) { scheduleRows })
+        list.append(EditorSection(id: "repeat", title: "Repeat", systemImage: "repeat",
+                                  hasValue: repeats) { repeatRows })
+        list.append(EditorSection(id: "checklist", title: "Checklist", systemImage: "checklist",
+                                  badge: checklist.isEmpty ? nil : "\(checklist.count)",
+                                  hasValue: !checklist.isEmpty) { checklistRows })
+        if !goals.isEmpty {
+            list.append(EditorSection(id: "goal", title: "Goal", systemImage: "target",
+                                      hasValue: !goalID.isEmpty) { goalRows })
+        }
+        if actionHint != nil {
+            list.append(EditorSection(id: "action", title: "Action", systemImage: "bolt",
+                                      hasValue: true) { actionHintRows })
+        }
+        list.append(EditorSection(id: "contact", title: "Contact", systemImage: "person.crop.circle",
+                                  hasValue: linkedContact != nil) { contactRows })
+        list.append(EditorSection(id: "actions", title: "Actions", systemImage: "link",
+                                  badge: actions.isEmpty ? nil : "\(actions.count)",
+                                  hasValue: !actions.isEmpty) { actionsRows })
+        list.append(EditorSection(id: "files", title: "Connected files", systemImage: "paperclip",
+                                  badge: attachments.isEmpty ? nil : "\(attachments.count)",
+                                  hasValue: !attachments.isEmpty) { connectedFilesRows })
+        return list
+    }
+
+    @ViewBuilder private var footerRows: some View {
+        if let existing {
+            Button("Delete task", role: .destructive) {
+                context.delete(existing); try? context.save(); dismiss()
+            }
+        } else {
+            Text("“Add & new” stays here and resets the form so you can add several tasks in a row.")
+                .font(.chronosCaption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var assistRows: some View {
+        if let fill = smartFill, !fill.typedDetections.isEmpty {
+            SmartFillPreviewCard(
+                fill: fill,
+                onApply: { applyDetectionChip($0, from: fill) },
+                onApplyAll: { applyAll(fill) },
+                onDismiss: { withAnimation(ChronosMotion.snappy) { smartFill = nil } }
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    @ViewBuilder private var priorityRows: some View {
+        Picker("Priority", selection: $priority) {
+            Text("None").tag(0); Text("Low").tag(1)
+            Text("Medium").tag(2); Text("High").tag(3)
+        }
+        .pickerStyle(.segmented)
+    }
+
+    @ViewBuilder private var dueRows: some View {
+        Toggle("Has due date", isOn: $hasDueDate.animation(ChronosMotion.snappy))
+        if hasDueDate {
+            DatePicker("Due", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
+        }
+    }
+
+    @ViewBuilder private var repeatRows: some View {
+        Toggle("Repeats", isOn: $repeats.animation(ChronosMotion.snappy))
+        if repeats {
+            Picker("Frequency", selection: $frequency) {
+                Text("Daily").tag(RecurrenceSpec.Frequency.daily)
+                Text("Weekly").tag(RecurrenceSpec.Frequency.weekly)
+                Text("Monthly").tag(RecurrenceSpec.Frequency.monthly)
+                Text("Monthly (weekday)").tag(RecurrenceSpec.Frequency.monthlyOrdinal)
+            }
+            Stepper("Every \(interval) \(unitLabel)", value: $interval, in: 1...30)
+            if frequency == .weekly {
+                WeekdaySelector(selection: $weekdays)
+                if !weekdays.isEmpty {
+                    Text("Repeats on \(RecurrenceSpec.weekdayLabel(for: weekdays)).")
+                        .font(.chronosCaption).foregroundStyle(.secondary)
+                }
+            }
+            if frequency == .monthlyOrdinal {
+                // Ordinal (1st…4th / Last) + target weekday (Android monthly-ordinal UI).
+                Picker("Occurrence", selection: $ordinal) {
+                    ForEach(1...5, id: \.self) { n in
+                        Text(RecurrenceSpec.ordinalLabel(n)).tag(n)
                     }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save)
-                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-            .alert("Save as template", isPresented: $savingTemplate) {
-                TextField("Template name", text: $templateName)
-                Button("Cancel", role: .cancel) {}
-                Button("Save") { commitTemplate() }
-                    .disabled(templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            } message: {
-                Text("Reuse this task's fields later from the Templates menu.")
-            }
-            .fileImporter(isPresented: $showFileImporter,
-                          allowedContentTypes: [.item],
-                          allowsMultipleSelection: true) { result in
-                importFiles(result)
-            }
-            .sheet(isPresented: $showContactPicker) {
-                ContactPickerSheet { contact in
-                    withAnimation(ChronosMotion.snappy) {
-                        linkedContact = TaskEditorSheet.snapshot(from: contact)
+                Picker("Weekday", selection: $ordinalWeekday) {
+                    ForEach([2, 3, 4, 5, 6, 7, 1], id: \.self) { wd in
+                        Text(RecurrenceSpec.weekdayName(wd)).tag(wd)
                     }
                 }
+                Text("Repeats on the \(RecurrenceSpec.ordinalLabel(ordinal)) \(RecurrenceSpec.weekdayName(ordinalWeekday)) each month.")
+                    .font(.chronosCaption).foregroundStyle(.secondary)
+            }
+            // Optional end date for the series (Android `endsOn`). `startsOn` defaults to the task's
+            // anchor day so it isn't surfaced as a separate field here.
+            Toggle("Ends on a date", isOn: $hasRecurrenceEnd.animation(ChronosMotion.snappy))
+            if hasRecurrenceEnd {
+                DatePicker("End date", selection: $recurrenceEnd, displayedComponents: [.date])
+            }
+            // Per-occurrence reminders (Android `reminderDrafts`: AT_TIME / BEFORE_OCCURRENCE).
+            ForEach($recurrenceReminders) { $reminder in
+                RecurrenceReminderRow(
+                    reminder: $reminder,
+                    hasPreferredStart: hasPreferredStart,
+                    onRemove: { removeRecurrenceReminder(reminder.id) })
+            }
+            Button {
+                addRecurrenceReminder()
+            } label: {
+                Label("Add recurring reminder", systemImage: "bell.badge.plus")
+                    .font(.chronosCaption)
+            }
+        }
+    }
+
+    @ViewBuilder private var checklistRows: some View {
+        ForEach($checklist) { $item in
+            HStack {
+                Button { item.isDone.toggle() } label: {
+                    Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
+                }.buttonStyle(.plain)
+                    // Announce the step text and its done/undone state, not an unnamed button (§7).
+                    .accessibilityLabel(item.text.isEmpty ? "Step" : item.text)
+                    .accessibilityAddTraits(item.isDone ? .isSelected : [])
+                TextField("Item", text: $item.text)
+            }
+        }
+        .onMove { checklist.move(fromOffsets: $0, toOffset: $1); reindex() }
+        .onDelete { checklist.remove(atOffsets: $0); reindex() }
+        HStack {
+            // Pasting a list (newlines or "a; b; c") splits into multiple steps on Add.
+            TextField("Add a step — or paste a list", text: $newChecklistItem, axis: .vertical)
+            Button("Add") { addChecklistItem() }
+                .disabled(newChecklistItem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        if !descriptionChecklistCandidates.isEmpty {
+            Button {
+                extractChecklistFromDescription()
+            } label: {
+                Label("Add \(descriptionChecklistCandidates.count) step\(descriptionChecklistCandidates.count == 1 ? "" : "s") from notes",
+                      systemImage: "text.badge.plus")
+                    .font(.chronosCaption)
+            }
+        }
+    }
+
+    @ViewBuilder private var goalRows: some View {
+        // Goal detection + linking (Android `detectGoalIdFromText` + goal picker).
+        if let detected = detectedGoal, detected.id != goalID {
+            Button {
+                withAnimation(ChronosMotion.snappy) { goalID = detected.id }
+            } label: {
+                Label("Link to goal: \(detected.title)", systemImage: "link.badge.plus")
+                    .font(.chronosCaption)
+                    .foregroundStyle(ChronosColors.brandPrimary)
+            }
+        }
+        Picker("Linked goal", selection: $goalID) {
+            Text("None").tag("")
+            ForEach(goals) { goal in Text(goal.title).tag(goal.id) }
+        }
+    }
+
+    @ViewBuilder private var actionHintRows: some View {
+        if let action = actionHint {
+            Button {
+                open(action)
+            } label: {
+                Label(action.label, systemImage: actionIcon(action.kind))
             }
         }
     }
@@ -401,8 +479,8 @@ struct TaskEditorSheet: View {
 
     /// Linked-contact row (Android's contact card): pick via the system contact picker (out-of-process,
     /// no Contacts permission needed), snapshotting name + phone/email methods onto the task.
-    private var contactSection: some View {
-        Section("Contact") {
+    @ViewBuilder private var contactRows: some View {
+        Group {
             if let contact = linkedContact {
                 VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
                     Text(contact.displayName).font(.chronosLabel)
@@ -449,8 +527,8 @@ struct TaskEditorSheet: View {
 
     /// External actions (Android's action drafts): list with make-primary / remove, plus an
     /// add-action row (type + label + destination).
-    private var actionsSection: some View {
-        Section("Actions") {
+    @ViewBuilder private var actionsRows: some View {
+        Group {
             ForEach(actions) { action in
                 HStack(spacing: ChronosSpacing.compact) {
                     Image(systemName: TaskEditorSheet.actionSymbol(action.type))
@@ -540,8 +618,8 @@ struct TaskEditorSheet: View {
 
     /// Collapsible "Connected files" section (Android TaskFormSheet ~2367): attachment rows with
     /// icon + name + size, add via the document picker (imported copy), swipe/row remove.
-    private var connectedFilesSection: some View {
-        Section {
+    @ViewBuilder private var connectedFilesRows: some View {
+        Group {
             DisclosureGroup(isExpanded: $connectedFilesExpanded.animation(ChronosMotion.snappy)) {
                 if attachments.isEmpty {
                     Text("No files or images attached yet")
@@ -684,42 +762,37 @@ struct TaskEditorSheet: View {
     /// Duration / target-day / preferred-start pickers plus the scheduling-summary line
     /// (Android TaskFormSheet ~1421–1536). All three write the existing model fields
     /// (`preferredDurationMinutes`, `targetDate`, `preferredStartMinuteOfDay`).
-    private var scheduleSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: ChronosSpacing.small) {
-                Text("Duration")
-                    .font(.chronosCaption)
-                    .foregroundStyle(.secondary)
-                ChipFlowLayout(spacing: ChronosSpacing.small) {
-                    ForEach(TaskEditorSheet.durationPresets, id: \.self) { minutes in
-                        SelectChip(label: TaskEditorSheet.durationLabel(minutes),
-                                   selected: preferredDuration == minutes) {
-                            withAnimation(ChronosMotion.snappy) { preferredDuration = minutes }
-                        }
-                    }
-                    SelectChip(label: "Any length", selected: preferredDuration == nil) {
-                        withAnimation(ChronosMotion.snappy) { preferredDuration = nil }
-                    }
-                }
-            }
-            Picker("Target day", selection: $targetDayOption.animation(ChronosMotion.snappy)) {
-                ForEach(TargetDayOption.allCases) { Text($0.rawValue).tag($0) }
-            }
-            if targetDayOption == .custom {
-                DatePicker("Target date", selection: $customTargetDate, displayedComponents: [.date])
-            }
-            Toggle("Preferred start time", isOn: $hasPreferredStart.animation(ChronosMotion.snappy))
-            if hasPreferredStart {
-                DatePicker("Preferred start", selection: $preferredStart, displayedComponents: [.hourAndMinute])
-            }
-        } header: {
-            Text("Schedule")
-        } footer: {
-            // "Scheduling summary" line (Android: "Targeting today • 1h block • ends ~10:00 AM").
-            Text(schedulingSummary)
+    @ViewBuilder private var scheduleRows: some View {
+        VStack(alignment: .leading, spacing: ChronosSpacing.small) {
+            Text("Duration")
                 .font(.chronosCaption)
                 .foregroundStyle(.secondary)
+            ChipFlowLayout(spacing: ChronosSpacing.small) {
+                ForEach(TaskEditorSheet.durationPresets, id: \.self) { minutes in
+                    SelectChip(label: TaskEditorSheet.durationLabel(minutes),
+                               selected: preferredDuration == minutes) {
+                        withAnimation(ChronosMotion.snappy) { preferredDuration = minutes }
+                    }
+                }
+                SelectChip(label: "Any length", selected: preferredDuration == nil) {
+                    withAnimation(ChronosMotion.snappy) { preferredDuration = nil }
+                }
+            }
         }
+        Picker("Target day", selection: $targetDayOption.animation(ChronosMotion.snappy)) {
+            ForEach(TargetDayOption.allCases) { Text($0.rawValue).tag($0) }
+        }
+        if targetDayOption == .custom {
+            DatePicker("Target date", selection: $customTargetDate, displayedComponents: [.date])
+        }
+        Toggle("Preferred start time", isOn: $hasPreferredStart.animation(ChronosMotion.snappy))
+        if hasPreferredStart {
+            DatePicker("Preferred start", selection: $preferredStart, displayedComponents: [.hourAndMinute])
+        }
+        // "Scheduling summary" line (Android: "Targeting today • 1h block • ends ~10:00 AM").
+        Text(schedulingSummary)
+            .font(.chronosCaption)
+            .foregroundStyle(.secondary)
     }
 
     /// Mirrors the Android scheduling-summary buildString.
@@ -1248,27 +1321,8 @@ private struct SmartFillPreviewCard: View {
     }
 }
 
-// MARK: - Schedule chips & recurring-reminder row
-
-/// A pill-shaped single-select option chip for the Schedule section (Android `ChronosOptionChips`).
-private struct SelectChip: View {
-    let label: String
-    let selected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(label)
-                .font(.chronosCaption)
-                .padding(.horizontal, ChronosSpacing.compact)
-                .padding(.vertical, ChronosSpacing.small)
-                .background(selected ? ChronosColors.brandPrimary : Color(.tertiarySystemFill), in: Capsule())
-                .foregroundStyle(selected ? ChronosColors.onBrand : .primary)
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-}
+// MARK: - Recurring-reminder row & weekday selector
+// (SelectChip and ChipFlowLayout now live in DesignSystem/CardEditorScaffold.swift, shared.)
 
 /// One recurring-reminder draft: a fixed clock time on each occurrence day, or a lead offset
 /// before the preferred start (Android's reminder-draft card, AT_TIME / BEFORE_OCCURRENCE).
@@ -1363,56 +1417,6 @@ private struct WeekdaySelector: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Repeat on weekdays")
-    }
-}
-
-// MARK: - Flow layout
-
-/// A minimal flowing wrap layout for the detection chips (iOS 16+ `Layout`). Lays children out
-/// left-to-right, wrapping to a new row when the proposed width is exceeded.
-private struct ChipFlowLayout: Layout {
-    var spacing: CGFloat = 8
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
-        let maxWidth = proposal.width ?? .infinity
-        var rowWidth: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        var totalHeight: CGFloat = 0
-        var totalWidth: CGFloat = 0
-
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if rowWidth + size.width > maxWidth, rowWidth > 0 {
-                totalHeight += rowHeight + spacing
-                totalWidth = max(totalWidth, rowWidth - spacing)
-                rowWidth = 0
-                rowHeight = 0
-            }
-            rowWidth += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
-        totalHeight += rowHeight
-        totalWidth = max(totalWidth, rowWidth - spacing)
-        return CGSize(width: min(totalWidth, maxWidth), height: totalHeight)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
-        let maxWidth = bounds.width
-        var x = bounds.minX
-        var y = bounds.minY
-        var rowHeight: CGFloat = 0
-
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x + size.width > bounds.minX + maxWidth, x > bounds.minX {
-                x = bounds.minX
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
     }
 }
 

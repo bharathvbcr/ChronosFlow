@@ -29,6 +29,10 @@ class AlarmSchedulerTest {
     @Before
     fun setup() {
         context = ApplicationProvider.getApplicationContext()
+        context.getSharedPreferences("daydial_ui_settings", Context.MODE_PRIVATE).edit()
+            .putBoolean("notifications.currentBlockLive", true)
+            .putBoolean("notifications.foldReminders", false)
+            .apply()
         alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         shadowAlarmManager = shadowOf(alarmManager)
         
@@ -82,5 +86,51 @@ class AlarmSchedulerTest {
         val alarm = shadowAlarmManager.scheduledAlarms[0]
         val intent = shadowOf(alarm.operation).savedIntent
         assertEquals(MedicationAlarmReceiver::class.java.name, intent.component?.className)
+    }
+
+    @Test
+    fun `scheduleAlarmRequest skips separate reminders when fold mode is active`() {
+        context.getSharedPreferences("daydial_ui_settings", Context.MODE_PRIVATE).edit()
+            .putBoolean("notifications.currentBlockLive", true)
+            .putBoolean("notifications.foldReminders", true)
+            .apply()
+
+        val request = AlarmRequest(
+            id = "med-fold",
+            type = AlarmRequestType.MEDICATION,
+            scheduledFor = Instant.now().plusSeconds(3600),
+            title = "Meds",
+            message = "Take meds",
+            medicationPlanId = "plan-1",
+            blockId = null,
+            reliability = AlarmReliability.EXACT,
+            deliveryState = AlarmDeliveryState.PENDING,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now()
+        )
+
+        val result = scheduler.scheduleAlarmRequest(request)
+
+        assertTrue(result is AlarmScheduleResult.Skipped)
+        assertEquals(FOLDED_REMINDER_SKIP_REASON, (result as AlarmScheduleResult.Skipped).reason)
+        assertEquals(0, shadowAlarmManager.scheduledAlarms.size)
+    }
+
+    @Test
+    fun `scheduleInexactAlarm skips habit reminders when fold mode is active`() {
+        context.getSharedPreferences("daydial_ui_settings", Context.MODE_PRIVATE).edit()
+            .putBoolean("notifications.currentBlockLive", true)
+            .putBoolean("notifications.foldReminders", true)
+            .apply()
+
+        val result = scheduler.scheduleInexactAlarm(
+            "daydial:2026-07-03:habit-h1:start",
+            Instant.now().plusSeconds(3600),
+            "Habit",
+            "Starts now"
+        )
+
+        assertTrue(result is AlarmScheduleResult.Skipped)
+        assertEquals(0, shadowAlarmManager.scheduledAlarms.size)
     }
 }

@@ -23,6 +23,9 @@ class TaskActionReceiver : BroadcastReceiver() {
     @Inject
     lateinit var toggleTaskCompletionUseCase: ToggleTaskCompletionUseCase
 
+    @Inject
+    lateinit var currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator
+
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
         val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: return
@@ -35,7 +38,9 @@ class TaskActionReceiver : BroadcastReceiver() {
                 try {
                     toggleTaskCompletionUseCase(taskId)
 
-                    if (notificationId != -1) {
+                    if (intent.getBooleanExtra(EXTRA_REFRESH_CURRENT_BLOCK, false)) {
+                        currentBlockNotificationCoordinator.refresh()
+                    } else if (notificationId != -1) {
                         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                         notificationManager.cancel(notificationId)
                         ReminderNotificationGroups.refreshSummary(context)

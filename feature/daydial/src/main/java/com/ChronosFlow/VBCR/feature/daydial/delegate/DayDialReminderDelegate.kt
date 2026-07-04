@@ -64,7 +64,8 @@ class DayDialReminderDelegate @Inject constructor(
         sleepScheduleEndMinute: Int,
         journalRemindersEnabled: Boolean = true,
         sleepJournalLogReminder: Boolean = false,
-        sleepJournalRemindersEnabled: Boolean = true
+        sleepJournalRemindersEnabled: Boolean = true,
+        currentBlockLiveEnabled: Boolean = false
     ) {
         scope.launch {
             val blocks = repository.getTimeBlocksByDate(date).first()
@@ -138,15 +139,19 @@ class DayDialReminderDelegate @Inject constructor(
             }
 
             if (blockStartReminders) {
-                reminderBlocks.forEach { block ->
-                    schedule(
-                        id = reminderId(date, block.id, "start"),
-                        minuteOfDay = block.startMinuteOfDay,
-                        title = block.title,
-                        message = "Your planned block starts now.",
-                        type = AlarmRequestType.BLOCK_START,
-                        blockId = block.id
-                    )
+                // Planner block starts are covered by the live current-block notification when enabled;
+                // habit starts keep their own dedicated alerts (not rerouted at delivery).
+                if (!currentBlockLiveEnabled) {
+                    reminderBlocks.forEach { block ->
+                        schedule(
+                            id = reminderId(date, block.id, "start"),
+                            minuteOfDay = block.startMinuteOfDay,
+                            title = block.title,
+                            message = "Your planned block starts now.",
+                            type = AlarmRequestType.BLOCK_START,
+                            blockId = block.id
+                        )
+                    }
                 }
 
                 habits
@@ -172,7 +177,8 @@ class DayDialReminderDelegate @Inject constructor(
                     }
             }
 
-            if (breakReminders) {
+            // Break nudges duplicate the live surface's end-of-block countdown when it is on.
+            if (breakReminders && !currentBlockLiveEnabled) {
                 reminderBlocks.forEach { block ->
                     schedule(
                         id = reminderId(date, block.id, "break"),

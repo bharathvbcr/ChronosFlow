@@ -14,6 +14,10 @@ interface MedicationRepository {
     suspend fun saveMedicationSchedule(schedule: MedicationSchedule)
     suspend fun saveMedicationSafetyProfile(profile: MedicationSafetyProfile)
     suspend fun addMedicationDoseEvent(event: MedicationDoseEvent)
+    /** Removes a single dose event by id — used to reverse a just-taken dose (see UndoMedicationDoseUseCase). */
+    suspend fun deleteMedicationDoseEvent(eventId: String)
+    /** Every recorded dose event for one plan (all types, no window) — used to find the dose to undo. */
+    suspend fun getDoseEventsForPlan(planId: String): List<MedicationDoseEvent>
     fun observeDoseEventsBetween(start: LocalDate, end: LocalDate): Flow<List<MedicationDoseEvent>>
     suspend fun deleteMedicationPlan(plan: MedicationPlan)
 }

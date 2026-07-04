@@ -9,6 +9,7 @@ import ChronosCore
 /// HabitStreakChart / HabitRepairPanel / HabitRow / HabitContextActionSheet).
 struct HabitsView: View {
     @Environment(\.modelContext) private var context
+    @Environment(ShellState.self) private var shell: ShellState?
     // Only active (non-archived) habits, matching Android's GetActiveHabitsUseCase.
     @Query(filter: #Predicate<Habit> { $0.isActive }, sort: \Habit.title) private var habits: [Habit]
     @Query private var allBlocks: [TimeBlock]
@@ -21,6 +22,8 @@ struct HabitsView: View {
     @State private var editingHabit: Habit?
     /// Habit pending archive confirmation from a row's Archive icon (Android `HabitRow` onArchive).
     @State private var archivingHabit: Habit?
+    /// Scroll target for notification deep links (`chronosflow://habits?id=…`).
+    @State private var scrollTarget: String?
 
     private var todayBusy: [(start: Int, end: Int)] {
         allBlocks
@@ -36,34 +39,7 @@ struct HabitsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: ChronosSpacing.compact) {
-                    if !habits.isEmpty {
-                        metricTiles
-                        if !repair.suggestions.isEmpty || repair.isThinking {
-                            HabitRepairPanel(
-                                assistant: repair,
-                                onComplete: { applyRepair($0) }
-                            )
-                        }
-                        ConsistencyCard(habits: habits)
-                        StreakChartCard(habits: habits)
-                    }
-                    ForEach(habits) { habit in
-                        HabitCard(
-                            habit: habit,
-                            busy: todayBusy,
-                            onMore: { contextHabit = habit },
-                            onEdit: { editingHabit = habit },
-                            onArchive: { archivingHabit = habit }
-                        )
-                    }
-                }
-                .padding(ChronosSpacing.standard)
-            }
-            .background { ChronosBackdrop() }
-            .navigationTitle("Habits")
-            .chronosScrollMinimizedBar()
+            chromedSurface
             .overlay {
                 if habits.isEmpty {
                     VStack(spacing: ChronosSpacing.standard) {
@@ -76,11 +52,6 @@ struct HabitsView: View {
                         }
                         .padding(.horizontal, ChronosSpacing.standard)
                     }
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { prefillTitle = nil; creating = true } label: { Image(systemName: "plus") }
                 }
             }
             .sheet(isPresented: $creating) { HabitEditorSheet(initialTitle: prefillTitle) }
@@ -108,7 +79,81 @@ struct HabitsView: View {
             }
             .task(id: habits.map(\.id)) { refreshRepair() }
             .onChange(of: todayBusy.count) { refreshRepair() }
+            .onAppear { drainPendingDeepLinkHabit() }
+            .onChange(of: shell?.pendingHabitID) { _, id in
+                if id != nil { drainPendingDeepLinkHabit() }
+            }
         }
+    }
+
+    private var chromedSurface: some View {
+        habitsSurface
+            .navigationTitle("Habits")
+            .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { prefillTitle = nil; creating = true } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Add habit")
+                }
+            }
+    }
+
+    private var habitsSurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: ChronosSpacing.compact) {
+                        if !habits.isEmpty {
+                            habitsSection { metricTiles }
+                            if !repair.suggestions.isEmpty || repair.isThinking {
+                                habitsSection {
+                                    HabitRepairPanel(
+                                        assistant: repair,
+                                        onComplete: { applyRepair($0) }
+                                    )
+                                }
+                            }
+                            habitsSection { ConsistencyCard(habits: habits) }
+                            habitsSection { StreakChartCard(habits: habits) }
+                        }
+                        ForEach(habits) { habit in
+                            habitsSection {
+                                HabitCard(
+                                    habit: habit,
+                                    busy: todayBusy,
+                                    onMore: { contextHabit = habit },
+                                    onEdit: { editingHabit = habit },
+                                    onArchive: { archivingHabit = habit }
+                                )
+                            }
+                            .id(habit.id)
+                        }
+                    }
+                    .padding(.vertical, ChronosSpacing.standard)
+                }
+                .scrollContentBackground(.hidden)
+                .onChange(of: scrollTarget) { _, target in
+                    guard let target else { return }
+                    withAnimation(ChronosMotion.snappy) { proxy.scrollTo(target, anchor: .center) }
+                    scrollTarget = nil
+                }
+            }
+        }
+    }
+
+    private func habitsSection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().padding(.horizontal, ChronosSpacing.standard)
+    }
+
+    /// Notification deep link (`chronosflow://habits?id=…`) — open the matching habit's context sheet.
+    private func drainPendingDeepLinkHabit() {
+        guard let id = shell?.pendingHabitID else { return }
+        shell?.pendingHabitID = nil
+        guard let habit = habits.first(where: { $0.id == id }) else { return }
+        scrollTarget = id
+        contextHabit = habit
     }
 
     // MARK: Metric tiles (Active / Best streak / Done today).
@@ -391,6 +436,7 @@ private struct HabitCard: View {
                         withAnimation(ChronosMotion.bouncy) {
                             habit.toggleCompletion(on: .now); try? context.save()
                         }
+                        BlockLiveActivityCoordinator.refreshToday()
                     } label: {
                         Label(doneToday ? "Completed today" : "Complete", systemImage: "checkmark")
                             .frame(maxWidth: .infinity)
@@ -751,63 +797,95 @@ struct HabitEditorSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                TextField("Habit", text: $title)
-                Picker("Cadence", selection: $cadence) {
-                    ForEach(cadenceOptions, id: \.self) { Text($0).tag($0) }
-                }
-                if cadence == "Custom days" {
-                    customDaysRow
-                }
-                if cadence == Self.everyNDaysOption {
-                    Stepper("Every \(everyNDays) days", value: $everyNDays, in: 2...30)
-                        .font(.chronosBody)
-                }
-                VStack(alignment: .leading) {
-                    Text("Difficulty: \(Int(difficulty))")
-                    Slider(value: $difficulty, in: 1...5, step: 1)
-                }
-                DatePicker("Window start", selection: $windowStart, displayedComponents: .hourAndMinute)
-                DatePicker("Window end", selection: $windowEnd, displayedComponents: .hourAndMinute)
-                if let hint = historyHint {
-                    // Android's "Today snapshot" streak/adherence context line in the edit form.
-                    Label(hint, systemImage: "flame")
-                        .font(.chronosCaption).foregroundStyle(.secondary)
-                }
+        CardEditorScaffold(
+            kind: "habit",
+            navTitle: editing == nil ? "New habit" : "Edit habit",
+            chips: habitChips,
+            sections: habitSections,
+            saveDisabled: title.isEmpty,
+            onCancel: { dismiss() },
+            onSave: saveHabit
+        ) {
+            habitHeader
+        }
+    }
 
-                if editing == nil {
-                    templatesSection
-                }
+    // MARK: - Scaffold pieces
 
-                Section {
-                    Toggle("On day plan", isOn: $isBundled)
-                    if !goals.isEmpty {
-                        Picker("Goal", selection: $goalID) {
-                            Text("None").tag(String?.none)
-                            ForEach(goals) { goal in
-                                Text(goal.title).tag(String?.some(goal.id))
-                            }
-                        }
-                    }
-                } footer: {
-                    Text("“On day plan” lets this habit be scheduled as a block. Linking a goal counts completions toward it.")
-                }
+    @ViewBuilder private var habitHeader: some View {
+        TextField("Habit", text: $title)
+        Picker("Cadence", selection: $cadence) {
+            ForEach(cadenceOptions, id: \.self) { Text($0).tag($0) }
+        }
+        if cadence == "Custom days" {
+            customDaysRow
+        }
+        if cadence == Self.everyNDaysOption {
+            Stepper("Every \(everyNDays) days", value: $everyNDays, in: 2...30)
+                .font(.chronosBody)
+        }
+        if let hint = historyHint {
+            // Android's "Today snapshot" streak/adherence context line in the edit form.
+            Label(hint, systemImage: "flame")
+                .font(.chronosCaption).foregroundStyle(.secondary)
+        }
+    }
 
-                if editing == nil && !historyTitles.isEmpty {
-                    fromHistorySection
-                }
+    private var habitChips: [EditorChip] {
+        var chips: [EditorChip] = [
+            EditorChip(id: "difficulty", systemImage: "gauge.medium", title: "Difficulty",
+                       value: "Level \(Int(difficulty))"),
+            EditorChip(id: "window", systemImage: "clock", title: "Window",
+                       value: "\(minute(windowStart).clockTime)–\(minute(windowEnd).clockTime)"),
+        ]
+        let planValue = isBundled ? "On plan" : goals.first { $0.id == goalID }?.title
+        chips.append(EditorChip(id: "plan", systemImage: "target", title: "Goal & plan", value: planValue))
+        return chips
+    }
+
+    private var habitSections: [EditorSection] {
+        var list: [EditorSection] = [
+            EditorSection(id: "difficulty", title: "Difficulty", systemImage: "gauge.medium") { difficultyRows },
+            EditorSection(id: "window", title: "Window", systemImage: "clock") { windowRows },
+            EditorSection(id: "plan", title: "Plan & goal", systemImage: "target",
+                          hasValue: isBundled || goalID != nil) { planRows },
+        ]
+        if editing == nil {
+            list.append(EditorSection(id: "templates", title: "Templates", systemImage: "square.on.square") { templatesRows })
+            if !historyTitles.isEmpty {
+                list.append(EditorSection(id: "history", title: "From history",
+                                          systemImage: "clock.arrow.circlepath") { historyRows })
             }
-            .navigationTitle(editing == nil ? "New habit" : "Edit habit")
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { saveHabit() }.disabled(title.isEmpty)
+        }
+        return list
+    }
+
+    @ViewBuilder private var difficultyRows: some View {
+        VStack(alignment: .leading) {
+            Text("Difficulty: \(Int(difficulty))")
+            Slider(value: $difficulty, in: 1...5, step: 1)
+                .accessibilityLabel("Difficulty")
+                .accessibilityValue("\(Int(difficulty)) of 5")
+        }
+    }
+
+    @ViewBuilder private var windowRows: some View {
+        DatePicker("Window start", selection: $windowStart, displayedComponents: .hourAndMinute)
+        DatePicker("Window end", selection: $windowEnd, displayedComponents: .hourAndMinute)
+    }
+
+    @ViewBuilder private var planRows: some View {
+        Toggle("On day plan", isOn: $isBundled)
+        if !goals.isEmpty {
+            Picker("Goal", selection: $goalID) {
+                Text("None").tag(String?.none)
+                ForEach(goals) { goal in
+                    Text(goal.title).tag(String?.some(goal.id))
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        Text("“On day plan” lets this habit be scheduled as a block. Linking a goal counts completions toward it.")
+            .font(.chronosCaption).foregroundStyle(.secondary)
     }
 
     // MARK: Cadence presets + custom weekdays (Android habitRecurrenceQuickPresets / SELECTED_WEEKDAYS)
@@ -861,17 +939,13 @@ struct HabitEditorSheet: View {
 
     // MARK: Templates (Android habitTemplates chips)
 
-    private var templatesSection: some View {
-        Section {
-            FlowChips(titles: habitTemplates.map(\.label)) { label in
-                guard let template = habitTemplates.first(where: { $0.label == label }) else { return }
-                withAnimation(ChronosMotion.smooth) { apply(template) }
-            }
-        } header: {
-            Text("Templates")
-        } footer: {
-            Text("Prefills the form — nothing is saved until you tap Save.")
+    @ViewBuilder private var templatesRows: some View {
+        FlowChips(titles: habitTemplates.map(\.label)) { label in
+            guard let template = habitTemplates.first(where: { $0.label == label }) else { return }
+            withAnimation(ChronosMotion.smooth) { apply(template) }
         }
+        Text("Prefills the form — nothing is saved until you tap Save.")
+            .font(.chronosCaption).foregroundStyle(.secondary)
     }
 
     private func apply(_ template: HabitTemplate) {
@@ -892,26 +966,22 @@ struct HabitEditorSheet: View {
         return archivedHabits.map(\.title).filter { seen.insert($0).inserted }
     }
 
-    private var fromHistorySection: some View {
-        Section {
-            FlowChips(titles: historyTitles) { picked in
-                guard let source = archivedHabits.first(where: { $0.title == picked }) else { return }
-                withAnimation(ChronosMotion.smooth) {
-                    title = source.title
-                    let state = habitCadenceEditorState(source.cadence)
-                    cadence = state.selection
-                    customDays = state.customDays
-                    windowStart = Self.date(fromMinute: source.windowStartMinute)
-                    windowEnd = Self.date(fromMinute: source.windowEndMinute)
-                    difficulty = Double(source.difficulty)
-                    isBundled = source.isBundled
-                }
+    @ViewBuilder private var historyRows: some View {
+        FlowChips(titles: historyTitles) { picked in
+            guard let source = archivedHabits.first(where: { $0.title == picked }) else { return }
+            withAnimation(ChronosMotion.smooth) {
+                title = source.title
+                let state = habitCadenceEditorState(source.cadence)
+                cadence = state.selection
+                customDays = state.customDays
+                windowStart = Self.date(fromMinute: source.windowStartMinute)
+                windowEnd = Self.date(fromMinute: source.windowEndMinute)
+                difficulty = Double(source.difficulty)
+                isBundled = source.isBundled
             }
-        } header: {
-            Text("From history")
-        } footer: {
-            Text("Recreate an archived habit's saved setup.")
         }
+        Text("Recreate an archived habit's saved setup.")
+            .font(.chronosCaption).foregroundStyle(.secondary)
     }
 
     // MARK: History hint (edit mode)
@@ -930,6 +1000,7 @@ struct HabitEditorSheet: View {
     }
 
     private func saveHabit() {
+        let saved: Habit
         if let habit = editing {
             habit.title = title
             habit.cadence = cadenceValue
@@ -938,13 +1009,20 @@ struct HabitEditorSheet: View {
             habit.windowEndMinute = minute(windowEnd)
             habit.isBundled = isBundled
             habit.goalID = goalID
+            saved = habit
         } else {
-            context.insert(Habit(
+            let habit = Habit(
                 title: title, cadence: cadenceValue, windowStartMinute: minute(windowStart),
                 windowEndMinute: minute(windowEnd), difficulty: Int(difficulty),
-                isBundled: isBundled, goalID: goalID))
+                isBundled: isBundled, goalID: goalID)
+            context.insert(habit)
+            saved = habit
         }
         try? context.save()
+        Task {
+            await ChronosNotifications.shared.scheduleHabit(saved)
+            BlockLiveActivityCoordinator.refreshToday()
+        }
         dismiss()
     }
 

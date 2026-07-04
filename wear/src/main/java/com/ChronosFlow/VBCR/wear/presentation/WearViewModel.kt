@@ -7,12 +7,24 @@ import com.ChronosFlow.VBCR.core.domain.wear.WearActionContract
 import com.ChronosFlow.VBCR.wear.DaySummaryStore
 import com.ChronosFlow.VBCR.wear.WearActionSender
 import com.ChronosFlow.VBCR.wear.WearFocusStateStore
+import com.ChronosFlow.VBCR.wear.model.WearTask
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+/**
+ * A per-item completion held for a brief window so the wrist can undo it. [Task] carries the removed
+ * entry + its list slot to restore; [Habit]/[Dose] carry just the id — the mirror row is un-flipped
+ * and the phone re-publishes the authoritative state.
+ */
+sealed interface UndoableAction {
+    data class Task(val task: WearTask, val index: Int) : UndoableAction
+    data class Habit(val habitId: String) : UndoableAction
+    data class Dose(val medId: String) : UndoableAction
+}
 
 /**
  * Backs the watch app. Reads the phone mirrors as reactive state ([daySummary], [focus]) and
@@ -59,6 +71,21 @@ class WearViewModel(application: Application) : AndroidViewModel(application) {
     /** Set when a completion couldn't be delivered to the phone; drives the failure overlay. */
     private val _failure = MutableStateFlow<String?>(null)
     val failure: StateFlow<String?> = _failure.asStateFlow()
+
+    /** The just-completed item, offered for a brief undo window; null when there's nothing to undo. */
+    private val _undoable = MutableStateFlow<UndoableAction?>(null)
+    val undoable: StateFlow<UndoableAction?> = _undoable.asStateFlow()
+    private var undoTimeoutJob: Job? = null
+
+    /** Offers [action] as undoable for [UNDO_TIMEOUT_MILLIS], replacing any still-pending offer. */
+    private fun offerUndo(action: UndoableAction) {
+        _undoable.value = action
+        undoTimeoutJob?.cancel()
+        undoTimeoutJob = viewModelScope.launch {
+            delay(UNDO_TIMEOUT_MILLIS)
+            _undoable.value = null
+        }
+    }
 
     /**
      * Asks the phone to push a fresh day-summary mirror. Sent when the watch app opens so a stale
@@ -109,21 +136,23 @@ class WearViewModel(application: Application) : AndroidViewModel(application) {
     fun markHabitDone(habitId: String) {
         val current = daySummary.value
         val updated = current.habits.map { if (it.id == habitId && !it.done) it.copy(done = true) else it }
-        if (updated != current.habits) {
+        val changed = updated != current.habits
+        if (changed) {
             DaySummaryStore.write(
                 getApplication(),
-                current.copy(
-                    habits = updated,
-                    habitsDone = updated.count { it.done }
-                )
+                current.copy(habits = updated, habitsDone = updated.count { it.done })
             )
         }
-        _confirmation.value = "Done"
-        sendItemAction(WearActionContract.TYPE_HABIT, habitId)
+        // Offer a brief undo (phone reverses via UndoHabitCompletionUseCase); fall back to the plain
+        // flash only when the mirror is redacted so there's no row to restore.
+        if (changed) offerUndo(UndoableAction.Habit(habitId)) else _confirmation.value = "Done"
+        sendItemAction(WearActionContract.TYPE_HABIT, WearActionContract.itemArg(habitId))
     }
 
     fun completeTask(taskId: String) {
         val current = daySummary.value
+        val index = current.tasks.indexOfFirst { it.id == taskId }
+        val removed = current.tasks.getOrNull(index)
         val remaining = current.tasks.filterNot { it.id == taskId }
         if (remaining.size != current.tasks.size) {
             DaySummaryStore.write(
@@ -134,24 +163,76 @@ class WearViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
         }
-        _confirmation.value = "Done"
+        // Offer a brief wrist-side undo instead of the plain success flash; a mis-tap on a small
+        // round screen is then recoverable in place.
+        if (removed != null) offerUndo(UndoableAction.Task(removed, index)) else _confirmation.value = "Done"
         sendItemAction(WearActionContract.TYPE_TASK, taskId)
+    }
+
+    /**
+     * Reverses the just-completed item: un-flips its mirror row and re-sends the reverse action so
+     * the phone undoes it (task = re-toggle; habit/dose = an explicit reverse arg the listener maps
+     * to the undo use-cases). No-op once the undo window has lapsed.
+     */
+    fun undo() {
+        val action = _undoable.value ?: return
+        _undoable.value = null
+        undoTimeoutJob?.cancel()
+        val current = daySummary.value
+        when (action) {
+            is UndoableAction.Task -> {
+                if (current.tasks.none { it.id == action.task.id }) {
+                    val restored = current.tasks.toMutableList().apply {
+                        add(action.index.coerceIn(0, size), action.task)
+                    }
+                    DaySummaryStore.write(
+                        getApplication(),
+                        current.copy(tasks = restored, openTaskCount = current.openTaskCount + 1)
+                    )
+                }
+                sendItemAction(WearActionContract.TYPE_TASK, action.task.id)
+            }
+            is UndoableAction.Habit -> {
+                val reverted = current.habits.map { if (it.id == action.habitId && it.done) it.copy(done = false) else it }
+                if (reverted != current.habits) {
+                    DaySummaryStore.write(
+                        getApplication(),
+                        current.copy(habits = reverted, habitsDone = reverted.count { it.done })
+                    )
+                }
+                sendItemAction(WearActionContract.TYPE_HABIT, WearActionContract.itemArg(action.habitId, reverse = true))
+            }
+            is UndoableAction.Dose -> {
+                val reverted = current.meds.map { if (it.id == action.medId && it.taken) it.copy(taken = false) else it }
+                if (reverted != current.meds) {
+                    DaySummaryStore.write(
+                        getApplication(),
+                        current.copy(meds = reverted, medsDueCount = reverted.count { !it.taken })
+                    )
+                }
+                sendItemAction(WearActionContract.TYPE_DOSE, WearActionContract.itemArg(action.medId, reverse = true))
+            }
+        }
+    }
+
+    fun dismissUndo() {
+        _undoable.value = null
+        undoTimeoutJob?.cancel()
     }
 
     fun takeDose(planId: String) {
         val current = daySummary.value
         val updated = current.meds.map { if (it.id == planId && !it.taken) it.copy(taken = true) else it }
-        if (updated != current.meds) {
+        val changed = updated != current.meds
+        if (changed) {
             DaySummaryStore.write(
                 getApplication(),
-                current.copy(
-                    meds = updated,
-                    medsDueCount = updated.count { !it.taken }
-                )
+                current.copy(meds = updated, medsDueCount = updated.count { !it.taken })
             )
         }
-        _confirmation.value = "Taken"
-        sendItemAction(WearActionContract.TYPE_DOSE, planId)
+        // Offer a brief undo (phone reverses via UndoMedicationDoseUseCase, deleting the TAKEN event).
+        if (changed) offerUndo(UndoableAction.Dose(planId)) else _confirmation.value = "Taken"
+        sendItemAction(WearActionContract.TYPE_DOSE, WearActionContract.itemArg(planId))
     }
 
     /**
@@ -172,18 +253,32 @@ class WearViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Starts a focus session; [durationMinutes] null defers to the phone's default length. */
     fun startFocus(durationMinutes: Int? = null) =
-        sendFocus(WearActionContract.focusStart(durationMinutes?.let { it * 60 }))
+        sendFocus(WearActionContract.focusStart(durationMinutes?.let { it * 60 }), reportUndelivered = true)
 
     fun pauseFocus() = sendFocus(WearActionContract.FOCUS_PAUSE)
     fun resumeFocus() = sendFocus(WearActionContract.FOCUS_RESUME)
     fun stopFocus() = sendFocus(WearActionContract.FOCUS_STOP)
 
-    private fun sendFocus(action: String) {
-        WearActionSender.send(getApplication(), WearActionContract.TYPE_FOCUS, action)
+    /**
+     * Sends a focus control to the phone. Starting a session — the app's headline action — is not
+     * applied optimistically (the phone owns the timer math), so with [reportUndelivered] a start
+     * that can't reach the phone raises the same "Couldn't reach phone" overlay the completion
+     * actions do, instead of a tap that silently does nothing. Pause/resume/stop act on a session
+     * already mirrored from the phone and stay best-effort.
+     */
+    private fun sendFocus(action: String, reportUndelivered: Boolean = false) {
+        WearActionSender.send(getApplication(), WearActionContract.TYPE_FOCUS, action) { delivered ->
+            if (!delivered && reportUndelivered) {
+                _failure.value = "Couldn't reach phone"
+            }
+        }
     }
 
     private companion object {
         /** How long to show "Syncing…" before falling back to the open-on-phone hint. */
         const val SYNC_TIMEOUT_MILLIS = 6_000L
+
+        /** How long the wrist-side "Undo" stays offered after a task completion. */
+        const val UNDO_TIMEOUT_MILLIS = 6_000L
     }
 }

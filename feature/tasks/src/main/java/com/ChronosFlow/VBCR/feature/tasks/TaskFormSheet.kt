@@ -64,6 +64,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.ChronosFlow.VBCR.core.ai.TaskAssistRequest
@@ -84,6 +85,8 @@ import com.ChronosFlow.VBCR.core.domain.model.TaskSchedule
 import com.ChronosFlow.VBCR.core.ui.components.GenAiAssistBanner
 import com.ChronosFlow.VBCR.core.ui.components.ChronosAssistSuggestionChips
 import com.ChronosFlow.VBCR.core.ui.components.ChronosTextRewriteRow
+import com.ChronosFlow.VBCR.core.ui.components.CardEditorScaffold
+import com.ChronosFlow.VBCR.core.ui.components.CardEditorSection
 import com.ChronosFlow.VBCR.core.ui.components.ChronosCollapsibleSection
 import com.ChronosFlow.VBCR.core.ui.components.ChronosSpeechInputButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosDatePickerField
@@ -104,6 +107,8 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosQuickAddChips
 import com.ChronosFlow.VBCR.core.ui.components.ChronosTimePickerField
 import com.ChronosFlow.VBCR.core.ui.components.formatDisplayMinute
 import com.ChronosFlow.VBCR.core.ui.components.withSelectedOption
+import com.ChronosFlow.VBCR.core.ui.components.EditorQuickAttribute
+import com.ChronosFlow.VBCR.core.ui.components.rememberCardEditorRevealController
 import com.ChronosFlow.VBCR.core.ui.settings.ChronosUiSettingsKeys
 import com.ChronosFlow.VBCR.core.ui.settings.rememberChronosUiBooleanSetting
 import com.ChronosFlow.VBCR.core.ui.components.formatChronosPickerDate
@@ -350,9 +355,7 @@ internal fun TaskFormSheet(
     var selectedGoalId by rememberSaveable(taskKey) {
         mutableStateOf(initialTask?.goalId ?: initialGoalId)
     }
-    var goalExpanded by rememberSaveable(taskKey) {
-        mutableStateOf((initialTask?.goalId ?: initialGoalId) != null)
-    }
+    val revealController = rememberCardEditorRevealController(taskKey)
     val actionDrafts = remember(taskKey) {
         mutableStateListOf<TaskActionDraft>().apply {
             addAll(initialTask?.actions?.map { action ->
@@ -395,23 +398,6 @@ internal fun TaskFormSheet(
                 !initialTask?.actions.isNullOrEmpty() ||
                 !initialTask?.attachments.isNullOrEmpty()
         )
-    }
-    var scheduleExpanded by rememberSaveable(taskKey) {
-        mutableStateOf(
-            initialTask?.targetDate != null ||
-                initialTask?.preferredDurationMinutes != null ||
-                initialTask?.preferredStartMinuteOfDay != null ||
-                initialSchedule != null
-        )
-    }
-    var priorityReminderExpanded by rememberSaveable(taskKey) {
-        mutableStateOf((initialTask?.priority ?: 0) > 0 || initialTask?.dueDate != null)
-    }
-    var checklistExpanded by rememberSaveable(taskKey) {
-        mutableStateOf(!initialTask?.checklist.isNullOrEmpty())
-    }
-    var recurrenceExpanded by rememberSaveable(taskKey) {
-        mutableStateOf(initialSchedule?.toRecurringConfig()?.enabled == true)
     }
     var connectedFilesExpanded by rememberSaveable(taskKey) { mutableStateOf(true) }
     var templatesExpanded by rememberSaveable(taskKey) { mutableStateOf(false) }
@@ -545,7 +531,7 @@ internal fun TaskFormSheet(
                     preferredStartTime = formatDisplayMinute(minute)
                     scheduleTimeOption = resolveScheduleTimeOption(minute)
                 }
-                scheduleExpanded = true
+                revealController.reveal("schedule")
             }
             is TaskAssistSuggestion.Checklist -> {
                 val knownLabels = checklistItems
@@ -562,11 +548,11 @@ internal fun TaskFormSheet(
                         )
                     )
                 }
-                checklistExpanded = true
+                revealController.reveal("checklist")
             }
             is TaskAssistSuggestion.Priority -> {
                 priority = suggestion.priority.coerceIn(0, 2)
-                priorityReminderExpanded = true
+                revealController.reveal("priority")
             }
         }
         supersededTaskAssistSuggestionIds(suggestion, assistState.suggestions).forEach { id ->
@@ -594,24 +580,24 @@ internal fun TaskFormSheet(
         fill.targetDate?.let { date ->
             customTargetDateIso = date.toString()
             scheduleDateOption = resolveScheduleDateOption(date)
-            scheduleExpanded = true
+            revealController.reveal("schedule")
         }
         fill.scheduleDateOption?.let { option ->
             scheduleDateOption = option
-            scheduleExpanded = true
+            revealController.reveal("schedule")
         }
         fill.preferredStartMinute?.let { minute ->
             preferredStartTime = formatDisplayMinute(minute)
             scheduleTimeOption = resolveScheduleTimeOption(minute)
-            scheduleExpanded = true
+            revealController.reveal("schedule")
         }
         fill.durationMinutes?.let { duration ->
             preferredDurationMinutes = duration
-            scheduleExpanded = true
+            revealController.reveal("schedule")
         }
         fill.priority?.let { detected ->
             priority = detected.coerceIn(0, 2)
-            if (priority > 0) priorityReminderExpanded = true
+            if (priority > 0) revealController.reveal("priority")
         }
         fill.recurrence?.let { detected ->
             recurringConfig = recurringConfig.copy(
@@ -624,7 +610,7 @@ internal fun TaskFormSheet(
                     recurringConfig.weekdays
                 }
             )
-            recurrenceExpanded = true
+            revealController.reveal("recurrence")
         }
         if (fill.actionPreview != null) {
             val pendingAction = taskTranscriptActionDraft(
@@ -659,14 +645,14 @@ internal fun TaskFormSheet(
             description = template.description
         }
         priority = template.priority.coerceIn(0, 2)
-        if (priority > 0) priorityReminderExpanded = true
+        if (priority > 0) revealController.reveal("priority")
         preferredDurationMinutes = template.durationMinutes
         template.preferredStartMinute?.let { minute ->
             preferredStartTime = formatDisplayMinute(minute)
             scheduleTimeOption = resolveScheduleTimeOption(minute)
         }
         if (template.durationMinutes != null || template.preferredStartMinute != null) {
-            scheduleExpanded = true
+            revealController.reveal("schedule")
         }
         if (template.checklistLabels.isNotEmpty()) {
             checklistItems.clear()
@@ -679,7 +665,7 @@ internal fun TaskFormSheet(
                     )
                 )
             }
-            checklistExpanded = true
+            revealController.reveal("checklist")
         }
         template.recurrenceCadence?.let { cadence ->
             recurringConfig = recurringConfig.copy(
@@ -692,7 +678,7 @@ internal fun TaskFormSheet(
                     recurringConfig.weekdays
                 }
             )
-            recurrenceExpanded = true
+            revealController.reveal("recurrence")
         }
     }
 
@@ -838,7 +824,7 @@ internal fun TaskFormSheet(
                 scheduleTimeOption = resolveScheduleTimeOption(minute)
             }
             if (prefillDraft.priority != null) {
-                priorityReminderExpanded = true
+                revealController.reveal("priority")
             }
             val prefillActionDraft = taskTranscriptActionDraft(
                 capture = prefillTitle,
@@ -918,14 +904,13 @@ internal fun TaskFormSheet(
         connectExpanded = connectExpanded || adaptiveTaskHints.showContext,
         attachmentCount = attachmentDrafts.size
     )
-    val hasTaskSchedulePreferences = preferredDurationMinutes != null ||
-        parsedPreferredStartMinute != null ||
+    val hasTaskScheduleValue = initialTask?.targetDate != null ||
+        initialTask?.preferredDurationMinutes != null ||
+        initialTask?.preferredStartMinuteOfDay != null ||
+        initialSchedule != null ||
         resolvedTargetDate != null ||
-        recurringConfig.enabled
-    val showTaskScheduleDetails = shouldShowTaskScheduleDetails(
-        scheduleExpanded = scheduleExpanded || adaptiveTaskHints.showSchedule,
-        hasSchedulePreferences = hasTaskSchedulePreferences || adaptiveTaskHints.showSchedule
-    )
+        preferredDurationMinutes != null ||
+        parsedPreferredStartMinute != null
     val scheduleDraftSummary = taskScheduleDraftSummary(
         targetDate = resolvedTargetDate,
         preferredDurationMinutes = preferredDurationMinutes,
@@ -934,15 +919,7 @@ internal fun TaskFormSheet(
     )
     val checklistStepCount = checklistItems.count { it.label.isNotBlank() }
     val completedChecklistStepCount = checklistItems.count { it.label.isNotBlank() && it.isCompleted }
-    val showTaskChecklistDetails = shouldShowTaskChecklistDetails(
-        checklistExpanded = checklistExpanded || adaptiveTaskHints.showChecklist,
-        checklistCount = checklistStepCount + if (adaptiveTaskHints.showChecklist) 1 else 0
-    )
     val hasTaskPrioritySettings = priority > 0 || alarmEnabled
-    val showTaskPriorityDetails = shouldShowTaskPriorityDetails(
-        priorityExpanded = priorityReminderExpanded || adaptiveTaskHints.showPriority,
-        hasPrioritySettings = hasTaskPrioritySettings || adaptiveTaskHints.showPriority
-    )
     val priorityDraftSummary = taskPrioritySummary(
         priority = priority,
         alarmEnabled = alarmEnabled,
@@ -1039,391 +1016,58 @@ internal fun TaskFormSheet(
         },
         archiveLabel = actionLabels.archive
     ) {
-        ChronosFormSection(
-            title = "Essentials",
-            subtitle = "Keep the core commitment visible while the rest stays contextual."
-        ) {
-            ChronosQuickAddChips(
-                label = "Context titles",
-                options = contextualTaskTitleOptions,
-                onSelect = { suggestion -> taskTitle = suggestion },
-                selected = taskTitle
-            )
-
-            if (target is TaskSheetTarget.Add) {
-                val recentTaskTitleChips = remember(existingTaskTitles) {
-                    recentTaskTitleOptions(existingTaskTitles)
-                }
-                if (recentTaskTitleChips.isNotEmpty()) {
-                    ChronosQuickAddChips(
-                        label = "Reuse a recent task",
-                        options = recentTaskTitleChips,
-                        onSelect = { suggestion -> taskTitle = suggestion },
-                        selected = taskTitle
-                    )
-                }
-            }
-
-            OutlinedTextField(
-                value = taskTitle,
-                onValueChange = {
-                    taskTitle = it
-                    if (it.isNotBlank()) titleEverFilled = true
-                },
-                label = { Text("Title") },
-                placeholder = { Text("What needs to get done?") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Sentences,
-                    imeAction = ImeAction.Done
+        CardEditorScaffold(
+            kind = "task",
+            stateKey = taskKey,
+            revealController = revealController,
+            attributes = listOf(
+                EditorQuickAttribute(
+                    id = "schedule",
+                    title = "Schedule",
+                    value = resolvedTargetDate?.let { formatTaskTargetDateLabel(it) },
+                    onReveal = {},
                 ),
-                keyboardActions = KeyboardActions(onDone = { if (isValid) submitTask() }),
-                isError = titleEverFilled && taskTitle.isBlank(),
-                supportingText = if (taskTitle.isBlank()) {
-                    { Text("Required") }
-                } else {
-                    null
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            // Offline natural-language parse of whatever was typed into the title. Detects dates,
-            // times, durations and priority words instantly (no AI dependency) and offers a one-tap
-            // fill that also tidies the title — the "magic" power users expect, invisible to lite users.
-            val titleSmartFill = remember(taskTitle) { taskTitleSmartFill(taskTitle) }
-            if (
-                target is TaskSheetTarget.Add &&
-                titleSmartFill != null &&
-                !taskTitle.equals(smartFillDismissedTitle, ignoreCase = true)
-            ) {
-                TaskTitleSmartFillCard(
-                    fill = titleSmartFill,
-                    onApply = { applyTitleSmartFill(titleSmartFill) },
-                    onDismiss = { smartFillDismissedTitle = taskTitle }
-                )
-            }
-
-            // Gentle nudge when the typed title matches an existing task, so quick captures don't
-            // silently create duplicates. Non-blocking — the user can still add it.
-            val duplicateTaskWarning = if (target is TaskSheetTarget.Add) {
-                taskTitleDuplicateWarning(taskTitle, existingTaskTitles)
-            } else {
-                null
-            }
-            if (duplicateTaskWarning != null) {
-                Text(
-                    text = duplicateTaskWarning,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.tertiary
-                )
-                if (onOpenExistingTask != null) {
-                    ChronosTextButton(onClick = { onOpenExistingTask(taskTitle) }) {
-                        Text("Open the existing task instead")
-                    }
-                }
-            }
-
-            // Show the sharing provenance when content was sent from another app via the
-            // Android share sheet so the user knows where the pre-filled text originated.
-            if (sourceAppLabel != null && target is TaskSheetTarget.Add) {
-                ChronosFilterChip(
-                    selected = false,
-                    onClick = {},
-                    label = { Text("Shared from $sourceAppLabel") }
-                )
-            }
-
-            OutlinedTextField(
-                value = description,
-                onValueChange = { description = it },
-                label = { Text("Description") },
-                placeholder = { Text("Optional context or next step") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 2,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
-            )
-
-            if (onRequestRewrite != null) {
-                ChronosTextRewriteRow(
-                    text = description,
-                    rewriteState = rewriteState,
-                    onRequestRewrite = onRequestRewrite,
-                    onApplyRewrite = { rewritten ->
-                        description = rewritten
-                        onClearRewrite?.invoke()
+                EditorQuickAttribute(
+                    id = "priority",
+                    title = "Priority",
+                    value = when (priority) {
+                        2 -> "Urgent"
+                        1 -> "High"
+                        else -> null
                     },
-                    onDismissRewrite = { onClearRewrite?.invoke() },
-                    fieldName = "description"
-                )
-            }
-
-            ChronosSpeechInputButton(
-                prompt = "Describe the task, including time, date, duration, contact, file, or link.",
-                label = "Dictate task",
-                onTranscript = { transcript ->
-                    val capture = commandPaletteSpeechQuery(transcript)
-                    if (capture.isBlank()) return@ChronosSpeechInputButton
-                    taskCaptureContext = capture
-                    val transcriptDraft = taskTranscriptDraft(capture)
-                    val requestTitle = taskTitle.ifBlank { capture }
-                    val visibleTitle = taskTitle.ifBlank { transcriptDraft.title ?: capture }
-                    val requestDescription = if (taskTitle.isBlank()) {
-                        description
-                    } else {
-                        appendTaskTranscript(description, capture)
-                    }
-                    val requestPriority = transcriptDraft.priority?.let { maxOf(priority, it) } ?: priority
-                    val requestDurationMinutes = transcriptDraft.durationMinutes ?: preferredDurationMinutes
-                    val requestPreferredStartMinute =
-                        transcriptDraft.preferredStartMinute ?: parsedPreferredStartMinute
-                    val requestTargetDate = when (transcriptDraft.scheduleDateOption ?: scheduleDateOption) {
-                        "Today" -> LocalDate.now()
-                        "Tomorrow" -> LocalDate.now().plusDays(1)
-                        else -> resolvedTargetDate
-                    }
-                    val transcriptActionDraft = taskTranscriptActionDraft(
-                        capture = capture,
-                        isPrimary = actionDrafts.none { it.isPrimary }
-                    )
-                    val transcriptActionType = transcriptActionDraft?.type
-                        ?: taskTranscriptActionType(capture)
-                    if (taskTitle.isBlank()) {
-                        taskTitle = visibleTitle
-                    } else {
-                        description = requestDescription
-                    }
-                    transcriptDraft.priority?.let { detectedPriority ->
-                        priority = maxOf(priority, detectedPriority)
-                        priorityReminderExpanded = true
-                    }
-                    transcriptDraft.durationMinutes?.let { duration ->
-                        preferredDurationMinutes = duration
-                    }
-                    transcriptDraft.preferredStartMinute?.let { minute ->
-                        preferredStartTime = formatDisplayMinute(minute)
-                        scheduleTimeOption = resolveScheduleTimeOption(minute)
-                    }
-                    transcriptDraft.scheduleDateOption?.let { option ->
-                        scheduleDateOption = option
-                    }
-                    if (transcriptActionDraft != null) {
-                        if (transcriptActionDraft.isPrimary) {
-                            actionDrafts.indices.forEach { index ->
-                                actionDrafts[index] = actionDrafts[index].copy(isPrimary = false)
-                            }
-                        }
-                        if (actionDrafts.none { draft ->
-                                draft.type == transcriptActionDraft.type &&
-                                    draft.value.equals(transcriptActionDraft.value, ignoreCase = true)
-                            }
-                        ) {
-                            actionDrafts.add(transcriptActionDraft)
-                        }
-                        newActionTypeOverride = transcriptActionDraft.type.name
-                        newActionLabel = ""
-                        newActionValue = ""
-                        connectExpanded = true
-                    } else if (transcriptActionType != null) {
-                        newActionTypeOverride = transcriptActionType.name
-                        newActionLabel = ""
-                        newActionValue = ""
-                        connectExpanded = true
-                    }
-                    onClearAssist?.invoke()
-                    lastAutoAssistCapture = listOf(requestTitle, requestDescription, capture)
-                        .map { it.trim() }
-                        .filter { it.isNotBlank() }
-                        .distinct()
-                        .joinToString(" ")
-                    onRequestAssist?.invoke(
-                        TaskAssistRequest(
-                            title = requestTitle,
-                            description = listOf(requestDescription, capture)
-                                .map { it.trim() }
-                                .filter { it.isNotBlank() }
-                                .distinct()
-                                .joinToString(" "),
-                            priority = requestPriority,
-                            targetDate = requestTargetDate,
-                            preferredDurationMinutes = requestDurationMinutes,
-                            preferredStartMinuteOfDay = requestPreferredStartMinute,
-                            checklistLabels = checklistItems.map { it.label }
-                        )
-                    )
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            if (onRequestAssist != null) {
-                ChronosFilledTonalButton(
-                    onClick = {
-                        onRequestAssist(
-                            TaskAssistRequest(
-                                title = taskTitle.ifBlank { taskCaptureContext },
-                                description = listOf(description, taskCaptureContext)
-                                    .map { it.trim() }
-                                    .filter { it.isNotBlank() }
-                                    .distinct()
-                                    .joinToString(" "),
-                                priority = priority,
-                                targetDate = resolvedTargetDate,
-                                preferredDurationMinutes = preferredDurationMinutes,
-                                preferredStartMinuteOfDay = parsedPreferredStartMinute,
-                                checklistLabels = checklistItems.map { it.label }.filter { it.isNotBlank() }
-                            )
-                        )
-                    },
-                    enabled = !assistState.isLoading,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        when {
-                            assistState.isLoading -> "Drafting suggestions…"
-                            visibleAssistSuggestions.isNotEmpty() -> "Refresh suggestions"
-                            else -> "Suggest details with AI"
-                        }
-                    )
-                }
-            }
-
-            assistState.assistSnapshot?.let { snapshot ->
-                GenAiAssistBanner(
-                    title = snapshot.bannerTitle,
-                    message = snapshot.bannerMessage +
-                        " Type or dictate the task and AI drafts editable suggestions — title, timing, contacts, links, and checklist. Nothing changes until you tap a suggestion.",
-                    ready = snapshot.isReady
-                )
-            }
-
-            if (assistState.message != null) {
-                Text(
-                    text = assistState.message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            if (visibleAssistSuggestions.isNotEmpty() || assistState.isLoading) {
-                ChronosAssistSuggestionChips(
-                    suggestions = visibleAssistSuggestions,
-                    isLoading = assistState.isLoading,
-                    onApply = ::applyAssistSuggestion,
-                    label = { it.label },
-                    reason = { it.reason },
-                    sourceLabel = { GenAiAssistCopy.taskAssistSourceLabel(it.source) },
-                    loadingLabel = "Drafting AI suggestions…",
-                    onApplyAll = ::applyAllAssistSuggestions
-                )
-            }
-
-            if (target is TaskSheetTarget.Add && goalOptions.isNotEmpty()) {
-                val detectedGoalId = remember(taskTitle, description, goalOptions) {
-                    detectGoalIdFromText("$taskTitle $description", goalOptions)
-                }
-                val detectedGoalLabel = goalOptions.firstOrNull { it.id == detectedGoalId }?.label
-                if (detectedGoalId != null && detectedGoalId != selectedGoalId && detectedGoalLabel != null) {
-                    ChronosFilledTonalButton(
-                        onClick = {
-                            selectedGoalId = detectedGoalId
-                            goalExpanded = true
-                        },
-                        modifier = Modifier.fillMaxWidth()
+                    onReveal = {},
+                ),
+                EditorQuickAttribute(
+                    id = "recurrence",
+                    title = "Repeat",
+                    value = taskRecurrenceDraftSummary(recurringConfig),
+                    onReveal = {},
+                ),
+                EditorQuickAttribute(
+                    id = "checklist",
+                    title = "Checklist",
+                    value = checklistStepCount
+                        .takeIf { it > 0 }
+                        ?.let { "$it step${if (it == 1) "" else "s"}" },
+                    onReveal = {},
+                ),
+                EditorQuickAttribute(
+                    id = "goal",
+                    title = "Goal",
+                    value = goalOptions.firstOrNull { it.id == selectedGoalId }?.label,
+                    onReveal = {},
+                    onClear = { selectedGoalId = null },
+                ),
+            ),
+            sections = buildList {
+                add(
+                    CardEditorSection(
+                        id = "schedule",
+                        title = "Schedule",
+                        summary = scheduleDraftSummary,
+                        hasValue = hasTaskScheduleValue,
+                        adaptiveHint = adaptiveTaskHints.showSchedule,
                     ) {
-                        Text("Link to goal: $detectedGoalLabel")
-                    }
-                }
-            }
-        }
-
-        if (target is TaskSheetTarget.Add && (taskTemplates.isNotEmpty() || onSaveTemplate != null)) {
-            ChronosCollapsibleSection(
-                title = "Templates",
-                summary = if (taskTemplates.isEmpty()) {
-                    "Save this task as a reusable template"
-                } else {
-                    "${pluralizeCount(taskTemplates.size, "template")} saved — tap to reuse"
-                },
-                expanded = templatesExpanded,
-                onExpandedChange = { templatesExpanded = it }
-            ) {
-                taskTemplates.asReversed().forEach { template ->
-                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                text = template.name,
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            Text(
-                                text = taskTemplateSummary(template),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                ChronosFilledTonalButton(
-                                    onClick = { applyTaskTemplate(template) },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Use")
-                                }
-                                if (onDeleteTemplate != null) {
-                                    ChronosTextButton(
-                                        onClick = { onDeleteTemplate(template.id) },
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text("Delete")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if (onSaveTemplate != null) {
-                    ChronosFilledTonalButton(
-                        onClick = { onSaveTemplate(currentDraftAsTemplate()) },
-                        enabled = taskTitle.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Save current task as template")
-                    }
-                }
-            }
-        }
-
-        if (target is TaskSheetTarget.Add && onAddAnother != null) {
-            ChronosFormSwitchRow(
-                title = "Keep adding after this",
-                subtitle = "Stay here and reset the form so you can add several tasks in a row.",
-                checked = addAnother,
-                onCheckedChange = { addAnother = it }
-            )
-        }
-
-        if (goalOptions.isNotEmpty() || selectedGoalId != null) {
-            ChronosCollapsibleSection(
-                title = "Goal",
-                summary = goalOptions.firstOrNull { it.id == selectedGoalId }?.label
-                    ?: "Link this task to a goal",
-                expanded = goalExpanded,
-                onExpandedChange = { goalExpanded = it }
-            ) {
-                ChronosLinkPickerField(
-                    label = "Link to goal",
-                    options = goalOptions,
-                    selectedId = selectedGoalId,
-                    onSelected = { selectedGoalId = it }
-                )
-            }
-        }
-
-        ChronosCollapsibleSection(
-            title = "Schedule",
-            summary = scheduleDraftSummary,
-            expanded = showTaskScheduleDetails,
-            onExpandedChange = { scheduleExpanded = it }
-        ) {
             ChronosOptionChips(
                 label = "Duration",
                 options = contextualTaskDurationPickerOptions(
@@ -1533,19 +1177,21 @@ internal fun TaskFormSheet(
                     )
                 }
             }
-        }
-
-        ChronosCollapsibleSection(
-            title = "Recurrence",
-            summary = if (recurringConfig.enabled) {
-                recurringSummary(recurringConfig, parsedPreferredStartMinute)
-                    ?: "Repeats — choose a cadence to preview the schedule"
-            } else {
-                "One-time task — tap to set up repeats"
-            },
-            expanded = recurrenceExpanded,
-            onExpandedChange = { recurrenceExpanded = it }
-        ) {
+                }
+                )
+                add(
+                    CardEditorSection(
+                        id = "recurrence",
+                        title = "Recurrence",
+                        summary = if (recurringConfig.enabled) {
+                            recurringSummary(recurringConfig, parsedPreferredStartMinute)
+                                ?: "Repeats — choose a cadence to preview the schedule"
+                        } else {
+                            "One-time task — tap to set up repeats"
+                        },
+                        hasValue = recurringConfig.enabled || initialSchedule?.toRecurringConfig()?.enabled == true,
+                        adaptiveHint = adaptiveTaskHints.showSchedule,
+                    ) {
             ChronosOptionChips(
                 label = "Repeat suggestion",
                 options = contextualTaskRepeatOptions(
@@ -1629,6 +1275,7 @@ internal fun TaskFormSheet(
                     supportingText = {
                         Text(taskRecurringIntervalUnitLabel(recurringConfig.cadence, recurringConfig.interval))
                     },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
@@ -1663,6 +1310,7 @@ internal fun TaskFormSheet(
                             recurringConfig = recurringConfig.copy(dayOfMonth = value.toIntOrNull()?.coerceIn(1, 31) ?: 1)
                         },
                         label = { Text("Day of month") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -1746,6 +1394,7 @@ internal fun TaskFormSheet(
                                             )
                                         },
                                         label = { Text("Minutes before") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                         modifier = Modifier.fillMaxWidth(),
                                         singleLine = true
                                     )
@@ -1798,18 +1447,21 @@ internal fun TaskFormSheet(
                     }
                 }
             }
-        }
-
-        ChronosCollapsibleSection(
-            title = "Priority / reminder",
-            summary = if (hasTaskPrioritySettings) {
-                priorityDraftSummary
-            } else {
-                "Normal priority — open for high-priority work or urgent alarms"
-            },
-            expanded = showTaskPriorityDetails,
-            onExpandedChange = { priorityReminderExpanded = it }
-        ) {
+                }
+                )
+                add(
+                    CardEditorSection(
+                        id = "priority",
+                        title = "Priority / reminder",
+                        summary = if (hasTaskPrioritySettings) {
+                            priorityDraftSummary
+                        } else {
+                            "Normal priority — open for high-priority work or urgent alarms"
+                        },
+                        hasValue = hasTaskPrioritySettings || initialTask?.dueDate != null,
+                        adaptiveHint = adaptiveTaskHints.showPriority,
+                        alwaysPrimary = priority > 0,
+                    ) {
             ChronosOptionChips(
                 label = "",
                 options = contextualTaskPriorityOptions(
@@ -1831,7 +1483,8 @@ internal fun TaskFormSheet(
                 Text(
                     text = "Urgent tasks can schedule an exact alarm so nothing slips.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
+                    // Informational, not an error — reserve error red for the alarm-state message below.
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 alarmState?.let { state ->
                     Text(
@@ -1929,21 +1582,23 @@ internal fun TaskFormSheet(
                 }
             }
             }
-        }
-
-        ChronosCollapsibleSection(
-            title = "Checklist",
-            summary = if (checklistStepCount > 0) {
-                taskChecklistSummary(
-                    totalCount = checklistStepCount,
-                    completedCount = completedChecklistStepCount
+                    }
                 )
-            } else {
-                "Break the work into concrete steps when this task needs them"
-            },
-            expanded = showTaskChecklistDetails,
-            onExpandedChange = { checklistExpanded = it }
-        ) {
+                add(
+                    CardEditorSection(
+                        id = "checklist",
+                        title = "Checklist",
+                        summary = if (checklistStepCount > 0) {
+                            taskChecklistSummary(
+                                totalCount = checklistStepCount,
+                                completedCount = completedChecklistStepCount,
+                            )
+                        } else {
+                            "Break the work into concrete steps when this task needs them"
+                        },
+                        hasValue = checklistStepCount > 0,
+                        adaptiveHint = adaptiveTaskHints.showChecklist,
+                    ) {
             if (checklistStepCount > 0) {
                 LinearProgressIndicator(
                     progress = { completedChecklistStepCount.toFloat() / checklistStepCount.toFloat() },
@@ -2106,7 +1761,386 @@ internal fun TaskFormSheet(
                     }
                 }
             }
+                    }
+                )
+                if (goalOptions.isNotEmpty() || selectedGoalId != null) {
+                    add(
+                        CardEditorSection(
+                            id = "goal",
+                            title = "Goal",
+                            summary = goalOptions.firstOrNull { it.id == selectedGoalId }?.label
+                                ?: "Link this task to a goal",
+                            hasValue = selectedGoalId != null,
+                        ) {
+                            ChronosLinkPickerField(
+                                label = "Link to goal",
+                                options = goalOptions,
+                                selectedId = selectedGoalId,
+                                onSelected = { selectedGoalId = it },
+                            )
+                        },
+                    )
+                }
+            },
+            essentials = {
+                ChronosQuickAddChips(
+                    label = "Context titles",
+                    options = contextualTaskTitleOptions,
+                    onSelect = { suggestion -> taskTitle = suggestion },
+                    selected = taskTitle
+                )
+
+                if (target is TaskSheetTarget.Add) {
+                    val recentTaskTitleChips = remember(existingTaskTitles) {
+                        recentTaskTitleOptions(existingTaskTitles)
+                    }
+                    if (recentTaskTitleChips.isNotEmpty()) {
+                        ChronosQuickAddChips(
+                            label = "Reuse a recent task",
+                            options = recentTaskTitleChips,
+                            onSelect = { suggestion -> taskTitle = suggestion },
+                            selected = taskTitle
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = taskTitle,
+                    onValueChange = {
+                        taskTitle = it
+                        if (it.isNotBlank()) titleEverFilled = true
+                    },
+                    label = { Text("Title") },
+                    placeholder = { Text("What needs to get done?") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { if (isValid) submitTask() }),
+                    isError = titleEverFilled && taskTitle.isBlank(),
+                    supportingText = if (taskTitle.isBlank()) {
+                        { Text("Required") }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Offline natural-language parse of whatever was typed into the title. Detects dates,
+                // times, durations and priority words instantly (no AI dependency) and offers a one-tap
+                // fill that also tidies the title — the "magic" power users expect, invisible to lite users.
+                val titleSmartFill = remember(taskTitle) { taskTitleSmartFill(taskTitle) }
+                if (
+                    target is TaskSheetTarget.Add &&
+                    titleSmartFill != null &&
+                    !taskTitle.equals(smartFillDismissedTitle, ignoreCase = true)
+                ) {
+                    TaskTitleSmartFillCard(
+                        fill = titleSmartFill,
+                        onApply = { applyTitleSmartFill(titleSmartFill) },
+                        onDismiss = { smartFillDismissedTitle = taskTitle }
+                    )
+                }
+
+                // Gentle nudge when the typed title matches an existing task, so quick captures don't
+                // silently create duplicates. Non-blocking — the user can still add it.
+                val duplicateTaskWarning = if (target is TaskSheetTarget.Add) {
+                    taskTitleDuplicateWarning(taskTitle, existingTaskTitles)
+                } else {
+                    null
+                }
+                if (duplicateTaskWarning != null) {
+                    Text(
+                        text = duplicateTaskWarning,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                    if (onOpenExistingTask != null) {
+                        ChronosTextButton(onClick = { onOpenExistingTask(taskTitle) }) {
+                            Text("Open the existing task instead")
+                        }
+                    }
+                }
+
+                // Show the sharing provenance when content was sent from another app via the
+                // Android share sheet so the user knows where the pre-filled text originated.
+                if (sourceAppLabel != null && target is TaskSheetTarget.Add) {
+                    ChronosFilterChip(
+                        selected = false,
+                        onClick = {},
+                        label = { Text("Shared from $sourceAppLabel") }
+                    )
+                }
+
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description") },
+                    placeholder = { Text("Optional context or next step") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
+                )
+
+                if (onRequestRewrite != null) {
+                    ChronosTextRewriteRow(
+                        text = description,
+                        rewriteState = rewriteState,
+                        onRequestRewrite = onRequestRewrite,
+                        onApplyRewrite = { rewritten ->
+                            description = rewritten
+                            onClearRewrite?.invoke()
+                        },
+                        onDismissRewrite = { onClearRewrite?.invoke() },
+                        fieldName = "description"
+                    )
+                }
+
+                ChronosSpeechInputButton(
+                    prompt = "Describe the task, including time, date, duration, contact, file, or link.",
+                    label = "Dictate task",
+                    onTranscript = { transcript ->
+                        val capture = commandPaletteSpeechQuery(transcript)
+                        if (capture.isBlank()) return@ChronosSpeechInputButton
+                        taskCaptureContext = capture
+                        val transcriptDraft = taskTranscriptDraft(capture)
+                        val requestTitle = taskTitle.ifBlank { capture }
+                        val visibleTitle = taskTitle.ifBlank { transcriptDraft.title ?: capture }
+                        val requestDescription = if (taskTitle.isBlank()) {
+                            description
+                        } else {
+                            appendTaskTranscript(description, capture)
+                        }
+                        val requestPriority = transcriptDraft.priority?.let { maxOf(priority, it) } ?: priority
+                        val requestDurationMinutes = transcriptDraft.durationMinutes ?: preferredDurationMinutes
+                        val requestPreferredStartMinute =
+                            transcriptDraft.preferredStartMinute ?: parsedPreferredStartMinute
+                        val requestTargetDate = when (transcriptDraft.scheduleDateOption ?: scheduleDateOption) {
+                            "Today" -> LocalDate.now()
+                            "Tomorrow" -> LocalDate.now().plusDays(1)
+                            else -> resolvedTargetDate
+                        }
+                        val transcriptActionDraft = taskTranscriptActionDraft(
+                            capture = capture,
+                            isPrimary = actionDrafts.none { it.isPrimary }
+                        )
+                        val transcriptActionType = transcriptActionDraft?.type
+                            ?: taskTranscriptActionType(capture)
+                        if (taskTitle.isBlank()) {
+                            taskTitle = visibleTitle
+                        } else {
+                            description = requestDescription
+                        }
+                        transcriptDraft.priority?.let { detectedPriority ->
+                            priority = maxOf(priority, detectedPriority)
+                            revealController.reveal("priority")
+                        }
+                        transcriptDraft.durationMinutes?.let { duration ->
+                            preferredDurationMinutes = duration
+                        }
+                        transcriptDraft.preferredStartMinute?.let { minute ->
+                            preferredStartTime = formatDisplayMinute(minute)
+                            scheduleTimeOption = resolveScheduleTimeOption(minute)
+                        }
+                        transcriptDraft.scheduleDateOption?.let { option ->
+                            scheduleDateOption = option
+                        }
+                        if (transcriptActionDraft != null) {
+                            if (transcriptActionDraft.isPrimary) {
+                                actionDrafts.indices.forEach { index ->
+                                    actionDrafts[index] = actionDrafts[index].copy(isPrimary = false)
+                                }
+                            }
+                            if (actionDrafts.none { draft ->
+                                    draft.type == transcriptActionDraft.type &&
+                                        draft.value.equals(transcriptActionDraft.value, ignoreCase = true)
+                                }
+                            ) {
+                                actionDrafts.add(transcriptActionDraft)
+                            }
+                            newActionTypeOverride = transcriptActionDraft.type.name
+                            newActionLabel = ""
+                            newActionValue = ""
+                            connectExpanded = true
+                        } else if (transcriptActionType != null) {
+                            newActionTypeOverride = transcriptActionType.name
+                            newActionLabel = ""
+                            newActionValue = ""
+                            connectExpanded = true
+                        }
+                        onClearAssist?.invoke()
+                        lastAutoAssistCapture = listOf(requestTitle, requestDescription, capture)
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .joinToString(" ")
+                        onRequestAssist?.invoke(
+                            TaskAssistRequest(
+                                title = requestTitle,
+                                description = listOf(requestDescription, capture)
+                                    .map { it.trim() }
+                                    .filter { it.isNotBlank() }
+                                    .distinct()
+                                    .joinToString(" "),
+                                priority = requestPriority,
+                                targetDate = requestTargetDate,
+                                preferredDurationMinutes = requestDurationMinutes,
+                                preferredStartMinuteOfDay = requestPreferredStartMinute,
+                                checklistLabels = checklistItems.map { it.label }
+                            )
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (onRequestAssist != null) {
+                    ChronosFilledTonalButton(
+                        onClick = {
+                            onRequestAssist(
+                                TaskAssistRequest(
+                                    title = taskTitle.ifBlank { taskCaptureContext },
+                                    description = listOf(description, taskCaptureContext)
+                                        .map { it.trim() }
+                                        .filter { it.isNotBlank() }
+                                        .distinct()
+                                        .joinToString(" "),
+                                    priority = priority,
+                                    targetDate = resolvedTargetDate,
+                                    preferredDurationMinutes = preferredDurationMinutes,
+                                    preferredStartMinuteOfDay = parsedPreferredStartMinute,
+                                    checklistLabels = checklistItems.map { it.label }.filter { it.isNotBlank() }
+                                )
+                            )
+                        },
+                        enabled = !assistState.isLoading,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            when {
+                                assistState.isLoading -> "Drafting suggestions…"
+                                visibleAssistSuggestions.isNotEmpty() -> "Refresh suggestions"
+                                else -> "Suggest details with AI"
+                            }
+                        )
+                    }
+                }
+
+                assistState.assistSnapshot?.let { snapshot ->
+                    GenAiAssistBanner(
+                        title = snapshot.bannerTitle,
+                        message = snapshot.bannerMessage +
+                            " Type or dictate the task and AI drafts editable suggestions — title, timing, contacts, links, and checklist. Nothing changes until you tap a suggestion.",
+                        ready = snapshot.isReady
+                    )
+                }
+
+                if (assistState.message != null) {
+                    Text(
+                        text = assistState.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (visibleAssistSuggestions.isNotEmpty() || assistState.isLoading) {
+                    ChronosAssistSuggestionChips(
+                        suggestions = visibleAssistSuggestions,
+                        isLoading = assistState.isLoading,
+                        onApply = ::applyAssistSuggestion,
+                        label = { it.label },
+                        reason = { it.reason },
+                        sourceLabel = { GenAiAssistCopy.taskAssistSourceLabel(it.source) },
+                        loadingLabel = "Drafting AI suggestions…",
+                        onApplyAll = ::applyAllAssistSuggestions
+                    )
+                }
+
+                if (target is TaskSheetTarget.Add && goalOptions.isNotEmpty()) {
+                    val detectedGoalId = remember(taskTitle, description, goalOptions) {
+                        detectGoalIdFromText("$taskTitle $description", goalOptions)
+                    }
+                    val detectedGoalLabel = goalOptions.firstOrNull { it.id == detectedGoalId }?.label
+                    if (detectedGoalId != null && detectedGoalId != selectedGoalId && detectedGoalLabel != null) {
+                        ChronosFilledTonalButton(
+                            onClick = {
+                                selectedGoalId = detectedGoalId
+                                revealController.reveal("goal")
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Link to goal: $detectedGoalLabel")
+                        }
+                    }
+                }
+            },
+        )
+        if (target is TaskSheetTarget.Add && (taskTemplates.isNotEmpty() || onSaveTemplate != null)) {
+            ChronosCollapsibleSection(
+                title = "Templates",
+                summary = if (taskTemplates.isEmpty()) {
+                    "Save this task as a reusable template"
+                } else {
+                    "${pluralizeCount(taskTemplates.size, "template")} saved — tap to reuse"
+                },
+                expanded = templatesExpanded,
+                onExpandedChange = { templatesExpanded = it }
+            ) {
+                taskTemplates.asReversed().forEach { template ->
+                    ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = template.name,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                text = taskTemplateSummary(template),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                ChronosFilledTonalButton(
+                                    onClick = { applyTaskTemplate(template) },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Use")
+                                }
+                                if (onDeleteTemplate != null) {
+                                    ChronosTextButton(
+                                        onClick = { onDeleteTemplate(template.id) },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Delete")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (onSaveTemplate != null) {
+                    ChronosFilledTonalButton(
+                        onClick = { onSaveTemplate(currentDraftAsTemplate()) },
+                        enabled = taskTitle.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Save current task as template")
+                    }
+                }
+            }
         }
+
+        if (target is TaskSheetTarget.Add && onAddAnother != null) {
+            ChronosFormSwitchRow(
+                title = "Keep adding after this",
+                subtitle = "Stay here and reset the form so you can add several tasks in a row.",
+                checked = addAnother,
+                onCheckedChange = { addAnother = it }
+            )
+        }
+
 
         ChronosFormSection(
             title = "Connect",
@@ -2336,6 +2370,20 @@ internal fun TaskFormSheet(
                     }
                 )
             }
+            // Disable the button until the draft is actually valid, so it stops being a silent
+            // no-op (previously it always looked tappable but did nothing on an invalid draft).
+            val canAddAction = TaskActionType.values().firstOrNull { it.name == newActionTypeName }
+                ?.let { type ->
+                    normalizeTaskActionDraft(
+                        TaskActionDraft(
+                            id = "",
+                            type = type,
+                            label = newActionLabel,
+                            value = newActionValue,
+                            isPrimary = false
+                        )
+                    ) != null
+                } == true
             ChronosFilledTonalButton(
                 onClick = {
                     val newDraft = TaskActionDraft(
@@ -2356,6 +2404,7 @@ internal fun TaskFormSheet(
                         newActionValue = ""
                     }
                 },
+                enabled = canAddAction,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Add action")
@@ -2516,10 +2565,10 @@ internal fun TaskFormSheet(
                 Text("Add files or images")
             }
         }
-        }
 
         Spacer(modifier = Modifier.height(ChronosSpacing.Medium))
     }
+}
 }
 
 internal fun taskCollapsedActionCardContentDescription(

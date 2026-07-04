@@ -118,6 +118,7 @@ final class FocusTimerModel {
         self.phasePlan = planFocusPhases(blockMinutes: self.plannedBlockMinutes, preset: self.preset)
         self.currentPhaseIndex = 0
         beginCurrentPhase()
+        BlockLiveActivityCoordinator.onFocusStarted()
         startLiveActivity()
     }
 
@@ -237,6 +238,7 @@ final class FocusTimerModel {
         awaitingPhaseAdvance = false
         clearSnapshot(context: context)
         endLiveActivity()
+        BlockLiveActivityCoordinator.onFocusEnded()
     }
 
     /// The mid-session break lengths offered as chips during an active work phase (minutes). Mirrors
@@ -290,6 +292,23 @@ final class FocusTimerModel {
         }
     }
 
+    /// Called when the user toggles Focus Live Activity in settings — start/update or dismiss the LA.
+    func applyFocusLiveActivitySetting(enabled: Bool) {
+        guard phase != .idle, phase != .completed else {
+            if !enabled { endLiveActivity() }
+            return
+        }
+        if enabled {
+            if activity == nil {
+                startLiveActivity()
+            } else {
+                updateLiveActivity()
+            }
+        } else {
+            endLiveActivity()
+        }
+    }
+
     // MARK: Phase machine
 
     private func beginCurrentPhase() {
@@ -324,6 +343,7 @@ final class FocusTimerModel {
         // Note: FocusSession logging happens in stop(context:) where the ModelContext is available.
         clearSnapshot(context: snapshotContext)
         endLiveActivity()
+        BlockLiveActivityCoordinator.onFocusEnded()
     }
 
     private func runTicker() {
@@ -395,6 +415,11 @@ final class FocusTimerModel {
             currentPhaseIndex: min(max(currentPhaseIndex, 0), max(phasePlan.count - 1, 0)))
     }
 
+    private func liveActivityStaleDate() -> Date? {
+        guard !isPaused, !awaitingPhaseAdvance, let end = phaseEndsAt else { return nil }
+        return end
+    }
+
     private func startLiveActivity() {
         guard ChronosSettings.shared.focusLiveActivityEnabled else { return }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
@@ -402,7 +427,7 @@ final class FocusTimerModel {
                                                   totalPhaseDurationMinutes: plannedBlockMinutes)
         activity = try? Activity.request(
             attributes: attributes,
-            content: .init(state: contentState(), staleDate: nil))
+            content: .init(state: contentState(), staleDate: liveActivityStaleDate()))
     }
 
     private func updateLiveActivity() {
@@ -414,7 +439,8 @@ final class FocusTimerModel {
         // even when the Live Activity isn't running. Mirrors the Android focus widget GlanceState.
         publishFocusWidget(active: true)
         guard let activity else { return }
-        Task { await activity.update(.init(state: contentState(), staleDate: nil)) }
+        Task { await activity.update(.init(state: contentState(), staleDate: liveActivityStaleDate())) }
+        BlockLiveActivityCoordinator.renewFocusSuppression()
     }
 
     private func endLiveActivity() {
@@ -528,6 +554,7 @@ final class FocusTimerModel {
             runTicker()
         }
         startLiveActivity()
+        BlockLiveActivityCoordinator.onFocusStarted()
         updateLiveActivity()
     }
 

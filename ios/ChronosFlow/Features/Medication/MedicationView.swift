@@ -20,6 +20,7 @@ import ChronosCore
 /// becomes permanently inaccessible — matching Android's `SensitiveRouteGate` canAuthenticate fallback.
 struct MedicationView: View {
     @Environment(\.modelContext) private var context
+    @Environment(ShellState.self) private var shell: ShellState?
     /// Only active (non-archived) plans appear; archiving flips `isActive` off (Android `archive(plan)`).
     @Query(filter: #Predicate<MedicationPlan> { $0.isActive },
            sort: \MedicationPlan.reminderMinuteOfDay) private var plans: [MedicationPlan]
@@ -29,6 +30,10 @@ struct MedicationView: View {
     /// Suggestions surfaced in the adherence panel, plus per-plan dismissals (Android
     /// `adherenceSuggestions` flow). Recomputed locally; mirrors `MedicationAdherenceAssistPlanner`.
     @State private var dismissedSuggestionPlanIDs: Set<String> = []
+    /// Plan whose dose action sheet should open from a notification deep link.
+    @State private var deepLinkActionPlanID: String?
+    /// Scroll target for notification deep links (`chronosflow://medication?id=…`).
+    @State private var scrollTarget: String?
 
     /// Plans whose remaining supply is at/under the refill threshold — surfaced in a single banner,
     /// mirroring Android's `MedicationRefillCard`.
@@ -56,75 +61,125 @@ struct MedicationView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: ChronosSpacing.compact) {
-                    pageHeader
-
-                    metricTiles
-
-                    Button { startCreate() } label: {
-                        Label("Add medication", systemImage: "plus")
-                            .font(.chronosLabel)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, ChronosSpacing.small)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(ChronosColors.brandPrimary)
-                    .controlSize(.large)
-
-                    if let next = nextMedicationDose(plans: plans) {
-                        NextDoseCard(next: next)
-                    }
-
-                    if !refillPlans.isEmpty {
-                        RefillSummaryCard(plans: refillPlans)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-
-                    AdherenceTrendCard(plans: plans)
-
-                    if !suggestions.isEmpty {
-                        AdherenceSuggestionPanel(
-                            suggestions: suggestions,
-                            onApply: applySuggestion,
-                            onDismiss: { suggestion in
-                                withAnimation(ChronosMotion.smooth) {
-                                    _ = dismissedSuggestionPlanIDs.insert(suggestion.plan.id)
-                                }
-                            })
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-
-                    if plans.isEmpty {
-                        emptyState
-                    } else {
-                        ForEach(plans) { plan in
-                            MedicationCard(plan: plan)
-                        }
-                    }
-
-                    Text("ChronosFlow helps you track and remember medication times. It does not provide medical advice.")
-                        .font(.chronosCaption).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, ChronosSpacing.medium)
-                }
-                .padding(ChronosSpacing.standard)
+            chromedSurface
+            .sheet(isPresented: $creating, onDismiss: { prefillName = nil }) {
+                MedicationEditorSheet(prefillName: prefillName)
             }
-            .background { ChronosBackdrop() }
+            .onAppear { drainPendingDeepLinkMedication() }
+            .onChange(of: shell?.pendingMedicationPlanID) { _, id in
+                if id != nil { drainPendingDeepLinkMedication() }
+            }
+        }
+        .medicationLock()
+    }
+
+    private var chromedSurface: some View {
+        medicationSurface
             .navigationTitle("Medication")
             .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { startCreate() } label: { Image(systemName: "plus") }
                         .accessibilityLabel("Add medication")
                 }
             }
-            .sheet(isPresented: $creating, onDismiss: { prefillName = nil }) {
-                MedicationEditorSheet(prefillName: prefillName)
+    }
+
+    private var medicationSurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: ChronosSpacing.compact) {
+                        medicationSection { pageHeader }
+
+                        medicationSection { metricTiles }
+
+                        medicationSection {
+                            Button { startCreate() } label: {
+                                Label("Add medication", systemImage: "plus")
+                                    .font(.chronosLabel)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, ChronosSpacing.small)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(ChronosColors.brandPrimary)
+                            .controlSize(.large)
+                        }
+
+                        if let next = nextMedicationDose(plans: plans) {
+                            medicationSection { NextDoseCard(next: next) }
+                        }
+
+                        if !refillPlans.isEmpty {
+                            medicationSection {
+                                RefillSummaryCard(plans: refillPlans)
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+                        }
+
+                        medicationSection { AdherenceTrendCard(plans: plans) }
+
+                        if !suggestions.isEmpty {
+                            medicationSection {
+                                AdherenceSuggestionPanel(
+                                    suggestions: suggestions,
+                                    onApply: applySuggestion,
+                                    onDismiss: { suggestion in
+                                        withAnimation(ChronosMotion.smooth) {
+                                            _ = dismissedSuggestionPlanIDs.insert(suggestion.plan.id)
+                                        }
+                                    })
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+                        }
+
+                        if plans.isEmpty {
+                            medicationSection { emptyState }
+                        } else {
+                            ForEach(plans) { plan in
+                                medicationSection {
+                                    MedicationCard(
+                                        plan: plan,
+                                        showActionsOnAppear: deepLinkActionPlanID == plan.id,
+                                        onDeepLinkActionPresented: { deepLinkActionPlanID = nil })
+                                }
+                                .id(plan.id)
+                            }
+                        }
+
+                        medicationSection {
+                            Text("ChronosFlow helps you track and remember medication times. It does not provide medical advice.")
+                                .font(.chronosCaption).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, ChronosSpacing.medium)
+                        }
+                    }
+                    .padding(.vertical, ChronosSpacing.standard)
+                }
+                .scrollContentBackground(.hidden)
+                .onChange(of: scrollTarget) { _, target in
+                    guard let target else { return }
+                    withAnimation(ChronosMotion.snappy) { proxy.scrollTo(target, anchor: .center) }
+                    scrollTarget = nil
+                }
             }
         }
-        .medicationLock()
+    }
+
+    private func medicationSection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().padding(.horizontal, ChronosSpacing.standard)
+    }
+
+    /// Notification deep link (`chronosflow://medication?id=…`) — open the plan's dose action sheet.
+    private func drainPendingDeepLinkMedication() {
+        guard let id = shell?.pendingMedicationPlanID else { return }
+        shell?.pendingMedicationPlanID = nil
+        guard plans.contains(where: { $0.id == id }) else { return }
+        scrollTarget = id
+        deepLinkActionPlanID = id
     }
 
     // MARK: Header + metrics (Android ChronosPageHeader + ChronosMetricTile row)
@@ -523,6 +578,9 @@ private struct AdherenceSuggestionPanel: View {
 private struct MedicationCard: View {
     @Environment(\.modelContext) private var context
     @Bindable var plan: MedicationPlan
+    /// When true, present the dose action sheet once on appear (notification deep link handoff).
+    var showActionsOnAppear = false
+    var onDeepLinkActionPresented: (() -> Void)?
 
     @State private var editing = false
     @State private var confirmingArchive = false
@@ -602,6 +660,12 @@ private struct MedicationCard: View {
         }
         .sheet(isPresented: $editing) { MedicationEditorSheet(plan: plan) }
         .sheet(isPresented: $showingActions) { contextActionSheet }
+        .onAppear {
+            if showActionsOnAppear {
+                showingActions = true
+                onDeepLinkActionPresented?()
+            }
+        }
     }
 
     // MARK: Header (icon + name + low-supply badge + edit/archive/expand)
@@ -677,6 +741,7 @@ private struct MedicationCard: View {
                 withAnimation(ChronosMotion.bouncy) {
                     if !takenToday { plan.acknowledgeDose(); try? context.save(); takeTick += 1 }
                 }
+                BlockLiveActivityCoordinator.refreshToday()
             } label: {
                 Label(takenToday ? "Taken" : "Take", systemImage: "checkmark.circle.fill")
                     .font(.chronosLabel).frame(maxWidth: .infinity)
@@ -1137,8 +1202,6 @@ struct MedicationEditorSheet: View {
     @State private var capDosesPerDay: Bool
     @State private var maxDosesPerDay: Double
     @State private var safetyNotes: String
-    /// Collapsed by default to keep the create flow short (Android's "Safety & Details" section).
-    @State private var showSafety: Bool
 
     /// Form-assist suggestions from the deterministic ChronosCore planner (Android
     /// `MedicationAssistPlanner`), each applied into the fields via an Apply button.
@@ -1169,97 +1232,123 @@ struct MedicationEditorSheet: View {
         _capDosesPerDay = State(initialValue: plan?.maxDosesPerDay != nil)
         _maxDosesPerDay = State(initialValue: Double(plan?.maxDosesPerDay ?? 1))
         _safetyNotes = State(initialValue: plan?.safetyNotes ?? "")
-        _showSafety = State(initialValue: (plan?.safetyNotes?.isEmpty == false)
-                            || plan?.maxDosesPerDay != nil)
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Basics") {
-                    TextField("Name", text: $name)
-                    HStack {
-                        TextField("Dosage", text: $dosage).keyboardType(.decimalPad)
-                        Picker("Unit", selection: $unit) {
-                            ForEach(unitOptions, id: \.self) { Text($0).tag($0) }
-                        }.labelsHidden()
-                    }
-                }
+        CardEditorScaffold(
+            kind: "medication",
+            navTitle: editing == nil ? "New medication" : "Edit medication",
+            chips: medChips,
+            sections: medSections,
+            saveDisabled: name.isEmpty,
+            onCancel: { dismiss() },
+            onSave: save
+        ) {
+            medHeader
+        }
+    }
 
-                assistSection
-                Section("Reminders") {
-                    ForEach(reminderTimes.indices, id: \.self) { index in
-                        DatePicker("Time \(index + 1)", selection: $reminderTimes[index],
-                                   displayedComponents: .hourAndMinute)
-                    }
-                    .onDelete { offsets in
-                        // Keep at least one reminder time.
-                        guard reminderTimes.count > 1 else { return }
-                        reminderTimes.remove(atOffsets: offsets)
-                    }
-                    Button {
-                        withAnimation(ChronosMotion.snappy) {
-                            reminderTimes.append(reminderTimes.last ?? .now)
-                        }
-                    } label: {
-                        Label("Add another time", systemImage: "plus.circle.fill")
-                    }
+    // MARK: - Scaffold pieces
+
+    @ViewBuilder private var medHeader: some View {
+        TextField("Name", text: $name)
+        HStack {
+            TextField("Dosage", text: $dosage).keyboardType(.decimalPad)
+            Picker("Unit", selection: $unit) {
+                ForEach(unitOptions, id: \.self) { Text($0).tag($0) }
+            }.labelsHidden()
+        }
+        // Tone/length rewrite for the free-text notes only (Android `rewriteNotes`) — the name, dose,
+        // and frequency fields are never rewritten so real drug names/amounts stay exactly as typed.
+        TextField("Notes", text: $notes, axis: .vertical)
+        if textTools.isAvailable && !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Menu {
+                ForEach(ChronosTextOp.allCases) { op in
+                    Button { rewriteNotes(op) } label: { Label(op.label, systemImage: op.systemImage) }
                 }
-                Section("Meal timing") {
-                    Toggle("Take with food", isOn: $withFood)
-                }
-                Section("Refill") {
-                    Toggle("Track supply", isOn: $trackSupply.animation(ChronosMotion.snappy))
-                    if trackSupply {
-                        Stepper("Doses remaining: \(Int(supply))", value: $supply, in: 1...365, step: 1)
-                        Toggle("Warn at low supply", isOn: $trackRefillThreshold.animation(ChronosMotion.snappy))
-                        if trackRefillThreshold {
-                            Stepper("Warn at \(Int(refillThreshold)) doses left",
-                                    value: $refillThreshold, in: 1...Swift.max(supply, 1), step: 1)
-                        }
-                    }
-                }
-                Section("Safety & details") {
-                    DisclosureGroup(isExpanded: $showSafety.animation(ChronosMotion.snappy)) {
-                        Toggle("Daily dose cap", isOn: $capDosesPerDay.animation(ChronosMotion.snappy))
-                        if capDosesPerDay {
-                            Stepper("Max \(Int(maxDosesPerDay)) doses/day",
-                                    value: $maxDosesPerDay, in: 1...24, step: 1)
-                        }
-                        TextField("Cautions / instructions", text: $safetyNotes, axis: .vertical)
-                            .lineLimit(1...4)
-                    } label: {
-                        Label("Safety & details", systemImage: "cross.case")
-                    }
-                }
-                Section("Notes") {
-                    TextField("Notes", text: $notes, axis: .vertical)
-                    // Tone/length rewrite for the free-text notes only (Android `rewriteNotes`) —
-                    // the name, dose, and frequency fields are never rewritten so real drug names
-                    // and amounts stay exactly as typed. Same menu pattern as the task editor.
-                    if textTools.isAvailable && !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Menu {
-                            ForEach(ChronosTextOp.allCases) { op in
-                                Button { rewriteNotes(op) } label: { Label(op.label, systemImage: op.systemImage) }
-                            }
-                        } label: {
-                            Label(textTools.isWorking ? "Rewriting…" : "AI rewrite", systemImage: "wand.and.sparkles")
-                                .font(.chronosCaption)
-                        }
-                        .disabled(textTools.isWorking)
-                    }
-                }
+            } label: {
+                Label(textTools.isWorking ? "Rewriting…" : "AI rewrite", systemImage: "wand.and.sparkles")
+                    .font(.chronosCaption)
             }
-            .navigationTitle(editing == nil ? "New medication" : "Edit medication")
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }.disabled(name.isEmpty)
-                }
+            .disabled(textTools.isWorking)
+        }
+    }
+
+    private var medChips: [EditorChip] {
+        [
+            EditorChip(id: "meal", systemImage: "fork.knife", title: "With food",
+                       value: withFood ? "With food" : nil,
+                       onClear: { withAnimation(ChronosMotion.snappy) { withFood = false } }),
+            EditorChip(id: "refill", systemImage: "shippingbox", title: "Refill",
+                       value: trackSupply ? "\(Int(supply)) left" : nil,
+                       onClear: { withAnimation(ChronosMotion.snappy) { trackSupply = false } }),
+            EditorChip(id: "safety", systemImage: "cross.case", title: "Safety",
+                       value: safetyIsSet ? "Set" : nil),
+        ]
+    }
+
+    private var safetyIsSet: Bool {
+        capDosesPerDay || !safetyNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var medSections: [EditorSection] {
+        [
+            EditorSection(id: "assist", title: "Suggest with AI", systemImage: "wand.and.sparkles",
+                          alwaysPrimary: true) { assistRows },
+            EditorSection(id: "reminders", title: "Reminders", systemImage: "bell",
+                          badge: "\(reminderTimes.count)", alwaysPrimary: true) { reminderRows },
+            EditorSection(id: "meal", title: "Meal timing", systemImage: "fork.knife",
+                          hasValue: withFood) { mealRows },
+            EditorSection(id: "refill", title: "Refill", systemImage: "shippingbox",
+                          hasValue: trackSupply) { refillRows },
+            EditorSection(id: "safety", title: "Safety & details", systemImage: "cross.case",
+                          hasValue: safetyIsSet) { safetyRows },
+        ]
+    }
+
+    @ViewBuilder private var reminderRows: some View {
+        ForEach(reminderTimes.indices, id: \.self) { index in
+            DatePicker("Time \(index + 1)", selection: $reminderTimes[index],
+                       displayedComponents: .hourAndMinute)
+        }
+        .onDelete { offsets in
+            // Keep at least one reminder time.
+            guard reminderTimes.count > 1 else { return }
+            reminderTimes.remove(atOffsets: offsets)
+        }
+        Button {
+            withAnimation(ChronosMotion.snappy) {
+                reminderTimes.append(reminderTimes.last ?? .now)
+            }
+        } label: {
+            Label("Add another time", systemImage: "plus.circle.fill")
+        }
+    }
+
+    @ViewBuilder private var mealRows: some View {
+        Toggle("Take with food", isOn: $withFood)
+    }
+
+    @ViewBuilder private var refillRows: some View {
+        Toggle("Track supply", isOn: $trackSupply.animation(ChronosMotion.snappy))
+        if trackSupply {
+            Stepper("Doses remaining: \(Int(supply))", value: $supply, in: 1...365, step: 1)
+            Toggle("Warn at low supply", isOn: $trackRefillThreshold.animation(ChronosMotion.snappy))
+            if trackRefillThreshold {
+                Stepper("Warn at \(Int(refillThreshold)) doses left",
+                        value: $refillThreshold, in: 1...Swift.max(supply, 1), step: 1)
             }
         }
-        .presentationDetents([.medium, .large])
+    }
+
+    @ViewBuilder private var safetyRows: some View {
+        Toggle("Daily dose cap", isOn: $capDosesPerDay.animation(ChronosMotion.snappy))
+        if capDosesPerDay {
+            Stepper("Max \(Int(maxDosesPerDay)) doses/day",
+                    value: $maxDosesPerDay, in: 1...24, step: 1)
+        }
+        TextField("Cautions / instructions", text: $safetyNotes, axis: .vertical)
+            .lineLimit(1...4)
     }
 
     /// Base units plus whatever the plan already stores / a suggestion applied, so the picker
@@ -1271,32 +1360,31 @@ struct MedicationEditorSheet: View {
 
     // MARK: Form assist (Android MedicationFormSheet assist chips → MedicationAssistPlanner)
 
-    private var assistSection: some View {
-        Section {
-            Button { requestAssist() } label: {
-                Label(assistLoading ? "Drafting suggestions…"
-                        : (assistSuggestions.isEmpty ? "Suggest details with AI" : "Refresh suggestions"),
-                      systemImage: "wand.and.sparkles")
-                    .font(.chronosLabel)
-            }
-            .disabled(assistLoading || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            ForEach(assistSuggestions) { suggestion in
-                HStack(alignment: .center, spacing: ChronosSpacing.compact) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(suggestion.label).font(.chronosLabel)
-                        Text(suggestion.reason).font(.chronosCaption).foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    Button("Apply") { apply(suggestion) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(ChronosColors.brandSecondary)
-                        .controlSize(.small)
+    @ViewBuilder private var assistRows: some View {
+        Button { requestAssist() } label: {
+            Label(assistLoading ? "Drafting suggestions…"
+                    : (assistSuggestions.isEmpty ? "Suggest details with AI" : "Refresh suggestions"),
+                  systemImage: "wand.and.sparkles")
+                .font(.chronosLabel)
+        }
+        .disabled(assistLoading || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        ForEach(assistSuggestions) { suggestion in
+            HStack(alignment: .center, spacing: ChronosSpacing.compact) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(suggestion.label).font(.chronosLabel)
+                    Text(suggestion.reason).font(.chronosCaption).foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 0)
+                Button("Apply") { apply(suggestion) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ChronosColors.brandSecondary)
+                    .controlSize(.small)
             }
-        } footer: {
-            if !assistSuggestions.isEmpty {
-                Text("Organizes what you typed into tracking fields — never medical advice. Nothing changes until you tap Apply.")
-            }
+        }
+        if !assistSuggestions.isEmpty {
+            Text("Organizes what you typed into tracking fields — never medical advice. Nothing changes until you tap Apply.")
+                .font(.chronosCaption)
+                .foregroundStyle(.secondary)
         }
     }
 

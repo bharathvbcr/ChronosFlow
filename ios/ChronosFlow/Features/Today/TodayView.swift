@@ -94,100 +94,140 @@ struct TodayView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                ChronosBackdrop()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
-                        if focusTimer.phase != .idle {
+            chromedSurface
+                // Keep the schedule live surface aligned with today's plan.
+                .task(id: dayBlocks.map(\.id)) {
+                    guard isViewingToday else { return }
+                    if ChronosSettings.shared.currentBlockLiveActivityEnabled {
+                        ChronosNotifications.shared.cancel(idPrefix: "block-next")
+                        BlockLiveActivityCoordinator.refresh(blocks: dayBlocks, nowMinute: nowMinute)
+                    } else {
+                        await ChronosNotifications.shared.scheduleNextBlockNotification(blocks: dayBlocks)
+                    }
+                }
+                .sheet(item: $activeSheet) { sheet in
+                    switch sheet {
+                    case .assistant: AssistantSheet()
+                    case .checkIn: CheckInSheet()
+                    case .data: DataManagementView()
+                    case .newTask: TaskEditorSheet(task: nil)
+                    case .newBlock: TimeBlockEditorSheet(block: nil)
+                    case .logSleep: SleepLogSheet()
+                    case .journal: JournalView()
+                    case .planDay: AIPlannerSheet(date: browsedDate, existingBlocks: dayBlocks)
+                    case .fillGaps: GapFillSheet(date: browsedDate, existingBlocks: dayBlocks)
+                    }
+                }
+        }
+    }
+
+    /// The scroll surface plus title/toolbar chrome. Split out like `DayDialScreen.chromedSurface` so
+    /// lifecycle modifiers stay in `body` and the layout matches Plan's edge-to-edge dial surface.
+    private var chromedSurface: some View {
+        todaySurface
+            .navigationTitle(browsedDate.formatted(.dateTime.weekday(.wide).month().day()))
+            .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
+            .toolbar { todayToolbar }
+    }
+
+    @ToolbarContentBuilder
+    private var todayToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { activeSheet = .assistant } label: { Image(systemName: "sparkles") }
+                .accessibilityLabel("Assistant")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            // Quick-create palette — the iOS analogue of ChronosQuickCreateCommandProvider.
+            Menu {
+                Button { activeSheet = .newTask } label: { Label("New task", systemImage: "checklist") }
+                Button { activeSheet = .newBlock } label: { Label("New time block", systemImage: "calendar.badge.plus") }
+                Button { activeSheet = .logSleep } label: { Label("Log sleep", systemImage: "moon.zzz.fill") }
+                Button { activeSheet = .checkIn } label: { Label("Mood check-in", systemImage: "face.smiling") }
+            } label: { Image(systemName: "plus.circle") }
+                .accessibilityLabel("Quick create")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button { activeSheet = .data } label: { Label("Data & backup", systemImage: "externaldrive") }
+            } label: { Image(systemName: "ellipsis.circle") }
+                .accessibilityLabel("More")
+        }
+    }
+
+    /// The scrolling Today feed over the living backdrop. Mirrors `DayDialScreen.dialSurface`:
+    /// vertical padding on the scroll column, horizontal padding on sections (not the scroll
+    /// container), and a hidden scroll background so content runs edge-to-edge under the nav bar.
+    private var todaySurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollView {
+                VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
+                    if focusTimer.phase != .idle {
+                        todaySection {
                             focusSessionCard
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
-                        if isViewingToday && readiness != .unknown && readiness != .normal {
+                    }
+                    if isViewingToday && readiness != .unknown && readiness != .normal {
+                        todaySection {
                             readinessBanner
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
-                        dialCard
-                        if isViewingToday {
-                            nowCard
-                        }
-                        dayActionStrip
-                        if isViewingToday && !hasDayJournalEntry {
+                    }
+                    todaySection { dialCard }
+                    if isViewingToday {
+                        todaySection { nowCard }
+                    }
+                    todaySection { dayActionStrip }
+                    if isViewingToday && !hasDayJournalEntry {
+                        todaySection {
                             journalActionCard
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
-                        if isViewingToday && !hasDaySleepLog {
+                    }
+                    if isViewingToday && !hasDaySleepLog {
+                        todaySection {
                             sleepActionCard
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
-                        if let upNext {
+                    }
+                    if let upNext {
+                        todaySection {
                             upNextCard(upNext)
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
-                        taskSection
-                        if !dueHabits.isEmpty {
+                    }
+                    todaySection { taskSection }
+                    if !dueHabits.isEmpty {
+                        todaySection {
                             habitSummarySection
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
-                        if isViewingToday && !dueMedicationPlans.isEmpty {
+                    }
+                    if isViewingToday && !dueMedicationPlans.isEmpty {
+                        todaySection {
                             medicationSection
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
-                    .padding(ChronosSpacing.standard)
-                    .animation(ChronosMotion.smooth, value: hasDayJournalEntry)
-                    .animation(ChronosMotion.smooth, value: hasDaySleepLog)
-                    .animation(ChronosMotion.smooth, value: upNext?.id)
-                    .animation(ChronosMotion.smooth, value: dueHabits.isEmpty)
-                    .animation(ChronosMotion.smooth, value: readiness)
-                    .animation(ChronosMotion.smooth, value: focusTimer.phase)
                 }
+                .padding(.vertical, ChronosSpacing.standard)
+                .animation(ChronosMotion.smooth, value: hasDayJournalEntry)
+                .animation(ChronosMotion.smooth, value: hasDaySleepLog)
+                .animation(ChronosMotion.smooth, value: upNext?.id)
+                .animation(ChronosMotion.smooth, value: dueHabits.isEmpty)
+                .animation(ChronosMotion.smooth, value: readiness)
+                .animation(ChronosMotion.smooth, value: focusTimer.phase)
             }
-            .navigationTitle(browsedDate.formatted(.dateTime.weekday(.wide).month().day()))
-            .chronosCommandPaletteToolbar()
-            .chronosScrollMinimizedBar()
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { activeSheet = .assistant } label: { Image(systemName: "sparkles") }
-                        .accessibilityLabel("Assistant")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    // Quick-create palette — the iOS analogue of ChronosQuickCreateCommandProvider.
-                    Menu {
-                        Button { activeSheet = .newTask } label: { Label("New task", systemImage: "checklist") }
-                        Button { activeSheet = .newBlock } label: { Label("New time block", systemImage: "calendar.badge.plus") }
-                        Button { activeSheet = .logSleep } label: { Label("Log sleep", systemImage: "moon.zzz.fill") }
-                        Button { activeSheet = .checkIn } label: { Label("Mood check-in", systemImage: "face.smiling") }
-                    } label: { Image(systemName: "plus.circle") }
-                        .accessibilityLabel("Quick create")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button { activeSheet = .data } label: { Label("Data & backup", systemImage: "externaldrive") }
-                    } label: { Image(systemName: "ellipsis.circle") }
-                        .accessibilityLabel("More")
-                }
-            }
-            // Keep the "next block starts soon" notification aligned with today's plan (re-runs
-            // whenever the day's blocks change). Gated on settings inside the scheduler; only
-            // today's blocks may schedule — a browsed day's plan must not rewrite the alerts.
-            .task(id: dayBlocks.map(\.id)) {
-                guard isViewingToday else { return }
-                await ChronosNotifications.shared.scheduleNextBlockNotification(blocks: dayBlocks)
-            }
-            .sheet(item: $activeSheet) { sheet in
-                switch sheet {
-                case .assistant: AssistantSheet()
-                case .checkIn: CheckInSheet()
-                case .data: DataManagementView()
-                case .newTask: TaskEditorSheet(task: nil)
-                case .newBlock: TimeBlockEditorSheet(block: nil)
-                case .logSleep: SleepLogSheet()
-                case .journal: JournalView()
-                case .planDay: AIPlannerSheet(date: browsedDate, existingBlocks: dayBlocks)
-                case .fillGaps: GapFillSheet(date: browsedDate, existingBlocks: dayBlocks)
-                }
-            }
+            .scrollContentBackground(.hidden)
         }
+    }
+
+    /// Sections inset horizontally — mirrors Plan's per-row `.padding(.horizontal)` on the scroll
+    /// column while the scroll view itself stays full-bleed edge-to-edge under the nav bar.
+    private func todaySection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().padding(.horizontal, ChronosSpacing.standard)
     }
 
     /// Compact running-session card — the cross-tab surfacing of the focus timer (Android shows
@@ -312,6 +352,7 @@ struct TodayView: View {
                     block.actualEndMinuteOfDay = block.plannedEndMinuteOfDay
                 }
                 try? context.save()
+                BlockLiveActivityCoordinator.refreshToday()
             }
         } label: {
             Label(done ? "Completed" : "Mark done",
@@ -382,7 +423,9 @@ struct TodayView: View {
             } else {
                 ForEach(dayTasks) { task in
                     Button {
-                        task.isCompleted.toggle(); try? context.save()
+                        task.isCompleted.toggle()
+                        try? context.save()
+                        BlockLiveActivityCoordinator.refreshToday()
                     } label: {
                         HStack {
                             Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
@@ -403,41 +446,46 @@ struct TodayView: View {
     }
 
     private var journalActionCard: some View {
-        ChronosGlassCard(tint: ChronosColors.brandSecondary) {
-            HStack {
-                VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
-                    Label("Reflect on your day", systemImage: "book.closed.fill")
-                        .font(.chronosHeadline)
-                        .foregroundStyle(ChronosColors.brandSecondary)
-                    Text("Write in your journal to build your streak.")
-                        .font(.chronosCaption).foregroundStyle(.secondary)
+        Button { activeSheet = .journal } label: {
+            ChronosGlassCard(tint: ChronosColors.brandSecondary) {
+                HStack {
+                    VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
+                        Label("Reflect on your day", systemImage: "book.closed.fill")
+                            .font(.chronosHeadline)
+                            .foregroundStyle(ChronosColors.brandSecondary)
+                        Text("Write in your journal to build your streak.")
+                            .font(.chronosCaption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
                 }
-                Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.secondary)
             }
         }
-        .onTapGesture { activeSheet = .journal }
+        .buttonStyle(.plain)
         .pressable()
+        .accessibilityLabel("Reflect on your day")
+        .accessibilityHint("Opens your journal")
     }
 
     private var sleepActionCard: some View {
-        ChronosGlassCard(tone: .quiet) {
-            HStack {
-                VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
-                    Label("Log tonight's sleep", systemImage: "moon.zzz.fill")
-                        .font(.chronosHeadline)
-                    Text("Track your sleep to adapt tomorrow's plan.")
-                        .font(.chronosCaption).foregroundStyle(.secondary)
+        Button { activeSheet = .logSleep } label: {
+            ChronosGlassCard(tone: .quiet) {
+                HStack {
+                    VStack(alignment: .leading, spacing: ChronosSpacing.micro) {
+                        Label("Log tonight's sleep", systemImage: "moon.zzz.fill")
+                            .font(.chronosHeadline)
+                        Text("Track your sleep to adapt tomorrow's plan.")
+                            .font(.chronosCaption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
                 }
-                Spacer()
-                Button { activeSheet = .logSleep } label: {
-                    Text("Log").font(.chronosLabel)
-                        .padding(.horizontal, ChronosSpacing.compact).padding(.vertical, ChronosSpacing.micro)
-                        .background(ChronosColors.brandPrimary.opacity(0.15), in: Capsule())
-                }
-                .buttonStyle(.plain)
             }
         }
+        .buttonStyle(.plain)
+        .pressable()
+        .accessibilityLabel("Log tonight's sleep")
+        .accessibilityHint("Opens the sleep log")
     }
 
     private var habitSummarySection: some View {
@@ -447,6 +495,7 @@ struct TodayView: View {
                 Button {
                     habit.toggleCompletion(on: browsedDate)
                     try? context.save()
+                    BlockLiveActivityCoordinator.refreshToday()
                 } label: {
                     HStack {
                         Image(systemName: habit.isCompleted(on: browsedDate) ? "checkmark.circle.fill" : "circle")
@@ -480,6 +529,7 @@ struct TodayView: View {
                         plan.acknowledgeDose()
                         try? context.save()
                         medTakeTick += 1
+                        BlockLiveActivityCoordinator.refreshToday()
                     }
                 } label: {
                     HStack {
@@ -553,6 +603,9 @@ struct CheckInSheet: View {
                     Text("\(Int(value.wrappedValue))/5").foregroundStyle(.secondary)
                 }
                 Slider(value: value, in: 1...5, step: 1)
+                    // Speak "Mood, 3 of 5" rather than the default percentage (§7).
+                    .accessibilityLabel(label)
+                    .accessibilityValue("\(Int(value.wrappedValue)) of 5")
             }
         }
     }

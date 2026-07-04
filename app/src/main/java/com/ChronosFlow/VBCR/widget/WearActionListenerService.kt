@@ -58,12 +58,26 @@ class WearActionListenerService : WearableListenerService() {
                         dispatcher.dispatch(applicationContext, arg)
                     }
                 }
-                WearActionContract.TYPE_HABIT ->
-                    entryPoint.completeHabitByIdUseCase()(arg, LocalDate.now())
+                WearActionContract.TYPE_HABIT -> {
+                    // A bare id completes the habit (same as a widget tap); a reversed arg undoes it.
+                    val habitId = WearActionContract.argId(arg)
+                    if (WearActionContract.isReverse(arg)) {
+                        entryPoint.undoHabitCompletionUseCase()(habitId, LocalDate.now())
+                    } else {
+                        entryPoint.completeHabitByIdUseCase()(habitId, LocalDate.now())
+                    }
+                }
                 WearActionContract.TYPE_TASK ->
                     entryPoint.toggleTaskCompletionUseCase()(arg)
-                WearActionContract.TYPE_DOSE ->
-                    entryPoint.recordMedicationWidgetActionUseCase()(arg, true)
+                WearActionContract.TYPE_DOSE -> {
+                    // A bare id records the dose taken; a reversed arg removes that just-taken event.
+                    val planId = WearActionContract.argId(arg)
+                    if (WearActionContract.isReverse(arg)) {
+                        entryPoint.undoMedicationDoseUseCase()(planId, LocalDate.now())
+                    } else {
+                        entryPoint.recordMedicationWidgetActionUseCase()(planId, true)
+                    }
+                }
                 WearActionContract.TYPE_BLOCK -> {
                     val block = entryPoint.timeBlockRepository().getTimeBlockById(arg)
                         ?: return@launch

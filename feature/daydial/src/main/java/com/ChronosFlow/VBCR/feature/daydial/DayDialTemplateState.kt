@@ -492,7 +492,8 @@ internal fun DayDialTemplateEditorSheet(
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
-                    DayDialBlockEditorFields(
+                    BlockEditorProgressiveForm(
+                        stateKey = "template-${draft.id}",
                         title = draft.title,
                         onTitleChange = { templateState.updateDraftBlockTitle(draft.id, it) },
                         startText = draft.startText,
@@ -500,7 +501,7 @@ internal fun DayDialTemplateEditorSheet(
                         durationText = draft.durationText,
                         onDurationTextChange = { templateState.updateDraftBlockDuration(draft.id, it) },
                         category = draft.category,
-                        onCategorySelected = { templateState.updateDraftBlockCategory(draft.id, it) }
+                        onCategorySelected = { templateState.updateDraftBlockCategory(draft.id, it) },
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ChronosTextButton(

@@ -108,47 +108,7 @@ struct InsightsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
-                    periodPicker
-                    sectionFilterPills
-
-                    // MARK: EXECUTION — rollup metrics + balance
-                    if sectionVisible(.execution) {
-                        periodSummaryCard
-                        collapsibleCard(key: "balance", title: "Day balance") {
-                            balanceCard
-                        }
-                    }
-
-                    // MARK: CATEGORIES — per-category breakdown
-                    if sectionVisible(.categories) {
-                        categoryBreakdownCard
-                    }
-
-                    // MARK: INSIGHTS — findings + AI recommendations (eager render, matching Android)
-                    if sectionVisible(.insights) {
-                        findingsCard
-                        recommendationsCard
-                    }
-
-                    // MARK: SCREEN_TIME
-                    if sectionVisible(.screenTime) {
-                        screenTimeCard
-                    }
-
-                    // MARK: TRENDS — habit / sleep / mood charts + derived signals. Matching Android's
-                    // InsightsTrendSections, each trend renders inline and is gated ONLY on data
-                    // availability (never on collapsed state) under one cohesive "Trends" heading.
-                    if sectionVisible(.trends) {
-                        trendsSection
-                    }
-                }
-                .padding(ChronosSpacing.standard)
-            }
-            .background { ChronosBackdrop() }
-            .navigationTitle("Review")
-            .chronosScrollMinimizedBar()
+            chromedSurface
             .sheet(isPresented: $showingDayReview) {
                 DayReviewSheet(blocks: todayBlocks)
                     .presentationDetents([.large])
@@ -162,6 +122,57 @@ struct InsightsView: View {
             .task { refreshRecommendationsBaseline() }
             .onChange(of: period) { _, _ in refreshRecommendationsBaseline() }
         }
+    }
+
+    private var chromedSurface: some View {
+        insightsSurface
+            .navigationTitle("Review")
+            .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
+    }
+
+    private var insightsSurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollView {
+                VStack(alignment: .leading, spacing: ChronosSpacing.medium) {
+                    insightsSection { periodPicker }
+                    insightsSection { sectionFilterPills }
+
+                    if sectionVisible(.execution) {
+                        insightsSection { periodSummaryCard }
+                        insightsSection {
+                            collapsibleCard(key: "balance", title: "Day balance") {
+                                balanceCard
+                            }
+                        }
+                    }
+
+                    if sectionVisible(.categories) {
+                        insightsSection { categoryBreakdownCard }
+                    }
+
+                    if sectionVisible(.insights) {
+                        insightsSection { findingsCard }
+                        insightsSection { recommendationsCard }
+                    }
+
+                    if sectionVisible(.screenTime) {
+                        insightsSection { screenTimeCard }
+                    }
+
+                    if sectionVisible(.trends) {
+                        insightsSection { trendsSection }
+                    }
+                }
+                .padding(.vertical, ChronosSpacing.standard)
+            }
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    private func insightsSection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().padding(.horizontal, ChronosSpacing.standard)
     }
 
     // MARK: TRENDS section body (extracted from `body` to keep the type-checker in budget)

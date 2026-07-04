@@ -21,6 +21,20 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
+            chromedSurface
+        }
+    }
+
+    private var chromedSurface: some View {
+        settingsSurface
+            .navigationTitle("Settings")
+            .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
+    }
+
+    private var settingsSurface: some View {
+        ZStack {
+            ChronosBackdrop()
             List {
                 settingsPagesSection
                 screenTimeSection
@@ -29,9 +43,6 @@ struct SettingsView: View {
                 aboutSection
             }
             .scrollContentBackground(.hidden)
-            .background { ChronosBackdrop() }
-            .navigationTitle("Settings")
-            .chronosScrollMinimizedBar()
         }
     }
 
@@ -102,7 +113,7 @@ struct SettingsView: View {
             Toggle("Routines", isOn: $settings.routinesEnabled)
             Toggle("Insights", isOn: $settings.insightsEnabled)
         } footer: {
-            Text("Turn modules on or off. Disabled modules are hidden from the tab bar — mirrors the Android onboarding feature selector.")
+            Text("Turn modules on or off. Turning a module off hides its tab but keeps all your logged data — turn it back on anytime.")
         }
     }
 

@@ -104,4 +104,16 @@ object WearDaySummaryContract {
      * mention the next block's title.
      */
     const val KEY_DIGEST = "digest"
+
+    /**
+     * String array: ranked folded reminders packed as
+     * `kind(0=MED,1=TASK,2=HABIT) FIELD_SEP entityId FIELD_SEP title FIELD_SEP detail FIELD_SEP isOverdue(0/1)`.
+     * Mirrors the phone's current-block / Live Activity reminder chips. Absent when folding is off
+     * or nothing is due; titles become generic labels under redaction but ids still flow so the
+     * watch can act.
+     */
+    const val KEY_FOLDED_REMINDER_ENTRIES = "folded_reminder_entries"
+
+    /** Maximum folded reminders published for the watch live surface. */
+    const val MAX_FOLDED_REMINDERS = 3
 }

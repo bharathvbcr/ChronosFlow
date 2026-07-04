@@ -214,7 +214,7 @@ private struct PriorityBreakdownBar: View {
     let stats: TaskStatsSnapshot
 
     private let high = ChronosColors.brandAccent
-    private let medium = Color(red: 0.95, green: 0.62, blue: 0.24)
+    private let medium = ChronosColors.warning
     private let low = ChronosColors.brandSecondary
 
     var body: some View {

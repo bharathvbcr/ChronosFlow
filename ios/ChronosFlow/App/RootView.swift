@@ -47,6 +47,7 @@ struct RootView: View {
         // pages-on-top-of-Day model; swipe-down / Done returns to the day).
         .sheet(item: $shell.presentedRoute) { route in
             routeView(for: route)
+                .environment(shell)
         }
         // The global command palette (jump to any destination / create / ask the assistant).
         .sheet(isPresented: $shell.commandPaletteShown) {
@@ -62,18 +63,34 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task { await ProactiveDigest.refresh() }
-                // Apply any focus controls (Live Activity / focus widget) queued while we were
-                // backgrounded — drained app-wide so it works on any tab, not just Focus.
                 ChronosFocusCommandRouter.drain()
-                // Re-arm the background sync cadence on each foreground (mirrors auto-backup).
+                FocusTimerModel.shared.recoverBoundaryIfNeeded()
                 ChronosBackgroundSync.scheduleAll()
-                // Mirror the latest day to the paired watch (Android Wear Data Layer parity).
                 PhoneWatchSync.shared.pushSnapshot()
+                BlockLiveActivityCoordinator.refreshToday()
+                BlockLiveActivityCoordinator.startForegroundRefresh()
+            } else if phase == .background {
+                BlockLiveActivityCoordinator.stopForegroundRefresh()
+                // One last refresh + boundary-scheduled BG task so the live surface stays aligned
+                // after the user leaves the app (Today-tab timer no longer runs).
+                BlockLiveActivityCoordinator.refreshToday()
+            } else if phase == .inactive {
+                BlockLiveActivityCoordinator.stopForegroundRefresh()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name.NSSystemTimeZoneDidChange)) { _ in
+            BlockLiveActivityCoordinator.refreshToday()
+            Task { await ChronosNotifications.shared.refreshFoldableReminders() }
         }
         // Handle deep links — widget taps (chronosflow://section) and the chronosflow://add-task URL
         // posted by ChronosShareExtension. Mirrors the Android notification-launch path.
         .onOpenURL { url in handleDeepLink(url) }
+        .onReceive(NotificationCenter.default.publisher(for: .chronosDeepLinkPending)) { note in
+            if let url = note.object as? URL { handleDeepLink(url) }
+        }
+        .onAppear {
+            if let url = ChronosPendingDeepLink.consume() { handleDeepLink(url) }
+        }
         // Share Extension task editor — pre-fills the title with the text shared from another app.
         .sheet(isPresented: $showingShareTaskEditor) {
             if let text = pendingShareText {
@@ -122,7 +139,7 @@ struct RootView: View {
         switch shell.selectedTab {
         case .plan:  DayDialScreen()
         case .today: TodayView()
-        case .focus: FocusView()
+        case .focus: FocusView(prefilledBlockID: shell.pendingFocusBlockID)
         }
     }
 
@@ -151,10 +168,24 @@ struct RootView: View {
     /// fall back to the Today tab rather than a blank destination (Android feature-flag gating).
     private func handleDeepLink(_ url: URL) {
         guard url.scheme == "chronosflow" else { return }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func queryValue(_ name: String) -> String? {
+            query.first(where: { $0.name == name })?.value
+        }
+
         switch url.host() {
         case "today": shell.select(.today)
         case "plan":  shell.select(.plan)
-        case "focus": shell.select(.focus)
+        case "focus":
+            shell.select(.focus)
+            if let blockId = queryValue("blockId") { shell.pendingFocusBlockID = blockId }
+        case "sleep":
+            if ShellRoute.sleep.isEnabled(settings) {
+                shell.open(.sleep)
+                if queryValue("log") == "1" { shell.pendingOpenSleepLog = true }
+            } else {
+                shell.select(.today)
+            }
         case "add-task":
             // Check for pending shared text (written by ChronosShareExtension) and open task editor.
             let defaults = UserDefaults(suiteName: "group.com.chronosflow.shared")
@@ -169,6 +200,15 @@ struct RootView: View {
             // Any other host maps to a secondary route when its feature is enabled.
             if let route = ShellRoute.fromDeepLinkHost(url.host()), route.isEnabled(settings) {
                 shell.open(route)
+                if route == .tasks, let taskID = queryValue("id") {
+                    shell.pendingTaskID = taskID
+                } else if route == .medication, let planID = queryValue("id") {
+                    shell.pendingMedicationPlanID = planID
+                } else if route == .habits, let habitID = queryValue("id") {
+                    shell.pendingHabitID = habitID
+                } else if route == .goals, let goalID = queryValue("id") {
+                    shell.pendingGoalID = goalID
+                }
             } else {
                 shell.select(.today)
             }

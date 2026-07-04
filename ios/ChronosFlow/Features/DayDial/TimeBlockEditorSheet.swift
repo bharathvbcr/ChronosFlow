@@ -58,115 +58,149 @@ struct TimeBlockEditorSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                if isImportedBlock {
-                    Section {
-                        Label(
-                            "Imported from your calendar. Edit it in the Calendar app — changes here won't sync back.",
-                            systemImage: "calendar.badge.exclamationmark"
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section {
-                    TextField("Title", text: $title)
-                    Picker("Category", selection: $category) {
-                        ForEach(categories, id: \.self) { c in
-                            Label(c.capitalized, systemImage: "circle.fill")
-                                .foregroundStyle(ChronosColors.category(c))
-                                .tag(c)
-                        }
-                    }
-                }
-                .disabled(isImportedBlock)
-                Section("Time") {
-                    LabeledContent("Start", value: Int(startMinute).clockTime)
-                    Slider(value: $startMinute, in: 0...1425, step: 15)
-                    LabeledContent("Duration", value: "\(Int(duration)) min")
-                    Slider(value: $duration, in: 15...720, step: 15)
-                    LabeledContent("Ends", value: ((Int(startMinute) + Int(duration)) % 1440).clockTime)
-                }
-                .disabled(isImportedBlock)
-                Section("Planner") {
-                    Picker("Flexibility", selection: $flexibility) {
-                        ForEach(BlockFlexibility.allCases, id: \.self) {
-                            Text($0.rawValue.capitalized).tag($0)
-                        }
-                    }
-                    Picker("Energy", selection: $energy) {
-                        ForEach(EnergyIntensity.allCases, id: \.self) {
-                            Text($0.label).tag($0)
-                        }
-                    }
-                    Toggle("Lock (protect from AI)", isOn: $isLocked)
-                }
-                .disabled(isImportedBlock)
-
-                if !isImportedBlock {
-                    Section {
-                        Toggle("Export to Calendar", isOn: $exportEnabled)
-                        if exportEnabled {
-                            Text("Adds this block to your device calendar and keeps it in sync when you edit it.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    } header: {
-                        Text("Calendar")
-                    }
-                }
-
-                if let existing {
-                    Section {
-                        Button(isImportedBlock ? "Remove from plan" : "Delete block", role: .destructive) {
-                            if isImportedBlock {
-                                showDeleteImportedConfirm = true
-                            } else {
-                                deleteBlock(existing)
-                            }
-                        }
-                    } footer: {
-                        if isImportedBlock {
-                            Text("Removing only hides it from your plan. Your calendar event is untouched.")
-                        }
-                    }
-                }
+        CardEditorScaffold(
+            kind: "block",
+            navTitle: existing == nil ? "New block" : (isImportedBlock ? "Calendar event" : "Edit block"),
+            chips: blockChips,
+            sections: blockSections,
+            footer: existing != nil ? AnyView(deleteFooter) : nil,
+            saveDisabled: title.isEmpty || isImportedBlock,
+            onCancel: { dismiss() },
+            onSave: { Task { await save() } }
+        ) {
+            blockHeader
+        }
+        .confirmationDialog(
+            "Remove this calendar event from your plan?",
+            isPresented: $showDeleteImportedConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Remove from plan", role: .destructive) {
+                if let existing { deleteBlock(existing) }
             }
-            .navigationTitle(existing == nil ? "New block" : (isImportedBlock ? "Calendar event" : "Edit block"))
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save() } }
-                        .disabled(title.isEmpty || isImportedBlock)
-                }
-            }
-            .confirmationDialog(
-                "Remove this calendar event from your plan?",
-                isPresented: $showDeleteImportedConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Remove from plan", role: .destructive) {
-                    if let existing { deleteBlock(existing) }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This only removes it from ChronosFlow. Your device calendar event won't change.")
-            }
-            .alert("Calendar", isPresented: Binding(
-                get: { calendarErrorMessage != nil },
-                set: { if !$0 { calendarErrorMessage = nil } }
-            )) {
-                Button("OK", role: .cancel) { calendarErrorMessage = nil }
-            } message: {
-                Text(calendarErrorMessage ?? "")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This only removes it from ChronosFlow. Your device calendar event won't change.")
+        }
+        .alert("Calendar", isPresented: Binding(
+            get: { calendarErrorMessage != nil },
+            set: { if !$0 { calendarErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { calendarErrorMessage = nil }
+        } message: {
+            Text(calendarErrorMessage ?? "")
+        }
+    }
+
+    // MARK: - Scaffold pieces
+
+    @ViewBuilder private var blockHeader: some View {
+        if isImportedBlock {
+            Label("Imported from your calendar. Edit it in the Calendar app — changes here won't sync back.",
+                  systemImage: "calendar.badge.exclamationmark")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        TextField("Title", text: $title).disabled(isImportedBlock)
+        Picker("Category", selection: $category) {
+            ForEach(categories, id: \.self) { c in
+                Label(c.capitalized, systemImage: "circle.fill")
+                    .foregroundStyle(ChronosColors.category(c))
+                    .tag(c)
             }
         }
-        .presentationDetents([.large])
+        .disabled(isImportedBlock)
+    }
+
+    private var blockChips: [EditorChip] {
+        var chips = [EditorChip(id: "planner", systemImage: "slider.horizontal.3",
+                                title: "Planner", value: plannerChipValue)]
+        if !isImportedBlock {
+            chips.append(EditorChip(id: "calendar", systemImage: "calendar", title: "Calendar",
+                value: exportEnabled ? "Exporting" : nil,
+                onClear: { withAnimation(ChronosMotion.snappy) { exportEnabled = false } }))
+        }
+        return chips
+    }
+
+    private var plannerChipValue: String? {
+        var parts: [String] = []
+        if flexibility != .movable { parts.append(flexibility.rawValue.capitalized) }
+        if energy != .moderate { parts.append(energy.label) }
+        if isLocked { parts.append("Locked") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var blockSections: [EditorSection] {
+        var list: [EditorSection] = [
+            EditorSection(id: "time", title: "Time", systemImage: "clock", alwaysPrimary: true) { timeRows },
+            EditorSection(id: "planner", title: "Planner", systemImage: "slider.horizontal.3",
+                          hasValue: plannerChipValue != nil) { plannerRows },
+        ]
+        if !isImportedBlock {
+            list.append(EditorSection(id: "calendar", title: "Calendar", systemImage: "calendar",
+                                      hasValue: exportEnabled) { calendarRows })
+        }
+        return list
+    }
+
+    @ViewBuilder private var timeRows: some View {
+        Group {
+            LabeledContent("Start", value: Int(startMinute).clockTime)
+            Slider(value: $startMinute, in: 0...1425, step: 15)
+                // A bare Slider speaks its value as a percentage; announce the real clock time (§7).
+                .accessibilityLabel("Start time")
+                .accessibilityValue(Int(startMinute).clockTime)
+            LabeledContent("Duration", value: "\(Int(duration)) min")
+            Slider(value: $duration, in: 15...720, step: 15)
+                .accessibilityLabel("Duration")
+                .accessibilityValue("\(Int(duration)) minutes")
+            LabeledContent("Ends", value: ((Int(startMinute) + Int(duration)) % 1440).clockTime)
+        }
+        .disabled(isImportedBlock)
+    }
+
+    @ViewBuilder private var plannerRows: some View {
+        Group {
+            Picker("Flexibility", selection: $flexibility) {
+                ForEach(BlockFlexibility.allCases, id: \.self) {
+                    Text($0.rawValue.capitalized).tag($0)
+                }
+            }
+            Picker("Energy", selection: $energy) {
+                ForEach(EnergyIntensity.allCases, id: \.self) {
+                    Text($0.label).tag($0)
+                }
+            }
+            Toggle("Lock (protect from AI)", isOn: $isLocked)
+        }
+        .disabled(isImportedBlock)
+    }
+
+    @ViewBuilder private var calendarRows: some View {
+        Toggle("Export to Calendar", isOn: $exportEnabled)
+        if exportEnabled {
+            Text("Adds this block to your device calendar and keeps it in sync when you edit it.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var deleteFooter: some View {
+        if let existing {
+            Button(isImportedBlock ? "Remove from plan" : "Delete block", role: .destructive) {
+                if isImportedBlock {
+                    showDeleteImportedConfirm = true
+                } else {
+                    deleteBlock(existing)
+                }
+            }
+            if isImportedBlock {
+                Text("Removing only hides it from your plan. Your calendar event is untouched.")
+                    .font(.chronosCaption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     // MARK: - Save

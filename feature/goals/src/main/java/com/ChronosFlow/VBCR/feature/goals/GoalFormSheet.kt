@@ -21,12 +21,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.ChronosFlow.VBCR.core.domain.model.Goal
+import com.ChronosFlow.VBCR.core.ui.components.CardEditorScaffold
+import com.ChronosFlow.VBCR.core.ui.components.CardEditorSection
 import com.ChronosFlow.VBCR.core.ui.components.ChronosAssistChip
-import com.ChronosFlow.VBCR.core.ui.components.ChronosCollapsibleSection
 import com.ChronosFlow.VBCR.core.ui.components.ChronosDatePickerField
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFilterChip
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFormBottomSheet
 import com.ChronosFlow.VBCR.core.ui.components.ChronosOptionChips
+import com.ChronosFlow.VBCR.core.ui.components.EditorQuickAttribute
 import java.time.LocalDate
 
 /** Target describing whether the sheet creates a new goal or edits an existing one. */
@@ -134,7 +136,6 @@ internal fun GoalFormSheet(
     var targetDateIso by rememberSaveable(targetKey) {
         mutableStateOf(existing?.targetDate?.toString())
     }
-    var detailsExpanded by rememberSaveable(targetKey) { mutableStateOf(false) }
     var customCategory by rememberSaveable(targetKey) { mutableStateOf("") }
     var lastChipCategory by rememberSaveable(targetKey) {
         mutableStateOf(existing?.category ?: GoalViewModel.DEFAULT_CATEGORY)
@@ -153,7 +154,6 @@ internal fun GoalFormSheet(
             lastChipCategory = GoalViewModel.DEFAULT_CATEGORY
             targetValueText = "1"
             targetDateIso = null
-            detailsExpanded = false
         }
         lastAddOpen = isAddOpen
     }
@@ -189,158 +189,204 @@ internal fun GoalFormSheet(
             )
         }
     ) {
-        OutlinedTextField(
-            value = title,
-            onValueChange = { title = it },
-            label = { Text("Goal") },
-            placeholder = { Text("Read 12 books this year") },
-            singleLine = true,
-            isError = title.isNotEmpty() && !titleValid,
-            modifier = Modifier.fillMaxWidth()
-        )
-        ChronosOptionChips(
-            label = "Category",
-            options = categoryOptions,
-            selected = category,
-            onSelected = { selection ->
-                category = selection
-                lastChipCategory = selection
-                customCategory = ""
-            }
-        )
-        OutlinedTextField(
-            value = customCategory,
-            onValueChange = { input ->
-                customCategory = input
-                val trimmed = input.trim()
-                when {
-                    trimmed.isBlank() -> category = lastChipCategory
-                    trimmed.length >= 2 -> category = trimmed
-                }
-            },
-            label = { Text("Custom category") },
-            placeholder = { Text("e.g. Travel") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        suggestGoalCategory(title)?.takeIf { it != category }?.let { suggested ->
-            ChronosAssistChip(
-                onClick = { category = suggested },
-                label = { Text("Suggested: $suggested") }
-            )
-        }
-        OutlinedTextField(
-            value = targetValueText,
-            onValueChange = { input -> targetValueText = input.filter(Char::isDigit).take(5) },
-            label = { Text("Target count") },
-            supportingText = { Text("How many completions/units count as done (e.g. 12 books).") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            GoalTargetQuickPicks.forEach { pick ->
-                ChronosFilterChip(
-                    selected = parsedTargetValue == pick,
-                    onClick = { targetValueText = pick.toString() },
-                    label = { Text(pick.toString()) }
+        CardEditorScaffold(
+            kind = "goal",
+            stateKey = targetKey,
+            attributes = listOf(
+                EditorQuickAttribute(
+                    id = "details",
+                    title = "Deadline",
+                    value = targetDate?.let { "Due $it" },
+                    onReveal = {},
+                    onClear = { targetDateIso = null },
                 )
-            }
-        }
-        goalTargetFromTitle(title)?.takeIf { it != parsedTargetValue }?.let { suggested ->
-            ChronosAssistChip(
-                onClick = { targetValueText = suggested.toString() },
-                label = { Text("Use $suggested from title") }
-            )
-        }
-        if (existing != null) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = "Progress · ${goalProgressSummary(existing.progressValue, existing.targetValue)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            ),
+            sections = buildList {
+                add(
+                    CardEditorSection(
+                        id = "category",
+                        title = "Category",
+                        summary = category,
+                        hasValue = true,
+                    ) {
+                        ChronosOptionChips(
+                            label = "Category",
+                            options = categoryOptions,
+                            selected = category,
+                            onSelected = { selection ->
+                                category = selection
+                                lastChipCategory = selection
+                                customCategory = ""
+                            }
+                        )
+                        OutlinedTextField(
+                            value = customCategory,
+                            onValueChange = { input ->
+                                customCategory = input
+                                val trimmed = input.trim()
+                                when {
+                                    trimmed.isBlank() -> category = lastChipCategory
+                                    trimmed.length >= 2 -> category = trimmed
+                                }
+                            },
+                            label = { Text("Custom category") },
+                            placeholder = { Text("e.g. Travel") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        suggestGoalCategory(title)?.takeIf { it != category }?.let { suggested ->
+                            ChronosAssistChip(
+                                onClick = { category = suggested },
+                                label = { Text("Suggested: $suggested") }
+                            )
+                        }
+                    }
                 )
-                LinearProgressIndicator(
-                    progress = { goalProgressFraction(existing.progressValue, existing.targetValue) },
-                    modifier = Modifier.fillMaxWidth()
+                add(
+                    CardEditorSection(
+                        id = "target",
+                        title = "Target",
+                        summary = "Count: $parsedTargetValue",
+                        hasValue = true,
+                    ) {
+                        OutlinedTextField(
+                            value = targetValueText,
+                            onValueChange = { input -> targetValueText = input.filter(Char::isDigit).take(5) },
+                            label = { Text("Target count") },
+                            supportingText = { Text("How many completions/units count as done (e.g. 12 books).") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GoalTargetQuickPicks.forEach { pick ->
+                                ChronosFilterChip(
+                                    selected = parsedTargetValue == pick,
+                                    onClick = { targetValueText = pick.toString() },
+                                    label = { Text(pick.toString()) }
+                                )
+                            }
+                        }
+                        goalTargetFromTitle(title)?.takeIf { it != parsedTargetValue }?.let { suggested ->
+                            ChronosAssistChip(
+                                onClick = { targetValueText = suggested.toString() },
+                                label = { Text("Use $suggested from title") }
+                            )
+                        }
+                    }
                 )
-                goalTargetBelowProgressWarning(parsedTargetValue, existing.progressValue)?.let { warning ->
-                    Text(
-                        text = warning,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-        }
-        ChronosCollapsibleSection(
-            title = "Details",
-            summary = buildString {
-                append(targetDate?.let { "Due $it" } ?: "No target date")
-                if (description.isNotBlank()) append(" • has notes")
-            },
-            expanded = detailsExpanded,
-            onExpandedChange = { detailsExpanded = it }
-        ) {
-            ChronosDatePickerField(
-                label = "Target date",
-                value = targetDate?.toString() ?: "Pick a date",
-                selectedDate = targetDate,
-                onDateSelected = { picked -> targetDateIso = picked.toString() },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                goalDeadlinePresets(LocalDate.now()).forEach { (label, date) ->
-                    ChronosFilterChip(
-                        selected = targetDate == date,
-                        onClick = { targetDateIso = date.toString() },
-                        label = { Text(label) }
-                    )
-                }
-            }
-            val today = LocalDate.now()
-            val pastWarning = goalTargetDateWarning(targetDate, today)
-            if (pastWarning != null) {
-                Text(
-                    text = pastWarning,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
+                add(
+                    CardEditorSection(
+                        id = "details",
+                        title = "Details",
+                        summary = buildString {
+                            append(targetDate?.let { "Due $it" } ?: "No target date")
+                            if (description.isNotBlank()) append(" • has notes")
+                        },
+                        hasValue = targetDateIso != null || description.isNotBlank(),
+                    ) {
+                        ChronosDatePickerField(
+                            label = "Target date",
+                            value = targetDate?.toString() ?: "Pick a date",
+                            selectedDate = targetDate,
+                            onDateSelected = { picked -> targetDateIso = picked.toString() },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            goalDeadlinePresets(LocalDate.now()).forEach { (label, date) ->
+                                ChronosFilterChip(
+                                    selected = targetDate == date,
+                                    onClick = { targetDateIso = date.toString() },
+                                    label = { Text(label) }
+                                )
+                            }
+                        }
+                        val today = LocalDate.now()
+                        val pastWarning = goalTargetDateWarning(targetDate, today)
+                        if (pastWarning != null) {
+                            Text(
+                                text = pastWarning,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        } else if (targetDate != null) {
+                            goalDueLabel(targetDate = targetDate, isCompleted = false, today = today)?.let { due ->
+                                Text(
+                                    text = due.text,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (due.emphasized) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        }
+                        OutlinedTextField(
+                            value = description,
+                            onValueChange = { description = it },
+                            label = { Text("Notes") },
+                            placeholder = { Text("Why this matters, milestones, etc.") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            text = "Tip: link tasks and habits to this goal from their edit screens to track progress automatically.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 )
-            } else if (targetDate != null) {
-                goalDueLabel(targetDate = targetDate, isCompleted = false, today = today)?.let { due ->
-                    Text(
-                        text = due.text,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (due.emphasized) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                if (existing != null) {
+                    add(
+                        CardEditorSection(
+                            id = "progress",
+                            title = "Progress",
+                            summary = goalProgressSummary(existing.progressValue, existing.targetValue),
+                            hasValue = true,
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = "Progress · ${goalProgressSummary(existing.progressValue, existing.targetValue)}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                LinearProgressIndicator(
+                                    progress = { goalProgressFraction(existing.progressValue, existing.targetValue) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                goalTargetBelowProgressWarning(parsedTargetValue, existing.progressValue)?.let { warning ->
+                                    Text(
+                                        text = warning,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
                         }
                     )
                 }
-            }
-            OutlinedTextField(
-                value = description,
-                onValueChange = { description = it },
-                label = { Text("Notes") },
-                placeholder = { Text("Why this matters, milestones, etc.") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Text(
-                text = "Tip: link tasks and habits to this goal from their edit screens to track progress automatically.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+            },
+            essentials = {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Goal") },
+                    placeholder = { Text("Read 12 books this year") },
+                    singleLine = true,
+                    isError = title.isNotEmpty() && !titleValid,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+        )
     }
 }

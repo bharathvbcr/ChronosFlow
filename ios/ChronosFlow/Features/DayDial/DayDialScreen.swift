@@ -81,114 +81,149 @@ struct DayDialScreen: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                ChronosBackdrop()
-                ScrollView {
-                    VStack(spacing: ChronosSpacing.medium) {
-                        ChronosDialCanvas(
-                            blocks: dayBlocks,
-                            nowMinute: nowMinute,
-                            selectedBlockID: selectedBlockID,
-                            overlayEvents: showCalendar ? overlayEvents : [],
-                            conflictBlockIDs: conflictBlockIDs,
-                            showNowHand: Calendar.current.isDateInToday(selectedDate),
-                            onTapBlock: { activeSheet = .edit($0) },
-                            onSelectBlock: { selectedBlockID = $0 },
-                            onCreate: { activeSheet = .create(minute: $0) },
-                            onAdjustBlock: { block, newStart, newDuration in
-                                adjustBlock(block, newStart: newStart, newDuration: newDuration)
-                            }
-                        )
-                        .frame(maxWidth: 380)
-                        .padding(.horizontal, ChronosSpacing.standard)
-
-                        if !conflicts.isEmpty { conflictBanner }
-                        if !freeWindows.isEmpty { freeWindowStrip }
-                        blockList
+            chromedSurface
+                .task(id: selectedDate) { if showCalendar { await loadOverlay() } }
+                // Keep the schedule Live Activity in sync when the plan changes (Android DayDialScreen
+                // LaunchedEffect on timeBlocks).
+                .task(id: dayBlocks.map(\.id)) {
+                    guard Calendar.current.isDateInToday(selectedDate) else { return }
+                    if ChronosSettings.shared.currentBlockLiveActivityEnabled {
+                        ChronosNotifications.shared.cancel(idPrefix: "block-next")
+                        BlockLiveActivityCoordinator.refresh(blocks: dayBlocks, nowMinute: nowMinute)
                     }
-                    .padding(.vertical, ChronosSpacing.standard)
                 }
-            }
+                // A new day's edits are a fresh audit trail — drop the prior day's undo/redo stack.
+                .onChange(of: selectedDate) { _, _ in history.clear() }
+                .sheet(item: $activeSheet) { sheet in sheetContent(for: sheet) }
+                .overlay(alignment: .bottom) { toastView }
+                // Confirm/Reject haptics on toast events, parity with SleepView's sync feedback.
+                .sensoryFeedback(.success, trigger: toastFeedback) { _, new in new == .success }
+                .sensoryFeedback(.error, trigger: toastFeedback) { _, new in new == .failure }
+        }
+    }
+
+    /// The dial surface plus its title/toolbar chrome. Split out from `body` so the type-checker
+    /// solves the structural modifiers here and the lifecycle modifiers (task/sheet/overlay/feedback)
+    /// in `body` as two smaller expressions rather than one over-budget chain.
+    private var chromedSurface: some View {
+        dialSurface
             .navigationTitle("Plan")
             // iOS 27: collapse the nav bar as the day's block list scrolls up, giving the dial room.
             // Routed through the single helper so the new-API signature has one fix point.
             .chronosScrollMinimizedBar()
             .chronosCommandPaletteToolbar()
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    DatePicker("Day", selection: selectedDateBinding, displayedComponents: .date)
-                        .labelsHidden()
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    // Undo/redo appear only when actionable. Permanently-present (greyed) buttons here
-                    // overflowed the iPhone bar and pushed the leading DatePicker into the system "…"
-                    // menu; surfacing them on demand keeps the day selector visible.
-                    if history.canUndo {
-                        Button { undo() } label: { Image(systemName: "arrow.uturn.backward") }
-                            .accessibilityLabel("Undo")
-                    }
-                    if history.canRedo {
-                        Button { redo() } label: { Image(systemName: "arrow.uturn.forward") }
-                            .accessibilityLabel("Redo")
-                    }
-                    Menu {
-                        Button { activeSheet = .ai } label: { Label("AI day plan", systemImage: "sparkles") }
-                        Button { activeSheet = .gapFill } label: { Label("Fill free time", systemImage: "rectangle.compress.vertical") }
-                        Divider()
-                        // Calendar overlay toggle lives in the menu (was a standalone bar button that
-                        // contributed to the overflow); the filled icon still signals the on state.
-                        Button {
-                            showCalendar.toggle()
-                            if showCalendar { Task { await loadOverlay() } }
-                        } label: {
-                            Label(showCalendar ? "Hide calendar overlay" : "Show calendar overlay",
-                                  systemImage: showCalendar ? "calendar.circle.fill" : "calendar.circle")
-                        }
-                        if !conflicts.isEmpty {
-                            Divider()
-                            // Deterministic, undoable conflict repair (Android "Fix schedule").
-                            Button { activeSheet = .resolve } label: { Label("Fix schedule", systemImage: "wrench.and.screwdriver") }
-                            // Hybrid: auto-resolve, then AI text for whatever can't be moved (Android "Repair with AI").
-                            Button { activeSheet = .repairAI } label: { Label("Repair with AI", systemImage: "sparkles") }
-                        }
-                    } label: {
-                        Image(systemName: "wand.and.stars")
-                    }
-                    .accessibilityLabel("Planning tools")
-                    .accessibilityHint("AI plan, fill free time, calendar overlay, fix schedule")
-                    Button { activeSheet = .create(minute: nowMinute) } label: { Image(systemName: "plus") }
-                        .accessibilityLabel("Add block")
-                }
+            .toolbar { dialToolbar }
+    }
+
+    /// The nav-bar toolbar. Extracted from `body` (as a `@ToolbarContentBuilder`) so the type-checker
+    /// solves a smaller expression — the conditional undo/redo + Menu inline pushed the body over the
+    /// compile-time budget.
+    @ToolbarContentBuilder
+    private var dialToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            DatePicker("Day", selection: selectedDateBinding, displayedComponents: .date)
+                .labelsHidden()
+        }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            // Undo/redo appear only when actionable. Permanently-present (greyed) buttons here
+            // overflowed the iPhone bar and pushed the leading DatePicker into the system "…"
+            // menu; surfacing them on demand keeps the day selector visible.
+            if history.canUndo {
+                Button { undo() } label: { Image(systemName: "arrow.uturn.backward") }
+                    .accessibilityLabel("Undo")
             }
-            .task(id: selectedDate) { if showCalendar { await loadOverlay() } }
-            // A new day's edits are a fresh audit trail — drop the prior day's undo/redo stack.
-            .onChange(of: selectedDate) { _, _ in history.clear() }
-            .sheet(item: $activeSheet) { sheet in
-                switch sheet {
-                case .edit(let block):
-                    TimeBlockEditorSheet(block: block)
-                case .create(let minute):
-                    TimeBlockEditorSheet(block: nil, date: selectedDate, startMinute: minute)
-                case .ai:
-                    AIPlannerSheet(date: selectedDate, existingBlocks: dayBlocks)
-                case .gapFill:
-                    GapFillSheet(date: selectedDate, existingBlocks: dayBlocks)
-                case .resolve:
-                    // Deterministic Fix-schedule: apply the moves and record one undoable batch.
-                    ConflictResolveSheet(blocks: dayBlocks, mode: .deterministic) { applied in
-                        recordResolveBatch(applied)
-                    }
-                case .repairAI:
-                    // Hybrid Repair-with-AI: auto-resolve first, then hand the leftovers to the planner.
-                    ConflictResolveSheet(blocks: dayBlocks, mode: .repairWithAI) { applied in
-                        recordResolveBatch(applied)
-                    }
-                }
+            if history.canRedo {
+                Button { redo() } label: { Image(systemName: "arrow.uturn.forward") }
+                    .accessibilityLabel("Redo")
             }
-            .overlay(alignment: .bottom) { toastView }
-            // Confirm/Reject haptics on toast events, parity with SleepView's sync feedback.
-            .sensoryFeedback(.success, trigger: toastFeedback) { _, new in new == .success }
-            .sensoryFeedback(.error, trigger: toastFeedback) { _, new in new == .failure }
+            Menu {
+                Button { activeSheet = .ai } label: { Label("AI day plan", systemImage: "sparkles") }
+                Button { activeSheet = .gapFill } label: { Label("Fill free time", systemImage: "rectangle.compress.vertical") }
+                Divider()
+                // Calendar overlay toggle lives in the menu (was a standalone bar button that
+                // contributed to the overflow); the filled icon still signals the on state.
+                Button {
+                    showCalendar.toggle()
+                    if showCalendar { Task { await loadOverlay() } }
+                } label: {
+                    Label(showCalendar ? "Hide calendar overlay" : "Show calendar overlay",
+                          systemImage: showCalendar ? "calendar.circle.fill" : "calendar.circle")
+                }
+                if !conflicts.isEmpty {
+                    Divider()
+                    // Deterministic, undoable conflict repair (Android "Fix schedule").
+                    Button { activeSheet = .resolve } label: { Label("Fix schedule", systemImage: "wrench.and.screwdriver") }
+                    // Hybrid: auto-resolve, then AI text for whatever can't be moved (Android "Repair with AI").
+                    Button { activeSheet = .repairAI } label: { Label("Repair with AI", systemImage: "sparkles") }
+                }
+            } label: {
+                Image(systemName: "wand.and.stars")
+            }
+            .accessibilityLabel("Planning tools")
+            .accessibilityHint("AI plan, fill free time, calendar overlay, fix schedule")
+            Button { activeSheet = .create(minute: nowMinute) } label: { Image(systemName: "plus") }
+                .accessibilityLabel("Add block")
+        }
+    }
+
+    /// The scrolling dial + block list. Extracted from `body` so the type-checker solves a smaller
+    /// expression — inlined with the toolbar/sheet/overlay chain it pushed the body over the
+    /// compile-time budget ("unable to type-check in reasonable time").
+    private var dialSurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollView {
+                VStack(spacing: ChronosSpacing.medium) {
+                    ChronosDialCanvas(
+                        blocks: dayBlocks,
+                        nowMinute: nowMinute,
+                        selectedBlockID: selectedBlockID,
+                        overlayEvents: showCalendar ? overlayEvents : [],
+                        conflictBlockIDs: conflictBlockIDs,
+                        showNowHand: Calendar.current.isDateInToday(selectedDate),
+                        onTapBlock: { activeSheet = .edit($0) },
+                        onSelectBlock: { selectedBlockID = $0 },
+                        onCreate: { activeSheet = .create(minute: $0) },
+                        onAdjustBlock: { block, newStart, newDuration in
+                            adjustBlock(block, newStart: newStart, newDuration: newDuration)
+                        }
+                    )
+                    .frame(maxWidth: 380)
+                    .padding(.horizontal, ChronosSpacing.standard)
+
+                    if !conflicts.isEmpty { conflictBanner }
+                    if !freeWindows.isEmpty { freeWindowStrip }
+                    blockList
+                }
+                .padding(.vertical, ChronosSpacing.standard)
+            }
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    /// The presented sheet's content. Extracted from `body` so the type-checker solves a smaller
+    /// expression (the inline switch pushed the DayDial body over the compile-time budget).
+    @ViewBuilder
+    private func sheetContent(for sheet: DialSheet) -> some View {
+        switch sheet {
+        case .edit(let block):
+            TimeBlockEditorSheet(block: block)
+        case .create(let minute):
+            TimeBlockEditorSheet(block: nil, date: selectedDate, startMinute: minute)
+        case .ai:
+            AIPlannerSheet(date: selectedDate, existingBlocks: dayBlocks)
+        case .gapFill:
+            GapFillSheet(date: selectedDate, existingBlocks: dayBlocks)
+        case .resolve:
+            // Deterministic Fix-schedule: apply the moves and record one undoable batch.
+            ConflictResolveSheet(blocks: dayBlocks, mode: .deterministic) { applied in
+                recordResolveBatch(applied)
+            }
+        case .repairAI:
+            // Hybrid Repair-with-AI: auto-resolve first, then hand the leftovers to the planner.
+            ConflictResolveSheet(blocks: dayBlocks, mode: .repairWithAI) { applied in
+                recordResolveBatch(applied)
+            }
         }
     }
 
@@ -234,13 +269,15 @@ struct DayDialScreen: View {
                     Button {
                         activeSheet = .create(minute: window.startMinute)
                     } label: {
-                        VStack(alignment: .leading) {
-                            Text("Free").font(.chronosCaption).foregroundStyle(.secondary)
-                            Text("\(window.startMinute.clockTime) · \(window.durationMinutes)m")
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(ChronosColors.brandSecondary)
+                            Text("\(window.startMinute.clockTime) · \(window.durationMinutes)m free")
                                 .font(.chronosLabel)
                         }
                         .padding(.horizontal, ChronosSpacing.compact)
-                        .padding(.vertical, ChronosSpacing.small)
+                        .padding(.vertical, ChronosSpacing.small + 2)
                     }
                     .glassEffect(.regular.tint(ChronosColors.brandSecondary.opacity(0.15)),
                                  in: Capsule())
@@ -309,6 +346,13 @@ struct DayDialScreen: View {
         }
         .padding(.horizontal, ChronosSpacing.micro)
         .padding(.bottom, ChronosSpacing.micro)
+    }
+
+    /// "45m" / "3h" / "3h 30m" for a total minute count — the compact summary form.
+    private func plannedDurationText(_ minutes: Int) -> String {
+        let h = minutes / 60, m = minutes % 60
+        if h == 0 { return "\(m)m" }
+        return m == 0 ? "\(h)h" : "\(h)h \(m)m"
     }
 
     // MARK: - Command-history-backed edits (mirror DayDialBlockDelegate)
@@ -508,22 +552,47 @@ struct DayDialScreen: View {
 
 private struct BlockRow: View {
     let block: TimeBlock
+
+    private var durationText: String {
+        let m = block.durationMinutes
+        if m < 60 { return "\(m)m" }
+        let h = m / 60, rem = m % 60
+        return rem == 0 ? "\(h)h" : "\(h)h \(rem)m"
+    }
+
     var body: some View {
         ChronosGlassCard(tone: .standard, tint: ChronosColors.category(block.category)) {
             HStack(spacing: ChronosSpacing.compact) {
                 RoundedRectangle(cornerRadius: 3)
                     .fill(ChronosColors.category(block.category))
                     .frame(width: 5, height: 40)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(block.title).font(.chronosHeadline)
-                    Text("\(block.startMinuteOfDay.clockTime) – \(block.plannedEndMinuteOfDay.clockTime)")
-                        .font(.chronosCaption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(block.title).font(.chronosHeadline).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text("\(block.startMinuteOfDay.clockTime) – \(block.plannedEndMinuteOfDay.clockTime)")
+                        Text("·")
+                        Text(durationText)
+                    }
+                    .font(.chronosCaption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                // Category pill ties the row to its dial-arc colour at a glance.
+                Text(block.category.capitalized)
+                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    .foregroundStyle(ChronosColors.category(block.category))
+                    .padding(.horizontal, ChronosSpacing.small)
+                    .padding(.vertical, 3)
+                    .background(ChronosColors.category(block.category).opacity(0.14), in: Capsule())
                 if block.provenance == .ai {
-                    Image(systemName: "sparkles").foregroundStyle(ChronosColors.brandPrimary)
+                    // State conveyed by icon alone otherwise — label it so VoiceOver folds
+                    // "AI-generated" into the row's spoken description (§7).
+                    Image(systemName: "sparkles").font(.caption).foregroundStyle(ChronosColors.brandPrimary)
+                        .accessibilityLabel("AI-generated")
                 }
-                if block.isLocked { Image(systemName: "lock.fill").foregroundStyle(.secondary) }
+                if block.isLocked {
+                    Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                        .accessibilityLabel("Locked")
+                }
             }
         }
         .pressable()

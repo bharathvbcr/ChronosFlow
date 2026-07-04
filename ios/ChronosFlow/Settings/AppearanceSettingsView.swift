@@ -31,6 +31,16 @@ struct AppearanceSettingsView: View {
                 Toggle("Reduce motion", isOn: $settings.reduceMotionPreference)
                 Toggle("Increase contrast", isOn: $settings.increaseContrast)
             }
+
+            Section {
+                Toggle("Compact editors", isOn: $settings.adaptiveEditorEnabled)
+            } header: {
+                Text("Editing")
+            } footer: {
+                Text(settings.adaptiveEditorEnabled
+                     ? "Task, medication, habit, goal, and block forms open compact — the essentials plus a row of quick-add chips, with the rest under “More options.” Sections you use often surface automatically; long-press any section to pin or hide it."
+                     : "Editors show every field at once. Turn on to open forms compact with advanced options tucked away.")
+            }
         }
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)

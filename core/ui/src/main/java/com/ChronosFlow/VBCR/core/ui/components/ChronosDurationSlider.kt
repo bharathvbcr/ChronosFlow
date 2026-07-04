@@ -22,6 +22,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
@@ -89,7 +90,14 @@ fun ChronosDurationSlider(
                 value = clamped.toFloat(),
                 onValueChange = { update(snapDurationMinutes(it, range)) },
                 valueRange = range.first.toFloat()..range.last.toFloat(),
-                modifier = Modifier.weight(1f)
+                // A bare Slider speaks its value as a percentage; name it and announce the real
+                // duration (e.g. "Duration, 45 min") to TalkBack. Additive — no API/behavior change.
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics {
+                        contentDescription = label
+                        stateDescription = formatDurationLabel(clamped)
+                    }
             )
             FilledTonalIconButton(
                 onClick = { update(stepDurationMinutes(clamped, 1, range)) },

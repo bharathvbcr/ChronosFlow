@@ -74,6 +74,14 @@ class LiveUpdateGateway @Inject constructor(
         extendIntent: PendingIntent? = null,
         // "Start focus" action for the block-view ("now") notification — absent on the focus path.
         startFocusIntent: PendingIntent? = null,
+        // Primary folded-reminder action (Take / Complete / Mark done) on the block live surface.
+        foldedActionIntent: PendingIntent? = null,
+        foldedActionLabel: String? = null,
+        foldedActionIcon: Int? = null,
+        // Secondary folded reminder when two are due and action budget allows (≤3 actions total).
+        secondaryFoldedActionIntent: PendingIntent? = null,
+        secondaryFoldedActionLabel: String? = null,
+        secondaryFoldedActionIcon: Int? = null,
         // false lets a fresh post alert (a single buzz when a new block begins); updates stay silent.
         onlyAlertOnce: Boolean = true,
         // Ordered work/break phases of a split (Pomodoro) session. >1 entry renders a segmented bar.
@@ -202,6 +210,30 @@ class LiveUpdateGateway @Inject constructor(
                         Icon.createWithResource(context, R.drawable.ic_focus_session),
                         context.getString(R.string.current_block_action_start_focus),
                         it
+                    ).build()
+                )
+            }
+            if (foldedActionIntent != null && foldedActionLabel != null) {
+                addAction(
+                    Notification.Action.Builder(
+                        Icon.createWithResource(
+                            context,
+                            foldedActionIcon ?: R.drawable.ic_notif_check
+                        ),
+                        foldedActionLabel,
+                        foldedActionIntent
+                    ).build()
+                )
+            }
+            if (secondaryFoldedActionIntent != null && secondaryFoldedActionLabel != null) {
+                addAction(
+                    Notification.Action.Builder(
+                        Icon.createWithResource(
+                            context,
+                            secondaryFoldedActionIcon ?: R.drawable.ic_notif_check
+                        ),
+                        secondaryFoldedActionLabel,
+                        secondaryFoldedActionIntent
                     ).build()
                 )
             }

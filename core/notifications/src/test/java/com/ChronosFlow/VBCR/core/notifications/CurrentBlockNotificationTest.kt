@@ -11,6 +11,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 class CurrentBlockNotificationTest {
     @Test
@@ -131,6 +133,16 @@ class CurrentBlockNotificationTest {
         )
         // No boundary at all → nothing to schedule.
         assertNull(nextRenderMinute(boundaryMinute = null, nowMinute = 9 * 60, showingLive = true, refreshIntervalMinutes = 10))
+    }
+
+    @Test
+    fun `boundary wake rolls to tomorrow when minute already passed today`() {
+        val zone = ZoneId.of("UTC")
+        val now = LocalDateTime.of(2026, 7, 3, 23, 50)
+        val wakeMs = boundaryWakeEpochMillis(now, wakeMinute = 23 * 60 + 55, zoneId = zone)
+        val midnightMs = now.toLocalDate().plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        assertTrue(wakeMs > now.atZone(zone).toInstant().toEpochMilli())
+        assertTrue(wakeMs < midnightMs)
     }
 
     @Test
@@ -270,21 +282,33 @@ class CurrentBlockNotificationTest {
     }
 
     @Test
-    fun `redacted current block text keeps times but drops every title`() {
-        assertEquals(
-            "2:00–2:30 PM · Break at 2:45 PM · Next at 3:00 PM",
-            redactedCurrentBlockText(
-                startMinute = 14 * 60,
-                endMinute = 14 * 60 + 30,
-                upcoming = listOf(
-                    UpcomingGlance("Coffee", 14 * 60 + 45, isBreak = true),
-                    UpcomingGlance("Standup", 15 * 60, isBreak = false)
-                )
+    fun `append folded reminders adds primary chip and more suffix`() {
+        val base = "2:00–2:30 PM · Last block of the day"
+        val folded = listOf(
+            FoldedReminder(
+                kind = FoldedReminderKind.TASK,
+                entityId = "t1",
+                title = "Email team",
+                detail = "Due 1:00 PM",
+                dueMinute = 13 * 60,
+                isOverdue = false
+            ),
+            FoldedReminder(
+                kind = FoldedReminderKind.MEDICATION,
+                entityId = "m1",
+                title = "Vitamin D",
+                detail = "Due 8:00 AM",
+                dueMinute = 8 * 60,
+                isOverdue = true
             )
         )
         assertEquals(
-            "10:00–11:00 PM · Last block of the day",
-            redactedCurrentBlockText(startMinute = 22 * 60, endMinute = 23 * 60, upcoming = emptyList())
+            "$base · Due 1:00 PM · +1 more",
+            appendFoldedRemindersToBody(base, folded, redact = false)
+        )
+        assertEquals(
+            "$base · Task due · +1 more",
+            appendFoldedRemindersToBody(base, folded, redact = true)
         )
     }
 }

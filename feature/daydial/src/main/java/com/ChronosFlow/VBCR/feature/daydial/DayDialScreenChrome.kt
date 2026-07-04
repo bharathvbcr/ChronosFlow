@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ChronosFlow.VBCR.core.data.security.AppLockAuthResult
+import com.ChronosFlow.VBCR.feature.focus.FocusService
+import com.ChronosFlow.VBCR.feature.focus.sendFocusServiceCommand
 import com.ChronosFlow.VBCR.core.data.security.SensitiveArea
 import com.ChronosFlow.VBCR.core.ui.components.ChronosBackdrop
 import com.ChronosFlow.VBCR.core.ui.components.ChronosPredictiveBackHandlerWithProgress
@@ -487,6 +489,23 @@ internal fun DayDialScreenChrome(
                                         onError = { reason ->
                                             uiState.snackbarMessage = reason
                                         }
+                                    )
+                                },
+                                onReminderKindPreferencesChanged = {
+                                    viewModel.refreshReminderScheduleFromStoredPreferences()
+                                    viewModel.refreshCurrentBlockNotification()
+                                },
+                                onLiveSurfacePreferencesChanged = { enabled ->
+                                    viewModel.setCurrentBlockNotificationEnabled(enabled)
+                                    viewModel.reconcileSeparateFoldableAlarms()
+                                    viewModel.refreshCurrentBlockNotification()
+                                },
+                                onFocusLiveActivityPreferenceChanged = {
+                                    context.sendFocusServiceCommand(
+                                        action = FocusService.ACTION_SYNC,
+                                        timeLeft = 0,
+                                        totalSeconds = 0,
+                                        sessionId = null
                                     )
                                 },
                                 contentBottomPadding = bottomContentPadding,

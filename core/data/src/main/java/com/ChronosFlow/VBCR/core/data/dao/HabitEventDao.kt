@@ -23,4 +23,7 @@ interface HabitEventDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvent(event: HabitEventEntity)
+
+    @Query("DELETE FROM habit_events WHERE id = :id")
+    suspend fun deleteEventById(id: String)
 }

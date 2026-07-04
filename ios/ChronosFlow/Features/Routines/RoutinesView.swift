@@ -46,35 +46,7 @@ struct RoutinesView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: ChronosSpacing.compact) {
-                    ForEach(routines) { routine in
-                        RoutineCard(routine: routine,
-                                    completion: completions[routine.id],
-                                    onApply: { activeSheet = .apply(routine) },
-                                    onSeed: { seedDay(routine) },
-                                    onEdit: { activeSheet = .edit(routine) },
-                                    onCopy: { copy(routine) },
-                                    onComplete: { markComplete(routine) })
-                    }
-                    // "Save current day as routine" (Android SidebarPageContent.kt 535): snapshot
-                    // today's blocks into a routine draft and open the editor for naming before save.
-                    Button {
-                        activeSheet = .saveToday
-                    } label: {
-                        Label("Save today as routine", systemImage: "square.and.arrow.down")
-                            .font(.chronosLabel)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(ChronosColors.brandPrimary)
-                    .disabled(todaysBlocks.isEmpty)
-                }
-                .padding(ChronosSpacing.standard)
-            }
-            .background { ChronosBackdrop() }
-            .navigationTitle("Routines")
-            .chronosScrollMinimizedBar()
+            chromedSurface
             .overlay {
                 if routines.isEmpty {
                     ContentUnavailableView {
@@ -88,12 +60,6 @@ struct RoutinesView: View {
                     }
                 }
             }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { activeSheet = .new } label: { Image(systemName: "plus") }
-                        .accessibilityLabel("New routine")
-                }
-            }
             .sheet(item: $activeSheet) { sheet in
                 switch sheet {
                 case .edit(let r): RoutineEditorSheet(routine: r)
@@ -105,6 +71,58 @@ struct RoutinesView: View {
                 }
             }
         }
+    }
+
+    private var chromedSurface: some View {
+        routinesSurface
+            .navigationTitle("Routines")
+            .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { activeSheet = .new } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("New routine")
+                }
+            }
+    }
+
+    private var routinesSurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollView {
+                LazyVStack(spacing: ChronosSpacing.compact) {
+                    ForEach(routines) { routine in
+                        routinesSection {
+                            RoutineCard(routine: routine,
+                                        completion: completions[routine.id],
+                                        onApply: { activeSheet = .apply(routine) },
+                                        onSeed: { seedDay(routine) },
+                                        onEdit: { activeSheet = .edit(routine) },
+                                        onCopy: { copy(routine) },
+                                        onComplete: { markComplete(routine) })
+                        }
+                    }
+                    routinesSection {
+                        Button {
+                            activeSheet = .saveToday
+                        } label: {
+                            Label("Save today as routine", systemImage: "square.and.arrow.down")
+                                .font(.chronosLabel)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(ChronosColors.brandPrimary)
+                        .disabled(todaysBlocks.isEmpty)
+                    }
+                }
+                .padding(.vertical, ChronosSpacing.standard)
+            }
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    private func routinesSection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().padding(.horizontal, ChronosSpacing.standard)
     }
 
     /// Mark a routine done for today without re-instantiating its blocks — the iOS analogue of

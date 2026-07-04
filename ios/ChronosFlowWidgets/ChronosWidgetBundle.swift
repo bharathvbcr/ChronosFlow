@@ -15,5 +15,6 @@ struct ChronosWidgetBundle: WidgetBundle {
         MedicationWidget()
         FocusWidget()
         FocusLiveActivityWidget()
+        BlockLiveActivityWidget()
     }
 }

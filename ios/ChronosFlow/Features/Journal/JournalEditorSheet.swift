@@ -382,6 +382,7 @@ struct JournalEditorSheet: View {
                         Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Remove sub-note")
                 }
             }
 

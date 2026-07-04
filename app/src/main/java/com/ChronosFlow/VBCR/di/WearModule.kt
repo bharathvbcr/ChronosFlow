@@ -1,6 +1,8 @@
 package com.ChronosFlow.VBCR.di
 
+import com.ChronosFlow.VBCR.core.domain.wear.WearDaySummaryPublisher
 import com.ChronosFlow.VBCR.core.domain.wear.WearLinkStatusProvider
+import com.ChronosFlow.VBCR.widget.WearDaySummaryPublisherImpl
 import com.ChronosFlow.VBCR.widget.WearLinkStatusProviderImpl
 import dagger.Binds
 import dagger.Module
@@ -17,4 +19,10 @@ abstract class WearModule {
     abstract fun bindWearLinkStatusProvider(
         impl: WearLinkStatusProviderImpl
     ): WearLinkStatusProvider
+
+    @Binds
+    @Singleton
+    abstract fun bindWearDaySummaryPublisher(
+        impl: WearDaySummaryPublisherImpl
+    ): WearDaySummaryPublisher
 }

@@ -38,6 +38,9 @@ class MedicationActionReceiver : BroadcastReceiver() {
     @Inject
     lateinit var alarmDeliveryCoordinator: AlarmDeliveryCoordinator
 
+    @Inject
+    lateinit var currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator
+
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
         val medicationPlanId = intent.getStringExtra(EXTRA_MEDICATION_PLAN_ID) ?: return
@@ -124,8 +127,9 @@ class MedicationActionReceiver : BroadcastReceiver() {
                     }
                 }
 
-                // Cancel the notification
-                if (notificationId != -1) {
+                if (intent.getBooleanExtra(EXTRA_REFRESH_CURRENT_BLOCK, false)) {
+                    currentBlockNotificationCoordinator.refresh()
+                } else if (notificationId != -1) {
                     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     notificationManager.cancel(notificationId)
                     ReminderNotificationGroups.refreshSummary(context)

@@ -30,6 +30,10 @@ struct PrivacySyncSettingsView: View {
         }
         .navigationTitle("Privacy & Sync")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: settings.sensitiveTitlesRedacted) { _, _ in
+            BlockLiveActivityCoordinator.refreshToday()
+            PhoneWatchSync.shared.pushSnapshot()
+        }
     }
 
     // MARK: App lock + App permissions
@@ -61,8 +65,14 @@ struct PrivacySyncSettingsView: View {
     // AI privacy mode — single picker, kept always-visible. iOS ships on-device-only.
     private var aiPrivacySection: some View {
         Section {
+            // "Cloud allowed" is a placeholder that behaves exactly like on-device until a cloud
+            // provider ships, so don't offer it as a distinct (misleading) choice on iOS. The enum
+            // case is kept for future / Android parity.
             Picker("AI data", selection: $settings.privacyMode) {
-                ForEach(PrivacyMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                ForEach([PrivacyMode.onDeviceOnly, .disabled], id: \.self) { Text($0.label).tag($0) }
+            }
+            .onAppear {
+                if settings.privacyMode == .cloudAllowed { settings.privacyMode = .onDeviceOnly }
             }
         } footer: {
             Text(settings.privacyMode.allowsOnDeviceGeneration

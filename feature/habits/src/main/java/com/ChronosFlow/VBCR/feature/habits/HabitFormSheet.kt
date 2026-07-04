@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -57,7 +59,11 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosFormBottomSheet
 import com.ChronosFlow.VBCR.core.ui.components.ChronosModalActionLabels
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFormPreviewCard
 import com.ChronosFlow.VBCR.core.ui.components.commandPaletteSpeechQuery
+import com.ChronosFlow.VBCR.core.ui.components.CardEditorScaffold
+import com.ChronosFlow.VBCR.core.ui.components.CardEditorSection
 import com.ChronosFlow.VBCR.core.ui.components.ChronosCollapsibleSection
+import com.ChronosFlow.VBCR.core.ui.components.EditorQuickAttribute
+import com.ChronosFlow.VBCR.core.ui.components.rememberCardEditorRevealController
 import com.ChronosFlow.VBCR.core.ui.components.ChronosLinkOption
 import com.ChronosFlow.VBCR.core.ui.components.ChronosLinkPickerField
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFormSection
@@ -284,25 +290,7 @@ internal fun HabitFormSheet(
     var historyQuery by rememberSaveable(habitKey) { mutableStateOf("") }
     var templatesExpanded by rememberSaveable(habitKey) { mutableStateOf(false) }
     var historyExpanded by rememberSaveable(habitKey) { mutableStateOf(false) }
-    var scheduleExpanded by rememberSaveable(habitKey) {
-        mutableStateOf(
-            resolveHabitRecurrenceQuickPreset(initialRecurrenceState) == "Custom" ||
-                prefillDraft.cadence != null
-        )
-    }
-    var windowExpanded by rememberSaveable(habitKey) {
-        mutableStateOf(
-            initialHabit?.let { resolveHabitWindowPreset(it.windowStartMinute, it.windowEndMinute) } == "Custom" ||
-                prefillDraft.windowPreset != null
-        )
-    }
-    var effortExpanded by rememberSaveable(habitKey) {
-        mutableStateOf(
-            (initialHabit?.difficulty ?: prefillDraft.difficulty ?: 2) != 2 ||
-                initialHabit?.isBundled == true ||
-                prefillDraft.isBundled == true
-        )
-    }
+    val revealController = rememberCardEditorRevealController(habitKey)
     var launchAppExpanded by rememberSaveable(habitKey) {
         mutableStateOf(initialHabit?.launchTarget != null || prefillLaunchSuggestion != null)
     }
@@ -318,9 +306,6 @@ internal fun HabitFormSheet(
     var lastAutoAssistCapture by rememberSaveable(habitKey) { mutableStateOf("") }
     var selectedGoalId by rememberSaveable(habitKey) {
         mutableStateOf(initialHabit?.goalId ?: initialGoalId)
-    }
-    var goalExpanded by rememberSaveable(habitKey) {
-        mutableStateOf((initialHabit?.goalId ?: initialGoalId) != null)
     }
 
     val parsedStart = parseFlexibleMinute(start)
@@ -368,9 +353,16 @@ internal fun HabitFormSheet(
         suggestions = contextualAssistSuggestions
     )
     val showHabitLaunchDetails = launchAppExpanded || adaptiveHabitHints.showLaunch
-    val showHabitRecurrenceDetails = scheduleExpanded || adaptiveHabitHints.showRecurrence
-    val showHabitWindowDetails = windowExpanded || adaptiveHabitHints.showWindow
-    val showHabitEffortDetails = effortExpanded || adaptiveHabitHints.showEffort
+    val hasHabitRecurrenceValue = resolveHabitRecurrenceQuickPreset(initialRecurrenceState) == "Custom" ||
+        prefillDraft.cadence != null ||
+        initialHabit != null
+    val hasHabitWindowValue = initialHabit?.let {
+        resolveHabitWindowPreset(it.windowStartMinute, it.windowEndMinute)
+    } == "Custom" || prefillDraft.windowPreset != null || parsedStart != null
+    val hasHabitEffortValue = (initialHabit?.difficulty ?: prefillDraft.difficulty ?: 2) != 2 ||
+        initialHabit?.isBundled == true ||
+        prefillDraft.isBundled == true ||
+        isBundled
     val autoAssistCapture = habitContextQuery.trim()
     LaunchedEffect(autoAssistCapture, assistState.isLoading, onRequestAssist) {
         val requestAssist = onRequestAssist ?: return@LaunchedEffect
@@ -461,22 +453,22 @@ internal fun HabitFormSheet(
             is HabitAssistSuggestion.Recurrence -> {
                 recurrenceState = buildHabitRecurrenceEditorState(suggestion.cadence, null)
                 recurrenceCustomExpanded = resolveHabitRecurrenceQuickPreset(recurrenceState) == "Custom"
-                scheduleExpanded = true
+                revealController.reveal("recurrence")
             }
             is HabitAssistSuggestion.Window -> {
                 startOverride = formatDisplayMinute(suggestion.startMinute)
                 endOverride = formatDisplayMinute(suggestion.endMinute)
                 windowDurationOverride = (suggestion.endMinute - suggestion.startMinute).coerceIn(15, 240)
                 windowPresetOverride = resolveHabitWindowPreset(suggestion.startMinute, suggestion.endMinute)
-                windowExpanded = true
+                revealController.reveal("window")
             }
             is HabitAssistSuggestion.Difficulty -> {
                 difficulty = suggestion.difficulty.toFloat()
-                effortExpanded = true
+                revealController.reveal("effort")
             }
             is HabitAssistSuggestion.DayPlan -> {
                 isBundled = suggestion.isBundled
-                effortExpanded = true
+                revealController.reveal("effort")
             }
         }
         supersededHabitAssistSuggestionIds(suggestion, assistState.suggestions).forEach { id ->
@@ -593,158 +585,517 @@ internal fun HabitFormSheet(
             },
             detail = windowLabel
         )
-        ChronosFormSection(
-            title = "Essentials",
-            subtitle = "Name the habit first; the rest stays contextual."
-        ) {
-            OutlinedTextField(
-                value = habitTitle,
-                onValueChange = {
-                    habitTitle = it
-                    if (it.isNotBlank()) nameEverFilled = true
+        CardEditorScaffold(
+            kind = "habit",
+            stateKey = habitKey,
+            revealController = revealController,
+            attributes = listOf(
+                EditorQuickAttribute(
+                    id = "recurrence",
+                    title = "Repeat",
+                    value = cadence,
+                    onReveal = {},
+                ),
+                EditorQuickAttribute(
+                    id = "window",
+                    title = "Window",
+                    value = windowPreset,
+                    onReveal = {},
+                ),
+                EditorQuickAttribute(
+                    id = "effort",
+                    title = "Effort",
+                    value = difficultyLabel(difficultyInt),
+                    onReveal = {},
+                ),
+                EditorQuickAttribute(
+                    id = "goal",
+                    title = "Goal",
+                    value = goalOptions.firstOrNull { it.id == selectedGoalId }?.label,
+                    onReveal = {},
+                    onClear = { selectedGoalId = null },
+                ),
+            ),
+            sections = buildList {
+                add(
+                    CardEditorSection(
+                        id = "recurrence",
+                        title = "Recurrence",
+                        summary = recurrenceSummary,
+                        hasValue = hasHabitRecurrenceValue,
+                        adaptiveHint = adaptiveHabitHints.showRecurrence,
+                    ) {
+            ChronosOptionChips(
+                label = "Quick picks",
+                options = contextualHabitRecurrenceOptions(
+                    selectedPreset = selectedRecurrencePreset,
+                    title = habitContextQuery,
+                    suggestions = contextualAssistSuggestions
+                ).withSelectedOption(selectedRecurrencePreset),
+                selected = selectedRecurrencePreset,
+                onSelected = { preset ->
+                    if (preset == "Custom") {
+                        recurrenceCustomExpanded = true
+                    } else {
+                        recurrenceState = recurrenceStateForQuickPreset(preset)
+                        recurrenceCustomExpanded = false
+                    }
+                }
+            )
+            ChronosFilledTonalButton(
+                onClick = { recurrenceCustomExpanded = !customRecurrenceVisible },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (customRecurrenceVisible) "Hide custom controls" else "Customize recurrence")
+            }
+            if (customRecurrenceVisible) {
+                ChronosOptionChips(
+                    label = "Custom pattern",
+                    options = HabitRecurrenceCustomPattern.entries.map(HabitRecurrenceCustomPattern::label),
+                    selected = selectedCustomPattern.label,
+                    onSelected = { label ->
+                        val pattern = HabitRecurrenceCustomPattern.entries.first { it.label == label }
+                        recurrenceState = pattern.applyTo(recurrenceState)
+                    }
+                )
+                when (selectedCustomPattern) {
+                    HabitRecurrenceCustomPattern.SELECTED_WEEKDAYS -> {
+                        val selectedShortcut = habitWeekdayShortcutLabel(recurrenceState.weekdays)
+                        ChronosOptionChips(
+                            label = "Shortcuts",
+                            options = habitWeekdayShortcuts.keys.toList(),
+                            selected = selectedShortcut.orEmpty(),
+                            onSelected = { label ->
+                                recurrenceState = recurrenceState.copy(
+                                    kind = HabitRecurrenceEditorKind.SCHEDULED,
+                                    scheduleMode = HabitRecurrenceScheduleMode.SELECTED_WEEKDAYS,
+                                    weekdays = habitWeekdayShortcuts.getValue(label)
+                                )
+                            }
+                        )
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            DayOfWeek.values().forEach { day ->
+                                val selected = day in recurrenceState.weekdays
+                                ChronosFilterChip(
+                                    selected = selected,
+                                    onClick = {
+                                        recurrenceState = recurrenceState.copy(
+                                            kind = HabitRecurrenceEditorKind.SCHEDULED,
+                                            scheduleMode = HabitRecurrenceScheduleMode.SELECTED_WEEKDAYS,
+                                            weekdays = if (selected) {
+                                                recurrenceState.weekdays - day
+                                            } else {
+                                                recurrenceState.weekdays + day
+                                            }
+                                        )
+                                    },
+                                    label = { Text(day.name.take(3)) }
+                                )
+                            }
+                        }
+                    }
+                    HabitRecurrenceCustomPattern.EVERY_N_DAYS -> {
+                        OutlinedTextField(
+                            value = recurrenceState.interval.toString(),
+                            onValueChange = { value ->
+                                recurrenceState = recurrenceState.copy(
+                                    kind = HabitRecurrenceEditorKind.SCHEDULED,
+                                    scheduleMode = HabitRecurrenceScheduleMode.EVERY_N_DAYS,
+                                    interval = value.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                                )
+                            },
+                            label = { Text("Repeat every N days") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                    }
+                    HabitRecurrenceCustomPattern.EVERY_N_WEEKS -> {
+                        OutlinedTextField(
+                            value = recurrenceState.interval.toString(),
+                            onValueChange = { value ->
+                                recurrenceState = recurrenceState.copy(
+                                    kind = HabitRecurrenceEditorKind.SCHEDULED,
+                                    scheduleMode = HabitRecurrenceScheduleMode.EVERY_N_WEEKS,
+                                    interval = value.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                                )
+                            },
+                            label = { Text("Repeat every N weeks") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            DayOfWeek.values().forEach { day ->
+                                val selected = day in recurrenceState.weekdays
+                                ChronosFilterChip(
+                                    selected = selected,
+                                    onClick = {
+                                        recurrenceState = recurrenceState.copy(
+                                            kind = HabitRecurrenceEditorKind.SCHEDULED,
+                                            scheduleMode = HabitRecurrenceScheduleMode.EVERY_N_WEEKS,
+                                            weekdays = if (selected) {
+                                                recurrenceState.weekdays - day
+                                            } else {
+                                                recurrenceState.weekdays + day
+                                            }
+                                        )
+                                    },
+                                    label = { Text(day.name.take(3)) }
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Leave weekdays empty to keep a simple weekly interval.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    HabitRecurrenceCustomPattern.QUOTA -> {
+                        ChronosOptionChips(
+                            label = "Quota presets",
+                            options = habitQuotaPresetLabels,
+                            selected = quotaPresetLabel(recurrenceState).orEmpty(),
+                            onSelected = { label ->
+                                recurrenceState = recurrenceState.applyQuotaPreset(label)
+                            }
+                        )
+                        OutlinedTextField(
+                            value = recurrenceState.quotaCompletions.toString(),
+                            onValueChange = { value ->
+                                recurrenceState = recurrenceState.copy(
+                                    kind = HabitRecurrenceEditorKind.QUOTA,
+                                    quotaCompletions = value.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                                )
+                            },
+                            label = { Text("Times to complete") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        ChronosOptionChips(
+                            label = "Per",
+                            options = HabitRecurrencePeriodUnit.entries.map(HabitRecurrencePeriodUnit::name),
+                            selected = recurrenceState.quotaPeriodUnit.name,
+                            onSelected = { raw ->
+                                recurrenceState = recurrenceState.copy(
+                                    kind = HabitRecurrenceEditorKind.QUOTA,
+                                    quotaPeriodUnit = HabitRecurrencePeriodUnit.valueOf(raw)
+                                )
+                            },
+                            optionLabel = { raw -> raw.lowercase().replaceFirstChar(Char::uppercase) }
+                        )
+                        OutlinedTextField(
+                            value = recurrenceState.quotaInterval.toString(),
+                            onValueChange = { value ->
+                                recurrenceState = recurrenceState.copy(
+                                    kind = HabitRecurrenceEditorKind.QUOTA,
+                                    quotaInterval = value.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                                )
+                            },
+                            label = { Text("Every N periods") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                    }
+                }
+            }
+                }
+                )
+                add(
+                    CardEditorSection(
+                        id = "window",
+                        title = "Completion window",
+                        summary = windowLabel ?: "Set a valid start and end time",
+                        hasValue = hasHabitWindowValue,
+                        adaptiveHint = adaptiveHabitHints.showWindow,
+                    ) {
+            ChronosOptionChips(
+                label = "Preset",
+                options = contextualHabitWindowOptions(
+                    selectedPreset = windowPreset,
+                    title = habitContextQuery,
+                    suggestions = contextualAssistSuggestions
+                ).withSelectedOption(windowPreset),
+                selected = windowPreset,
+                onSelected = { preset ->
+                    windowPresetOverride = preset
+                    habitWindowPresets[preset]?.let { (presetStart, presetEnd) ->
+                        startOverride = formatDisplayMinute(presetStart)
+                        endOverride = formatDisplayMinute(presetEnd)
+                        windowDurationOverride = (presetEnd - presetStart).coerceIn(15, 240)
+                    }
+                }
+            )
+            ChronosTimeWindowControls(
+                startText = start,
+                endText = end,
+                onStartChange = {
+                    startOverride = it
+                    windowPresetOverride = "Custom"
                 },
-                label = { Text("Habit name") },
-                placeholder = { Text("e.g. Morning walk") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                isError = nameEverFilled && habitTitle.isBlank(),
-                supportingText = if (habitTitle.isBlank()) {
-                    { Text("Required") }
-                } else {
-                    null
+                onEndChange = {
+                    endOverride = it
+                    windowPresetOverride = "Custom"
+                },
+                parsedStart = parsedStart,
+                parsedEnd = parsedEnd,
+                showFineTuneFields = windowPreset == "Custom",
+                onNudgeStart = { delta ->
+                    val nudgedStart = nudgeMinuteText(start, delta, parsedStart ?: 8 * 60)
+                    startOverride = nudgedStart
+                    windowPresetOverride = "Custom"
+                    parseFlexibleMinute(nudgedStart)?.let { s ->
+                        endOverride = formatDisplayMinute(applyDurationToWindow(s, windowDuration))
+                    }
+                },
+                onNudgeEnd = { delta ->
+                    endOverride = nudgeMinuteText(end, delta, parsedEnd ?: 20 * 60)
+                    windowPresetOverride = "Custom"
+                },
+                durationMinutes = windowDuration,
+                onDurationChange = { minutes ->
+                    val clampedDuration = minutes.coerceIn(15, 240)
+                    windowDurationOverride = clampedDuration
+                    windowPresetOverride = "Custom"
+                    parsedStart?.let { s ->
+                        endOverride = formatDisplayMinute(applyDurationToWindow(s, clampedDuration))
+                    }
+                }
+            )
+                }
+                )
+                add(
+                    CardEditorSection(
+                        id = "effort",
+                        title = "Effort",
+                        summary = "${difficultyLabel(difficultyInt)} · " +
+                            if (isBundled) "Visible on Today" else "Flexible habit",
+                        hasValue = hasHabitEffortValue,
+                        adaptiveHint = adaptiveHabitHints.showEffort,
+                    ) {
+            ChronosOptionChips(
+                label = "Quick effort",
+                options = contextualHabitDifficultyOptions(habitContextQuery, contextualAssistSuggestions)
+                    .withSelectedOption(habitDifficultyOptions.getValue(difficultyInt)),
+                selected = habitDifficultyOptions.getValue(difficultyInt),
+                onSelected = { label ->
+                    difficulty = habitDifficultyOptions.entries.first { it.value == label }.key.toFloat()
                 }
             )
             ChronosOptionChips(
-                label = "Context titles",
-                options = contextualHabitTitleOptions,
-                selected = habitTitle,
-                onSelected = { habitTitle = it }
+                label = "Day plan",
+                options = contextualHabitDayPlanOptions(
+                    title = habitContextQuery,
+                    isBundled = isBundled,
+                    suggestions = contextualAssistSuggestions
+                ).withSelectedOption(habitDayPlanOptionLabel(isBundled)),
+                selected = habitDayPlanOptionLabel(isBundled),
+                onSelected = { label ->
+                    isBundled = habitDayPlanOptionValue(label)
+                }
             )
-            ChronosSpeechInputButton(
-                prompt = "Describe the habit, including cadence and completion window.",
-                label = "Dictate habit",
-                onTranscript = { transcript ->
-                    val capture = commandPaletteSpeechQuery(transcript)
-                    if (capture.isBlank()) return@ChronosSpeechInputButton
-                    habitCaptureContext = capture
-                    val transcriptDraft = habitTranscriptDraft(capture)
-                    val launchSuggestion = habitLaunchCaptureSuggestion(capture)
-                    val requestTitle = mergeHabitTranscriptTitle(habitTitle, capture)
-                    habitTitle = mergeHabitTranscriptTitle(
-                        title = habitTitle,
-                        transcript = transcriptDraft.title ?: capture
-                    )
-                    transcriptDraft.cadence?.let { cadenceLabel ->
-                        recurrenceState = buildHabitRecurrenceEditorState(
-                            cadence = cadenceLabel,
-                            schedule = null
-                        )
-                        recurrenceCustomExpanded = resolveHabitRecurrenceQuickPreset(recurrenceState) == "Custom"
-                        scheduleExpanded = true
-                    }
-                    if (
-                        transcriptDraft.windowPreset != null &&
-                            transcriptDraft.startMinute != null &&
-                            transcriptDraft.endMinute != null
-                    ) {
-                        windowPresetOverride = transcriptDraft.windowPreset
-                        startOverride = formatDisplayMinute(transcriptDraft.startMinute)
-                        endOverride = formatDisplayMinute(transcriptDraft.endMinute)
-                        windowDurationOverride = (transcriptDraft.endMinute - transcriptDraft.startMinute)
-                            .coerceIn(15, 240)
-                        windowExpanded = true
-                    }
-                    transcriptDraft.difficulty?.let { detectedDifficulty ->
-                        difficulty = detectedDifficulty.toFloat()
-                        effortExpanded = true
-                    }
-                    transcriptDraft.isBundled?.let { detectedBundled ->
-                        isBundled = detectedBundled
-                        effortExpanded = true
-                    }
-                    launchSuggestion?.let { suggestion ->
-                        launchAppEnabled = true
-                        launchAppExpanded = true
-                        launchAppLabel = suggestion.label
-                        launchAppValue = suggestion.value
-                    }
-                    onClearAssist?.invoke()
-                    lastAutoAssistCapture = listOf(requestTitle, capture)
-                        .map { it.trim() }
-                        .filter { it.isNotBlank() }
-                        .distinct()
-                        .joinToString(" ")
-                    onRequestAssist?.invoke(
-                        HabitAssistRequest(
-                            title = listOf(requestTitle, capture)
-                                .map { it.trim() }
-                                .filter { it.isNotBlank() }
-                                .distinct()
-                                .joinToString(" "),
-                            cadence = transcriptDraft.cadence ?: cadence,
-                            startMinute = transcriptDraft.startMinute ?: parsedStart ?: 8 * 60,
-                            endMinute = transcriptDraft.endMinute ?: parsedEnd ?: 20 * 60,
-                            difficulty = transcriptDraft.difficulty ?: difficultyInt,
-                            isBundled = transcriptDraft.isBundled ?: isBundled
-                        )
-                    )
-                },
-                modifier = Modifier.fillMaxWidth()
+            Text(
+                text = "Difficulty · ${difficultyLabel(difficultyInt)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (onRequestAssist != null) {
-                ChronosFilledTonalButton(
-                    onClick = {
-                        onRequestAssist(
+            Slider(
+                value = difficulty,
+                onValueChange = { difficulty = it },
+                valueRange = 1f..5f,
+                steps = 3,
+                // Announce the difficulty label to TalkBack instead of a bare percentage.
+                modifier = Modifier.semantics {
+                    contentDescription = "Difficulty, ${difficultyLabel(difficultyInt)}"
+                }
+            )
+            ChronosFormSwitchRow(
+                title = "Bundle with day plan",
+                subtitle = "Shows this habit alongside scheduled blocks on Today.",
+                checked = isBundled,
+                onCheckedChange = { isBundled = it }
+            )
+                    }
+                )
+                if (goalOptions.isNotEmpty() || selectedGoalId != null) {
+                    add(
+                        CardEditorSection(
+                            id = "goal",
+                            title = "Goal",
+                            summary = goalOptions.firstOrNull { it.id == selectedGoalId }?.label
+                                ?: "Link this habit to a goal",
+                            hasValue = selectedGoalId != null,
+                        ) {
+                            ChronosLinkPickerField(
+                                label = "Link to goal",
+                                options = goalOptions,
+                                selectedId = selectedGoalId,
+                                onSelected = { selectedGoalId = it },
+                            )
+                        },
+                    )
+                }
+            },
+            essentials = {
+                OutlinedTextField(
+                    value = habitTitle,
+                    onValueChange = {
+                        habitTitle = it
+                        if (it.isNotBlank()) nameEverFilled = true
+                    },
+                    label = { Text("Habit name") },
+                    placeholder = { Text("e.g. Morning walk") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    isError = nameEverFilled && habitTitle.isBlank(),
+                    supportingText = if (habitTitle.isBlank()) {
+                        { Text("Required") }
+                    } else {
+                        null
+                    }
+                )
+                ChronosOptionChips(
+                    label = "Context titles",
+                    options = contextualHabitTitleOptions,
+                    selected = habitTitle,
+                    onSelected = { habitTitle = it }
+                )
+                ChronosSpeechInputButton(
+                    prompt = "Describe the habit, including cadence and completion window.",
+                    label = "Dictate habit",
+                    onTranscript = { transcript ->
+                        val capture = commandPaletteSpeechQuery(transcript)
+                        if (capture.isBlank()) return@ChronosSpeechInputButton
+                        habitCaptureContext = capture
+                        val transcriptDraft = habitTranscriptDraft(capture)
+                        val launchSuggestion = habitLaunchCaptureSuggestion(capture)
+                        val requestTitle = mergeHabitTranscriptTitle(habitTitle, capture)
+                        habitTitle = mergeHabitTranscriptTitle(
+                            title = habitTitle,
+                            transcript = transcriptDraft.title ?: capture
+                        )
+                        transcriptDraft.cadence?.let { cadenceLabel ->
+                            recurrenceState = buildHabitRecurrenceEditorState(
+                                cadence = cadenceLabel,
+                                schedule = null
+                            )
+                            recurrenceCustomExpanded = resolveHabitRecurrenceQuickPreset(recurrenceState) == "Custom"
+                            revealController.reveal("recurrence")
+                        }
+                        if (
+                            transcriptDraft.windowPreset != null &&
+                                transcriptDraft.startMinute != null &&
+                                transcriptDraft.endMinute != null
+                        ) {
+                            windowPresetOverride = transcriptDraft.windowPreset
+                            startOverride = formatDisplayMinute(transcriptDraft.startMinute)
+                            endOverride = formatDisplayMinute(transcriptDraft.endMinute)
+                            windowDurationOverride = (transcriptDraft.endMinute - transcriptDraft.startMinute)
+                                .coerceIn(15, 240)
+                            revealController.reveal("window")
+                        }
+                        transcriptDraft.difficulty?.let { detectedDifficulty ->
+                            difficulty = detectedDifficulty.toFloat()
+                            revealController.reveal("effort")
+                        }
+                        transcriptDraft.isBundled?.let { detectedBundled ->
+                            isBundled = detectedBundled
+                            revealController.reveal("effort")
+                        }
+                        launchSuggestion?.let { suggestion ->
+                            launchAppEnabled = true
+                            launchAppExpanded = true
+                            launchAppLabel = suggestion.label
+                            launchAppValue = suggestion.value
+                        }
+                        onClearAssist?.invoke()
+                        lastAutoAssistCapture = listOf(requestTitle, capture)
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .joinToString(" ")
+                        onRequestAssist?.invoke(
                             HabitAssistRequest(
-                                title = habitContextQuery,
-                                cadence = cadence,
-                                startMinute = parsedStart ?: 8 * 60,
-                                endMinute = parsedEnd ?: 20 * 60,
-                                difficulty = difficultyInt,
-                                isBundled = isBundled
+                                title = listOf(requestTitle, capture)
+                                    .map { it.trim() }
+                                    .filter { it.isNotBlank() }
+                                    .distinct()
+                                    .joinToString(" "),
+                                cadence = transcriptDraft.cadence ?: cadence,
+                                startMinute = transcriptDraft.startMinute ?: parsedStart ?: 8 * 60,
+                                endMinute = transcriptDraft.endMinute ?: parsedEnd ?: 20 * 60,
+                                difficulty = transcriptDraft.difficulty ?: difficultyInt,
+                                isBundled = transcriptDraft.isBundled ?: isBundled
                             )
                         )
                     },
-                    enabled = !assistState.isLoading,
                     modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        when {
-                            assistState.isLoading -> "Drafting suggestions…"
-                            visibleAssistSuggestions.isNotEmpty() -> "Refresh suggestions"
-                            else -> "Suggest habit setup with AI"
-                        }
+                )
+                if (onRequestAssist != null) {
+                    ChronosFilledTonalButton(
+                        onClick = {
+                            onRequestAssist(
+                                HabitAssistRequest(
+                                    title = habitContextQuery,
+                                    cadence = cadence,
+                                    startMinute = parsedStart ?: 8 * 60,
+                                    endMinute = parsedEnd ?: 20 * 60,
+                                    difficulty = difficultyInt,
+                                    isBundled = isBundled
+                                )
+                            )
+                        },
+                        enabled = !assistState.isLoading,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            when {
+                                assistState.isLoading -> "Drafting suggestions…"
+                                visibleAssistSuggestions.isNotEmpty() -> "Refresh suggestions"
+                                else -> "Suggest habit setup with AI"
+                            }
+                        )
+                    }
+                }
+                assistState.assistSnapshot?.let { snapshot ->
+                    GenAiAssistBanner(
+                        title = snapshot.bannerTitle,
+                        message = snapshot.bannerMessage +
+                            " Type or dictate the habit and AI drafts editable suggestions — name, cadence, time window, effort, and starter plan. Nothing changes until you tap a suggestion.",
+                        ready = snapshot.isReady
                     )
                 }
-            }
-            assistState.assistSnapshot?.let { snapshot ->
-                GenAiAssistBanner(
-                    title = snapshot.bannerTitle,
-                    message = snapshot.bannerMessage +
-                        " Type or dictate the habit and AI drafts editable suggestions — name, cadence, time window, effort, and starter plan. Nothing changes until you tap a suggestion.",
-                    ready = snapshot.isReady
-                )
-            }
-            assistState.message?.let { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (visibleAssistSuggestions.isNotEmpty() || assistState.isLoading) {
-                ChronosAssistSuggestionChips(
-                    suggestions = visibleAssistSuggestions,
-                    isLoading = assistState.isLoading,
-                    onApply = ::applyHabitAssistSuggestion,
-                    label = { it.label },
-                    reason = { it.reason },
-                    sourceLabel = { GenAiAssistCopy.routineAssistSourceLabel(it.source) },
-                    loadingLabel = "Drafting AI suggestions…",
-                    onApplyAll = ::applyAllAssistSuggestions
-                )
-            }
-        }
+                assistState.message?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (visibleAssistSuggestions.isNotEmpty() || assistState.isLoading) {
+                    ChronosAssistSuggestionChips(
+                        suggestions = visibleAssistSuggestions,
+                        isLoading = assistState.isLoading,
+                        onApply = ::applyHabitAssistSuggestion,
+                        label = { it.label },
+                        reason = { it.reason },
+                        sourceLabel = { GenAiAssistCopy.routineAssistSourceLabel(it.source) },
+                        loadingLabel = "Drafting AI suggestions…",
+                        onApplyAll = ::applyAllAssistSuggestions
+                    )
+                }
+            },
+        )
         val contextualHabitTemplateLabels = contextualHabitTemplateOptions(
             title = habitContextQuery,
             suggestions = contextualAssistSuggestions,
@@ -753,22 +1104,6 @@ internal fun HabitFormSheet(
         val suggestedHabitTemplateLabel = contextualHabitTemplateLabels
             .firstOrNull()
             ?.takeIf { hasHabitTemplateContext(habitContextQuery, contextualAssistSuggestions) }
-        if (goalOptions.isNotEmpty() || selectedGoalId != null) {
-            ChronosCollapsibleSection(
-                title = "Goal",
-                summary = goalOptions.firstOrNull { it.id == selectedGoalId }?.label
-                    ?: "Link this habit to a goal",
-                expanded = goalExpanded,
-                onExpandedChange = { goalExpanded = it }
-            ) {
-                ChronosLinkPickerField(
-                    label = "Link to goal",
-                    options = goalOptions,
-                    selectedId = selectedGoalId,
-                    onSelected = { selectedGoalId = it }
-                )
-            }
-        }
         ChronosCollapsibleSection(
             title = "Templates",
             summary = selectedTemplateLabel.ifBlank {
@@ -981,301 +1316,6 @@ internal fun HabitFormSheet(
                     isError = launchTargetInvalid
                 )
             }
-        }
-        ChronosCollapsibleSection(
-            title = "Recurrence",
-            summary = recurrenceSummary,
-            expanded = showHabitRecurrenceDetails,
-            onExpandedChange = { scheduleExpanded = it }
-        ) {
-            ChronosOptionChips(
-                label = "Quick picks",
-                options = contextualHabitRecurrenceOptions(
-                    selectedPreset = selectedRecurrencePreset,
-                    title = habitContextQuery,
-                    suggestions = contextualAssistSuggestions
-                ).withSelectedOption(selectedRecurrencePreset),
-                selected = selectedRecurrencePreset,
-                onSelected = { preset ->
-                    if (preset == "Custom") {
-                        recurrenceCustomExpanded = true
-                    } else {
-                        recurrenceState = recurrenceStateForQuickPreset(preset)
-                        recurrenceCustomExpanded = false
-                    }
-                }
-            )
-            ChronosFilledTonalButton(
-                onClick = { recurrenceCustomExpanded = !customRecurrenceVisible },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(if (customRecurrenceVisible) "Hide custom controls" else "Customize recurrence")
-            }
-            if (customRecurrenceVisible) {
-                ChronosOptionChips(
-                    label = "Custom pattern",
-                    options = HabitRecurrenceCustomPattern.entries.map(HabitRecurrenceCustomPattern::label),
-                    selected = selectedCustomPattern.label,
-                    onSelected = { label ->
-                        val pattern = HabitRecurrenceCustomPattern.entries.first { it.label == label }
-                        recurrenceState = pattern.applyTo(recurrenceState)
-                    }
-                )
-                when (selectedCustomPattern) {
-                    HabitRecurrenceCustomPattern.SELECTED_WEEKDAYS -> {
-                        val selectedShortcut = habitWeekdayShortcutLabel(recurrenceState.weekdays)
-                        ChronosOptionChips(
-                            label = "Shortcuts",
-                            options = habitWeekdayShortcuts.keys.toList(),
-                            selected = selectedShortcut.orEmpty(),
-                            onSelected = { label ->
-                                recurrenceState = recurrenceState.copy(
-                                    kind = HabitRecurrenceEditorKind.SCHEDULED,
-                                    scheduleMode = HabitRecurrenceScheduleMode.SELECTED_WEEKDAYS,
-                                    weekdays = habitWeekdayShortcuts.getValue(label)
-                                )
-                            }
-                        )
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            DayOfWeek.values().forEach { day ->
-                                val selected = day in recurrenceState.weekdays
-                                ChronosFilterChip(
-                                    selected = selected,
-                                    onClick = {
-                                        recurrenceState = recurrenceState.copy(
-                                            kind = HabitRecurrenceEditorKind.SCHEDULED,
-                                            scheduleMode = HabitRecurrenceScheduleMode.SELECTED_WEEKDAYS,
-                                            weekdays = if (selected) {
-                                                recurrenceState.weekdays - day
-                                            } else {
-                                                recurrenceState.weekdays + day
-                                            }
-                                        )
-                                    },
-                                    label = { Text(day.name.take(3)) }
-                                )
-                            }
-                        }
-                    }
-                    HabitRecurrenceCustomPattern.EVERY_N_DAYS -> {
-                        OutlinedTextField(
-                            value = recurrenceState.interval.toString(),
-                            onValueChange = { value ->
-                                recurrenceState = recurrenceState.copy(
-                                    kind = HabitRecurrenceEditorKind.SCHEDULED,
-                                    scheduleMode = HabitRecurrenceScheduleMode.EVERY_N_DAYS,
-                                    interval = value.toIntOrNull()?.coerceAtLeast(1) ?: 1
-                                )
-                            },
-                            label = { Text("Repeat every N days") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                    }
-                    HabitRecurrenceCustomPattern.EVERY_N_WEEKS -> {
-                        OutlinedTextField(
-                            value = recurrenceState.interval.toString(),
-                            onValueChange = { value ->
-                                recurrenceState = recurrenceState.copy(
-                                    kind = HabitRecurrenceEditorKind.SCHEDULED,
-                                    scheduleMode = HabitRecurrenceScheduleMode.EVERY_N_WEEKS,
-                                    interval = value.toIntOrNull()?.coerceAtLeast(1) ?: 1
-                                )
-                            },
-                            label = { Text("Repeat every N weeks") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            DayOfWeek.values().forEach { day ->
-                                val selected = day in recurrenceState.weekdays
-                                ChronosFilterChip(
-                                    selected = selected,
-                                    onClick = {
-                                        recurrenceState = recurrenceState.copy(
-                                            kind = HabitRecurrenceEditorKind.SCHEDULED,
-                                            scheduleMode = HabitRecurrenceScheduleMode.EVERY_N_WEEKS,
-                                            weekdays = if (selected) {
-                                                recurrenceState.weekdays - day
-                                            } else {
-                                                recurrenceState.weekdays + day
-                                            }
-                                        )
-                                    },
-                                    label = { Text(day.name.take(3)) }
-                                )
-                            }
-                        }
-                        Text(
-                            text = "Leave weekdays empty to keep a simple weekly interval.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    HabitRecurrenceCustomPattern.QUOTA -> {
-                        ChronosOptionChips(
-                            label = "Quota presets",
-                            options = habitQuotaPresetLabels,
-                            selected = quotaPresetLabel(recurrenceState).orEmpty(),
-                            onSelected = { label ->
-                                recurrenceState = recurrenceState.applyQuotaPreset(label)
-                            }
-                        )
-                        OutlinedTextField(
-                            value = recurrenceState.quotaCompletions.toString(),
-                            onValueChange = { value ->
-                                recurrenceState = recurrenceState.copy(
-                                    kind = HabitRecurrenceEditorKind.QUOTA,
-                                    quotaCompletions = value.toIntOrNull()?.coerceAtLeast(1) ?: 1
-                                )
-                            },
-                            label = { Text("Times to complete") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                        ChronosOptionChips(
-                            label = "Per",
-                            options = HabitRecurrencePeriodUnit.entries.map(HabitRecurrencePeriodUnit::name),
-                            selected = recurrenceState.quotaPeriodUnit.name,
-                            onSelected = { raw ->
-                                recurrenceState = recurrenceState.copy(
-                                    kind = HabitRecurrenceEditorKind.QUOTA,
-                                    quotaPeriodUnit = HabitRecurrencePeriodUnit.valueOf(raw)
-                                )
-                            },
-                            optionLabel = { raw -> raw.lowercase().replaceFirstChar(Char::uppercase) }
-                        )
-                        OutlinedTextField(
-                            value = recurrenceState.quotaInterval.toString(),
-                            onValueChange = { value ->
-                                recurrenceState = recurrenceState.copy(
-                                    kind = HabitRecurrenceEditorKind.QUOTA,
-                                    quotaInterval = value.toIntOrNull()?.coerceAtLeast(1) ?: 1
-                                )
-                            },
-                            label = { Text("Every N periods") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                    }
-                }
-            }
-        }
-
-        ChronosCollapsibleSection(
-            title = "Completion window",
-            summary = windowLabel ?: "Set a valid start and end time",
-            expanded = showHabitWindowDetails,
-            onExpandedChange = { windowExpanded = it }
-        ) {
-            ChronosOptionChips(
-                label = "Preset",
-                options = contextualHabitWindowOptions(
-                    selectedPreset = windowPreset,
-                    title = habitContextQuery,
-                    suggestions = contextualAssistSuggestions
-                ).withSelectedOption(windowPreset),
-                selected = windowPreset,
-                onSelected = { preset ->
-                    windowPresetOverride = preset
-                    habitWindowPresets[preset]?.let { (presetStart, presetEnd) ->
-                        startOverride = formatDisplayMinute(presetStart)
-                        endOverride = formatDisplayMinute(presetEnd)
-                        windowDurationOverride = (presetEnd - presetStart).coerceIn(15, 240)
-                    }
-                }
-            )
-            ChronosTimeWindowControls(
-                startText = start,
-                endText = end,
-                onStartChange = {
-                    startOverride = it
-                    windowPresetOverride = "Custom"
-                },
-                onEndChange = {
-                    endOverride = it
-                    windowPresetOverride = "Custom"
-                },
-                parsedStart = parsedStart,
-                parsedEnd = parsedEnd,
-                showFineTuneFields = windowPreset == "Custom",
-                onNudgeStart = { delta ->
-                    val nudgedStart = nudgeMinuteText(start, delta, parsedStart ?: 8 * 60)
-                    startOverride = nudgedStart
-                    windowPresetOverride = "Custom"
-                    parseFlexibleMinute(nudgedStart)?.let { s ->
-                        endOverride = formatDisplayMinute(applyDurationToWindow(s, windowDuration))
-                    }
-                },
-                onNudgeEnd = { delta ->
-                    endOverride = nudgeMinuteText(end, delta, parsedEnd ?: 20 * 60)
-                    windowPresetOverride = "Custom"
-                },
-                durationMinutes = windowDuration,
-                onDurationChange = { minutes ->
-                    val clampedDuration = minutes.coerceIn(15, 240)
-                    windowDurationOverride = clampedDuration
-                    windowPresetOverride = "Custom"
-                    parsedStart?.let { s ->
-                        endOverride = formatDisplayMinute(applyDurationToWindow(s, clampedDuration))
-                    }
-                }
-            )
-        }
-
-        ChronosCollapsibleSection(
-            title = "Effort",
-            summary = "${difficultyLabel(difficultyInt)} · " +
-                if (isBundled) "Visible on Today" else "Flexible habit",
-            expanded = showHabitEffortDetails,
-            onExpandedChange = { effortExpanded = it }
-        ) {
-            ChronosOptionChips(
-                label = "Quick effort",
-                options = contextualHabitDifficultyOptions(habitContextQuery, contextualAssistSuggestions)
-                    .withSelectedOption(habitDifficultyOptions.getValue(difficultyInt)),
-                selected = habitDifficultyOptions.getValue(difficultyInt),
-                onSelected = { label ->
-                    difficulty = habitDifficultyOptions.entries.first { it.value == label }.key.toFloat()
-                }
-            )
-            ChronosOptionChips(
-                label = "Day plan",
-                options = contextualHabitDayPlanOptions(
-                    title = habitContextQuery,
-                    isBundled = isBundled,
-                    suggestions = contextualAssistSuggestions
-                ).withSelectedOption(habitDayPlanOptionLabel(isBundled)),
-                selected = habitDayPlanOptionLabel(isBundled),
-                onSelected = { label ->
-                    isBundled = habitDayPlanOptionValue(label)
-                }
-            )
-            Text(
-                text = "Difficulty · ${difficultyLabel(difficultyInt)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Slider(
-                value = difficulty,
-                onValueChange = { difficulty = it },
-                valueRange = 1f..5f,
-                steps = 3
-            )
-            ChronosFormSwitchRow(
-                title = "Bundle with day plan",
-                subtitle = "Shows this habit alongside scheduled blocks on Today.",
-                checked = isBundled,
-                onCheckedChange = { isBundled = it }
-            )
         }
     }
 }

@@ -10,77 +10,107 @@ struct FocusView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(ShellState.self) private var shell: ShellState?
+    @Query(sort: \TimeBlock.startMinuteOfDay) private var allBlocks: [TimeBlock]
     @State private var timer = FocusTimerModel.shared
     /// Drives the repeating opacity pulse on the active phase dot (see `phaseDots`).
     @State private var pulseOpacity: Double = 1.0
+    /// Scroll target when a notification/deep link pre-selects a block (`chronosflow://focus?blockId=…`).
+    @State private var scrollTarget: String?
     var prefilledBlockID: String? = nil
+
+    private var todayBlocks: [TimeBlock] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        return allBlocks.filter { cal.isDate($0.date, inSameDayAs: today) }
+    }
+
+    private var nowMinute: Int {
+        let cal = Calendar.current
+        return cal.component(.hour, from: .now) * 60 + cal.component(.minute, from: .now)
+    }
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                ChronosBackdrop()
-                VStack(spacing: ChronosSpacing.hero) {
-                    Text(phaseTitle).font(.chronosTitle).foregroundStyle(.secondary)
-                    timerRing
-                    // Paused affordance. Mirrors Android's "Paused · tap play to resume" copy, shown
-                    // only while genuinely paused mid-phase (not while holding at a phase boundary,
-                    // where pause is a no-op and a different prompt applies).
-                    if timer.isPaused && timer.phase != .idle && !timer.awaitingPhaseAdvance {
-                        Label("Paused · tap play to resume", systemImage: "pause.fill")
-                            .font(.chronosLabel).foregroundStyle(.secondary)
-                            .transition(.opacity)
-                    }
-                    if timer.isSplitSession && timer.phase != .idle { phaseDots }
-                    controls
-                    if timer.completedWorkSessions > 0 {
-                        Label("\(timer.completedWorkSessions) focus phases done", systemImage: "checkmark.seal.fill")
-                            .font(.chronosLabel).foregroundStyle(ChronosColors.brandSecondary)
-                    }
-                }
-                .padding(ChronosSpacing.medium)
-            }
-            .navigationTitle("Focus")
-            .chronosCommandPaletteToolbar()
-            // Apply any focus controls that arrived from the Live Activity / Today widget while we
-            // were backgrounded or on another tab (FocusCommandBridge — see WidgetIntents.swift).
+            chromedSurface
             .onAppear {
                 FocusCommandObserver.startIfNeeded()
-                // F03: explicitly restore an in-flight SPLIT session left by a previous app run BEFORE
-                // anything else, so a session survives relaunch. Mirrors Android
-                // `DayDialFocusDelegate.restoreActiveSplitFromStore()`: `attach` only rehydrates when
-                // the live model is idle and a RUNNING/PAUSED snapshot exists, so it never clobbers an
-                // already-running session. After restore, re-sync a boundary that may have elapsed
-                // while the app was killed/backgrounded.
+                drainPendingFocusBlock()
                 timer.attach(context: context)
                 timer.recoverBoundaryIfNeeded()
                 drainFocusCommands()
-                // Restore the user's last-used split preset (persisted in ChronosSettings) when idle,
-                // so a new session defaults to their preference instead of the hard-coded 25 · 5.
                 if timer.phase == .idle || timer.phase == .completed {
                     timer.preset = ChronosSettings.shared.focusLastPreset
                 }
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
-                    // Re-sync across a backgrounded phase boundary (the Timer doesn't fire while
-                    // suspended), then restore any session persisted by a kill, then drain controls.
+                    drainPendingFocusBlock()
                     timer.recoverBoundaryIfNeeded()
                     timer.attach(context: context)
                     drainFocusCommands()
                 }
             }
-            // A control tapped while we're already foregrounded on this tab applies immediately.
             .onReceive(NotificationCenter.default.publisher(for: FocusCommandObserver.didReceive)) { _ in
                 drainFocusCommands()
             }
-            // Tactile feedback for the key focus transitions, keyed to observable timer state so it
-            // fires regardless of which control (in-app, Live Activity, widget) drove the change.
-            // `.sensoryFeedback` automatically respects the system haptics setting.
-            // Phase flips on start and at every boundary advance (start / advance / break transitions).
+            .onChange(of: shell?.pendingFocusBlockID) { _, id in
+                if id != nil { drainPendingFocusBlock() }
+            }
             .sensoryFeedback(.impact, trigger: timer.phase)
-            // A focus-phase completion accent — mirrors SleepView's `.success` precedent.
             .sensoryFeedback(.success, trigger: timer.completedWorkSessions)
         }
+    }
+
+    private var chromedSurface: some View {
+        focusSurface
+            .navigationTitle("Focus")
+            .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
+    }
+
+    private var focusSurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: ChronosSpacing.hero) {
+                        if !todayBlocks.isEmpty {
+                            focusSection {
+                                focusDialCard
+                                    .id(FocusScrollAnchor.dial)
+                            }
+                        }
+                        focusSection {
+                            Text(phaseTitle).font(.chronosTitle).foregroundStyle(.secondary)
+                            timerRing
+                            if timer.isPaused && timer.phase != .idle && !timer.awaitingPhaseAdvance {
+                                Label("Paused · tap play to resume", systemImage: "pause.fill")
+                                    .font(.chronosLabel).foregroundStyle(.secondary)
+                                    .transition(.opacity)
+                            }
+                            if timer.isSplitSession && timer.phase != .idle { phaseDots }
+                            controls
+                            if timer.completedWorkSessions > 0 {
+                                Label("\(timer.completedWorkSessions) focus phases done", systemImage: "checkmark.seal.fill")
+                                    .font(.chronosLabel).foregroundStyle(ChronosColors.brandSecondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, ChronosSpacing.standard)
+                }
+                .scrollContentBackground(.hidden)
+                .onChange(of: scrollTarget) { _, target in
+                    guard let target else { return }
+                    withAnimation(ChronosMotion.snappy) { proxy.scrollTo(target, anchor: .center) }
+                    scrollTarget = nil
+                }
+            }
+        }
+    }
+
+    private func focusSection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().padding(.horizontal, ChronosSpacing.standard)
     }
 
     /// Drains queued cross-process focus commands and applies them to the live timer.
@@ -144,6 +174,26 @@ struct FocusView: View {
         }
         .frame(width: 260, height: 260)
         .padding(ChronosSpacing.medium)
+        // The ring is the hero element; expose one clean spoken value instead of letting VoiceOver
+        // read the decorative sub-icon + "25:00" as digits-and-"colon" (§7). `children: .ignore`
+        // collapses the ring into a single element carrying the countdown as words.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Focus timer")
+        .accessibilityValue(ringAccessibilityValue)
+    }
+
+    /// Spoken value for the timer ring — the countdown as words ("24 minutes 30 seconds remaining"),
+    /// which reads far better than the visual "MM:SS". Covers idle / running / paused / boundary-hold.
+    private var ringAccessibilityValue: String {
+        if timer.awaitingPhaseAdvance {
+            return timer.nextPhase == nil ? "Block complete" : "Phase complete, ready to continue"
+        }
+        let total = Int(timer.phase == .idle ? TimeInterval(timer.workMinutes * 60) : timer.remaining)
+        let m = total / 60, s = total % 60
+        var spoken = m > 0 ? "\(m) minute\(m == 1 ? "" : "s")" : ""
+        if s > 0 { spoken += (m > 0 ? " " : "") + "\(s) second\(s == 1 ? "" : "s")" }
+        if spoken.isEmpty { spoken = "0 seconds" }
+        return timer.isPaused ? "\(spoken) remaining, paused" : "\(spoken) remaining"
     }
 
     private var ringColor: Color {
@@ -236,6 +286,9 @@ struct FocusView: View {
                     .buttonStyle(.bordered)
                     .tint(timer.preset == preset ? ChronosColors.brandPrimary : .secondary)
                     .buttonBorderShape(.capsule)
+                    // Selection is shown visually via tint; announce it to VoiceOver too so the
+                    // active split isn't conveyed by color alone (§7).
+                    .accessibilityAddTraits(timer.preset == preset ? [.isSelected] : [])
                 }
             }
         }
@@ -379,6 +432,39 @@ struct FocusView: View {
     }
 
     // MARK: Block lookup
+
+    /// Read-only day dial — highlights the deep-linked / pre-selected block (Android FocusTab block card).
+    private var focusDialCard: some View {
+        VStack(spacing: ChronosSpacing.small) {
+            if let block = block {
+                Text(block.title).font(.chronosLabel).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            ChronosDialCanvas(
+                blocks: todayBlocks,
+                nowMinute: nowMinute,
+                selectedBlockID: prefilledBlockID,
+                conflictBlockIDs: Set(PlannerMath.conflicts(in: todayBlocks).flatMap { [$0.firstID, $0.secondID] }),
+                showNowHand: true
+            )
+            .allowsHitTesting(false)
+            .frame(maxWidth: 320)
+            .frame(maxWidth: .infinity)
+        }
+        .accessibilityLabel(block.map { "Selected block: \($0.title)" } ?? "Today's schedule")
+    }
+
+    /// Notification / deep link (`chronosflow://focus?blockId=…`) — scroll the dial into view.
+    private func drainPendingFocusBlock() {
+        guard let id = shell?.pendingFocusBlockID ?? prefilledBlockID else { return }
+        shell?.pendingFocusBlockID = nil
+        guard todayBlocks.contains(where: { $0.id == id }) else { return }
+        scrollTarget = FocusScrollAnchor.dial
+    }
+
+    private enum FocusScrollAnchor {
+        static let dial = "focus-dial"
+    }
 
     private var block: TimeBlock? {
         guard let id = prefilledBlockID else { return nil }

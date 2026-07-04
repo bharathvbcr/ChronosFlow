@@ -18,13 +18,13 @@ object WearActionContract {
     /** Focus transport control; [arg] is one of the FOCUS_* constants. */
     const val TYPE_FOCUS = "focus"
 
-    /** Mark a habit done for today; [arg] is the habit id. */
+    /** Mark a habit done — or undo it — for today; [arg] is built by [itemArg] (habit id + reverse). */
     const val TYPE_HABIT = "habit"
 
     /** Toggle a task's completion; [arg] is the task id. */
     const val TYPE_TASK = "task"
 
-    /** Acknowledge a medication dose as taken; [arg] is the medication plan id. */
+    /** Acknowledge a dose as taken — or undo it; [arg] is built by [itemArg] (plan id + reverse). */
     const val TYPE_DOSE = "dose"
 
     /** Mark a planned time block complete; [arg] is the block id. */
@@ -60,6 +60,27 @@ object WearActionContract {
     /** The explicit duration in a focus-start [arg], or null when none was requested. */
     fun focusStartSeconds(arg: String): Int? =
         arg.substringAfter("$FOCUS_START$FOCUS_START_SECONDS_SEP", "").toIntOrNull()?.takeIf { it > 0 }
+
+    /** Separator marking a per-item [arg] as a reversal request; a control char so ids can't collide. */
+    private const val REVERSE_MARK_SEP = "\u001E"
+
+    /** The reversal marker value carried after [REVERSE_MARK_SEP]; see [itemArg]. */
+    const val ARG_REVERSE = "undo"
+
+    /**
+     * Builds the [arg] for a per-item action ([TYPE_HABIT] / [TYPE_DOSE]). A plain [id] applies the
+     * action; [reverse] = true asks the phone to undo it (un-complete a habit / remove a just-taken
+     * dose). A bare id — what the home-screen widgets send — always means "apply", so existing
+     * callers stay correct without change.
+     */
+    fun itemArg(id: String, reverse: Boolean = false): String =
+        if (reverse) "$id$REVERSE_MARK_SEP$ARG_REVERSE" else id
+
+    /** The entity id carried in a per-item [arg], stripping any reversal marker. */
+    fun argId(arg: String): String = arg.substringBefore(REVERSE_MARK_SEP)
+
+    /** True when a per-item [arg] asks to reverse the action rather than apply it. */
+    fun isReverse(arg: String): Boolean = arg.substringAfter(REVERSE_MARK_SEP, "") == ARG_REVERSE
 
     /** Packs an action into the on-wire payload. */
     fun encode(type: String, arg: String): ByteArray =

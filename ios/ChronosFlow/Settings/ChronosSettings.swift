@@ -54,7 +54,14 @@ final class ChronosSettings {
         aiEnabled = defaults.boolOr("ai.enabled", true)
         planningStyle = PlanningStyle(rawValue: defaults.string(forKey: "ai.planningStyle") ?? "") ?? .balanced
         autoApplyPlan = defaults.boolOr("ai.autoApply", false)
-        autoApplyAssist = defaults.boolOr("ai.autoApplyAssist", false)
+        // On by default so a typed title ("call mom tomorrow 9am") fills the draft with zero taps;
+        // still non-destructive (only empty fields) and every applied detail shows a removable chip.
+        autoApplyAssist = defaults.boolOr("ai.autoApplyAssist", true)
+
+        // Adaptive card editors: surface a compact form (essentials + quick-bar chips) and remember
+        // which advanced sections the user actually opens, promoting them above "More options". Off
+        // reverts to the flat, everything-expanded layout for users who want it all in view.
+        adaptiveEditorEnabled = defaults.boolOr("editor.adaptive", true)
 
         // Planning behaviour toggles (Android parity: SidebarPageContent.kt lines 961–963,
         // "Protect focus blocks" / "Add breaks automatically" / "Preserve manual blocks").
@@ -70,6 +77,13 @@ final class ChronosSettings {
         habitRemindersEnabled = defaults.boolOr("notif.habits", true)
         taskRemindersEnabled = defaults.boolOr("notif.tasks", true)
         focusLiveActivityEnabled = defaults.boolOr("notif.focusLiveActivity", true)
+        // Android parity: `CurrentBlockNotificationCoordinator` defaults ON — the single live "now"
+        // surface replaces separate block-start reminders when enabled.
+        currentBlockLiveActivityEnabled = defaults.boolOr("notif.currentBlockLive", true)
+        // Aggressive fold: surface due medication / task / habit reminders as action chips inside the
+        // Live Activity and demote their standalone banners to passive, so the live surface — not a
+        // stack of alerts — is where the user acts. Defaults ON.
+        foldRemindersIntoLiveActivity = defaults.boolOr("notif.foldReminders", true)
         quietHoursStartMinute = defaults.intOr("notif.quietStart", 22 * 60)
         quietHoursEndMinute = defaults.intOr("notif.quietEnd", 7 * 60)
         logReminderEnabled = defaults.boolOr("notif.logReminder", false)
@@ -153,6 +167,10 @@ final class ChronosSettings {
     /// are filled from the detections; fields the user already set are never overwritten.
     /// Android parity: ChronosUiSettingsKeys.KEY_ASSIST_AUTO_APPLY ("Auto-apply form suggestions").
     var autoApplyAssist: Bool { didSet { defaults.set(autoApplyAssist, forKey: "ai.autoApplyAssist") } }
+    /// When on, card editors (task/med/habit/goal/block) open compact — essentials plus a quick-bar of
+    /// attribute chips — and adaptively promote the advanced sections the user opens most; off shows
+    /// every section inline. Backs `CardEditorScaffold` + `EditorLayoutStore`.
+    var adaptiveEditorEnabled: Bool { didSet { defaults.set(adaptiveEditorEnabled, forKey: "editor.adaptive") } }
     /// When on, the planner never reschedules or shortens existing FOCUS blocks when it regenerates a
     /// plan. Android parity: onProtectFocusChanged ("Protect focus blocks").
     var protectFocusBlocks: Bool { didSet { defaults.set(protectFocusBlocks, forKey: "ai.protectFocus") } }
@@ -169,6 +187,17 @@ final class ChronosSettings {
     var habitRemindersEnabled: Bool { didSet { defaults.set(habitRemindersEnabled, forKey: "notif.habits") } }
     var taskRemindersEnabled: Bool { didSet { defaults.set(taskRemindersEnabled, forKey: "notif.tasks") } }
     var focusLiveActivityEnabled: Bool { didSet { defaults.set(focusLiveActivityEnabled, forKey: "notif.focusLiveActivity") } }
+    /// Always-on Live Activity for the current / up-next schedule block (Android: current-block notification).
+    var currentBlockLiveActivityEnabled: Bool { didSet { defaults.set(currentBlockLiveActivityEnabled, forKey: "notif.currentBlockLive") } }
+    /// Fold due medication / task / habit reminders into the Live Activity as action chips and demote
+    /// their standalone banners to passive. Only takes effect while the block Live Activity is on.
+    var foldRemindersIntoLiveActivity: Bool { didSet { defaults.set(foldRemindersIntoLiveActivity, forKey: "notif.foldReminders") } }
+    /// True when reminders are actively folded into the live surface: the master switch is on, the block
+    /// Live Activity is the chosen surface, and folding is enabled. Both the coordinator (which builds
+    /// the chips) and ChronosNotifications (which demotes the banners) gate on this so they stay in sync.
+    var remindersFoldedIntoLiveActivity: Bool {
+        remindersEnabled && currentBlockLiveActivityEnabled && foldRemindersIntoLiveActivity
+    }
     var quietHoursStartMinute: Int { didSet { defaults.set(quietHoursStartMinute, forKey: "notif.quietStart") } }
     var quietHoursEndMinute: Int { didSet { defaults.set(quietHoursEndMinute, forKey: "notif.quietEnd") } }
     /// When on, a 20:00 nudge reminds the user to log tonight's sleep and write in their journal.

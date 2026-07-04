@@ -13,7 +13,8 @@ object DayDialReminderSettingsKeys {
     const val END_DAY_REVIEW_REMINDER = "end_day_review_reminder"
     const val SLEEP_JOURNAL_LOG_REMINDER = "sleep_journal_log_reminder"
 
-    const val DEFAULT_BLOCK_START_REMINDERS = true
+    // Off by default: the always-on current-block live notification replaces separate block-start alerts.
+    const val DEFAULT_BLOCK_START_REMINDERS = false
     const val DEFAULT_BREAK_REMINDERS = false
     // Off by default: the always-on live "now" notification already shows whether the current block
     // is on track, so the separate +10m "Progress check" reminder was redundant noise.

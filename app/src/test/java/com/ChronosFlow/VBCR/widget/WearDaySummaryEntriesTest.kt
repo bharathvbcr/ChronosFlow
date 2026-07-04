@@ -149,6 +149,25 @@ class WearDaySummaryEntriesTest {
     }
 
     @Test
+    fun `folded reminders publish when provided`() {
+        val folded = listOf(
+            com.ChronosFlow.VBCR.core.notifications.FoldedReminder(
+                kind = com.ChronosFlow.VBCR.core.notifications.FoldedReminderKind.TASK,
+                entityId = "t1",
+                title = "File taxes",
+                detail = "Due now",
+                dueMinute = 9 * 60,
+                isOverdue = false
+            )
+        )
+        val entries = ChronosDayOverview().toWearDaySummaryEntries(foldedReminders = folded)
+        assertArrayEquals(
+            arrayOf("1${sep}t1${sep}File taxes${sep}Due now${sep}0"),
+            entries[WearDaySummaryContract.KEY_FOLDED_REMINDER_ENTRIES] as Array<*>
+        )
+    }
+
+    @Test
     fun `empty overview omits block keys but keeps counts`() {
         val entries = ChronosDayOverview().toWearDaySummaryEntries()
 
@@ -159,5 +178,6 @@ class WearDaySummaryEntriesTest {
         assertEquals(0, entries[WearDaySummaryContract.KEY_HABITS_TOTAL])
         assertEquals(0, entries[WearDaySummaryContract.KEY_MEDS_DUE_COUNT])
         assertArrayEquals(emptyArray<String>(), entries[WearDaySummaryContract.KEY_TASK_ENTRIES] as Array<*>)
+        assertArrayEquals(emptyArray<String>(), entries[WearDaySummaryContract.KEY_FOLDED_REMINDER_ENTRIES] as Array<*>)
     }
 }

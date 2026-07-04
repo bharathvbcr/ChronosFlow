@@ -112,13 +112,16 @@ class ChronosTodayTileProvider : TileService() {
                 summary.openTaskCount
             )
         )
-        // Present only when the phone syncs task entries (privacy redaction strips them).
-        summary.tasks.firstOrNull()?.let { topTask ->
-            rows += ChronosTileUi.caption(this, "Next: ${topTask.title}")
-        }
-
+        // The top-task row is dropped from the tile: it duplicates the open-task count already in
+        // the day-line, and on a non-scrolling round tile the lowest rows are the ones that ride
+        // under the bezel — the current + next block must always fit.
+        val spoken = nowTitle?.let {
+            "Now: $it, ${WearFormat.remainingLabel(summary.nowEndMinute, nowMinute)}"
+        } ?: summary.nextTitle?.let {
+            "Next: $it, ${WearFormat.startsInLabel(summary.nextStartMinute, nowMinute)}"
+        } ?: if (summary.receivedAtMillis == 0L) SYNC_LABEL else EMPTY_LABEL
         return ChronosTileUi.column(
-            ChronosTileUi.launchModifiers(this, WearStartPage.NOW),
+            ChronosTileUi.launchModifiers(this, WearStartPage.NOW, spoken),
             *rows.toTypedArray()
         )
     }
@@ -158,8 +161,13 @@ class ChronosTodayTileProvider : TileService() {
             )
             .build()
 
+        val spoken = if (state.paused) {
+            "Focus paused"
+        } else {
+            "Focus session, ${WearFormat.mmss(remainingSeconds)} remaining"
+        }
         return LayoutElementBuilders.Box.Builder()
-            .setModifiers(ChronosTileUi.launchModifiers(this, WearStartPage.FOCUS))
+            .setModifiers(ChronosTileUi.launchModifiers(this, WearStartPage.FOCUS, spoken))
             .addContent(
                 CircularProgressIndicator.Builder()
                     .setProgress(progress)

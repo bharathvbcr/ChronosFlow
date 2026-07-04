@@ -10,6 +10,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -59,7 +62,11 @@ fun ChronosFormValidationHint(
     if (message.isNullOrBlank()) return
     Text(
         text = message,
-        modifier = modifier.fillMaxWidth(),
+        // Speak the disabled-Save reason when it appears/changes (Polite) — otherwise a screen-reader
+        // user gets no feedback on why the form won't submit. Shared → fixes every form sheet at once.
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.error
     )

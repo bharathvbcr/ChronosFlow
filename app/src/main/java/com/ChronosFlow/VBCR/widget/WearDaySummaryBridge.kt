@@ -4,9 +4,13 @@ import android.content.Context
 import com.ChronosFlow.VBCR.core.domain.model.BlockCategories
 import com.ChronosFlow.VBCR.core.domain.model.ChronosDayOverview
 import com.ChronosFlow.VBCR.core.domain.wear.WearDaySummaryContract
+import com.ChronosFlow.VBCR.core.notifications.FoldedReminder
+import com.ChronosFlow.VBCR.core.notifications.FoldedReminderKind
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.time.LocalDateTime
+import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,7 +32,8 @@ internal const val REDACTED_BLOCK_TITLE = "Scheduled block"
  */
 internal fun ChronosDayOverview.toWearDaySummaryEntries(
     redactTitles: Boolean = false,
-    digest: String? = null
+    digest: String? = null,
+    foldedReminders: List<com.ChronosFlow.VBCR.core.notifications.FoldedReminder> = emptyList()
 ): Map<String, Any> {
     val sep = WearDaySummaryContract.FIELD_SEP
     val entries = linkedMapOf<String, Any>()
@@ -91,8 +96,34 @@ internal fun ChronosDayOverview.toWearDaySummaryEntries(
             }
             .toTypedArray()
     }
+    if (foldedReminders.isNotEmpty()) {
+        entries[WearDaySummaryContract.KEY_FOLDED_REMINDER_ENTRIES] =
+            foldedReminders.toWearFoldedEntries(sep, redactTitles)
+    } else {
+        // Explicit empty array so a prior push's chips clear when fold turns off or nothing is due.
+        entries[WearDaySummaryContract.KEY_FOLDED_REMINDER_ENTRIES] = emptyArray<String>()
+    }
     return entries
 }
+
+private fun List<FoldedReminder>.toWearFoldedEntries(
+    sep: String,
+    redactTitles: Boolean,
+    max: Int = WearDaySummaryContract.MAX_FOLDED_REMINDERS
+): Array<String> = take(max).map { reminder ->
+    val title = if (redactTitles) {
+        when (reminder.kind) {
+            FoldedReminderKind.MEDICATION -> "Medication"
+            FoldedReminderKind.TASK -> "Task"
+            FoldedReminderKind.HABIT -> "Habit"
+        }
+    } else {
+        reminder.title
+    }
+    val detail = if (redactTitles) "Due now" else reminder.detail
+    "${reminder.kind.ordinal}$sep${reminder.entityId}$sep${title.replace('\n', ' ')}" +
+        "$sep${detail.replace('\n', ' ')}$sep${if (reminder.isOverdue) 1 else 0}"
+}.toTypedArray()
 
 /**
  * Publishes the day summary to the Wearable Data Layer so the paired watch's Today and Habits
@@ -104,14 +135,23 @@ internal fun ChronosDayOverview.toWearDaySummaryEntries(
 @Singleton
 class WearDaySummaryBridge @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    private val linkStatusStore: WearLinkStatusStore
+    private val linkStatusStore: WearLinkStatusStore,
+    private val foldedReminderResolver: com.ChronosFlow.VBCR.core.notifications.FoldedReminderResolver,
+    private val currentBlockNotificationCoordinator: com.ChronosFlow.VBCR.core.notifications.CurrentBlockNotificationCoordinator
 ) {
     private val dataClient by lazy { Wearable.getDataClient(context) }
 
-    fun publish(overview: ChronosDayOverview, redactTitles: Boolean = false, digest: String? = null) {
+    suspend fun publish(overview: ChronosDayOverview, redactTitles: Boolean = false, digest: String? = null) {
+        val folded = if (currentBlockNotificationCoordinator.isFoldRemindersEnabled()) {
+            runCatching {
+                foldedReminderResolver.resolve(LocalDateTime.now(), ZoneId.systemDefault())
+            }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
         runCatching {
             val request = PutDataMapRequest.create(WearDaySummaryContract.DAY_SUMMARY_PATH).apply {
-                overview.toWearDaySummaryEntries(redactTitles, digest).forEach { (key, value) ->
+                overview.toWearDaySummaryEntries(redactTitles, digest, folded).forEach { (key, value) ->
                     when (value) {
                         is Boolean -> dataMap.putBoolean(key, value)
                         is Int -> dataMap.putInt(key, value)

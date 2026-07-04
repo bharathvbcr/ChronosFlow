@@ -72,8 +72,21 @@ internal object ChronosTileUi {
      * [WearStartPage] value). Without this a tile is a glanceable dead end; tapping should always
      * land the wearer on the matching page so they can act.
      */
-    fun launchModifiers(context: Context, startPage: String): ModifiersBuilders.Modifiers =
+    fun launchModifiers(
+        context: Context,
+        startPage: String,
+        contentDescription: String? = null
+    ): ModifiersBuilders.Modifiers =
         ModifiersBuilders.Modifiers.Builder()
+            // A spoken glance for TalkBack, so the tile isn't read out as its literal glyphs
+            // ("check mark", "fire") — matching the description the complications already carry.
+            .apply {
+                contentDescription?.let {
+                    setSemantics(
+                        ModifiersBuilders.Semantics.Builder().setContentDescription(it).build()
+                    )
+                }
+            }
             .setClickable(
                 ModifiersBuilders.Clickable.Builder()
                     .setId(startPage)

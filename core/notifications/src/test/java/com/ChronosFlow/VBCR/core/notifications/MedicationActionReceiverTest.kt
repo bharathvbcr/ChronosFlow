@@ -36,11 +36,13 @@ class MedicationActionReceiverTest {
     private val medicationRepository: MedicationRepository = mockk(relaxed = true)
     private val alarmScheduler: AlarmScheduler = mockk(relaxed = true)
     private val alarmDeliveryCoordinator: AlarmDeliveryCoordinator = mockk(relaxed = true)
+    private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator = mockk(relaxed = true)
 
     private val receiver = MedicationActionReceiver().apply {
         this.medicationRepository = this@MedicationActionReceiverTest.medicationRepository
         this.alarmScheduler = this@MedicationActionReceiverTest.alarmScheduler
         this.alarmDeliveryCoordinator = this@MedicationActionReceiverTest.alarmDeliveryCoordinator
+        this.currentBlockNotificationCoordinator = this@MedicationActionReceiverTest.currentBlockNotificationCoordinator
         markInjected(this)
     }
 

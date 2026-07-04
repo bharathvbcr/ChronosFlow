@@ -49,6 +49,14 @@ object ChronosUiSettingsKeys {
     const val KEY_ASSIST_AUTO_APPLY = "assist.autoApplySuggestions"
     const val KEY_ONBOARDING_COMPLETED = "onboarding.completed"
 
+    /**
+     * When on (default), card editors show the attribute quick-bar and open compact — advanced
+     * sections stay collapsed until revealed (by a chip, adaptive hint, or a pin). Off flattens the
+     * forms to every-section-expanded and hides the quick-bar. Backs [EditorQuickBar]. Per-editor
+     * pin/hide use namespaced keys via [editorSectionPinnedKey]/[editorSectionHiddenKey].
+     */
+    const val KEY_ADAPTIVE_EDITOR_ENABLED = "editor.adaptive"
+
     /** Auto-fetch reading-list metadata (title/favicon/read-time) over the network. On by default. */
     const val KEY_READING_METADATA_AUTOFETCH = "reading.metadata.autofetch"
     const val APPEARANCE_LIGHT = "LIGHT"

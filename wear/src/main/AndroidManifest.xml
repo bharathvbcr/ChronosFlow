@@ -103,6 +103,22 @@
                 android:resource="@drawable/tile_preview_habits" />
         </service>
 
+        <!-- "Meds" glance: doses due today and the next few to take. -->
+        <service
+            android:name=".ChronosMedsTileProvider"
+            android:label="ChronosFlow Meds"
+            android:icon="@drawable/ic_chronosflow_tile"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <!-- Shown in the watch's tile picker so the tile is recognisable before it's added. -->
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/tile_preview_meds" />
+        </service>
+
         <!-- Watch-face complication: the "Now" glance (current block / focus countdown / next-up)
              for any face slot that accepts short text, long text, or a ranged value. -->
         <service

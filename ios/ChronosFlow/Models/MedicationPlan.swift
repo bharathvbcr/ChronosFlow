@@ -175,4 +175,13 @@ final class MedicationPlan {
             $0.status == .taken && Calendar.current.isDate($0.date, inSameDayAs: day)
         }
     }
+
+    /// Whether the dose scheduled at `minute` on `day` was already taken (multi-dose aware).
+    func isDoseTaken(on day: Date, scheduledMinute minute: Int) -> Bool {
+        (doseEvents ?? []).contains {
+            guard $0.status == .taken, Calendar.current.isDate($0.date, inSameDayAs: day) else { return false }
+            guard let recorded = $0.scheduledMinuteOfDay else { return true }
+            return recorded == minute
+        }
+    }
 }

@@ -24,6 +24,9 @@ class HabitActionReceiver : BroadcastReceiver() {
     @Inject
     lateinit var completeHabitByIdUseCase: CompleteHabitByIdUseCase
 
+    @Inject
+    lateinit var currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator
+
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
         val habitId = intent.getStringExtra(EXTRA_HABIT_ID) ?: return
@@ -36,8 +39,9 @@ class HabitActionReceiver : BroadcastReceiver() {
                 try {
                     completeHabitByIdUseCase(habitId, LocalDate.now())
 
-                    // Cancel the notification
-                    if (notificationId != -1) {
+                    if (intent.getBooleanExtra(EXTRA_REFRESH_CURRENT_BLOCK, false)) {
+                        currentBlockNotificationCoordinator.refresh()
+                    } else if (notificationId != -1) {
                         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                         notificationManager.cancel(notificationId)
                         ReminderNotificationGroups.refreshSummary(context)

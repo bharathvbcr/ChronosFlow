@@ -20,6 +20,8 @@ import com.ChronosFlow.VBCR.core.domain.repository.TimeBlockRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,7 +38,8 @@ class AlarmDeliveryCoordinator @Inject constructor(
     private val timeBlockRepository: TimeBlockRepository,
     private val habitRepository: HabitRepository,
     private val alarmScheduler: AlarmScheduler,
-    private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator
+    private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator,
+    private val foldedReminderResolver: FoldedReminderResolver
 ) {
     suspend fun deliverFromAlarmIntent(intent: Intent, receiverClass: Class<*>) {
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "ChronosFlow Reminder"
@@ -67,9 +70,43 @@ class AlarmDeliveryCoordinator @Inject constructor(
             receiverClass = receiverClass,
             requestType = alarmRequest?.type
         )
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         val task = loadTaskForRequest(requestId)
+        val isMedication = alarmRequest?.type == AlarmRequestType.MEDICATION ||
+            receiverClass == MedicationAlarmReceiver::class.java
+        val medicationPlanId = alarmRequest?.medicationPlanId
+        val blockId = alarmRequest?.blockId
+            ?: requestId?.takeIf { it.startsWith("daydial:") }
+                ?.split(":")
+                ?.getOrNull(2)
+                ?.takeUnless { it == "day" }
+        val habitId = blockId?.takeIf { it.startsWith("habit-") }?.removePrefix("habit-")
+            ?: blockId?.takeIf { habitRepository.getHabitById(it) != null }
+
+        if (currentBlockNotificationCoordinator.isFoldRemindersEnabled()) {
+            val folded = foldedReminderResolver.resolve(
+                LocalDateTime.now(),
+                ZoneId.systemDefault(),
+                FoldToggles.fromPreferences(context)
+            )
+            if (shouldSuppressFoldedReminderBanner(
+                    folded = foldedEntityKeys(folded),
+                    medicationPlanId = medicationPlanId?.takeIf { isMedication },
+                    taskId = task?.id,
+                    habitId = habitId
+                )
+            ) {
+                currentBlockNotificationCoordinator.refresh(alert = false)
+                markDelivered(requestId)
+                if (requestId != null) {
+                    alarmScheduler.cancelAlarm(requestId)
+                }
+                return
+            }
+        }
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
         val habitLaunchTarget = if (task == null) loadHabitLaunchTargetForRequest(requestId) else null
         val contentIntent = habitLaunchTarget
             ?.let { target ->
@@ -111,14 +148,6 @@ class AlarmDeliveryCoordinator @Inject constructor(
             notification.addAction(0, habitLaunchTarget?.label ?: "Open app", pendingIntent)
         }
 
-        val blockId = alarmRequest?.blockId
-            ?: requestId?.takeIf { it.startsWith("daydial:") }
-                ?.split(":")
-                ?.getOrNull(2)
-                ?.takeUnless { it == "day" }
-        val habitId = blockId?.takeIf { it.startsWith("habit-") }?.removePrefix("habit-")
-            ?: blockId?.takeIf { habitRepository.getHabitById(it) != null }
-
         if (habitId != null) {
             val habit = habitRepository.getHabitById(habitId)
             if (habit != null) {
@@ -152,8 +181,6 @@ class AlarmDeliveryCoordinator @Inject constructor(
             notification.addAction(0, "Mark Done", completePendingIntent)
         }
 
-        val isMedication = alarmRequest?.type == AlarmRequestType.MEDICATION || receiverClass == MedicationAlarmReceiver::class.java
-        val medicationPlanId = alarmRequest?.medicationPlanId
         if (isMedication && medicationPlanId != null) {
             val takeIntent = Intent(context, MedicationActionReceiver::class.java).apply {
                 action = MedicationActionReceiver.ACTION_TAKE

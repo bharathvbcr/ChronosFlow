@@ -12,6 +12,7 @@ import ChronosCore
 struct TasksView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(ShellState.self) private var shell: ShellState?
     @Query(sort: [SortDescriptor(\TaskItem.priority, order: .reverse),
                   SortDescriptor(\TaskItem.createdAt)]) private var tasks: [TaskItem]
     @Query(sort: \Goal.title) private var goals: [Goal]
@@ -31,6 +32,8 @@ struct TasksView: View {
     @State private var bulkImportCandidates: [String]?
     /// Drives a one-shot sensory tick on the key task actions (mirrors SleepView's feedback idiom).
     @State private var actionFeedback: ActionFeedback?
+    /// Scroll target for notification deep links (`chronosflow://tasks?id=…`).
+    @State private var scrollTarget: String?
 
     /// The outcome that just occurred, so `.sensoryFeedback` can play the matching haptic.
     private enum ActionFeedback { case completed, deleted }
@@ -74,46 +77,40 @@ struct TasksView: View {
     // Extracted so the `body` modifier chain stays within the SwiftUI type-checker budget.
     private var taskList: some View {
         LazyVStack(spacing: ChronosSpacing.compact) {
-            header
-            if !tasks.isEmpty { metricTiles }
-            addButton
+            tasksSection { header }
+            if !tasks.isEmpty { tasksSection { metricTiles } }
+            tasksSection { addButton }
             if !tasks.isEmpty {
-                TaskStatsCard(tasks: tasks)
-                assistantTriageCard
+                tasksSection { TaskStatsCard(tasks: tasks) }
+                tasksSection { assistantTriageCard }
             }
-            permissionAlerts
-            filterRow
+            tasksSection { permissionAlerts }
+            tasksSection { filterRow }
             if visibleTasks.isEmpty {
-                emptyState
+                tasksSection { emptyState }
             } else {
                 ForEach(visibleTasks) { task in
-                    TaskRow(
-                        task: task,
-                        onToggle: { complete(task) },
-                        onTap: { contextTask = task },
-                        onSchedule: { scheduleToday(task) },
-                        onDuplicate: { duplicate(task) },
-                        onEdit: { activeSheet = .edit(task) },
-                        onDelete: { delete(task) }
-                    )
+                    tasksSection {
+                        TaskRow(
+                            task: task,
+                            onToggle: { complete(task) },
+                            onTap: { contextTask = task },
+                            onSchedule: { scheduleToday(task) },
+                            onDuplicate: { duplicate(task) },
+                            onEdit: { activeSheet = .edit(task) },
+                            onDelete: { delete(task) }
+                        )
+                    }
+                    .id(task.id)
                 }
             }
         }
-        .padding(ChronosSpacing.standard)
+        .padding(.vertical, ChronosSpacing.standard)
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView { taskList }
-            .background { ChronosBackdrop() }
-            .navigationTitle("Tasks")
-            .chronosScrollMinimizedBar()
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { activeSheet = .new } label: { Image(systemName: "plus") }
-                        .accessibilityLabel("Add task")
-                }
-            }
+            chromedSurface
             .sheet(item: $activeSheet) { sheet in
                 switch sheet {
                 case .edit(let task): TaskEditorSheet(task: task)
@@ -139,7 +136,13 @@ struct TasksView: View {
             .sheet(item: bulkSheetBinding) { box in
                 TaskBulkImportSheet(candidates: box.candidates)
             }
-            .onAppear { drainPendingBulkImport() }
+            .onAppear {
+                drainPendingBulkImport()
+                drainPendingDeepLinkTask()
+            }
+            .onChange(of: shell?.pendingTaskID) { _, id in
+                if id != nil { drainPendingDeepLinkTask() }
+            }
             .task { await refreshNotificationAuthorization() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
@@ -156,6 +159,40 @@ struct TasksView: View {
                 }
             }
         }
+    }
+
+    /// Scroll surface plus title/toolbar chrome — matches Plan/Today edge-to-edge layout.
+    private var chromedSurface: some View {
+        tasksSurface
+            .navigationTitle("Tasks")
+            .chronosScrollMinimizedBar()
+            .chronosCommandPaletteToolbar()
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { activeSheet = .new } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Add task")
+                }
+            }
+    }
+
+    /// Full-bleed scroll column over the living backdrop; horizontal insets live on each section.
+    private var tasksSurface: some View {
+        ZStack {
+            ChronosBackdrop()
+            ScrollViewReader { proxy in
+                ScrollView { taskList }
+                    .scrollContentBackground(.hidden)
+                    .onChange(of: scrollTarget) { _, target in
+                        guard let target else { return }
+                        withAnimation(ChronosMotion.snappy) { proxy.scrollTo(target, anchor: .center) }
+                        scrollTarget = nil
+                    }
+            }
+        }
+    }
+
+    private func tasksSection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().padding(.horizontal, ChronosSpacing.standard)
     }
 
     // MARK: - Header & metrics
@@ -320,6 +357,8 @@ struct TasksView: View {
             await ChronosNotifications.shared.scheduleTask(toggled)
             if let next { await ChronosNotifications.shared.scheduleTask(next) }
         }
+        // Keep the folded reminder chip in the Live Activity in sync with the completion.
+        BlockLiveActivityCoordinator.refreshToday()
         actionFeedback = nil
         actionFeedback = .completed
     }
@@ -406,6 +445,17 @@ struct TasksView: View {
               Date().timeIntervalSince1970 - ts < 30 else { return }
         defaults?.removeObject(forKey: "share.pendingBulkTasks")
         bulkImportCandidates = candidates
+    }
+
+    /// Notification / widget deep link (`chronosflow://tasks?id=…`) — open the matching row's
+    /// quick-action sheet instead of landing on the list alone.
+    private func drainPendingDeepLinkTask() {
+        guard let id = shell?.pendingTaskID else { return }
+        shell?.pendingTaskID = nil
+        guard let task = tasks.first(where: { $0.id == id }) else { return }
+        if task.isCompleted && filter == .open { filter = .all }
+        scrollTarget = id
+        contextTask = task
     }
 }
 
@@ -812,6 +862,9 @@ private struct FilterChip: View {
         }
         .buttonStyle(.plain)
         .pressable()
+        // Selection is shown by fill color; announce it to VoiceOver too (§7), matching the
+        // canonical `SelectChip`.
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

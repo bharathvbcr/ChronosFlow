@@ -127,7 +127,7 @@ struct ChronosDialCanvas: View {
                     startAngle: .degrees(arc.startAngleDegrees),
                     endAngle: .degrees(arc.startAngleDegrees + arc.sweepDegrees),
                     clockwise: false)
-        context.stroke(path, with: .color(ChronosColors.brandPrimary.opacity(0.15)),
+        context.stroke(path, with: .color(ChronosColors.nightBand.opacity(0.20)),
                        style: StrokeStyle(lineWidth: outer - inner, lineCap: .butt))
     }
 

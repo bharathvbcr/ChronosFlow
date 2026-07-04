@@ -40,10 +40,15 @@ class ChronosHabitsTileProvider : TileService() {
             }
         }
 
+        val spoken = if (summary.habitsTotal == 0) {
+            "Habits, none today"
+        } else {
+            "Habits, ${summary.habitsDone} of ${summary.habitsTotal} done today"
+        }
         return Futures.immediateFuture(
             ChronosTileUi.tile(
                 ChronosTileUi.column(
-                    ChronosTileUi.launchModifiers(this, WearStartPage.HABITS),
+                    ChronosTileUi.launchModifiers(this, WearStartPage.HABITS, spoken),
                     *rows.toTypedArray()
                 )
             )
@@ -53,7 +58,9 @@ class ChronosHabitsTileProvider : TileService() {
     private fun habitLine(habit: com.ChronosFlow.VBCR.wear.model.WearHabit): String = buildString {
         if (habit.done) append("✓ ")
         append(habit.title)
-        if (habit.streak > 0) append(" · ${habit.streak}🔥")
+        // Flame-then-number, matching the app's Habits page ("🔥 N") so the streak reads the same
+        // whether the wearer sees it on the tile or drills into the app.
+        if (habit.streak > 0) append(" · 🔥 ${habit.streak}")
     }
 
     override fun onTileResourcesRequest(requestParams: RequestBuilders.ResourcesRequest): ListenableFuture<ResourceBuilders.Resources> =

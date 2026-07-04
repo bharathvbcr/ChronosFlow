@@ -69,6 +69,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chronosflow.app.watchkitapp
         CODE_SIGN_ENTITLEMENTS: ChronosWatch/ChronosWatch.entitlements
+        GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_WKApplication: YES
         INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.chronosflow.app
         INFOPLIST_KEY_CFBundleDisplayName: ChronosFlow
@@ -118,6 +119,7 @@ targets:
       - path: ChronosFlow/Planner/DialGeometry.swift
       - path: ChronosFlow/DesignSystem/ChronosTokens.swift
       - path: ChronosFlow/LiveActivity/FocusActivityAttributes.swift
+      - path: ChronosFlow/LiveActivity/BlockActivityAttributes.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chronosflow.app.widgets

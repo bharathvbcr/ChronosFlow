@@ -133,6 +133,19 @@ final class ShellState {
     /// Quick-Add menu, the command palette, or a deep link.
     var presentedRoute: ShellRoute?
 
+    /// Notification / deep-link handoff: pre-select a block on the Focus tab (`chronosflow://focus?blockId=…`).
+    var pendingFocusBlockID: String?
+    /// Open the sleep-log sheet when the Sleep route presents (`chronosflow://sleep?log=1`).
+    var pendingOpenSleepLog = false
+    /// Scroll/highlight target when opening Tasks from a reminder tap (`chronosflow://tasks?id=…`).
+    var pendingTaskID: String?
+    /// Open the matching plan's action sheet when Medication presents (`chronosflow://medication?id=…`).
+    var pendingMedicationPlanID: String?
+    /// Open the matching habit's context sheet when Habits presents (`chronosflow://habits?id=…`).
+    var pendingHabitID: String?
+    /// Scroll/open target when Goals presents (`chronosflow://goals?id=…`).
+    var pendingGoalID: String?
+
     /// Whether the Quick-Add menu is expanded above the bar (Android `quickAddExpanded`).
     var quickAddExpanded = false
 
@@ -152,6 +165,7 @@ final class ShellState {
     func open(_ route: ShellRoute) {
         quickAddExpanded = false
         commandPaletteShown = false
+        pendingFocusBlockID = nil
         presentedRoute = route
     }
 
@@ -161,7 +175,36 @@ final class ShellState {
         quickAddExpanded = false
         commandPaletteShown = false
         presentedRoute = nil
+        pendingTaskID = nil
+        pendingMedicationPlanID = nil
+        pendingHabitID = nil
+        pendingGoalID = nil
+        if tab != .focus { pendingFocusBlockID = nil }
         selectedTab = tab
+    }
+}
+
+// MARK: - Notification tap → deep link (cold-start safe)
+
+extension Notification.Name {
+    /// Posted when a notification default tap enqueues a `chronosflow://` URL for `RootView`.
+    static let chronosDeepLinkPending = Notification.Name("chronosDeepLinkPending")
+}
+
+/// Holds a deep link until the shell mounts — `UNUserNotificationCenterDelegate` may fire before
+/// `RootView` exists on cold launch.
+@MainActor
+enum ChronosPendingDeepLink {
+    private(set) static var url: URL?
+
+    static func enqueue(_ url: URL) {
+        self.url = url
+        NotificationCenter.default.post(name: .chronosDeepLinkPending, object: url)
+    }
+
+    static func consume() -> URL? {
+        defer { url = nil }
+        return url
     }
 }
 
