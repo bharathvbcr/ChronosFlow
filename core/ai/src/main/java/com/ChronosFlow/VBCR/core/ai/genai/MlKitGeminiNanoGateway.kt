@@ -46,12 +46,18 @@ class MlKitGeminiNanoGateway @Inject constructor(
     @Volatile private var downloadCooldownUntilMs: Long? = null
 
     /**
-     * Replay cache for completed on-device generations, keyed by (profile, prompt). Repeating the
-     * same request — re-opening a plan, re-proofreading unchanged text — returns instantly without a
-     * cold inference, and still serves while backgrounded since it never touches ML Kit. In-memory
-     * and bounded, so nothing is persisted off-device.
+     * Replay cache for completed on-device generations. Repeating the same request — re-opening a
+     * plan, re-proofreading unchanged text — returns instantly without a cold inference, and still
+     * serves while backgrounded since it never touches ML Kit. In-memory and bounded, so nothing is
+     * persisted off-device.
+     *
+     * The plain [generateText] path uses exact replay only. The prefix path ([generateTextWithPrefix])
+     * additionally matches near-duplicates by the **dynamic suffix**, so a re-plan whose data barely
+     * changed reuses the prior output. The two paths use separate namespaces ([plainNamespace] vs
+     * [suffixNamespace]) so a suffix-similarity scan never matches a full-prompt entry (whose vector
+     * would be dominated by the shared static prefix).
      */
-    private val responseCache = GenAiResponseCache(maxEntries = RESPONSE_CACHE_MAX_ENTRIES, ttlMs = RESPONSE_CACHE_TTL_MS)
+    private val responseCache = SemanticResponseCache(maxEntries = RESPONSE_CACHE_MAX_ENTRIES, ttlMs = RESPONSE_CACHE_TTL_MS)
 
     /**
      * Coalesces concurrent identical requests: on-device inference is a scarce, effectively serial
@@ -147,8 +153,9 @@ class MlKitGeminiNanoGateway @Inject constructor(
 
     override suspend fun generateText(prompt: String, profile: GenerationProfile): Result<String> {
         // A cache hit is a replay of the user's own prior on-device output, so it can be served
-        // before the foreground/readiness gates — it never runs inference.
-        responseCache.get(inFlightKey(profile, prompt), nowMs())?.let { return Result.success(it) }
+        // before the foreground/readiness gates — it never runs inference. Exact-only here: a plain
+        // prompt has no static/dynamic split, so a near-duplicate could differ in what matters.
+        responseCache.getExact(inFlightKey(profile, prompt), nowMs())?.let { return Result.success(it) }
 
         // Single-flight: if an identical request is already running, await its result instead of
         // launching a second inference. The leader (no existing entry) runs and shares its outcome.
@@ -199,7 +206,7 @@ class MlKitGeminiNanoGateway @Inject constructor(
             if (inference.isSuccess) {
                 val text = inference.getOrThrow()
                 if (text.isNotBlank()) {
-                    responseCache.put(inFlightKey(profile, prompt), text, nowMs())
+                    responseCache.put(inFlightKey(profile, prompt), plainNamespace(profile), prompt, text, nowMs())
                     return Result.success(text)
                 }
                 lastError = IllegalStateException("Gemini Nano returned an empty response.")
@@ -217,13 +224,22 @@ class MlKitGeminiNanoGateway @Inject constructor(
 
     private fun inFlightKey(profile: GenerationProfile, prompt: String): String = "${profile.name} $prompt"
 
+    /** Semantic-cache namespace for plain-prompt entries (exact-only; never near-duplicate matched). */
+    private fun plainNamespace(profile: GenerationProfile): String = "${profile.name}plain"
+
+    /** Semantic-cache namespace for suffix entries — kept separate so suffix scans never see full prompts. */
+    private fun suffixNamespace(profile: GenerationProfile): String = "${profile.name}suffix"
+
     override suspend fun generateTextWithPrefix(
         prefix: String,
         suffix: String,
         profile: GenerationProfile
     ): Result<String> {
         val combined = prefix + suffix
-        responseCache.get(inFlightKey(profile, combined), nowMs())?.let { return Result.success(it) }
+        // Exact replay on the full prompt, then a near-duplicate match on the dynamic suffix only —
+        // the static prefix (role + schema) is shared across every call and must not drive the match.
+        responseCache.lookup(inFlightKey(profile, combined), suffixNamespace(profile), suffix, nowMs())
+            ?.let { return Result.success(it) }
 
         val key = inFlightKey(profile, combined)
         var leader: CompletableDeferred<Result<String>>? = null
@@ -274,7 +290,7 @@ class MlKitGeminiNanoGateway @Inject constructor(
             if (inference.isSuccess) {
                 val text = inference.getOrThrow()
                 if (text.isNotBlank()) {
-                    responseCache.put(inFlightKey(profile, prefix + suffix), text, nowMs())
+                    responseCache.put(inFlightKey(profile, prefix + suffix), suffixNamespace(profile), suffix, text, nowMs())
                     return Result.success(text)
                 }
                 lastError = IllegalStateException("Gemini Nano returned an empty response.")

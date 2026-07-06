@@ -1,0 +1,86 @@
+package com.ChronosFlow.VBCR.core.ai.genai
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class SemanticResponseCacheTest {
+
+    private fun cache(
+        maxEntries: Int = 32,
+        ttlMs: Long = 10_000L,
+        threshold: Float = SemanticResponseCache.DEFAULT_SIMILARITY_THRESHOLD,
+        margin: Float = SemanticResponseCache.DEFAULT_SIMILARITY_MARGIN,
+        minTokens: Int = SemanticResponseCache.DEFAULT_MIN_TOKENS_FOR_SEMANTIC
+    ) = SemanticResponseCache(maxEntries, ttlMs, threshold, margin, minTokens)
+
+    @Test
+    fun `exact key replays stored value`() {
+        val cache = cache()
+        cache.put("k1", "BALANCED", "summarize my open tasks for the week", "SUMMARY", nowMs = 0)
+        assertEquals("SUMMARY", cache.getExact("k1", nowMs = 100))
+        assertEquals("SUMMARY", cache.lookup("k1", "BALANCED", "summarize my open tasks for the week", nowMs = 100))
+    }
+
+    @Test
+    fun `reordered near-duplicate hits semantically under a different exact key`() {
+        val cache = cache()
+        cache.put("k1", "BALANCED", "summarize my open tasks for the week", "SUMMARY", nowMs = 0)
+        // Same tokens, reordered, distinct exact key → exact miss, semantic hit.
+        val hit = cache.lookup("k2", "BALANCED", "for the week summarize my open tasks", nowMs = 50)
+        assertEquals("SUMMARY", hit)
+    }
+
+    @Test
+    fun `different namespace never shares an answer`() {
+        val cache = cache()
+        cache.put("k1", "BALANCED", "summarize my open tasks for the week", "SUMMARY", nowMs = 0)
+        val hit = cache.lookup("k2", "CREATIVE", "summarize my open tasks for the week", nowMs = 50)
+        assertNull(hit)
+    }
+
+    @Test
+    fun `dissimilar prompt misses on threshold`() {
+        val cache = cache()
+        cache.put("k1", "BALANCED", "summarize my open tasks for the week", "SUMMARY", nowMs = 0)
+        val hit = cache.lookup("k2", "BALANCED", "proofread this paragraph about hiking trips", nowMs = 50)
+        assertNull(hit)
+    }
+
+    @Test
+    fun `ambiguous match between two close neighbours is rejected by the margin gate`() {
+        val cache = cache()
+        cache.put("k1", "BALANCED", "review my morning workout routine plan", "MORNING", nowMs = 0)
+        cache.put("k2", "BALANCED", "review my evening workout routine plan", "EVENING", nowMs = 0)
+        // Equally close to both stored prompts (differs only by morning/evening) → cannot disambiguate.
+        val hit = cache.lookup("k3", "BALANCED", "review my workout routine plan", nowMs = 50)
+        assertNull(hit)
+    }
+
+    @Test
+    fun `expired entry is not returned`() {
+        val cache = cache(ttlMs = 1_000L)
+        cache.put("k1", "BALANCED", "summarize my open tasks for the week", "SUMMARY", nowMs = 0)
+        assertNull(cache.getExact("k1", nowMs = 2_000))
+        assertNull(cache.lookup("k2", "BALANCED", "for the week summarize my open tasks", nowMs = 2_000))
+    }
+
+    @Test
+    fun `short prompt falls back to exact-only matching`() {
+        val cache = cache(minTokens = 3)
+        cache.put("k1", "BALANCED", "plan the whole busy afternoon", "PLAN", nowMs = 0)
+        // Query has fewer than minTokens meaningful tokens → no semantic scan, and exact key differs.
+        assertNull(cache.lookup("k2", "BALANCED", "ok no", nowMs = 50))
+    }
+
+    @Test
+    fun `honours max entries with lru eviction`() {
+        val cache = cache(maxEntries = 2)
+        cache.put("k1", "BALANCED", "first distinct prompt alpha", "A", nowMs = 0)
+        cache.put("k2", "BALANCED", "second distinct prompt bravo", "B", nowMs = 0)
+        cache.put("k3", "BALANCED", "third distinct prompt charlie", "C", nowMs = 0)
+        assertNull(cache.getExact("k1", nowMs = 10)) // evicted as least-recently-used
+        assertEquals("B", cache.getExact("k2", nowMs = 10))
+        assertEquals("C", cache.getExact("k3", nowMs = 10))
+    }
+}

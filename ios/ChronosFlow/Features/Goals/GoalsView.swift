@@ -113,7 +113,7 @@ struct GoalsView: View {
                             goalsSection {
                                 sectionHeader("Active", subtitle: "\(active.count) in progress")
                             }
-                            ForEach(active) { goalsSection { card(for: $0) } }
+                            ForEach(active) { goal in goalsSection { card(for: goal) } }
                         }
 
                         if !completed.isEmpty {
@@ -130,7 +130,7 @@ struct GoalsView: View {
                                 }
                             }
                             if showCompleted {
-                                ForEach(completed) { goalsSection { card(for: $0) } }
+                                ForEach(completed) { goal in goalsSection { card(for: goal) } }
                             }
                         }
                     }

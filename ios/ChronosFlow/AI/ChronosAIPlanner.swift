@@ -53,6 +53,14 @@ final class ChronosAIPlanner {
 
     private var session: LanguageModelSession?
 
+    /// Shared, process-wide near-duplicate cache for on-device plan generations (Android parity:
+    /// `MlKitGeminiNanoGateway`'s `SemanticResponseCache`). Reuses a prior suggestion when the day's
+    /// dynamic inputs (existing blocks, free windows, readiness) are all but identical, so a repeat
+    /// "plan my day" skips a cold Foundation Models inference. Suggestions are minute-of-day templates
+    /// re-materialised onto the target date, so reuse across days is safe. MainActor-isolated because
+    /// the planner is `@MainActor` and the cache is not itself thread-safe.
+    @MainActor private static let planCache = SemanticResponseCache(capacity: 16, ttlMs: 10 * 60 * 1000)
+
     init() {
         switch SystemLanguageModel.default.availability {
         case .available:
@@ -156,6 +164,19 @@ final class ChronosAIPlanner {
 
         let temperature = ChronosSettings.shared.plannerProfile.temperature
 
+        // Near-duplicate replay: an all-but-identical day's inputs reuse the prior suggestion instead
+        // of paying a cold inference. Namespaced by temperature so planning profiles never share, and
+        // matched on the *dynamic* inputs only — the static instructions would otherwise dominate the
+        // similarity and merge unrelated requests.
+        let cacheNamespace = "planner:\(temperature)"
+        let cacheSignature = "\(busy) \(free) \(readinessHint)"
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        if let cached = Self.planCache.lookup(
+            exactKey: prompt, namespace: cacheNamespace, semanticText: cacheSignature, nowMs: nowMs
+        ), let decoded = Self.decodePlan(cached) {
+            return decoded
+        }
+
         // Attempt 1: guided generation — typed and schema-valid, no parsing needed.
         do {
             let response = try await session.respond(
@@ -163,7 +184,13 @@ final class ChronosAIPlanner {
                 generating: AIPlanSuggestion.self,
                 options: GenerationOptions(temperature: temperature)
             )
-            return response.content
+            let plan = response.content
+            if let encoded = Self.encodePlan(plan) {
+                Self.planCache.put(
+                    exactKey: prompt, namespace: cacheNamespace, semanticText: cacheSignature,
+                    value: encoded, nowMs: nowMs)
+            }
+            return plan
         } catch {
             // Fall through to the text + corrective-parse path below.
         }
@@ -263,6 +290,41 @@ final class ChronosAIPlanner {
                     durationMinutes: $0.durationMinutes,
                     rationale: structured.explanation)
             })
+    }
+
+    /// Compact JSON of an `AIPlanSuggestion` for the replay cache. Hand-rolled via `JSONSerialization`
+    /// so we don't add `Codable` to the `@Generable` types (whose macro owns their synthesized members).
+    private static func encodePlan(_ plan: AIPlanSuggestion) -> String? {
+        let dict: [String: Any] = [
+            "summary": plan.summary,
+            "blocks": plan.blocks.map { [
+                "title": $0.title,
+                "category": $0.category,
+                "startMinuteOfDay": $0.startMinuteOfDay,
+                "durationMinutes": $0.durationMinutes,
+                "rationale": $0.rationale
+            ] }
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func decodePlan(_ raw: String) -> AIPlanSuggestion? {
+        guard let data = raw.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let summary = obj["summary"] as? String,
+              let rawBlocks = obj["blocks"] as? [[String: Any]] else { return nil }
+        let blocks = rawBlocks.compactMap { b -> AISuggestedBlock? in
+            guard let title = b["title"] as? String,
+                  let category = b["category"] as? String,
+                  let start = b["startMinuteOfDay"] as? Int,
+                  let duration = b["durationMinutes"] as? Int,
+                  let rationale = b["rationale"] as? String else { return nil }
+            return AISuggestedBlock(
+                title: title, category: category,
+                startMinuteOfDay: start, durationMinutes: duration, rationale: rationale)
+        }
+        return AIPlanSuggestion(summary: summary, blocks: blocks)
     }
 
     /// The blocks a materialize pass produces plus the existing blocks it replaced. The caller
