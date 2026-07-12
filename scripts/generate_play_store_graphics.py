@@ -71,12 +71,6 @@ def radial_glow(img, cx, cy, radius, color, alpha_peak=80):
     img.paste(overlay, mask=overlay)
 
 
-def rounded_rect(draw, xy, radius, fill, stroke=None, stroke_width=2):
-    x0, y0, x1, y1 = xy
-    draw.rounded_rectangle([x0, y0, x1, y1], radius=radius, fill=fill,
-                            outline=stroke, width=stroke_width)
-
-
 def pill(draw, cx, cy, w, h, fill, text=None, text_fill=WHITE, f=None):
     x0, y0 = cx - w // 2, cy - h // 2
     draw.rounded_rectangle([x0, y0, x0 + w, y0 + h], radius=h // 2, fill=fill)
@@ -84,20 +78,6 @@ def pill(draw, cx, cy, w, h, fill, text=None, text_fill=WHITE, f=None):
         bbox = draw.textbbox((0, 0), text, font=f)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
         draw.text((cx - tw // 2, cy - th // 2), text, font=f, fill=text_fill)
-
-
-# ── Draw a minimalist phone-frame outline ─────────────────────────────────────
-def phone_frame(draw, x, y, w, h, scale=1):
-    bw = max(2, int(3 * scale))
-    r = int(24 * scale)
-    draw.rounded_rectangle([x, y, x + w, y + h], radius=r,
-                            outline=(*PRIMARY_LT, 180), width=bw)
-    # home-bar
-    bw2 = max(2, int(3 * scale))
-    bx = x + w // 2 - int(30 * scale)
-    by = y + h - int(18 * scale)
-    draw.rounded_rectangle([bx, by, bx + int(60 * scale), by + bw2 * 2],
-                            radius=4, fill=(*WHITE, 80))
 
 
 # ══════════════════════════════════════════════════════════════════════════════

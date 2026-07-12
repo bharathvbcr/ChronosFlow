@@ -1,0 +1,57 @@
+commands:
+  lint:
+  - flake8
+  - eslint
+  test:
+  - pytest
+  - npm test
+  typecheck:
+  - mypy
+  - tsc
+execution:
+  checkpoint_before_each_task: true
+  default_executor: native
+  max_repair_attempts: 3
+gates:
+  block_dependency_changes_without_approval: true
+  block_failed_commands: true
+  block_missing_tests_for_high_requirements: true
+  block_orphan_diffs: true
+  block_schema_change_without_migration: true
+  require_clean_git_before_task: true
+integrations:
+  agent_flow:
+    enabled: false
+    mode: jsonl
+    trace_path: .devcouncil/logs/traces.jsonl
+  code_review_graph:
+    command: code-review-graph
+    enabled: false
+    optional: true
+models:
+  provider: openrouter
+  roles:
+    arbiter:
+      model: openai/gpt-4o
+    critic_a:
+      model: openai/gpt-4o
+    critic_b:
+      model: anthropic/claude-3-opus
+    implementation_reviewer:
+      model: openai/gpt-4o
+    native_agent:
+      model: anthropic/claude-3.5-sonnet
+    planner_a:
+      model: anthropic/claude-3.5-sonnet
+    planner_b:
+      model: google/gemini-pro-1.5
+    spec_writer:
+      model: anthropic/claude-3.5-sonnet
+privacy:
+  redact_env_vars: true
+  redact_secrets_in_logs: true
+  store_prompts_locally: true
+project:
+  default_branch: main
+  name: ChronosFlow
+  root: .

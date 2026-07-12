@@ -92,6 +92,7 @@ import com.ChronosFlow.VBCR.core.ui.theme.categoryColor
 import com.ChronosFlow.VBCR.feature.daydial.TimeBlockUiModel
 import com.ChronosFlow.VBCR.feature.daydial.TimeRangeUi
 import com.ChronosFlow.VBCR.feature.daydial.formatClockLabel
+import com.ChronosFlow.VBCR.feature.daydial.formatMinuteOfDay
 import com.ChronosFlow.VBCR.feature.daydial.isAllDayCalendarImport
 import com.ChronosFlow.VBCR.feature.daydial.model.DayQuickItemKind
 import com.ChronosFlow.VBCR.feature.daydial.model.DayQuickItemUiModel
@@ -911,13 +912,8 @@ private fun PlanScheduleAttentionCard(
 
 internal fun conflictDescription(overlaps: List<TimeRangeUi>): String =
     overlaps.joinToString(prefix = "Overlapping blocks at: ", separator = ", ") { range ->
-        "${formatDialMinute(range.startMinute)}-${formatDialMinute(range.endMinute)}"
+        "${formatMinuteOfDay(range.startMinute)}-${formatMinuteOfDay(range.endMinute)}"
     }
-
-private fun formatDialMinute(minute: Int): String {
-    val normalized = ((minute % 1440) + 1440) % 1440
-    return "%02d:%02d".format(normalized / 60, normalized % 60)
-}
 
 @Composable
 private fun PlanAiSuggestionsCard(

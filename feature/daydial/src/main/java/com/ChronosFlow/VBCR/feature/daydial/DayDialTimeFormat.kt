@@ -1,5 +1,6 @@
 package com.ChronosFlow.VBCR.feature.daydial
 
+import com.ChronosFlow.VBCR.core.ui.components.formatClockMinute
 import java.util.Locale
 
 /**
@@ -29,13 +30,9 @@ internal fun parseMinuteOfDay(value: String): Int? {
 /**
  * Format a minute-of-day as a zero-padded 24-hour `"HH:MM"` label (e.g. `"09:05"`, `"14:30"`).
  * This is the editor/input style; for human-facing schedule rows use [formatClockLabel].
+ * Delegates to shared [formatClockMinute] so day-dial and core:ui stay in lockstep.
  */
-internal fun formatMinuteOfDay(minute: Int): String {
-    val normalized = ((minute % MINUTES_IN_DAY) + MINUTES_IN_DAY) % MINUTES_IN_DAY
-    val h = (normalized / 60) % 24
-    val m = normalized % 60
-    return String.format(Locale.getDefault(), "%02d:%02d", h, m)
-}
+internal fun formatMinuteOfDay(minute: Int): String = formatClockMinute(minute)
 
 /**
  * Format a minute-of-day as a 12-hour clock label with an AM/PM suffix

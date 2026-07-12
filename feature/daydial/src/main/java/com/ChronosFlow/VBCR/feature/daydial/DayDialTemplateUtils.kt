@@ -1,16 +1,12 @@
 package com.ChronosFlow.VBCR.feature.daydial
 
+import com.ChronosFlow.VBCR.core.ui.components.formatClockMinute
 import com.ChronosFlow.VBCR.feature.daydial.model.TemplateBlockBlueprint
-import java.util.Locale
 
 private const val DAY_IN_MINUTES = 1440
 
-fun formatDayDialMinute(minute: Int): String {
-    val normalized = ((minute % DAY_IN_MINUTES) + DAY_IN_MINUTES) % DAY_IN_MINUTES
-    val h = (normalized / 60) % 24
-    val m = normalized % 60
-    return String.format(Locale.getDefault(), "%02d:%02d", h, m)
-}
+/** Zero-padded 24-hour minute-of-day label; shared with [formatMinuteOfDay] / [formatClockMinute]. */
+fun formatDayDialMinute(minute: Int): String = formatClockMinute(minute)
 
 internal fun parseDayDialBackupBlocks(text: String): List<TemplateBlockBlueprint> {
     return text.lineSequence()

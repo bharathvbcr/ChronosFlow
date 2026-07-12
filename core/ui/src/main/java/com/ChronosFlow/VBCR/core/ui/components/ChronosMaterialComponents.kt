@@ -158,20 +158,6 @@ fun ChronosDropdownMenuItem(
 }
 
 @Composable
-fun ChronosActionRow(
-    modifier: Modifier = Modifier,
-    horizontalArrangement: Arrangement.Horizontal = Arrangement.spacedBy(ChronosSpacing.Small),
-    content: @Composable RowScope.() -> Unit
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = horizontalArrangement,
-        verticalAlignment = Alignment.CenterVertically,
-        content = content
-    )
-}
-
-@Composable
 fun ChronosListCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
