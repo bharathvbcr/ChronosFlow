@@ -10,7 +10,10 @@ import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,10 +32,8 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import com.ChronosFlow.VBCR.core.ui.components.ChronosSwitch
@@ -40,7 +41,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -53,11 +53,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import com.ChronosFlow.VBCR.core.data.health.HealthConnectSleepDataSource
+import com.ChronosFlow.VBCR.core.ui.motion.ChronosMotionDefaults
+import com.ChronosFlow.VBCR.core.ui.motion.ChronosTransitionDirection
+import com.ChronosFlow.VBCR.core.ui.motion.ChronosTransitionFactory
 import com.ChronosFlow.VBCR.core.ui.motion.ChronosValueAnimationFactory
 import com.ChronosFlow.VBCR.core.ui.settings.rememberChronosUiSettings
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
@@ -80,6 +87,20 @@ fun ChronosOnboarding(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { ONBOARDING_PAGE_COUNT })
+    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
+    val pageEnter = remember(reduceMotion) {
+        ChronosTransitionFactory.fadeScale(
+            durationMillis = if (reduceMotion) {
+                ChronosMotionDefaults.ReducedDurationMillis
+            } else {
+                ChronosMotionDefaults.DefaultDurationMillis
+            },
+            easing = ChronosMotionDefaults.MaterialStandardEasing,
+            direction = ChronosTransitionDirection.Neutral,
+            enterScale = if (reduceMotion) 1f else ChronosMotionDefaults.SharedAxisEnterScale,
+            exitScale = 1f
+        )
+    }
 
     // Feature toggles — the user's choices here decide which permissions we ask for on the next page.
     val features = rememberOnboardingFeatureChoices()
@@ -105,13 +126,13 @@ fun ChronosOnboarding(
             modifier = Modifier
                 .fillMaxSize()
                 .safeDrawingPadding()
-                .padding(horizontal = 24.dp, vertical = 16.dp)
+                .padding(horizontal = ChronosSpacing.Medium, vertical = ChronosSpacing.Standard)
         ) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 if (!isLastPage) {
                     ChronosTextButton(onClick = onComplete) { Text("Skip") }
                 } else {
-                    Spacer(Modifier.height(48.dp))
+                    Spacer(modifier = Modifier.height(ChronosSpacing.Hero))
                 }
             }
 
@@ -121,37 +142,49 @@ fun ChronosOnboarding(
                     .weight(1f)
                     .fillMaxWidth()
             ) { page ->
-                when (page) {
-                    0 -> OnboardingPage(
-                        icon = Icons.Outlined.Schedule,
-                        title = "Your whole day, on one dial",
-                        body = "ChronosFlow lays your day out as a 24-hour ring. Drop in blocks for " +
-                            "work, breaks, and routines, then watch the dial track what actually " +
-                            "happens against your plan."
-                    )
-                    1 -> OnboardingFeaturePage(features = features)
-                    else -> OnboardingPermissionsPage(
-                        notificationReasons = notificationReasons(
-                            medicationEnabled = medicationEnabled.value,
-                            habitsEnabled = habitsEnabled.value,
-                            reviewEnabled = reviewEnabled.value
-                        ),
-                        sleepImportRequested = sleepEnabled.value
-                    )
+                // Per-page enter: fade/scale via ChronosTransitionFactory; collapses to fade-only
+                // under reduced motion. Pager still owns swipe between pages.
+                var visible by remember(page) { mutableStateOf(false) }
+                LaunchedEffect(page) { visible = true }
+                AnimatedVisibility(
+                    visible = visible,
+                    enter = pageEnter.enter,
+                    exit = pageEnter.exit
+                ) {
+                    when (page) {
+                        0 -> OnboardingPage(
+                            title = "Your whole day, on one dial",
+                            body = "ChronosFlow lays your day out as a 24-hour ring. Drop in blocks for " +
+                                "work, breaks, and routines, then watch the dial track what actually " +
+                                "happens against your plan.",
+                            visual = {
+                                OnboardingMiniDial(reduceMotionEnabled = reduceMotion)
+                            }
+                        )
+                        1 -> OnboardingFeaturePage(features = features)
+                        else -> OnboardingPermissionsPage(
+                            notificationReasons = notificationReasons(
+                                medicationEnabled = medicationEnabled.value,
+                                habitsEnabled = habitsEnabled.value,
+                                reviewEnabled = reviewEnabled.value
+                            ),
+                            sleepImportRequested = sleepEnabled.value
+                        )
+                    }
                 }
             }
 
             PageIndicator(
                 pageCount = ONBOARDING_PAGE_COUNT,
                 currentPage = pagerState.currentPage,
-                modifier = Modifier.padding(vertical = 16.dp)
+                modifier = Modifier.padding(vertical = ChronosSpacing.Standard)
             )
 
             ChronosButton(
                 onClick = { advance() },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(ChronosSpacing.Hero + ChronosSpacing.Micro)
             ) {
                 Text(if (isLastPage) "Get started" else "Next")
             }
@@ -244,17 +277,17 @@ private fun OnboardingFeaturePage(features: List<OnboardingFeatureChoice>) {
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(ChronosSpacing.Small))
         OnboardingHeader(
             icon = Icons.Outlined.Tune,
             title = "Choose what to track",
             body = "Beyond your schedule, turn on only the trackers you want. Each adds its own " +
                 "section to the app — you can change any of these later in Settings."
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(ChronosSpacing.Medium))
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
         ) {
             features.forEach { feature ->
                 OnboardingFeatureToggle(
@@ -265,7 +298,7 @@ private fun OnboardingFeaturePage(features: List<OnboardingFeatureChoice>) {
                 )
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(ChronosSpacing.Small))
     }
 }
 
@@ -350,14 +383,14 @@ private fun OnboardingPermissionsPage(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(ChronosSpacing.Small))
         OnboardingHeader(
             icon = Icons.Outlined.Notifications,
             title = "Permissions you'll need",
             body = "We only ask for what your choices require, and you can grant these later in " +
                 "Settings instead. Nothing here is required to start using the planner."
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(ChronosSpacing.Medium))
 
         PermissionCard(
             icon = Icons.Outlined.Notifications,
@@ -371,7 +404,7 @@ private fun OnboardingPermissionsPage(
         )
 
         if (sleepImportRequested && sleepProviderAvailable) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(ChronosSpacing.Compact))
             PermissionCard(
                 icon = Icons.Outlined.Bedtime,
                 title = "Import sleep from Health Connect",
@@ -384,7 +417,7 @@ private fun OnboardingPermissionsPage(
                 onGrant = { sleepLauncher.launch(sleepDataSource.requestPermissions) }
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(ChronosSpacing.Small))
     }
 }
 
@@ -397,25 +430,25 @@ private fun OnboardingHeader(
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.primaryContainer,
-        modifier = Modifier.size(80.dp)
+        modifier = Modifier.size(ChronosSpacing.Hero + ChronosSpacing.Large)
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.size(38.dp)
+                modifier = Modifier.size(ChronosSpacing.Large + ChronosSpacing.Micro)
             )
         }
     }
-    Spacer(Modifier.height(20.dp))
+    Spacer(modifier = Modifier.height(ChronosSpacing.Standard + ChronosSpacing.Micro))
     Text(
         text = title,
         style = MaterialTheme.typography.headlineSmall,
         textAlign = TextAlign.Center,
         color = MaterialTheme.colorScheme.onBackground
     )
-    Spacer(Modifier.height(12.dp))
+    Spacer(modifier = Modifier.height(ChronosSpacing.Compact))
     Text(
         text = body,
         style = MaterialTheme.typography.bodyMedium,
@@ -426,9 +459,9 @@ private fun OnboardingHeader(
 
 @Composable
 private fun OnboardingPage(
-    icon: ImageVector,
     title: String,
     body: String,
+    visual: @Composable () -> Unit,
     action: (@Composable () -> Unit)? = null
 ) {
     Column(
@@ -436,28 +469,15 @@ private fun OnboardingPage(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.size(96.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(44.dp)
-                )
-            }
-        }
-        Spacer(Modifier.height(32.dp))
+        visual()
+        Spacer(modifier = Modifier.height(ChronosSpacing.Large))
         Text(
             text = title,
             style = MaterialTheme.typography.headlineSmall,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onBackground
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(ChronosSpacing.Compact))
         Text(
             text = body,
             style = MaterialTheme.typography.bodyLarge,
@@ -465,11 +485,83 @@ private fun OnboardingPage(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         if (action != null) {
-            Spacer(Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(ChronosSpacing.Medium + ChronosSpacing.Micro))
             action()
         }
     }
 }
+
+/**
+ * Lightweight decorative mini-dial for onboarding page 1 — static sample arcs (not live
+ * schedule data) with a quiet glow pulse that snaps static under reduced motion.
+ */
+@Composable
+private fun OnboardingMiniDial(
+    reduceMotionEnabled: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val trackColor = MaterialTheme.colorScheme.outline
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val primaryContainer = MaterialTheme.colorScheme.primaryContainer
+    val glow = remember { Animatable(if (reduceMotionEnabled) 0.45f else 0.28f) }
+    LaunchedEffect(reduceMotionEnabled) {
+        if (reduceMotionEnabled) {
+            glow.snapTo(0.45f)
+            return@LaunchedEffect
+        }
+        while (true) {
+            glow.animateTo(
+                0.55f,
+                ChronosValueAnimationFactory.stateChange(reducedMotion = false)
+            )
+            glow.animateTo(
+                0.28f,
+                ChronosValueAnimationFactory.stateChange(reducedMotion = false)
+            )
+        }
+    }
+    val sampleArcs = remember(primary, secondary, tertiary, primaryContainer) {
+        listOf(
+            OnboardingSampleArc(startAngle = -75f, sweepAngle = 70f, color = primary),
+            OnboardingSampleArc(startAngle = 20f, sweepAngle = 28f, color = tertiary),
+            OnboardingSampleArc(startAngle = 70f, sweepAngle = 55f, color = secondary),
+            OnboardingSampleArc(startAngle = 200f, sweepAngle = 48f, color = primaryContainer)
+        )
+    }
+    val dialSize = ChronosSpacing.Hero * 2 + ChronosSpacing.Medium
+    val stroke = ChronosSpacing.Small
+    Canvas(
+        modifier = modifier
+            .size(dialSize)
+            .semantics { contentDescription = "Sample day dial" }
+    ) {
+        val strokeWidth = stroke.toPx()
+        drawArc(
+            color = trackColor.copy(alpha = 0.22f + glow.value * 0.12f),
+            startAngle = -90f,
+            sweepAngle = 360f,
+            useCenter = false,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        )
+        sampleArcs.forEach { arc ->
+            drawArc(
+                color = arc.color.copy(alpha = 0.72f + glow.value * 0.2f),
+                startAngle = arc.startAngle,
+                sweepAngle = arc.sweepAngle,
+                useCenter = false,
+                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+            )
+        }
+    }
+}
+
+private data class OnboardingSampleArc(
+    val startAngle: Float,
+    val sweepAngle: Float,
+    val color: Color
+)
 
 @Composable
 private fun OnboardingFeatureToggle(
@@ -486,7 +578,7 @@ private fun OnboardingFeatureToggle(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(horizontal = ChronosSpacing.Standard + ChronosSpacing.Micro, vertical = ChronosSpacing.Compact),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -501,7 +593,7 @@ private fun OnboardingFeatureToggle(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(ChronosSpacing.Compact))
             ChronosSwitch(checked = checked, onCheckedChange = onCheckedChange)
         }
     }
@@ -528,31 +620,31 @@ private fun PermissionCard(
                     imageVector = icon,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(ChronosSpacing.Medium)
                 )
-                Spacer(Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(ChronosSpacing.Compact))
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(ChronosSpacing.Small))
             Text(
                 text = why,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(ChronosSpacing.Standard))
             if (granted) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Filled.CheckCircle,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(ChronosSpacing.Standard + ChronosSpacing.Micro)
                     )
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(ChronosSpacing.Small))
                     Text(
                         text = grantedLabel,
                         style = MaterialTheme.typography.labelLarge,
@@ -581,14 +673,14 @@ private fun PageIndicator(
         repeat(pageCount) { index ->
             val selected = index == currentPage
             val width by animateDpAsState(
-                targetValue = if (selected) 24.dp else 8.dp,
+                targetValue = if (selected) ChronosSpacing.Medium else ChronosSpacing.Small,
                 animationSpec = ChronosValueAnimationFactory.selection(reduceMotion),
                 label = "indicatorWidth"
             )
             Box(
                 modifier = Modifier
-                    .padding(horizontal = 4.dp)
-                    .height(8.dp)
+                    .padding(horizontal = ChronosSpacing.Micro)
+                    .height(ChronosSpacing.Small)
                     .width(width)
                     .clip(CircleShape)
                     .background(

@@ -112,6 +112,7 @@ import com.ChronosFlow.VBCR.core.ui.settings.ChronosFeatureFlags
 import com.ChronosFlow.VBCR.core.ui.settings.rememberChronosUiSettings
 import com.ChronosFlow.VBCR.core.ui.settings.resolveChronosDarkTheme
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosGlassTokens
+import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
 import com.ChronosFlow.VBCR.core.ui.theme.GlassElevation
 import com.ChronosFlow.VBCR.core.ui.theme.GlassTone
 import com.ChronosFlow.VBCR.core.ui.theme.LocalChronosHazeState
@@ -123,19 +124,24 @@ import androidx.window.core.layout.WindowSizeClass
 import kotlin.math.min
 
 private object ChronosShellDefaults {
-    val CompactPillHorizontalPadding = 16.dp
-    val CompactPillBottomMargin = 16.dp
+    val CompactPillHorizontalPadding = ChronosSpacing.Standard
+    val CompactPillBottomMargin = ChronosSpacing.Standard
     val CompactFabSize = 56.dp
-    val CompactFabRadius = 18.dp
+    val CompactFabRadius = ChronosGlassTokens.CompactRadius
     val CompactFloatingBarHeight = 72.dp
-    val CompactQuickAddMenuGap = 8.dp
-    val CompactPillRadius = 32.dp
+    val CompactQuickAddMenuGap = ChronosSpacing.Small
+    val CompactPillRadius = ChronosGlassTokens.PanelRadius
+    val CompactBarTonalElevation = ChronosSpacing.Small
+    val CompactBarShadowElevation = 10.dp
+    val CompactFabPressedElevation = ChronosSpacing.Compact
+    val CompactNavItemMinHeight = 60.dp
     const val CompactSelectedScale = 1.02f
     const val QuickAddExpandedRotationDegrees = 45f
     const val CompactNavigationDoubleClickMillis = 300L
     const val CompactNavigationDeferredClickIgnoreMillis = 420L
     val RailPanelWidth = 116.dp
-    val RailPanelPadding = 16.dp
+    val RailPanelPadding = ChronosSpacing.Standard
+    const val FocusActiveBadge = "•"
 }
 
 private object ChronosShellMotion {
@@ -742,8 +748,16 @@ private fun ChronosCompactFloatingBottomBar(
         } else {
             null
         },
-        tonalElevation = if (highContrastEnabled || frosted) 0.dp else 8.dp,
-        shadowElevation = if (highContrastEnabled || frosted) 0.dp else 10.dp
+        tonalElevation = if (highContrastEnabled || frosted) {
+            0.dp
+        } else {
+            ChronosShellDefaults.CompactBarTonalElevation
+        },
+        shadowElevation = if (highContrastEnabled || frosted) {
+            0.dp
+        } else {
+            ChronosShellDefaults.CompactBarShadowElevation
+        }
     ) {
         var barCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
         val itemBounds = remember { mutableStateMapOf<Int, ChronosNavItemBounds>() }
@@ -761,11 +775,12 @@ private fun ChronosCompactFloatingBottomBar(
             animationSpec = ChronosValueAnimationFactory.navIndicator(reducedMotion),
             label = "navIndicatorWidth"
         )
-        val indicatorColor = MaterialTheme.colorScheme.primaryContainer
+        val indicatorColor = MaterialTheme.colorScheme.secondaryContainer
+        val pillCornerRadius = ChronosGlassTokens.StandardRadius
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .padding(horizontal = ChronosSpacing.Small, vertical = 6.dp)
                 .onGloballyPositioned { barCoordinates = it }
                 // The selection pill is drawn (not laid out) so both its glide and width
                 // animate entirely in the draw phase — GPU-composited on the bar's render
@@ -778,7 +793,7 @@ private fun ChronosCompactFloatingBottomBar(
                         color = indicatorColor,
                         topLeft = Offset(indicatorX, bounds.y),
                         size = Size(width, bounds.height),
-                        cornerRadius = CornerRadius(24.dp.toPx())
+                        cornerRadius = CornerRadius(pillCornerRadius.toPx())
                     )
                 }
         ) {
@@ -804,7 +819,9 @@ private fun ChronosCompactFloatingBottomBar(
                 ChronosQuickAddButton(
                     expanded = quickAddExpanded,
                     reducedMotion = reducedMotion,
-                    onClick = onQuickAddClick
+                    onClick = onQuickAddClick,
+                    matchBarChrome = true,
+                    chromeElevated = !highContrastEnabled && !frosted
                 )
             }
         }
@@ -826,7 +843,7 @@ private fun ChronosQuickAddFab(
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(ChronosShellDefaults.CompactQuickAddMenuGap)
     ) {
         ChronosQuickAddMenu(
             actions = actions,
@@ -840,7 +857,9 @@ private fun ChronosQuickAddFab(
         ChronosQuickAddButton(
             expanded = expanded,
             reducedMotion = reducedMotion,
-            onClick = { onExpandedChange(!expanded) }
+            onClick = { onExpandedChange(!expanded) },
+            matchBarChrome = false,
+            chromeElevated = true
         )
     }
 }
@@ -883,13 +902,21 @@ private fun ChronosQuickAddMenu(
                 ),
             shape = menuShape,
             color = if (frostedMenu) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = if (frostedMenu) 0.dp else 6.dp,
-            shadowElevation = if (frostedMenu) 0.dp else 8.dp
+            tonalElevation = if (frostedMenu) {
+                0.dp
+            } else {
+                ChronosShellDefaults.CompactBarTonalElevation
+            },
+            shadowElevation = if (frostedMenu) {
+                0.dp
+            } else {
+                ChronosShellDefaults.CompactBarShadowElevation
+            }
         ) {
             Column(
                 modifier = Modifier
                     .widthIn(min = 260.dp, max = 320.dp)
-                    .padding(8.dp),
+                    .padding(ChronosSpacing.Small),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 actions.forEach { action ->
@@ -918,7 +945,9 @@ private fun ChronosQuickAddButton(
     expanded: Boolean,
     reducedMotion: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    matchBarChrome: Boolean = false,
+    chromeElevated: Boolean = true
 ) {
     val haptic = LocalHapticFeedback.current
     val iconRotation by animateFloatAsState(
@@ -926,6 +955,27 @@ private fun ChronosQuickAddButton(
         animationSpec = ChronosValueAnimationFactory.quickAddRotation(reducedMotion),
         label = "quickAddIconRotation"
     )
+    val barElevation = ChronosShellDefaults.CompactBarShadowElevation
+    val fabElevation = when {
+        matchBarChrome && !chromeElevated -> FloatingActionButtonDefaults.elevation(
+            defaultElevation = 0.dp,
+            pressedElevation = 0.dp,
+            focusedElevation = 0.dp,
+            hoveredElevation = 0.dp
+        )
+        matchBarChrome -> FloatingActionButtonDefaults.elevation(
+            defaultElevation = ChronosShellDefaults.CompactBarTonalElevation,
+            pressedElevation = barElevation,
+            focusedElevation = ChronosShellDefaults.CompactBarTonalElevation,
+            hoveredElevation = ChronosShellDefaults.CompactBarTonalElevation
+        )
+        else -> FloatingActionButtonDefaults.elevation(
+            defaultElevation = barElevation,
+            pressedElevation = ChronosShellDefaults.CompactFabPressedElevation,
+            focusedElevation = barElevation,
+            hoveredElevation = barElevation
+        )
+    }
     FloatingActionButton(
         onClick = {
             if (shouldPerformShellHaptic(ChronosShellHapticCue.QuickAddToggle, reducedMotion)) {
@@ -937,18 +987,13 @@ private fun ChronosQuickAddButton(
         shape = RoundedCornerShape(ChronosShellDefaults.CompactFabRadius),
         containerColor = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
-        elevation = FloatingActionButtonDefaults.elevation(
-            defaultElevation = 10.dp,
-            pressedElevation = 14.dp,
-            focusedElevation = 12.dp,
-            hoveredElevation = 12.dp
-        )
+        elevation = fabElevation
     ) {
         Icon(
             imageVector = Icons.Default.Add,
             contentDescription = if (expanded) "Close quick create" else "Open quick create",
             modifier = Modifier
-                .size(24.dp)
+                .size(ChronosSpacing.Medium)
                 .graphicsLayer { rotationZ = iconRotation }
         )
     }
@@ -975,7 +1020,7 @@ private fun ChronosQuickAddPill(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = ChronosSpacing.Compact, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1101,7 +1146,7 @@ private fun ChronosCompactNavigationItem(
 ) {
     val contentColor by animateColorAsState(
         targetValue = if (selected) {
-            MaterialTheme.colorScheme.onPrimaryContainer
+            MaterialTheme.colorScheme.onSecondaryContainer
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
@@ -1171,17 +1216,17 @@ private fun ChronosCompactNavigationItem(
                     handleNavigationClick(clickUptimeMillis)
                 }
             ),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(ChronosGlassTokens.StandardRadius),
         color = Color.Transparent,
         contentColor = contentColor
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 60.dp)
-                .padding(horizontal = 6.dp, vertical = 8.dp),
+                .heightIn(min = ChronosShellDefaults.CompactNavItemMinHeight)
+                .padding(horizontal = 6.dp, vertical = ChronosSpacing.Small),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Micro)
         ) {
             BadgedBox(
                 badge = {
@@ -1205,6 +1250,22 @@ private fun ChronosCompactNavigationItem(
 }
 
 @Composable
+private fun chronosShellBadgeContainerColor(badgeValue: String): Color =
+    if (badgeValue == ChronosShellDefaults.FocusActiveBadge) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.error
+    }
+
+@Composable
+private fun chronosShellBadgeContentColor(badgeValue: String): Color =
+    if (badgeValue == ChronosShellDefaults.FocusActiveBadge) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onError
+    }
+
+@Composable
 private fun ChronosAnimatedBadge(badgeValue: String?, reducedMotion: Boolean) {
     AnimatedVisibility(
         visible = badgeValue != null,
@@ -1213,7 +1274,13 @@ private fun ChronosAnimatedBadge(badgeValue: String?, reducedMotion: Boolean) {
         exit = scaleOut(ChronosValueAnimationFactory.pressScale(reducedMotion)) +
             fadeOut(ChronosValueAnimationFactory.selection(reducedMotion))
     ) {
-        Badge { Text(badgeValue.orEmpty()) }
+        val value = badgeValue.orEmpty()
+        Badge(
+            containerColor = chronosShellBadgeContainerColor(value),
+            contentColor = chronosShellBadgeContentColor(value)
+        ) {
+            Text(value)
+        }
     }
 }
 
@@ -1229,23 +1296,23 @@ private fun ChronosAdaptiveNavigationRail(
 ) {
     Surface(
         modifier = modifier.width(ChronosShellDefaults.RailPanelWidth),
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(ChronosGlassTokens.PanelRadius),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = if (highContrastEnabled) 0.dp else 4.dp,
-        shadowElevation = if (highContrastEnabled) 0.dp else 4.dp
+        tonalElevation = if (highContrastEnabled) 0.dp else ChronosSpacing.Micro,
+        shadowElevation = if (highContrastEnabled) 0.dp else ChronosSpacing.Micro
     ) {
         Column(
             modifier = Modifier
                 .fillMaxHeight()
-                .padding(vertical = 12.dp),
+                .padding(vertical = ChronosSpacing.Compact),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
         ) {
             Text(
                 text = "Navigate",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(vertical = 4.dp)
+                modifier = Modifier.padding(vertical = ChronosSpacing.Micro)
             )
             destinations.forEach { destination ->
                 val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
@@ -1263,8 +1330,13 @@ private fun ChronosAdaptiveNavigationRail(
                             badge = {
                                 val dayDialViewedDate =
                                     LocalChronosShellOverlayController.current?.dayDialViewedDate
-                                badgeValueFor(destination.id, shellState, dayDialViewedDate)?.let {
-                                    Badge { Text(it) }
+                                badgeValueFor(destination.id, shellState, dayDialViewedDate)?.let { value ->
+                                    Badge(
+                                        containerColor = chronosShellBadgeContainerColor(value),
+                                        contentColor = chronosShellBadgeContentColor(value)
+                                    ) {
+                                        Text(value)
+                                    }
                                 }
                             }
                         ) {
@@ -1297,7 +1369,7 @@ private fun badgeValueFor(
             today = java.time.LocalDate.now(),
             missedCount = shellState.missedBlocksCount
         )
-        ChronosRoute.SHELL_FOCUS -> if (shellState.focusActive) "•" else null
+        ChronosRoute.SHELL_FOCUS -> if (shellState.focusActive) ChronosShellDefaults.FocusActiveBadge else null
         ChronosRoute.SHELL_REVIEW -> numericBadge(shellState.unreadInsightsCount)
         else -> null
     }
