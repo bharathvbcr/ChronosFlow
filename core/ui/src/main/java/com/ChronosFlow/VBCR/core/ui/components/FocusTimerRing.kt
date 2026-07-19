@@ -19,7 +19,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -107,7 +111,11 @@ fun FocusTimerRing(
                 text = timeLabel,
                 style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.SemiBold,
-                color = primaryColor
+                color = primaryColor,
+                modifier = Modifier.semantics {
+                    contentDescription = "$timeLabel $sublabel"
+                    liveRegion = LiveRegionMode.Polite
+                }
             )
             Text(
                 text = sublabel,

@@ -91,12 +91,14 @@ object ChronosColors {
     val AssistOptional = Color(0xFF3859B8)
     val AssistSuggestion = Color(0xFF64B5F6)
 
-    // Dial ring legend accents + night band.
+    // Dial ring legend accents + night/wake bands.
     val DialRingTeal = Color(0xFF4DB6AC)
     val DialRingIndigo = Color(0xFF8E99F3)
     val DialRingGreen = Color(0xFF4CAF50)
     val DialRingAmber = Color(0xFFFF9800)
     val DialNightBand = Color(0xFF302A5E)
+    /** Warm daytime wash for the empty dial's non-night arc (decorative; gated off in high contrast). */
+    val DialWakeBand = Color(0xFFD4A574)
 
     // Medication adherence chart — mid-score threshold tint.
     val AdherenceMid = Color(0xFF6B5300)
