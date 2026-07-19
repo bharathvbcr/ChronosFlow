@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -29,8 +31,16 @@ class GoalViewModel @Inject constructor(
     private val observeGoalLinkedWorkUseCase: ObserveGoalLinkedWorkUseCase
 ) : ViewModel() {
 
-    val goals: StateFlow<List<GoalWithProgress>> = observeGoalsWithProgressUseCase()
+    private val goalsSource = observeGoalsWithProgressUseCase()
+
+    val goals: StateFlow<List<GoalWithProgress>> = goalsSource
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** True until the first goals emission arrives — used for list skeleton first paint. */
+    val isListLoading = goalsSource
+        .map { false }
+        .onStart { emit(true) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
     // The goal whose detail sheet is open; null collapses the linked-work stream to empty.
     private val detailGoalId = MutableStateFlow<String?>(null)
@@ -127,6 +137,15 @@ class GoalViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching {
                 goalRepository.deleteGoal(goal)
+            }.onFailure { e -> _errorState.value = e.message }
+        }
+    }
+
+    /** Re-inserts a goal after delete so Snackbar Undo can reverse it. */
+    fun restoreGoal(goal: Goal) {
+        viewModelScope.launch {
+            runCatching {
+                goalRepository.saveGoal(goal)
             }.onFailure { e -> _errorState.value = e.message }
         }
     }

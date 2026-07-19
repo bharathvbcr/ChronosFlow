@@ -38,6 +38,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -46,6 +47,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Before
 import org.junit.Test
@@ -96,6 +98,19 @@ class HabitViewModelTest {
     fun tearDown() {
         viewModel.viewModelScope.cancel()
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `isListLoading clears after first habits emission`() = runTest(testDispatcher) {
+        var latest: Boolean? = null
+        val job = launch {
+            viewModel.isListLoading.collect { latest = it }
+        }
+        runCurrent()
+
+        assertFalse(latest == true)
+        assertEquals(false, latest)
+        job.cancel()
     }
 
     @Test
@@ -349,6 +364,31 @@ class HabitViewModelTest {
             )
         }
         coVerify { habitReminderScheduler.cancelUpcomingHabitReminders("h-archive", any()) }
+    }
+
+    @Test
+    fun `restoreArchivedHabit reactivates habit and syncs reminders`() = runTest(testDispatcher) {
+        val habit = habit(id = "h-restore", title = "Restore me", isActive = false)
+        coEvery { habitRepository.saveHabit(any()) } returns Unit
+
+        viewModel.restoreArchivedHabit(habit)
+        runCurrent()
+
+        coVerify {
+            habitRepository.saveHabit(
+                match { it.isActive && it.id == "h-restore" }
+            )
+        }
+        // All params are matched explicitly: the scheduler's `now`/`zoneId` params have
+        // defaults computed at call time, so leaving them out would make MockK re-evaluate
+        // the defaults (Instant.now()) at verification time and flake on exact equality.
+        coVerify {
+            habitReminderScheduler.syncUpcomingHabitReminder(
+                match { it.id == "h-restore" && it.isActive },
+                any(),
+                any()
+            )
+        }
     }
 
     @Test

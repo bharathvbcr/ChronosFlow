@@ -296,13 +296,16 @@ class TaskFormSheetLogicTest {
 
     @Test
     fun taskPrioritySummaryNamesResolvedAlarmTime() {
+        // Build dueDate in the JVM default zone so 6:00 PM stays stable across CI/dev timezones.
+        val today = LocalDate.of(2026, 5, 25)
+        val dueDate = today.atTime(18, 0).atZone(ZoneId.systemDefault()).toInstant()
         assertEquals(
             "Urgent priority · alarm today at 6:00 PM",
             taskPrioritySummary(
                 priority = 2,
                 alarmEnabled = true,
-                dueDate = Instant.parse("2026-05-25T23:00:00Z"),
-                today = LocalDate.of(2026, 5, 25)
+                dueDate = dueDate,
+                today = today
             )
         )
     }

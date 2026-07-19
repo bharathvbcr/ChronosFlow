@@ -2,6 +2,7 @@ package com.ChronosFlow.VBCR.feature.goals
 
 import com.ChronosFlow.VBCR.core.ui.components.ChronosIconButton
 
+import com.ChronosFlow.VBCR.core.ui.components.ChronosButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosTextButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFilledTonalButton
 
@@ -26,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,8 +35,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -51,9 +55,12 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosMetricTile
 import com.ChronosFlow.VBCR.core.ui.components.ChronosOptionChips
 import com.ChronosFlow.VBCR.core.ui.components.ChronosScreenBackdrop
 import com.ChronosFlow.VBCR.core.ui.components.ChronosScreenScaffold
+import com.ChronosFlow.VBCR.core.ui.components.ChronosShimmerPlaceholder
 import com.ChronosFlow.VBCR.core.ui.components.OneShotNavTrigger
 import com.ChronosFlow.VBCR.core.ui.components.ChronosSectionHeader
 import com.ChronosFlow.VBCR.core.ui.components.ChronosWarningBanner
+import com.ChronosFlow.VBCR.core.ui.components.showChronosUndoSnackbar
+import com.ChronosFlow.VBCR.core.ui.shell.ChronosSnackbarHost
 import com.ChronosFlow.VBCR.core.ui.shell.LocalChronosShellBottomInset
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
 import java.time.LocalDate
@@ -73,9 +80,12 @@ fun GoalScreen(
     navTargetGeneration: Int = 0
 ) {
     val goals by viewModel.goals.collectAsStateWithLifecycle()
+    val isListLoading by viewModel.isListLoading.collectAsStateWithLifecycle()
     var sheetTarget by remember { mutableStateOf<GoalSheetTarget?>(null) }
     val normalizedCapture = initialAddCapture?.trim()?.takeIf(String::isNotBlank)
     val shellBottomInset = LocalChronosShellBottomInset.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
     OneShotNavTrigger(openAddSheet, navTargetGeneration, normalizedCapture) {
         sheetTarget = GoalSheetTarget.Add(prefillTitle = normalizedCapture)
@@ -114,7 +124,8 @@ fun GoalScreen(
     ChronosScreenScaffold(
         title = "Goals",
         onBack = onBack,
-        actions = { ChronosCommandPaletteAction(onOpenCommandPalette) }
+        actions = { ChronosCommandPaletteAction(onOpenCommandPalette) },
+        snackbarHost = { ChronosSnackbarHost(snackbarHostState) }
     ) { padding ->
         ChronosScreenBackdrop(
             modifier = Modifier
@@ -170,16 +181,32 @@ fun GoalScreen(
                     }
                 }
                 when {
+                    isListLoading -> item(key = "goals_list_loading") {
+                        ChronosShimmerPlaceholder(
+                            modifier = Modifier.fillMaxWidth(),
+                            rows = 4
+                        )
+                    }
                     goals.isEmpty() -> item {
                         ChronosEmptyState(
                             title = "No goals yet",
-                            message = "Add a goal, then link tasks and habits so completing them moves you forward."
+                            message = "Add a goal, then link tasks and habits so completing them moves you forward.",
+                            action = {
+                                ChronosButton(onClick = { sheetTarget = GoalSheetTarget.Add() }) {
+                                    Text("Add goal", fontWeight = FontWeight.SemiBold)
+                                }
+                            }
                         )
                     }
                     visibleActive.isEmpty() && visibleCompleted.isEmpty() -> item {
                         ChronosEmptyState(
                             title = "Nothing in $effectiveCategory",
-                            message = "No goals match this category yet. Switch the filter or add a new goal."
+                            message = "No goals match this category yet. Switch the filter or add a new goal.",
+                            action = {
+                                ChronosButton(onClick = { sheetTarget = GoalSheetTarget.Add() }) {
+                                    Text("Add goal", fontWeight = FontWeight.SemiBold)
+                                }
+                            }
                         )
                     }
                     else -> {
@@ -248,7 +275,16 @@ fun GoalScreen(
         },
         onArchive = if (sheetTarget is GoalSheetTarget.Edit) {
             {
-                (sheetTarget as? GoalSheetTarget.Edit)?.let { viewModel.deleteGoal(it.goal) }
+                (sheetTarget as? GoalSheetTarget.Edit)?.let { target ->
+                    val goal = target.goal
+                    viewModel.deleteGoal(goal)
+                    coroutineScope.launch {
+                        snackbarHostState.showChronosUndoSnackbar(
+                            message = "Goal deleted",
+                            onUndo = { viewModel.restoreGoal(goal) },
+                        )
+                    }
+                }
                 sheetTarget = null
             }
         } else {

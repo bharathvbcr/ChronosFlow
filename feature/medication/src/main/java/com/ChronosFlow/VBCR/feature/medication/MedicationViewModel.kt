@@ -47,6 +47,8 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -110,8 +112,16 @@ class MedicationViewModel @Inject constructor(
         }
     }
 
-    val plans = medicationRepository.observeMedicationPlans()
+    private val plansSource = medicationRepository.observeMedicationPlans()
+
+    val plans = plansSource
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** True until the first plans emission arrives — used for list skeleton first paint. */
+    val isListLoading = plansSource
+        .map { false }
+        .onStart { emit(true) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     /** Per-day taken/missed dose counts over the trailing 14 days, oldest first. */
     val adherenceTrend = observeMedicationAdherenceTrendUseCase(windowDays = 14)
@@ -463,6 +473,15 @@ class MedicationViewModel @Inject constructor(
     fun archive(plan: MedicationPlan) {
         viewModelScope.launch {
             medicationRepository.saveMedicationPlan(plan.copy(isActive = false))
+        }
+    }
+
+    /** Restores a soft-archived plan so Snackbar Undo can reverse [archive]. */
+    fun restoreArchived(plan: MedicationPlan) {
+        viewModelScope.launch {
+            val restored = plan.copy(isActive = true)
+            medicationRepository.saveMedicationPlan(restored)
+            scheduleReminders(restored)
         }
     }
 

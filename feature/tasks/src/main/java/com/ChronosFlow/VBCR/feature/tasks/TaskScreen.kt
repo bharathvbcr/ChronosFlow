@@ -97,12 +97,14 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosFilterChip
 import com.ChronosFlow.VBCR.core.ui.components.ChronosLinkOption
 import com.ChronosFlow.VBCR.core.ui.components.ChronosListCard
 import com.ChronosFlow.VBCR.core.ui.components.ChronosMetricTile
+import com.ChronosFlow.VBCR.core.ui.components.ChronosShimmerPlaceholder
 import com.ChronosFlow.VBCR.core.ui.shell.ChronosModalBottomSheet
 import com.ChronosFlow.VBCR.core.ui.components.ChronosCommandPaletteAction
 import com.ChronosFlow.VBCR.core.ui.components.ChronosPageHeader
 import com.ChronosFlow.VBCR.core.ui.components.ChronosScreenScaffold
 import com.ChronosFlow.VBCR.core.ui.components.OneShotNavTrigger
 import com.ChronosFlow.VBCR.core.ui.components.formatDisplayMinute
+import com.ChronosFlow.VBCR.core.ui.components.showChronosUndoSnackbar
 import com.ChronosFlow.VBCR.core.ui.motion.ChronosValueAnimationFactory
 import com.ChronosFlow.VBCR.core.ui.settings.rememberChronosUiSettings
 import com.ChronosFlow.VBCR.core.ui.settings.rememberPersistentUiStringSetting
@@ -137,6 +139,7 @@ fun TaskScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
+    val isListLoading by viewModel.isListLoading.collectAsStateWithLifecycle()
     val goals by viewModel.goals.collectAsStateWithLifecycle()
     val goalOptions = remember(goals) { goals.map { ChronosLinkOption(it.id, it.title) } }
     val taskSchedulesByTaskId by viewModel.taskSchedulesByTaskId.collectAsStateWithLifecycle()
@@ -262,6 +265,17 @@ fun TaskScreen(
             }
         }
         commandSheetTask = null
+    }
+
+    fun deleteTaskWithUndo(task: Task) {
+        val schedule = taskSchedulesByTaskId[task.id]
+        viewModel.deleteTask(task)
+        coroutineScope.launch {
+            snackbarHostState.showChronosUndoSnackbar(
+                message = "Task deleted",
+                onUndo = { viewModel.restoreDeletedTask(task, schedule) },
+            )
+        }
     }
 
     ChronosScreenScaffold(
@@ -401,7 +415,14 @@ fun TaskScreen(
                 }
             }
 
-            if (visibleTasks.isEmpty()) {
+            if (isListLoading) {
+                item(key = "tasks_list_loading") {
+                    ChronosShimmerPlaceholder(
+                        modifier = Modifier.animateItem().fillMaxWidth(),
+                        rows = 4
+                    )
+                }
+            } else if (visibleTasks.isEmpty()) {
                 item(key = "tasks_empty_state") {
                     EmptyTasks(
                         filter = filter,
@@ -413,7 +434,9 @@ fun TaskScreen(
                 items(visibleTasks, key = { it.id }) { task ->
                     val onToggle = remember(task.id) { { viewModel.toggleTask(task.id) } }
                     val onEdit = remember(task.id) { { sheetTarget = TaskSheetTarget.Edit(task, taskSchedulesByTaskId[task.id]) } }
-                    val onDelete = remember(task.id) { { viewModel.deleteTask(task) } }
+                    val onDelete = remember(task.id, taskSchedulesByTaskId[task.id]) {
+                        { deleteTaskWithUndo(task) }
+                    }
                     val onSchedule = remember(task.id) { { viewModel.scheduleTaskToday(task.id) } }
                     val onDuplicate = remember(task.id) { { viewModel.duplicateTask(task) } }
                     val onOpenContext = remember(task.id) { { openTaskContext(task) } }
@@ -496,7 +519,7 @@ fun TaskScreen(
             sheetTarget = null
         },
         onDelete = { task ->
-            viewModel.deleteTask(task)
+            deleteTaskWithUndo(task)
             sheetTarget = null
         },
         onDuplicate = { task ->
@@ -520,7 +543,19 @@ fun TaskScreen(
             taskTemplatesSetting.value = encodeTaskTemplates(upsertTaskTemplate(taskTemplates, template))
         },
         onDeleteTemplate = { id ->
+            val removed = taskTemplates.firstOrNull { it.id == id }
+            val previous = taskTemplates
             taskTemplatesSetting.value = encodeTaskTemplates(taskTemplates.filterNot { it.id == id })
+            if (removed != null) {
+                coroutineScope.launch {
+                    snackbarHostState.showChronosUndoSnackbar(
+                        message = "Template deleted",
+                        onUndo = {
+                            taskTemplatesSetting.value = encodeTaskTemplates(previous)
+                        },
+                    )
+                }
+            }
         },
         onAddAnother = {
                 title, desc, priority, dueDate, alarmEnabled, preferredDurationMinutes,

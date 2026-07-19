@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -81,8 +82,16 @@ class HabitViewModel @Inject constructor(
     val goals: StateFlow<List<Goal>> = goalRepository.observeGoals()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val activeHabits = getActiveHabitsUseCase()
+    private val activeHabitsSource = getActiveHabitsUseCase()
+
+    val activeHabits = activeHabitsSource
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** True until the first active-habits emission arrives — used for list skeleton first paint. */
+    val isListLoading = activeHabitsSource
+        .map { false }
+        .onStart { emit(true) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     private val _repairSuggestions = MutableStateFlow<List<HabitRepairSuggestion>>(emptyList())
     val repairSuggestions = _repairSuggestions.asStateFlow()
@@ -339,6 +348,15 @@ class HabitViewModel @Inject constructor(
         viewModelScope.launch {
             habitRepository.saveHabit(habit.copy(isActive = false))
             habitReminderScheduler.cancelUpcomingHabitReminders(habit.id)
+        }
+    }
+
+    /** Restores a soft-archived habit so Snackbar Undo can reverse [archiveHabit]. */
+    fun restoreArchivedHabit(habit: Habit) {
+        viewModelScope.launch {
+            val restored = habit.copy(isActive = true)
+            habitRepository.saveHabit(restored)
+            habitReminderScheduler.syncUpcomingHabitReminder(restored)
         }
     }
 

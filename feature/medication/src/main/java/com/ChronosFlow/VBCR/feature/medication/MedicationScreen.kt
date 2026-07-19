@@ -4,6 +4,7 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosIconButton
 
 import com.ChronosFlow.VBCR.core.ui.components.ChronosTextButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosOutlinedButton
+import com.ChronosFlow.VBCR.core.ui.components.ChronosButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFilledTonalButton
 
 import androidx.compose.animation.AnimatedContent
@@ -60,8 +61,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -78,10 +81,12 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosEmptyState
 import com.ChronosFlow.VBCR.core.ui.components.ChronosListCard
 import com.ChronosFlow.VBCR.core.ui.components.ChronosConfirmBottomSheet
 import com.ChronosFlow.VBCR.core.ui.components.ChronosMetricTile
+import com.ChronosFlow.VBCR.core.ui.components.ChronosShimmerPlaceholder
 import com.ChronosFlow.VBCR.core.ui.components.ChronosCommandPaletteAction
 import com.ChronosFlow.VBCR.core.ui.components.ChronosPageHeader
 import com.ChronosFlow.VBCR.core.ui.components.ChronosQuickAddChips
 import com.ChronosFlow.VBCR.core.ui.components.formatDisplayMinute
+import com.ChronosFlow.VBCR.core.ui.components.showChronosUndoSnackbar
 import com.ChronosFlow.VBCR.core.ui.motion.ChronosValueAnimationFactory
 import com.ChronosFlow.VBCR.core.ui.settings.rememberChronosUiSettings
 import com.ChronosFlow.VBCR.core.ui.shell.LocalChronosShellBottomInset
@@ -100,6 +105,7 @@ fun MedicationScreen(
     navTargetGeneration: Int = 0
 ) {
     val plans by viewModel.plans.collectAsStateWithLifecycle()
+    val isListLoading by viewModel.isListLoading.collectAsStateWithLifecycle()
     val recentHistoryTemplateIds by viewModel.recentHistoryTemplateIds.collectAsStateWithLifecycle()
     val status by viewModel.status.collectAsStateWithLifecycle()
     val showExactAlarmPermissionAction by viewModel.showExactAlarmPermissionAction.collectAsStateWithLifecycle()
@@ -110,6 +116,7 @@ fun MedicationScreen(
     val rewriteState by viewModel.rewriteState.collectAsStateWithLifecycle()
     val activePlans = plans.filter { it.isActive }
     val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
     // Sheet target: store a discriminator+id pair so state survives rotation.
     // "add" → Add sheet; "edit:<id>" → Edit sheet for that plan id.
     var sheetTargetKey by rememberSaveable { mutableStateOf<String?>(null) }
@@ -260,14 +267,26 @@ fun MedicationScreen(
                     )
                 }
             }
-            if (activePlans.isEmpty()) {
+            if (isListLoading) {
+                item(key = "med_list_loading") {
+                    ChronosShimmerPlaceholder(
+                        modifier = Modifier.animateItem().fillMaxWidth(),
+                        rows = 4
+                    )
+                }
+            } else if (activePlans.isEmpty()) {
                 item(key = "med_empty_state") {
                     ChronosEmptyState(
                         title = "No medication plans",
                         message = "Add a plan to schedule a reminder and track adherence.",
                         modifier = Modifier
                             .animateItem()
-                            .fillMaxWidth()
+                            .fillMaxWidth(),
+                        action = {
+                            ChronosButton(onClick = { setSheetTarget(MedicationSheetTarget.Add()) }) {
+                                Text("Add medication", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     )
                 }
                 item(key = "med_empty_quick_add") {
@@ -412,6 +431,12 @@ fun MedicationScreen(
                 viewModel.archive(plan)
                 planToArchiveId = null
                 setSheetTarget(null)
+                coroutineScope.launch {
+                    snackbarHostState.showChronosUndoSnackbar(
+                        message = "Medication archived",
+                        onUndo = { viewModel.restoreArchived(plan) },
+                    )
+                }
             },
             onDismiss = { planToArchiveId = null }
         )

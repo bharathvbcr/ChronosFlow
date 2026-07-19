@@ -22,6 +22,7 @@ import com.ChronosFlow.VBCR.core.domain.model.TaskAction
 import com.ChronosFlow.VBCR.core.domain.model.TaskAttachment
 import com.ChronosFlow.VBCR.core.domain.model.TaskChecklistItem
 import com.ChronosFlow.VBCR.core.domain.model.TaskContactSnapshot
+import com.ChronosFlow.VBCR.core.domain.model.TaskSchedule
 import com.ChronosFlow.VBCR.core.domain.repository.AlarmRequestRepository
 import com.ChronosFlow.VBCR.core.domain.repository.GoalRepository
 import com.ChronosFlow.VBCR.core.domain.repository.SleepScheduleRepository
@@ -51,6 +52,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -92,8 +94,16 @@ class TaskViewModel @Inject constructor(
         }
     }
 
-    val tasks = getTasksUseCase()
+    private val tasksSource = getTasksUseCase()
+
+    val tasks = tasksSource
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** True until the first tasks emission arrives — used for list skeleton first paint. */
+    val isListLoading = tasksSource
+        .map { false }
+        .onStart { emit(true) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     val goals: StateFlow<List<Goal>> = goalRepository.observeGoals()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -274,7 +284,20 @@ class TaskViewModel @Inject constructor(
             cancelTaskAlarms(task.id)
             taskScheduleRepository.deleteTaskSchedule(task.id)
             taskRepository.deleteTask(task)
-            _status.value = "Task deleted"
+        }
+    }
+
+    /** Re-inserts a task (and optional schedule) after a delete so Snackbar Undo can reverse it. */
+    fun restoreDeletedTask(task: Task, schedule: TaskSchedule? = null) {
+        viewModelScope.launch {
+            taskRepository.saveTask(task)
+            if (schedule != null) {
+                taskScheduleRepository.saveTaskSchedule(schedule)
+                syncRecurringTaskAlarmsUseCase(task, schedule)
+                schedulePersistedTaskAlarms(task.id)
+            } else if (task.priority >= 2 && task.dueDate?.isAfter(Instant.now()) == true) {
+                scheduleUrgentAlarm(task)
+            }
         }
     }
 

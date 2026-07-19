@@ -40,6 +40,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import com.ChronosFlow.VBCR.core.ui.shell.ChronosModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,7 +49,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +68,7 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosEmptyState
 import com.ChronosFlow.VBCR.core.ui.components.ChronosLinkOption
 import com.ChronosFlow.VBCR.core.ui.components.ChronosListCard
 import com.ChronosFlow.VBCR.core.ui.components.ChronosMetricTile
+import com.ChronosFlow.VBCR.core.ui.components.ChronosShimmerPlaceholder
 import com.ChronosFlow.VBCR.core.ui.components.ChronosConfirmBottomSheet
 import com.ChronosFlow.VBCR.core.ui.components.ChronosQuickAddChips
 import com.ChronosFlow.VBCR.core.ui.components.ChronosCommandPaletteAction
@@ -72,8 +76,10 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosPageHeader
 import com.ChronosFlow.VBCR.core.ui.components.ChronosScreenScaffold
 import com.ChronosFlow.VBCR.core.ui.components.OneShotNavTrigger
 import com.ChronosFlow.VBCR.core.ui.components.formatDisplayMinute
+import com.ChronosFlow.VBCR.core.ui.components.showChronosUndoSnackbar
 import com.ChronosFlow.VBCR.core.ui.motion.ChronosValueAnimationFactory
 import com.ChronosFlow.VBCR.core.ui.settings.rememberChronosUiSettings
+import com.ChronosFlow.VBCR.core.ui.shell.ChronosSnackbarHost
 import com.ChronosFlow.VBCR.core.ui.shell.LocalChronosShellBottomInset
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
 import java.time.LocalDate
@@ -90,6 +96,7 @@ fun HabitScreen(
     navTargetGeneration: Int = 0
 ) {
     val activeHabits by viewModel.activeHabits.collectAsStateWithLifecycle()
+    val isListLoading by viewModel.isListLoading.collectAsStateWithLifecycle()
     val allHabits by viewModel.allHabits.collectAsStateWithLifecycle()
     val goals by viewModel.goals.collectAsStateWithLifecycle()
     val goalOptions = remember(goals) { goals.map { ChronosLinkOption(it.id, it.title) } }
@@ -116,6 +123,8 @@ fun HabitScreen(
     val today by viewModel.today.collectAsStateWithLifecycle()
     val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
     val shellBottomInset = LocalChronosShellBottomInset.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
     OneShotNavTrigger(openAddSheet, navTargetGeneration, normalizedInitialAddCapture) {
         sheetTarget = HabitSheetTarget.Add(prefillTitle = normalizedInitialAddCapture)
@@ -136,7 +145,8 @@ fun HabitScreen(
     ChronosScreenScaffold(
         title = "Habits",
         onBack = onBack,
-        actions = { ChronosCommandPaletteAction(onOpenCommandPalette) }
+        actions = { ChronosCommandPaletteAction(onOpenCommandPalette) },
+        snackbarHost = { ChronosSnackbarHost(snackbarHostState) }
     ) { padding ->
         LazyColumn(
             modifier = Modifier
@@ -195,12 +205,24 @@ fun HabitScreen(
                     )
                 }
             }
-            if (activeHabits.isEmpty()) {
+            if (isListLoading) {
+                item(key = "habit_list_loading") {
+                    ChronosShimmerPlaceholder(
+                        modifier = Modifier.animateItem().fillMaxWidth(),
+                        rows = 4
+                    )
+                }
+            } else if (activeHabits.isEmpty()) {
                 item(key = "habit_empty_state") {
                     ChronosEmptyState(
                         title = "No active habits",
                         message = "Add one habit to start building a daily streak.",
-                        modifier = Modifier.animateItem()
+                        modifier = Modifier.animateItem(),
+                        action = {
+                            ChronosButton(onClick = { sheetTarget = HabitSheetTarget.Add() }) {
+                                Text("Add habit", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     )
                 }
                 item(key = "habit_empty_quick_add") {
@@ -343,6 +365,12 @@ fun HabitScreen(
                 viewModel.archiveHabit(habit)
                 habitToArchive = null
                 sheetTarget = null
+                coroutineScope.launch {
+                    snackbarHostState.showChronosUndoSnackbar(
+                        message = "Habit archived",
+                        onUndo = { viewModel.restoreArchivedHabit(habit) },
+                    )
+                }
             },
             onDismiss = { habitToArchive = null }
         )

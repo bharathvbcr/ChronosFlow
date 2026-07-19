@@ -23,6 +23,7 @@ import com.ChronosFlow.VBCR.core.domain.model.GoalLinkedHabit
 import com.ChronosFlow.VBCR.core.domain.model.GoalLinkedTask
 import com.ChronosFlow.VBCR.core.domain.model.GoalLinkedWork
 import com.ChronosFlow.VBCR.core.domain.model.GoalWithProgress
+import com.ChronosFlow.VBCR.core.ui.components.ChronosButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosEmptyState
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFormBottomSheet
 import com.ChronosFlow.VBCR.core.ui.components.ChronosSectionHeader
@@ -65,7 +66,12 @@ internal fun GoalDetailSheet(
         if (linkedWork.isEmpty) {
             ChronosEmptyState(
                 title = "No linked work yet",
-                message = "Link tasks and habits to this goal from their edit screens — completing them then moves this goal forward automatically."
+                message = "Link tasks and habits to this goal from their edit screens — completing them then moves this goal forward automatically.",
+                action = {
+                    ChronosButton(onClick = { onEdit(goal) }) {
+                        Text("Edit goal", fontWeight = FontWeight.SemiBold)
+                    }
+                }
             )
         }
 

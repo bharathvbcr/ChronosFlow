@@ -1,5 +1,6 @@
 package com.ChronosFlow.VBCR.feature.medication
 
+import app.cash.turbine.test
 import com.ChronosFlow.VBCR.core.domain.model.AlarmRequest
 import com.ChronosFlow.VBCR.core.domain.model.MedicationSchedule
 import com.ChronosFlow.VBCR.core.domain.model.MedicationDailyAdherence
@@ -124,6 +125,14 @@ class MedicationViewModelTest {
         viewModel.viewModelScope.cancel()
         TimeZone.setDefault(originalTimeZone)
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `isListLoading clears after first plans emission`() = runTest(testDispatcher) {
+        viewModel.isListLoading.test {
+            assertEquals(false, expectMostRecentItem())
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
@@ -366,6 +375,18 @@ class MedicationViewModelTest {
         advanceUntilIdle()
 
         assertEquals(false, archivedSlot.captured.isActive)
+    }
+
+    @Test
+    fun `restoreArchived marks plan active again`() = runTest(testDispatcher) {
+        val plan = medicationPlan(id = "plan-restore", isActive = false)
+        val restoredSlot = slot<MedicationPlan>()
+        coEvery { medicationRepository.saveMedicationPlan(capture(restoredSlot)) } returns Unit
+
+        viewModel.restoreArchived(plan)
+        advanceUntilIdle()
+
+        assertEquals(true, restoredSlot.captured.isActive)
     }
 
     @Test

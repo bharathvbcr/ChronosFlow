@@ -164,6 +164,14 @@ class TaskViewModelTest {
     }
 
     @Test
+    fun `isListLoading clears after first tasks emission`() = runTest(testDispatcher) {
+        viewModel.isListLoading.test {
+            assertEquals(false, expectMostRecentItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `addTask calls use case`() = runTest(testDispatcher) {
         val created = Task("1", "New Task", "Desc", false, 0, null, Instant.now(), Instant.now())
         coEvery { addTaskUseCase(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns created
@@ -425,6 +433,16 @@ class TaskViewModelTest {
 
         coVerify { taskRepository.deleteTask(task) }
         coVerify { alarmScheduler.cancelAlarm("task:1") }
+    }
+
+    @Test
+    fun `restoreDeletedTask reinserts repository task`() = runTest(testDispatcher) {
+        val task = Task("1", "Task 1", null, false, 0, null, Instant.now(), Instant.now())
+        coEvery { taskRepository.saveTask(task) } returns Unit
+
+        viewModel.restoreDeletedTask(task)
+
+        coVerify { taskRepository.saveTask(task) }
     }
 
     @Test
