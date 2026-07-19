@@ -61,6 +61,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -74,10 +76,12 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosCheckbox
 import com.ChronosFlow.VBCR.core.ui.components.ChronosCollapsibleSection
 import com.ChronosFlow.VBCR.core.ui.components.ChronosDropdownMenuItem
+import com.ChronosFlow.VBCR.core.ui.components.ChronosEmptyState
 import com.ChronosFlow.VBCR.core.ui.components.ChronosIconButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosListCard
 import com.ChronosFlow.VBCR.core.ui.components.ChronosOutlinedButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosSectionTitle
+import com.ChronosFlow.VBCR.core.ui.components.ChronosSkeleton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosTextButton
 import com.ChronosFlow.VBCR.core.ui.components.formatDisplayMinute
 import com.ChronosFlow.VBCR.core.ui.components.parseFlexibleMinute
@@ -242,7 +246,8 @@ internal fun JournalPageContent(
                             text = "Journal",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.semantics { heading() }
                         )
                         Text(
                             text = journalStreakLabel(streak) ?: "Start a streak today",
@@ -303,13 +308,20 @@ internal fun JournalPageContent(
         }
 
         if (entries.isEmpty()) {
-            ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "No reflections yet. Add a point above, or tap “New entry” for a fuller reflection with a mood.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            ChronosEmptyState(
+                title = "No reflections yet",
+                message = "Add a point above, or start a fuller reflection with a mood.",
+                modifier = Modifier.fillMaxWidth(),
+                action = {
+                    ChronosButton(
+                        onClick = { openNew(today) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("New entry", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            )
         } else {
             OutlinedTextField(
                 value = query,
@@ -441,7 +453,12 @@ private fun JournalImagePreviewDialog(uri: String, onDismiss: () -> Unit) {
                     contentScale = ContentScale.Fit
                 )
             } else {
-                CircularProgressIndicator(modifier = Modifier.padding(24.dp))
+                ChronosSkeleton(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(4f / 3f)
+                        .padding(ChronosSpacing.Standard)
+                )
             }
         }
     }

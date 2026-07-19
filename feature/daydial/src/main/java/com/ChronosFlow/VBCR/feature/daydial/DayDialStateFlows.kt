@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import java.time.LocalDate
 
@@ -19,6 +20,8 @@ internal class DayDialStateFlows(
     val selectedFocusBlock: StateFlow<TimeBlockUiModel?>,
     val timeBlocks: StateFlow<List<TimeBlockUiModel>>,
     val timeBlocksDomain: StateFlow<List<TimeBlock>>,
+    /** True until the selected date's first time-block emission arrives (and again on date change). */
+    val timeBlocksLoading: StateFlow<Boolean>,
     val freeTime: StateFlow<List<TimeRangeUi>>,
     val selectedBlock: StateFlow<TimeBlockUiModel?>,
     val dailyReview: StateFlow<DailyReview>
@@ -68,6 +71,12 @@ internal fun buildDayDialStateFlows(
         repository.getTimeBlocksByDate(date)
     }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val timeBlocksLoading = selectedDate.flatMapLatest { date ->
+        repository.getTimeBlocksByDate(date)
+            .map { false }
+            .onStart { emit(true) }
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), true)
+
     val freeTime = selectedDate.flatMapLatest { date ->
         repository.getTimeBlocksByDate(date)
     }.map { blocks ->
@@ -88,6 +97,7 @@ internal fun buildDayDialStateFlows(
         selectedFocusBlock = selectedFocusBlock,
         timeBlocks = timeBlocks,
         timeBlocksDomain = timeBlocksDomain,
+        timeBlocksLoading = timeBlocksLoading,
         freeTime = freeTime,
         selectedBlock = selectedBlock,
         dailyReview = dailyReview

@@ -24,6 +24,64 @@ class FocusTabStateTest {
     }
 
     @Test
+    fun `session complete celebration fires on finished and flat zero remaining`() {
+        assertTrue(
+            shouldPlayFocusSessionCompleteCelebration(
+                previousStatus = FocusExecutionStatus.RUNNING,
+                currentStatus = FocusExecutionStatus.FINISHED,
+                remainingSeconds = 0L,
+                awaitingPhaseAdvance = false,
+                isSplitSession = false
+            )
+        )
+        assertTrue(
+            shouldPlayFocusSessionCompleteCelebration(
+                previousStatus = FocusExecutionStatus.PAUSED,
+                currentStatus = FocusExecutionStatus.FINISHED,
+                remainingSeconds = 120L,
+                awaitingPhaseAdvance = false,
+                isSplitSession = true
+            )
+        )
+        assertTrue(
+            shouldPlayFocusSessionCompleteCelebration(
+                previousStatus = FocusExecutionStatus.RUNNING,
+                currentStatus = FocusExecutionStatus.RUNNING,
+                remainingSeconds = 0L,
+                awaitingPhaseAdvance = false,
+                isSplitSession = false
+            )
+        )
+        assertFalse(
+            shouldPlayFocusSessionCompleteCelebration(
+                previousStatus = FocusExecutionStatus.RUNNING,
+                currentStatus = FocusExecutionStatus.RUNNING,
+                remainingSeconds = 0L,
+                awaitingPhaseAdvance = false,
+                isSplitSession = true
+            )
+        )
+        assertFalse(
+            shouldPlayFocusSessionCompleteCelebration(
+                previousStatus = FocusExecutionStatus.RUNNING,
+                currentStatus = FocusExecutionStatus.SKIPPED,
+                remainingSeconds = 0L,
+                awaitingPhaseAdvance = false,
+                isSplitSession = false
+            )
+        )
+        assertFalse(
+            shouldPlayFocusSessionCompleteCelebration(
+                previousStatus = FocusExecutionStatus.IDLE,
+                currentStatus = FocusExecutionStatus.FINISHED,
+                remainingSeconds = 0L,
+                awaitingPhaseAdvance = false,
+                isSplitSession = false
+            )
+        )
+    }
+
+    @Test
     fun `skip action only appears for linked active sessions`() {
         assertTrue(
             shouldShowFocusTabSkipAction(

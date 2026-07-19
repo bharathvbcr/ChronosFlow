@@ -14,11 +14,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,9 +38,11 @@ import com.ChronosFlow.VBCR.core.domain.model.CaptureSource
 import com.ChronosFlow.VBCR.core.domain.model.InboxItem
 import com.ChronosFlow.VBCR.core.domain.model.ReadingUrls
 import com.ChronosFlow.VBCR.core.ui.components.ChronosButton
+import com.ChronosFlow.VBCR.core.ui.components.ChronosEmptyState
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFilledTonalButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosListCard
 import com.ChronosFlow.VBCR.core.ui.components.ChronosOutlinedButton
+import com.ChronosFlow.VBCR.core.ui.components.ChronosSwitch
 import com.ChronosFlow.VBCR.core.ui.components.ChronosTextButton
 import com.ChronosFlow.VBCR.core.ui.shell.ChronosModalBottomSheet
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
@@ -50,6 +50,7 @@ import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
 @Composable
 internal fun InboxPageRoute(
     onMessage: (String) -> Unit = {},
+    onShowUndoSnackbar: (message: String, onUndo: () -> Unit) -> Unit = { message, _ -> onMessage(message) },
     viewModel: InboxViewModel = hiltViewModel()
 ) {
     val items by viewModel.items.collectAsStateWithLifecycle()
@@ -63,21 +64,21 @@ internal fun InboxPageRoute(
     }
 
     if (items.isEmpty()) {
-        ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth().padding(vertical = ChronosSpacing.Medium)
-            ) {
-                Icon(Icons.Default.Inbox, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                Text("Inbox zero", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "Dump a quick thought or link here, then turn it into a task or reading item later.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+        ChronosEmptyState(
+            title = "Inbox zero",
+            message = "Dump a quick thought or link here, then turn it into a task or reading item later.",
+            modifier = Modifier.fillMaxWidth(),
+            action = {
+                ChronosButton(
+                    onClick = { showCaptureSheet = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Capture", fontWeight = FontWeight.SemiBold)
+                }
             }
-        }
+        )
     }
 
     items.forEach { item ->
@@ -92,7 +93,10 @@ internal fun InboxPageRoute(
             },
             onReading = { viewModel.triageToReading(item); onMessage("Saved to reading list") },
             onTask = { viewModel.triageToTask(item); onMessage("Added to tasks") },
-            onDelete = { viewModel.discard(item); onMessage("Removed") }
+            onDelete = {
+                viewModel.discard(item)
+                onShowUndoSnackbar("Removed") { viewModel.restore(item) }
+            }
         )
     }
 
@@ -197,7 +201,7 @@ private fun QuickCaptureSheet(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Switch(checked = saveToReading, onCheckedChange = { saveToReading = it })
+                    ChronosSwitch(checked = saveToReading, onCheckedChange = { saveToReading = it })
                 }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

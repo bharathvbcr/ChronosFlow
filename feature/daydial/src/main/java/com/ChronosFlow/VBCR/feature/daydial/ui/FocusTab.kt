@@ -9,6 +9,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import com.ChronosFlow.VBCR.core.ui.motion.chronosHapticClick
+import com.ChronosFlow.VBCR.core.ui.motion.ChronosValueAnimationFactory
+import com.ChronosFlow.VBCR.core.ui.motion.rememberChronosCompletionCelebration
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,17 +35,16 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.outlined.FreeBreakfast
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,6 +55,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -75,7 +77,6 @@ import com.ChronosFlow.VBCR.core.ui.components.FocusGlassCard
 import com.ChronosFlow.VBCR.core.ui.components.FocusMissedBadge
 import com.ChronosFlow.VBCR.core.ui.components.FocusCategoryChip
 import com.ChronosFlow.VBCR.core.ui.components.FocusSessionIconButton
-import com.ChronosFlow.VBCR.core.ui.motion.ChronosValueAnimationFactory
 import com.ChronosFlow.VBCR.core.ui.components.FocusTimerRing
 import com.ChronosFlow.VBCR.core.ui.components.formatDurationLabel
 import com.ChronosFlow.VBCR.core.ui.components.formatFocusCountdown
@@ -208,6 +209,37 @@ internal fun FocusTab(
         cachedMoodScore = cachedMoodScore,
         cachedEnergyScore = cachedEnergyScore
     )
+    // E1: one spring scale pulse + Confirm haptic when a session completes. Holds a brief
+    // post-FINISHED ring so the pulse is visible after active-session UI unmounts. No-op
+    // under reduced motion. FocusCompletionNotifier stays on the service/notification path.
+    val celebration = rememberChronosCompletionCelebration(reduceMotionEnabled)
+    var previousFocusStatus by remember { mutableStateOf(focusSession.status) }
+    var celebratedSessionStartedAt by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(
+        focusSession.status,
+        remainingSeconds,
+        focusSession.awaitingPhaseAdvance,
+        focusSession.isSplitSession,
+        focusSession.startedEpochMs,
+        reduceMotionEnabled
+    ) {
+        val previous = previousFocusStatus
+        previousFocusStatus = focusSession.status
+        val sessionKey = focusSession.startedEpochMs
+        if (sessionKey == 0L || celebratedSessionStartedAt == sessionKey) return@LaunchedEffect
+        if (!shouldPlayFocusSessionCompleteCelebration(
+                previousStatus = previous,
+                currentStatus = focusSession.status,
+                remainingSeconds = remainingSeconds,
+                awaitingPhaseAdvance = focusSession.awaitingPhaseAdvance,
+                isSplitSession = focusSession.isSplitSession
+            )
+        ) {
+            return@LaunchedEffect
+        }
+        celebratedSessionStartedAt = sessionKey
+        celebration.play(withHaptic = true)
+    }
     LaunchedEffect(sessionActive, selectedReadyBlock?.id) {
         if (!sessionActive) onRequestNextFocusSuggestion()
     }
@@ -309,7 +341,7 @@ internal fun FocusTab(
                         Icon(Icons.Default.Check, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (alreadyCompleted) "Completed" else "Mark complete",
+                            text = if (alreadyCompleted) "Completed" else "Complete",
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -343,6 +375,25 @@ internal fun FocusTab(
                             Text("Focus settings", fontWeight = FontWeight.SemiBold)
                         }
                     }
+                }
+            )
+        } else if (celebration.isCelebrating && !showSessionUi) {
+            val celebrationAccent = rememberFocusTimerAccent(
+                blockCategory = selectedBlock?.category,
+                blockId = selectedBlock?.id ?: focusSession.blockId,
+                moodScore = moodScore,
+                energyScore = energyScore
+            )
+            FocusTimerRing(
+                timeLabel = formatFocusCountdown(0L),
+                remainingFraction = 0f,
+                reduceMotionEnabled = reduceMotionEnabled,
+                highContrastEnabled = highContrastEnabled,
+                accentColor = celebrationAccent,
+                modifier = Modifier.graphicsLayer {
+                    val scale = celebration.scale
+                    scaleX = scale
+                    scaleY = scale
                 }
             )
         } else if (!showSessionUi) {
@@ -474,7 +525,12 @@ internal fun FocusTab(
                 remainingFraction = progressFraction,
                 reduceMotionEnabled = reduceMotionEnabled,
                 highContrastEnabled = highContrastEnabled,
-                accentColor = ringAccent
+                accentColor = ringAccent,
+                modifier = Modifier.graphicsLayer {
+                    val scale = celebration.scale
+                    scaleX = scale
+                    scaleY = scale
+                }
             )
 
             // The frozen ring alone reads ambiguously, so name the paused state
@@ -1017,6 +1073,31 @@ internal fun isFocusSessionActiveForTab(focusSession: FocusExecutionState): Bool
     focusSession.status == FocusExecutionStatus.RUNNING ||
         focusSession.status == FocusExecutionStatus.PAUSED
 
+/**
+ * True when Focus tab should play the session-complete micro-celebration.
+ * Covers explicit [FocusExecutionStatus.FINISHED] and a flat (non-split) session that
+ * reaches 0:00 while still [FocusExecutionStatus.RUNNING]. Split phase boundaries are
+ * excluded — those finish via [FocusExecutionStatus.FINISHED] on the last phase only.
+ */
+internal fun shouldPlayFocusSessionCompleteCelebration(
+    previousStatus: FocusExecutionStatus,
+    currentStatus: FocusExecutionStatus,
+    remainingSeconds: Long,
+    awaitingPhaseAdvance: Boolean,
+    isSplitSession: Boolean
+): Boolean {
+    if (currentStatus == FocusExecutionStatus.FINISHED &&
+        (previousStatus == FocusExecutionStatus.RUNNING ||
+            previousStatus == FocusExecutionStatus.PAUSED)
+    ) {
+        return true
+    }
+    return currentStatus == FocusExecutionStatus.RUNNING &&
+        remainingSeconds <= 0L &&
+        !awaitingPhaseAdvance &&
+        !isSplitSession
+}
+
 internal fun shouldShowFocusTabSkipAction(focusSession: FocusExecutionState): Boolean =
     isFocusSessionActiveForTab(focusSession) && focusSession.blockId != null
 
@@ -1467,7 +1548,8 @@ private fun FocusPhaseBoundaryControls(
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            modifier = Modifier.semantics { heading() }
         )
         ChronosButton(
             onClick = onAdvancePhase,

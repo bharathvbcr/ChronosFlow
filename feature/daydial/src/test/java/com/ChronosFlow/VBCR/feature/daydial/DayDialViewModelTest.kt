@@ -240,6 +240,7 @@ class DayDialViewModelTest {
             routineAssistPlanner = mockk(relaxed = true),
             genAiAssistCoordinator = mockk(relaxed = true),
             currentBlockNotificationCoordinator = mockk(relaxed = true),
+            separateFoldableAlarmReconciler = mockk(relaxed = true),
             appEventLog = AppEventLog(),
             deleteAllDataUseCase = mockk(relaxed = true),
             focusPhaseAdvanceBus = com.ChronosFlow.VBCR.core.data.focus.FocusPhaseAdvanceBus()
@@ -418,6 +419,14 @@ class DayDialViewModelTest {
             assertEquals("task-block-1", blocks.single().id)
             assertEquals("task-1", blocks.single().taskId)
             assertEquals(13 * 60, blocks.single().startMinuteOfDay)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `timeBlocksLoading clears after first emission for selected date`() = runTest(testDispatcher) {
+        viewModel.timeBlocksLoading.test {
+            assertEquals(false, expectMostRecentItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

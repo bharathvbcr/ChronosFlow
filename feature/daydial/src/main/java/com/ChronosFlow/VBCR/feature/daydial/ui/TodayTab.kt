@@ -11,6 +11,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import com.ChronosFlow.VBCR.core.ui.motion.chronosHapticClick
+import com.ChronosFlow.VBCR.core.ui.motion.rememberChronosCompletionCelebration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -60,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -78,6 +80,7 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosAssistChip
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFilterChip
 import com.ChronosFlow.VBCR.core.ui.components.ChronosListCard
 import com.ChronosFlow.VBCR.core.ui.components.ChronosSectionTitle
+import com.ChronosFlow.VBCR.core.ui.components.ChronosShimmerPlaceholder
 import com.ChronosFlow.VBCR.core.ui.components.formatDurationLabel
 import com.ChronosFlow.VBCR.core.ui.motion.ChronosMotionDefaults
 import com.ChronosFlow.VBCR.core.ui.motion.ChronosTransitionDirection
@@ -194,7 +197,8 @@ internal fun TodayTab(
     showSleepPrompt: Boolean = false,
     onLogSleep: () -> Unit = {},
     contentTopPadding: Dp = 0.dp,
-    contentBottomPadding: Dp = 0.dp
+    contentBottomPadding: Dp = 0.dp,
+    timelineLoading: Boolean = false
 ) {
     val dailyAction = remember(timeBlocks, activeBlock, nextBlock, missedBlocks) {
         resolveDailyAction(timeBlocks, activeBlock, nextBlock, missedBlocks)
@@ -280,14 +284,22 @@ internal fun TodayTab(
                             onCenterWindowOnNow = onCenterWindowOnNow
                         )
                         TodayDialLegend(showRingGuide = showRingGuide)
-                        DailyReviewHeader(
-                            review = review,
-                            onPlannedClick = onOpenPlanned,
-                            onActualClick = onOpenActual,
-                            onMissedClick = onOpenMissedRecovery,
-                            onOpenReview = onOpenReview,
-                            showReviewAction = reviewFeatureEnabled
-                        )
+                        if (timelineLoading) {
+                            ChronosShimmerPlaceholder(
+                                modifier = Modifier.fillMaxWidth(),
+                                rows = 2
+                            )
+                        } else {
+                            DailyReviewHeader(
+                                review = review,
+                                onPlannedClick = onOpenPlanned,
+                                onActualClick = onOpenActual,
+                                onMissedClick = onOpenMissedRecovery,
+                                onOpenReview = onOpenReview,
+                                onPlanDay = onOpenPlanTab,
+                                showReviewAction = reviewFeatureEnabled
+                            )
+                        }
                         Spacer(Modifier.height(bottomContentPadding))
                     }
                     Column(
@@ -297,46 +309,53 @@ internal fun TodayTab(
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Medium)
                     ) {
-                        DayQuickItemsSection(
-                            quickItems = quickItems,
-                            habitsEnabled = habitsFeatureEnabled,
-                            medicationEnabled = medicationFeatureEnabled,
-                            onOpenTasks = onOpenTasks,
-                            onOpenHabits = onOpenHabits,
-                            onOpenMedication = onOpenMedication,
-                            onTaskDone = onQuickTaskDone,
-                            onHabitDone = onQuickHabitDone,
-                            onMedicationTaken = onQuickMedicationTaken,
-                            onMedicationMissed = onQuickMedicationMissed,
-                            showContextualActions = true,
-                            onContextActionFailed = onQuickContextActionFailed
-                        )
-                        TodayDetailsSections(
-                            dailyAction = dailyAction,
-                            showQuickActions = showQuickActions,
-                            activeBlock = activeBlock,
-                            nextBlock = nextBlock,
-                            timeBlocks = timeBlocks,
-                            selectedBlockId = selectedBlockId,
-                            currentMinute = currentMinute,
-                            freeTime = freeTime,
-                            manualMissedBlockIds = manualMissedBlockIds,
-                            highContrastEnabled = highContrastEnabled,
-                            onEmptyAreaSelected = onEmptyAreaSelected,
-                            onStartFocus = onStartFocus,
-                            onCompleteBlock = onCompleteBlock,
-                            onUndoMissed = onUndoMissed,
-                            onBlockSelected = onBlockSelected,
-                            quickItems = quickItems,
-                            onQuickTaskDone = onQuickTaskDone,
-                            onQuickHabitDone = onQuickHabitDone,
-                            onQuickMedicationTaken = onQuickMedicationTaken,
-                            onQuickMedicationMissed = onQuickMedicationMissed,
-                            onQuickContextActionFailed = onQuickContextActionFailed,
-                            onOpenPlanTab = onOpenPlanTab,
-                            onShowMissed = onShowMissed,
-                            onAiStripAction = onAiStripAction
-                        )
+                        if (timelineLoading) {
+                            ChronosShimmerPlaceholder(
+                                modifier = Modifier.fillMaxWidth(),
+                                rows = 3
+                            )
+                        } else {
+                            DayQuickItemsSection(
+                                quickItems = quickItems,
+                                habitsEnabled = habitsFeatureEnabled,
+                                medicationEnabled = medicationFeatureEnabled,
+                                onOpenTasks = onOpenTasks,
+                                onOpenHabits = onOpenHabits,
+                                onOpenMedication = onOpenMedication,
+                                onTaskDone = onQuickTaskDone,
+                                onHabitDone = onQuickHabitDone,
+                                onMedicationTaken = onQuickMedicationTaken,
+                                onMedicationMissed = onQuickMedicationMissed,
+                                showContextualActions = true,
+                                onContextActionFailed = onQuickContextActionFailed
+                            )
+                            TodayDetailsSections(
+                                dailyAction = dailyAction,
+                                showQuickActions = showQuickActions,
+                                activeBlock = activeBlock,
+                                nextBlock = nextBlock,
+                                timeBlocks = timeBlocks,
+                                selectedBlockId = selectedBlockId,
+                                currentMinute = currentMinute,
+                                freeTime = freeTime,
+                                manualMissedBlockIds = manualMissedBlockIds,
+                                highContrastEnabled = highContrastEnabled,
+                                onEmptyAreaSelected = onEmptyAreaSelected,
+                                onStartFocus = onStartFocus,
+                                onCompleteBlock = onCompleteBlock,
+                                onUndoMissed = onUndoMissed,
+                                onBlockSelected = onBlockSelected,
+                                quickItems = quickItems,
+                                onQuickTaskDone = onQuickTaskDone,
+                                onQuickHabitDone = onQuickHabitDone,
+                                onQuickMedicationTaken = onQuickMedicationTaken,
+                                onQuickMedicationMissed = onQuickMedicationMissed,
+                                onQuickContextActionFailed = onQuickContextActionFailed,
+                                onOpenPlanTab = onOpenPlanTab,
+                                onShowMissed = onShowMissed,
+                                onAiStripAction = onAiStripAction
+                            )
+                        }
                         Spacer(Modifier.height(bottomContentPadding))
                     }
                 }
@@ -401,70 +420,78 @@ internal fun TodayTab(
                         dialRadiusScale = compactTodayDialRadiusScale
                     )
                     TodayDialLegend(showRingGuide = showRingGuide)
-                    // The active-block CTA lives inside the "Now & next" card below (identical
-                    // Start focus / Complete buttons), so the strip would only duplicate it —
-                    // show the strip for the states that have no live block to host the action.
-                    dailyAction
-                        ?.takeIf { it.kind != DailyActionKind.ACTIVE_BLOCK }
-                        ?.let { action ->
-                            val handlers = todayActionHandlers(
-                                action, activeBlock, nextBlock, currentMinute,
-                                onOpenPlanTab, onEmptyAreaSelected, onStartFocus, onCompleteBlock,
-                                onBlockSelected, onShowMissed, onAiStripAction
-                            )
-                            DailyActionStrip(
-                                action = action,
-                                onPrimary = handlers.first,
-                                onSecondary = handlers.second
-                            )
+                    if (timelineLoading) {
+                        ChronosShimmerPlaceholder(
+                            modifier = Modifier.fillMaxWidth(),
+                            rows = 3
+                        )
+                    } else {
+                        // The active-block CTA lives inside the "Now & next" card below (identical
+                        // Start focus / Complete buttons), so the strip would only duplicate it —
+                        // show the strip for the states that have no live block to host the action.
+                        dailyAction
+                            ?.takeIf { it.kind != DailyActionKind.ACTIVE_BLOCK }
+                            ?.let { action ->
+                                val handlers = todayActionHandlers(
+                                    action, activeBlock, nextBlock, currentMinute,
+                                    onOpenPlanTab, onEmptyAreaSelected, onStartFocus, onCompleteBlock,
+                                    onBlockSelected, onShowMissed, onAiStripAction
+                                )
+                                DailyActionStrip(
+                                    action = action,
+                                    onPrimary = handlers.first,
+                                    onSecondary = handlers.second
+                                )
+                            }
+                        DayQuickItemsSection(
+                            quickItems = quickItems,
+                            habitsEnabled = habitsFeatureEnabled,
+                            medicationEnabled = medicationFeatureEnabled,
+                            onOpenTasks = onOpenTasks,
+                            onOpenHabits = onOpenHabits,
+                            onOpenMedication = onOpenMedication,
+                            onTaskDone = onQuickTaskDone,
+                            onHabitDone = onQuickHabitDone,
+                            onMedicationTaken = onQuickMedicationTaken,
+                            onMedicationMissed = onQuickMedicationMissed,
+                            showContextualActions = true,
+                            onContextActionFailed = onQuickContextActionFailed
+                        )
+                        TodayNowAndNextSection(
+                            activeBlock = activeBlock,
+                            nextBlock = nextBlock,
+                            timeBlocks = timeBlocks,
+                            selectedBlockId = selectedBlockId,
+                            currentMinute = currentMinute,
+                            freeTime = freeTime,
+                            quickItems = quickItems,
+                            manualMissedBlockIds = manualMissedBlockIds,
+                            highContrastEnabled = highContrastEnabled,
+                            showInlineActions = dailyAction == null || dailyAction.kind == DailyActionKind.ACTIVE_BLOCK,
+                            onEmptyAreaSelected = onEmptyAreaSelected,
+                            onStartFocus = onStartFocus,
+                            onCompleteBlock = onCompleteBlock,
+                            onUndoMissed = onUndoMissed,
+                            onBlockSelected = onBlockSelected,
+                            onContextActionFailed = onQuickContextActionFailed,
+                            onAiStripAction = onAiStripAction
+                        )
+                        // Retrospective day summary sits below the live/actionable content: the
+                        // dial hub already carries at-a-glance progress ("3 of 7 done · 2h free"),
+                        // so the full Planned/Actual/Missed breakdown reads better as an end-of-scroll
+                        // recap than as the first card under the dial.
+                        DailyReviewHeader(
+                            review = review,
+                            onPlannedClick = onOpenPlanned,
+                            onActualClick = onOpenActual,
+                            onMissedClick = onOpenMissedRecovery,
+                            onOpenReview = onOpenReview,
+                            onPlanDay = onOpenPlanTab,
+                            showReviewAction = reviewFeatureEnabled
+                        )
+                        if (showQuickActions) {
+                            TodayQuickActions(onAiStripAction = onAiStripAction)
                         }
-                    DayQuickItemsSection(
-                        quickItems = quickItems,
-                        habitsEnabled = habitsFeatureEnabled,
-                        medicationEnabled = medicationFeatureEnabled,
-                        onOpenTasks = onOpenTasks,
-                        onOpenHabits = onOpenHabits,
-                        onOpenMedication = onOpenMedication,
-                        onTaskDone = onQuickTaskDone,
-                        onHabitDone = onQuickHabitDone,
-                        onMedicationTaken = onQuickMedicationTaken,
-                        onMedicationMissed = onQuickMedicationMissed,
-                        showContextualActions = true,
-                        onContextActionFailed = onQuickContextActionFailed
-                    )
-                    TodayNowAndNextSection(
-                        activeBlock = activeBlock,
-                        nextBlock = nextBlock,
-                        timeBlocks = timeBlocks,
-                        selectedBlockId = selectedBlockId,
-                        currentMinute = currentMinute,
-                        freeTime = freeTime,
-                        quickItems = quickItems,
-                        manualMissedBlockIds = manualMissedBlockIds,
-                        highContrastEnabled = highContrastEnabled,
-                        showInlineActions = dailyAction == null || dailyAction.kind == DailyActionKind.ACTIVE_BLOCK,
-                        onEmptyAreaSelected = onEmptyAreaSelected,
-                        onStartFocus = onStartFocus,
-                        onCompleteBlock = onCompleteBlock,
-                        onUndoMissed = onUndoMissed,
-                        onBlockSelected = onBlockSelected,
-                        onContextActionFailed = onQuickContextActionFailed,
-                        onAiStripAction = onAiStripAction
-                    )
-                    // Retrospective day summary sits below the live/actionable content: the
-                    // dial hub already carries at-a-glance progress ("3 of 7 done · 2h free"),
-                    // so the full Planned/Actual/Missed breakdown reads better as an end-of-scroll
-                    // recap than as the first card under the dial.
-                    DailyReviewHeader(
-                        review = review,
-                        onPlannedClick = onOpenPlanned,
-                        onActualClick = onOpenActual,
-                        onMissedClick = onOpenMissedRecovery,
-                        onOpenReview = onOpenReview,
-                        showReviewAction = reviewFeatureEnabled
-                    )
-                    if (showQuickActions) {
-                        TodayQuickActions(onAiStripAction = onAiStripAction)
                     }
                     Spacer(Modifier.height(bottomContentPadding))
                 }
@@ -564,11 +591,12 @@ private fun TodayDialHero(
             // AnimatedContent measures its contents with loose constraints to learn
             // their sizes, so fillMaxSize would let the dial's aspectRatio expand to
             // the full width and clip the ring top/bottom — pin the height instead.
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(dialHeight)
             ) {
+                val dialDiameter = minOf(maxWidth, maxHeight)
                 ChronosDial(
                     blocks = timeBlocks,
                     freeTimeSegments = freeTime,
@@ -601,9 +629,10 @@ private fun TodayDialHero(
                 )
                 DailyDialCenterOverlay(
                     state = centerState,
+                    dialDiameter = dialDiameter,
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .padding(horizontal = 24.dp)
+                        .padding(horizontal = ChronosSpacing.Medium)
                 )
             }
         }
@@ -643,7 +672,7 @@ private fun DialZoomControls(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Micro, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically
     ) {
         ChronosFilterChip(
@@ -673,7 +702,12 @@ private fun DialZoomControls(
                 Icon(Icons.Filled.ChevronRight, contentDescription = null)
             }
             if (isViewingToday && !dialZoomMinuteInWindow(currentMinute, compactWindowStart)) {
-                ChronosTextButton(onClick = onCenterWindowOnNow) { Text("Now") }
+                ChronosTextButton(
+                    onClick = onCenterWindowOnNow,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Center dial window on now"
+                    }
+                ) { Text("Now") }
             }
         }
     }
@@ -962,6 +996,7 @@ private fun TodayDetailedTimelineItemRow(
     item: TodayTimelineItem,
     onContextAction: (DayQuickContextActionUiModel) -> Unit
 ) {
+    val celebration = rememberChronosCompletionCelebration()
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
         Row(
             modifier = Modifier
@@ -1014,8 +1049,18 @@ private fun TodayDetailedTimelineItemRow(
                 ) {
                     if (item.primaryActionLabel != null) {
                         ChronosButton(
-                            onClick = item.onPrimaryAction ?: {},
+                            onClick = {
+                                if (!item.isDone) {
+                                    celebration.celebrate(withHaptic = false)
+                                }
+                                item.onPrimaryAction?.invoke()
+                            },
                             enabled = !item.isDone && item.onPrimaryAction != null,
+                            modifier = Modifier.graphicsLayer {
+                                val scale = celebration.scale
+                                scaleX = scale
+                                scaleY = scale
+                            },
                             shape = RoundedCornerShape(18.dp)
                         ) {
                             Text(item.primaryActionLabel)
@@ -1113,7 +1158,7 @@ private fun todayActionHandlers(
     onStartNext = onStartFocus,
     onPrepareNext = onBlockSelected,
     onReviewMissed = onShowMissed,
-    onFillGaps = { onAiStripAction("Fill gaps") }
+    onFillGaps = { onAiStripAction("Fill gap") }
 ) to dailyActionSecondaryHandler(
     action = action,
     activeBlockId = activeBlock?.id,
@@ -1122,7 +1167,7 @@ private fun todayActionHandlers(
     currentMinute = currentMinute,
     onCompleteBlock = onCompleteBlock,
     onPrepareNext = onBlockSelected,
-    onFillGaps = { onAiStripAction("Fill gaps") },
+    onFillGaps = { onAiStripAction("Fill gap") },
     onReflowDay = { onAiStripAction("Rebalance") }
 )
 
@@ -1218,6 +1263,7 @@ private fun TodayNowBlockContent(
     onUndoMissed: (String) -> Unit = {},
     onContextAction: (DayQuickContextActionUiModel) -> Unit
 ) {
+    val celebration = rememberChronosCompletionCelebration()
     val accentColor = categoryColor(block.category)
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -1328,10 +1374,20 @@ private fun TodayNowBlockContent(
             // a confirmed state so it reads consistently with the Focus tab and can't re-log.
             val alreadyCompleted = block.actualStartMinuteOfDay != null
             ChronosOutlinedButton(
-                onClick = { onCompleteBlock(block.id) },
+                onClick = {
+                    if (!alreadyCompleted) {
+                        celebration.celebrate(withHaptic = false)
+                    }
+                    onCompleteBlock(block.id)
+                },
                 enabled = !alreadyCompleted,
                 modifier = Modifier
                     .weight(1f)
+                    .graphicsLayer {
+                        val scale = celebration.scale
+                        scaleX = scale
+                        scaleY = scale
+                    }
                     .semantics {
                         contentDescription = todayCompleteBlockActionLabel(block)
                     },
@@ -1379,7 +1435,7 @@ private fun TodayOpenTimeContent(
     )
     if (showInlineActions) {
         ChronosOutlinedButton(
-            onClick = { onAiStripAction("Fill gaps") },
+            onClick = { onAiStripAction("Fill gap") },
             modifier = Modifier
                 .fillMaxWidth()
                 .semantics {
@@ -1458,7 +1514,7 @@ private fun TodayNextBlockRow(
 private fun TodayQuickActions(onAiStripAction: (String) -> Unit) {
     ChronosSectionTitle(title = "Quick actions")
     val suggestions = listOf(
-        "Fill gap" to "Fill gaps",
+        "Fill gap" to "Fill gap",
         "Rebalance" to "Rebalance",
         "Add breaks" to "Add breaks",
         "Protect focus" to "Protect focus"

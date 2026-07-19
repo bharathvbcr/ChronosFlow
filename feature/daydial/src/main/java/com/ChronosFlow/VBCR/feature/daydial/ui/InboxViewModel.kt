@@ -149,6 +149,11 @@ class InboxViewModel @Inject constructor(
         viewModelScope.launch { inboxRepository.delete(item.id) }
     }
 
+    /** Re-inserts a discarded inbox item so Snackbar Undo can reverse [discard]. */
+    fun restore(item: InboxItem) {
+        viewModelScope.launch { inboxRepository.save(item) }
+    }
+
     private companion object {
         const val TASK_TITLE_MAX = 200
         const val DEFAULT_PRIORITY = 2

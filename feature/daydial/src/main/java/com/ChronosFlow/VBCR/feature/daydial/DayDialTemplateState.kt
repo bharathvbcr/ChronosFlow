@@ -175,7 +175,8 @@ internal fun rememberDayDialTemplateState(
     onDeleteTemplate: (String) -> Unit,
     onApplyTemplateToDate: (TemplateBlueprint, java.time.LocalDate) -> Unit,
     routineCompletions: Map<String, RoutineCompletionSummary>,
-    showMessage: (String) -> Unit
+    showMessage: (String) -> Unit,
+    onShowUndoSnackbar: (message: String, onUndo: () -> Unit) -> Unit = { message, _ -> showMessage(message) }
 ): DayDialTemplateState {
     val builtInTemplates = remember { builtInDayDialTemplates() }
     val builtInTemplateIds = remember(builtInTemplates) { builtInTemplates.map { it.id }.toSet() }
@@ -333,8 +334,11 @@ internal fun rememberDayDialTemplateState(
         },
         deleteTemplate = if (templateToEdit != null && templateToEdit.id !in builtInTemplateIds) {
             {
-                onDeleteTemplate(templateToEdit.id)
-                showMessage("Deleted ${templateToEdit.name}")
+                val deleted = templateToEdit
+                onDeleteTemplate(deleted.id)
+                onShowUndoSnackbar("Deleted ${deleted.name}") {
+                    onPersistTemplate(deleted)
+                }
                 dismissTemplateEditor()
             }
         } else {

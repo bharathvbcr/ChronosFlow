@@ -312,6 +312,7 @@ class DayDialViewModel @Inject constructor(
     val selectedFocusBlock = stateFlows.selectedFocusBlock
     val timeBlocks = stateFlows.timeBlocks
     val timeBlocksDomain = stateFlows.timeBlocksDomain
+    val timeBlocksLoading = stateFlows.timeBlocksLoading
     val freeTime = stateFlows.freeTime
     val selectedBlock = stateFlows.selectedBlock
     val dailyReview = stateFlows.dailyReview

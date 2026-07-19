@@ -363,7 +363,10 @@ private fun DayDialDataScreen(
             viewModel.applyRoutineToDate(template.id, date, ROUTINE_TEMPLATE_ANCHOR_MINUTE)
         },
         routineCompletions = routineCompletions,
-        showMessage = { uiState.snackbarMessage = it }
+        showMessage = { uiState.snackbarMessage = it },
+        onShowUndoSnackbar = { message, onUndo ->
+            uiState.showSnackbar(message, actionLabel = "Undo", onAction = onUndo)
+        }
     )
 
     val restorePrevious = {

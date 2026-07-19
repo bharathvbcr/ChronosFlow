@@ -358,6 +358,7 @@ internal fun DayDialMainContent(
     val isViewingToday = selectedDate == LocalDate.now()
     val quickItems by viewModel.dayQuickItems.collectAsStateWithLifecycle()
     val lastCalendarSyncAtMillis by viewModel.lastCalendarSyncAtMillis.collectAsStateWithLifecycle()
+    val timeBlocksLoading by viewModel.timeBlocksLoading.collectAsStateWithLifecycle()
     val focusAccentBlockId = focusSession.blockId ?: focusedBlock?.id ?: selectedBlock?.id ?: activeBlock?.id
     val focusCachedAccent = viewModel.focusMoodAccentFor(focusAccentBlockId)
     val sidebarPageTransition = updateTransition(
@@ -458,7 +459,7 @@ internal fun DayDialMainContent(
                         contentBottomPadding = contentBottomPadding + scaffoldPadding.calculateBottomPadding(),
                         onAiStripAction = { label ->
                             when (label) {
-                                "Fill gaps" -> {
+                                "Fill gap", "Fill gaps" -> {
                                     viewModel.fillEmptyTime(addBreaksAutomatically)
                                     onActiveSheetChanged(SheetTarget.AiPlan)
                                 }
@@ -469,7 +470,8 @@ internal fun DayDialMainContent(
                                     onActiveSheetChanged(SheetTarget.AiPlan)
                                 }
                             }
-                        }
+                        },
+                        timelineLoading = timeBlocksLoading
                     )
             }
 
@@ -481,6 +483,7 @@ internal fun DayDialMainContent(
             ) {
                 PlanTab(
                         timeBlocks = sortedBlocks,
+                        timelineLoading = timeBlocksLoading,
                         suggestedBlocks = suggestedBlocks,
                         templates = templateState.allTemplates,
                         selectedDate = selectedDate,
@@ -854,7 +857,8 @@ internal fun DayDialMainContent(
                         onFocusLiveActivityPreferenceChanged = onFocusLiveActivityPreferenceChanged,
                         contentTopPadding = scaffoldPadding.calculateTopPadding(),
                         contentBottomPadding = contentBottomPadding + scaffoldPadding.calculateBottomPadding(),
-                        showMessage = showMessage
+                        showMessage = showMessage,
+                        onShowUndoSnackbar = onShowUndoSnackbar
                     )
                 }
             }

@@ -1,7 +1,14 @@
 package com.ChronosFlow.VBCR.feature.daydial
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import com.ChronosFlow.VBCR.core.domain.planner.DialGeometry
 import com.ChronosFlow.VBCR.core.domain.planner.DialRing
+import com.ChronosFlow.VBCR.feature.daydial.DialUtils.minuteToAngle
+import com.ChronosFlow.VBCR.feature.daydial.ui.dailyDialHubMaxWidth
+import com.ChronosFlow.VBCR.feature.daydial.ui.dailyDialHubShowsCategoryPill
+import com.ChronosFlow.VBCR.feature.daydial.ui.dailyDialHubShowsSecondaryLines
+import com.ChronosFlow.VBCR.feature.daydial.ui.isEmptyDayReview
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -58,6 +65,75 @@ class ChronosDialRingSemanticsTest {
         assertEquals(464f, scaledDialOuterDiameter(canvasSize = 600f, dialRadiusScale = 1.16f), 0.001f)
         assertEquals(232f, scaledDialHitRadius(canvasSize = 600f, dialRadiusScale = 1.16f), 0.001f)
         assertEquals(268f, scaledOuterRingTapRadius(canvasSize = 600f, dialRadiusScale = 1.16f), 0.001f)
+    }
+
+    @Test
+    fun wakeArcsComplementNightWindowOn24HourDial() {
+        val wake = buildDialWakeArcs(
+            nightStartMinute = 21 * 60,
+            nightEndMinute = 7 * 60,
+            compactMode = false,
+            compactWindowStart = 0
+        )
+        assertEquals(1, wake.size)
+        assertEquals(minuteToAngle(7 * 60), wake.single().startAngle, 0.001f)
+        // Night is 10h (150°); wake is the remaining 14h (210°).
+        assertEquals(210f, wake.single().sweepAngle, 0.001f)
+    }
+
+    @Test
+    fun selectedBlockCustomActionsExposeCompleteMoveAndResize() {
+        val block = block().copy(startMinuteOfDay = 9 * 60, durationMinutes = 60)
+        var completedId: String? = null
+        var movedTo: Int? = null
+        var resizedDuration: Int? = null
+        val actions = buildDialSelectedBlockCustomActions(
+            selectedBlock = block,
+            geometry = DialGeometry(),
+            onComplete = { completedId = it },
+            onMoved = { _, minute -> movedTo = minute },
+            onMoveCommitted = { _, minute -> movedTo = minute },
+            onResize = { _, _, duration -> resizedDuration = duration },
+            onResizeCommitted = { _, _, duration -> resizedDuration = duration }
+        )
+        assertEquals(
+            listOf(
+                DialA11yActionLabels.COMPLETE,
+                DialA11yActionLabels.MOVE_EARLIER,
+                DialA11yActionLabels.MOVE_LATER,
+                DialA11yActionLabels.RESIZE_SHORTER,
+                DialA11yActionLabels.RESIZE_LONGER
+            ),
+            actions.map { it.label }
+        )
+        assertTrue(actions[0].action())
+        assertEquals("block", completedId)
+        assertTrue(actions[1].action())
+        assertEquals(9 * 60 - 15, movedTo)
+        assertTrue(actions[4].action())
+        assertEquals(75, resizedDuration)
+    }
+
+    @Test
+    fun hubWidthCapsToInnerClearZone() {
+        assertEquals(165.dp, dailyDialHubMaxWidth(300.dp))
+        assertTrue(dailyDialHubShowsSecondaryLines(fontScale = 1f, availableHeight = 100.dp))
+        assertFalse(dailyDialHubShowsSecondaryLines(fontScale = 1.4f, availableHeight = 100.dp))
+        assertFalse(dailyDialHubShowsCategoryPill(fontScale = 1.4f, availableHeight = 80.dp))
+    }
+
+    @Test
+    fun emptyDayReviewCollapsesZeroMetrics() {
+        assertTrue(
+            isEmptyDayReview(
+                DailyReview(plannedMinutes = 0, actualMinutes = 0, missedMinutes = 0, completedBlocks = 0)
+            )
+        )
+        assertFalse(
+            isEmptyDayReview(
+                DailyReview(plannedMinutes = 30, actualMinutes = 0, missedMinutes = 0, completedBlocks = 0)
+            )
+        )
     }
 
     private fun block(

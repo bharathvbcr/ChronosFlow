@@ -85,7 +85,7 @@ class DailyActionResolverTest {
         )
         assertEquals(DailyActionKind.OPEN_TIME, action?.kind)
         assertEquals("Add block", action?.primaryLabel)
-        assertEquals("Fill gaps", action?.secondaryLabel)
+        assertEquals("Fill gap", action?.secondaryLabel)
     }
 
     private fun block(id: String, start: Int) = TimeBlockUiModel(

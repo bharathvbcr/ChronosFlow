@@ -313,7 +313,8 @@ internal fun SidebarPageContent(
     onFocusLiveActivityPreferenceChanged: () -> Unit = {},
     contentTopPadding: Dp = 0.dp,
     contentBottomPadding: Dp = 0.dp,
-    showMessage: (String) -> Unit
+    showMessage: (String) -> Unit,
+    onShowUndoSnackbar: (message: String, onUndo: () -> Unit) -> Unit = { message, _ -> showMessage(message) }
 ) {
     val backdropMutedText = MaterialTheme.colorScheme.onSurfaceVariant
     var sleepStartText by remember(sleepScheduleStartMinute) {
@@ -398,7 +399,7 @@ internal fun SidebarPageContent(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 ChronosFilledTonalButton(onClick = onFillGaps, modifier = Modifier.weight(1f)) {
-                                    Text("Fill gaps")
+                                    Text("Fill gap")
                                 }
                                 ChronosFilledTonalButton(onClick = onRebalance, modifier = Modifier.weight(1f)) {
                                     Text("Rebalance")
@@ -471,7 +472,10 @@ internal fun SidebarPageContent(
                 // Read-later queue: save links, fetch metadata, remind, and read with focus.
                 SidebarPage.READING_LIST -> ReadingListPageRoute(onMessage = showMessage)
                 // Quick-capture inbox: dump anything, triage later.
-                SidebarPage.INBOX -> InboxPageRoute(onMessage = showMessage)
+                SidebarPage.INBOX -> InboxPageRoute(
+                    onMessage = showMessage,
+                    onShowUndoSnackbar = onShowUndoSnackbar
+                )
                 SidebarPage.TEMPLATES -> {
                     ChronosSectionTitle(title = "Routines", subtitle = "Apply, edit, or duplicate reusable day blueprints")
                     templates.forEach { template ->
@@ -613,6 +617,7 @@ internal fun SidebarPageContent(
                                 onActualClick = onOpenActualLog,
                                 onMissedClick = onOpenMissedRecovery,
                                 onOpenReview = onOpenReview,
+                                onPlanDay = onOpenPlannedBreakdown,
                                 showReviewAction = featureFlags.reviewEnabled
                             )
                         }

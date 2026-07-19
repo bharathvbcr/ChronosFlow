@@ -74,13 +74,16 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.ChronosFlow.VBCR.core.ui.components.ChronosEmptyState
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFilterChip
 import com.ChronosFlow.VBCR.core.ui.components.ChronosListCard
 import com.ChronosFlow.VBCR.core.ui.components.ChronosSectionTitle
+import com.ChronosFlow.VBCR.core.ui.components.ChronosShimmerPlaceholder
 import com.ChronosFlow.VBCR.core.ui.components.formatDurationLabel
 import com.ChronosFlow.VBCR.core.ui.motion.ChronosTransitionDirection
 import com.ChronosFlow.VBCR.core.ui.motion.ChronosTransitionFactory
@@ -155,6 +158,7 @@ internal fun PlanTab(
     onDuplicateBlock: (String) -> Unit,
     onApplyTemplate: (TemplateBlueprint) -> Unit,
     onFillGaps: () -> Unit,
+    timelineLoading: Boolean = false,
     contentTopPadding: Dp = 0.dp,
     contentBottomPadding: Dp = 0.dp
 ) {
@@ -198,6 +202,7 @@ internal fun PlanTab(
                 timeBlocks = sortedBlocks,
                 quickItems = quickItems,
                 onBlockSelected = onBlockSelected,
+                onCreateBlock = onCreateBlock,
                 onQuickTaskDone = onQuickTaskDone,
                 onQuickHabitDone = onQuickHabitDone,
                 onQuickMedicationTaken = onQuickMedicationTaken,
@@ -235,99 +240,100 @@ internal fun PlanTab(
         if (!fullCalendarVisible) {
             item { ChronosSectionTitle(title = "Timeline") }
 
-            if (timeBlocks.isEmpty()) {
+            if (timelineLoading) {
+                item(key = "plan_timeline_loading") {
+                    ChronosShimmerPlaceholder(
+                        modifier = Modifier.animateItem().fillMaxWidth(),
+                        rows = 3
+                    )
+                }
+            } else if (timeBlocks.isEmpty()) {
                 item(key = "plan_empty_timeline") {
-                    ChronosListCard(modifier = Modifier.animateItem().fillMaxWidth()) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact),
-                            modifier = Modifier.padding(ChronosSpacing.Compact)
-                        ) {
-                            Text(
-                                "No blocks planned",
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                "Use Generate or Add manually above to plan your day.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-            items(sortedBlocks, key = { it.id }) { block ->
-                // Built with a plain (non-saveable) remember so a deleted-then-undone row — which is
-                // re-added under the same id — always starts fresh at Settled, instead of restoring
-                // a stale dismissed state that would re-hide (effectively re-delete) the row.
-                val swipeThreshold = SwipeToDismissBoxDefaults.positionalThreshold
-                val dismissState = remember(block.id) {
-                    SwipeToDismissBoxState(SwipeToDismissBoxValue.Settled, swipeThreshold)
-                }
-                val swipeScope = rememberCoroutineScope()
-
-                SwipeToDismissBox(
-                    state = dismissState,
-                    // onDismiss fires once per swipe; reset() snaps the row back so it never stays
-                    // in a terminal dismissed state. The actual removal of a deleted block comes
-                    // from the reactive list update. This matters for undo: undo re-inserts the
-                    // block under the same id, and a lingering dismissed state would otherwise
-                    // re-hide (effectively re-delete) the restored row.
-                    onDismiss = { direction ->
-                        when (direction) {
-                            SwipeToDismissBoxValue.EndToStart -> onDeleteBlock(block.id)
-                            SwipeToDismissBoxValue.StartToEnd -> onDuplicateBlock(block.id)
-                            SwipeToDismissBoxValue.Settled -> Unit
-                        }
-                        swipeScope.launch { dismissState.reset() }
-                    },
-                    backgroundContent = {
-                        val color = when (dismissState.dismissDirection) {
-                            SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.secondary
-                            SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.error
-                            else -> Color.Transparent
-                        }
-                        val iconTint = when (dismissState.dismissDirection) {
-                            SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.onSecondary
-                            SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.onError
-                            else -> MaterialTheme.colorScheme.onSurface
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(color, MaterialTheme.shapes.small)
-                                .padding(horizontal = 20.dp),
-                            contentAlignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart else Alignment.CenterEnd
-                        ) {
-                            // Only show the action icon while a swipe is in progress; at rest the
-                            // background is transparent and any icon would peek out from behind the card.
-                            if (dismissState.dismissDirection != SwipeToDismissBoxValue.Settled) {
-                                Icon(
-                                    imageVector = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) Icons.Default.ContentCopy else Icons.Default.Delete,
-                                    contentDescription = null,
-                                    tint = iconTint
-                                )
+                    ChronosEmptyState(
+                        title = "No blocks planned",
+                        message = "Use Generate or Add manually above to plan your day.",
+                        modifier = Modifier.animateItem().fillMaxWidth(),
+                        action = {
+                            ChronosButton(onClick = onCreateBlock) {
+                                Text("Add block", fontWeight = FontWeight.SemiBold)
                             }
                         }
-                    },
-                    modifier = Modifier
-                        .animateItem()
-                        .padding(vertical = 4.dp)
-                        .semantics {
-                            customActions = listOf(
-                                CustomAccessibilityAction(label = planDuplicateBlockActionLabel(block)) {
-                                    onDuplicateBlock(block.id)
-                                    true
-                                },
-                                CustomAccessibilityAction(label = planDeleteBlockActionLabel(block)) {
-                                    onDeleteBlock(block.id)
-                                    true
+                    )
+                }
+            } else {
+                items(sortedBlocks, key = { it.id }) { block ->
+                    // Built with a plain (non-saveable) remember so a deleted-then-undone row — which is
+                    // re-added under the same id — always starts fresh at Settled, instead of restoring
+                    // a stale dismissed state that would re-hide (effectively re-delete) the row.
+                    val swipeThreshold = SwipeToDismissBoxDefaults.positionalThreshold
+                    val dismissState = remember(block.id) {
+                        SwipeToDismissBoxState(SwipeToDismissBoxValue.Settled, swipeThreshold)
+                    }
+                    val swipeScope = rememberCoroutineScope()
+
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        // onDismiss fires once per swipe; reset() snaps the row back so it never stays
+                        // in a terminal dismissed state. The actual removal of a deleted block comes
+                        // from the reactive list update. This matters for undo: undo re-inserts the
+                        // block under the same id, and a lingering dismissed state would otherwise
+                        // re-hide (effectively re-delete) the restored row.
+                        onDismiss = { direction ->
+                            when (direction) {
+                                SwipeToDismissBoxValue.EndToStart -> onDeleteBlock(block.id)
+                                SwipeToDismissBoxValue.StartToEnd -> onDuplicateBlock(block.id)
+                                SwipeToDismissBoxValue.Settled -> Unit
+                            }
+                            swipeScope.launch { dismissState.reset() }
+                        },
+                        backgroundContent = {
+                            val color = when (dismissState.dismissDirection) {
+                                SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.secondary
+                                SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.error
+                                else -> Color.Transparent
+                            }
+                            val iconTint = when (dismissState.dismissDirection) {
+                                SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.onSecondary
+                                SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.onError
+                                else -> MaterialTheme.colorScheme.onSurface
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(color, MaterialTheme.shapes.small)
+                                    .padding(horizontal = 20.dp),
+                                contentAlignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart else Alignment.CenterEnd
+                            ) {
+                                // Only show the action icon while a swipe is in progress; at rest the
+                                // background is transparent and any icon would peek out from behind the card.
+                                if (dismissState.dismissDirection != SwipeToDismissBoxValue.Settled) {
+                                    Icon(
+                                        imageVector = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) Icons.Default.ContentCopy else Icons.Default.Delete,
+                                        contentDescription = null,
+                                        tint = iconTint
+                                    )
                                 }
-                            )
-                        }
-                ) {
-                    val onClickBlock = remember(block.id) { { onBlockSelected(block.id) } }
-                    TimelineBlockItem(block, onClick = onClickBlock, showTimeColumn = true)
+                            }
+                        },
+                        modifier = Modifier
+                            .animateItem()
+                            .padding(vertical = 4.dp)
+                            .semantics {
+                                customActions = listOf(
+                                    CustomAccessibilityAction(label = planDuplicateBlockActionLabel(block)) {
+                                        onDuplicateBlock(block.id)
+                                        true
+                                    },
+                                    CustomAccessibilityAction(label = planDeleteBlockActionLabel(block)) {
+                                        onDeleteBlock(block.id)
+                                        true
+                                    }
+                                )
+                            }
+                    ) {
+                        val onClickBlock = remember(block.id) { { onBlockSelected(block.id) } }
+                        TimelineBlockItem(block, onClick = onClickBlock, showTimeColumn = true)
+                    }
                 }
             }
         }
@@ -359,6 +365,7 @@ private fun PlanDateScroller(
     timeBlocks: List<TimeBlockUiModel>,
     quickItems: DayQuickItemsUiState,
     onBlockSelected: (String?) -> Unit,
+    onCreateBlock: () -> Unit,
     onQuickTaskDone: (String) -> Unit,
     onQuickHabitDone: (String) -> Unit,
     onQuickMedicationTaken: (String, Int?) -> Unit,
@@ -460,6 +467,7 @@ private fun PlanDateScroller(
                             timeBlocks = timeBlocks,
                             quickItems = quickItems,
                             onBlockSelected = onBlockSelected,
+                            onCreateBlock = onCreateBlock,
                             onQuickTaskDone = onQuickTaskDone,
                             onQuickHabitDone = onQuickHabitDone,
                             onQuickMedicationTaken = onQuickMedicationTaken,
@@ -644,6 +652,7 @@ private fun PlanCalendarAgenda(
     timeBlocks: List<TimeBlockUiModel>,
     quickItems: DayQuickItemsUiState,
     onBlockSelected: (String?) -> Unit,
+    onCreateBlock: () -> Unit,
     onQuickTaskDone: (String) -> Unit,
     onQuickHabitDone: (String) -> Unit,
     onQuickMedicationTaken: (String, Int?) -> Unit,
@@ -673,13 +682,19 @@ private fun PlanCalendarAgenda(
             text = "Selected-day agenda",
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.semantics { heading() }
         )
         if (agendaItems.isEmpty()) {
-            Text(
-                text = "No calendar items, blocks, tasks, habits, or medications for this date.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            ChronosEmptyState(
+                title = "Nothing on this date",
+                message = "No calendar items, blocks, tasks, habits, or medications for this date.",
+                modifier = Modifier.fillMaxWidth(),
+                action = {
+                    ChronosButton(onClick = onCreateBlock) {
+                        Text("Add block", fontWeight = FontWeight.SemiBold)
+                    }
+                }
             )
         } else {
             agendaItems.forEachIndexed { index, item ->

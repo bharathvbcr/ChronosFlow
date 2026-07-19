@@ -2,11 +2,16 @@ package com.ChronosFlow.VBCR.feature.daydial
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
-import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -16,23 +21,28 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ChronosFlow.VBCR.core.domain.planner.DialDragMode
@@ -43,20 +53,27 @@ import com.ChronosFlow.VBCR.core.domain.planner.DialRing
 import com.ChronosFlow.VBCR.core.ui.motion.ChronosValueAnimationFactory
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosColors
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosGlassTokens
+import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
+import com.ChronosFlow.VBCR.core.ui.theme.LocalFocusAwareColorState
 import com.ChronosFlow.VBCR.feature.daydial.DialUtils.durationToSweep
 import com.ChronosFlow.VBCR.feature.daydial.DialUtils.durationToSweepInWindow
-import com.ChronosFlow.VBCR.feature.daydial.DialUtils.minuteToAngleInWindow
 import com.ChronosFlow.VBCR.feature.daydial.DialUtils.minuteToAngle
+import com.ChronosFlow.VBCR.feature.daydial.DialUtils.minuteToAngleInWindow
 import com.ChronosFlow.VBCR.feature.daydial.DialUtils.offsetToMinuteInWindow
 import com.ChronosFlow.VBCR.feature.daydial.dial.ChronosDialRenderModelBuilder
+import com.ChronosFlow.VBCR.feature.daydial.dial.DialBlockArc
+import com.ChronosFlow.VBCR.feature.daydial.dial.DialNightArc
+import com.ChronosFlow.VBCR.feature.daydial.dial.VisibleWindowSlice
 import com.ChronosFlow.VBCR.feature.daydial.dial.visibleWindowSlice
 import com.ChronosFlow.VBCR.feature.daydial.dial.visibleWindowSlices
+import com.ChronosFlow.VBCR.feature.daydial.model.TimeBlockUiModel
 import kotlinx.coroutines.delay
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private const val OUTER_RING_RADIUS_FRACTION = 0.98f
@@ -66,10 +83,20 @@ private const val DIAL_OUTER_DIAMETER_DIVISOR = 1.5f
 private const val DIAL_HIT_RADIUS_DIVISOR = 3f
 private const val OUTER_RING_TAP_HALO_CANVAS_FRACTION = 0.06f
 private const val MIN_DIAL_RADIUS_SCALE = 0.1f
+private const val DIAL_A11Y_STEP_MINUTES = 15
 // Night band tint. A mid-tone indigo (not a black scrim) so the band stays visible on every
 // surface — the near-black dark panel, a light surface, and pure-black/white high-contrast
 // modes alike — while reading unmistakably as "night".
 private val DialNightBandColor = ChronosColors.DialNightBand
+private val DialWakeBandColor = ChronosColors.DialWakeBand
+
+internal object DialA11yActionLabels {
+    const val COMPLETE = "Complete"
+    const val MOVE_EARLIER = "Move earlier"
+    const val MOVE_LATER = "Move later"
+    const val RESIZE_SHORTER = "Resize shorter"
+    const val RESIZE_LONGER = "Resize longer"
+}
 
 internal fun scaledDialOuterDiameter(canvasSize: Float, dialRadiusScale: Float): Float =
     canvasSize / DIAL_OUTER_DIAMETER_DIVISOR * dialRadiusScale.coerceAtLeast(MIN_DIAL_RADIUS_SCALE)
@@ -259,24 +286,52 @@ fun ChronosDial(
         return (startMinute - compactWindowStart + 1440) % 1440
     }
 
+    val isHighContrast = LocalFocusAwareColorState.current.isHighContrast
+    val wakeArcs = remember(nightStartMinute, nightEndMinute, compactMode, compactWindowStart) {
+        buildDialWakeArcs(
+            nightStartMinute = nightStartMinute,
+            nightEndMinute = nightEndMinute,
+            compactMode = compactMode,
+            compactWindowStart = compactWindowStart
+        )
+    }
+    val selectedBlock = remember(blocks, selectedBlockId) {
+        blocks.firstOrNull { it.id == selectedBlockId }
+    }
+    val selectedBlockActions = buildDialSelectedBlockCustomActions(
+        selectedBlock = selectedBlock,
+        geometry = geometry,
+        onComplete = onInnerRingBlockActivated,
+        onMoved = onBlockMoved,
+        onMoveCommitted = onBlockMoveCommitted,
+        onResize = onBlockResize,
+        onResizeCommitted = onBlockResizeCommitted
+    )
+
+    Box(modifier = modifier.aspectRatio(1f)) {
     Canvas(
-        modifier = modifier
+        modifier = Modifier
+            .fillMaxSize()
             // Layout modifiers must precede drawWithCache so the cached background
             // (dial track, ticks, ring guides) shares the inset coordinate space of
             // the canvas content; otherwise the track renders at a larger radius and
             // reads as a second dark ring offset from the block arcs.
-            .semantics { contentDescription = buildDialContentDescription(blocks, currentMinute, compactMode, compactWindowStart) }
-            .aspectRatio(1f)
+            .semantics {
+                contentDescription = buildDialContentDescription(
+                    blocks,
+                    currentMinute,
+                    compactMode,
+                    compactWindowStart
+                )
+                if (selectedBlockActions.isNotEmpty()) {
+                    customActions = selectedBlockActions
+                }
+            }
             .padding(canvasInset)
             .drawWithCache {
                 val cachedCenter = Offset(size.width / 2f, size.height / 2f)
                 val cachedOuterRadius = scaledDialOuterDiameter(size.minDimension, effectiveDialRadiusScale)
                 val cachedRingStroke = size.minDimension * 0.1f
-                val cachedRingSize = Size(cachedOuterRadius, cachedOuterRadius)
-                val cachedRingTopLeft = Offset(
-                    x = cachedCenter.x - cachedOuterRadius / 2f,
-                    y = cachedCenter.y - cachedOuterRadius / 2f
-                )
                 val ringAlpha = if (glassSurfacesEnabled) ChronosGlassTokens.BaseOpacity else 1f
                 // Flat track: the night band (drawn in the Canvas body) is now the only
                 // intentional dark region, so the ring base stays uniform and non-directional.
@@ -306,10 +361,12 @@ fun ChronosDial(
                             x = cachedCenter.x + cos(rad).toFloat() * (cachedOuterRadius / 2f + cachedRingStroke / 2f - markerPadding),
                             y = cachedCenter.y + sin(rad).toFloat() * (cachedOuterRadius / 2f + cachedRingStroke / 2f - markerPadding)
                         )
-                        val tickAlpha = if (solidDial) {
-                            if (tick.isMajor) 0.9f else 0.65f
-                        } else {
-                            if (tick.isMajor) 0.55f else 0.3f
+                        // High contrast / solid light dials use stronger major ticks so an empty
+                        // ring still reads as a clock rather than a gray wash.
+                        val tickAlpha = when {
+                            isHighContrast -> if (tick.isMajor) 1f else 0.75f
+                            solidDial -> if (tick.isMajor) 1f else 0.65f
+                            else -> if (tick.isMajor) 0.55f else 0.3f
                         }
                         drawLine(
                             color = colorScheme.onSurfaceVariant.copy(alpha = tickAlpha),
@@ -558,6 +615,24 @@ fun ChronosDial(
                 size = ringSize,
                 style = Stroke(width = ringStroke, cap = StrokeCap.Butt)
             )
+        }
+
+        // Wake-hours complement: a warm wash on the non-night arc so an empty dial still feels
+        // like day vs night. Decorative only — skipped in high contrast (solid track + ticks).
+        if (!isHighContrast && wakeArcs.isNotEmpty()) {
+            val wakeBandColor = DialWakeBandColor.copy(alpha = if (glassSurfacesEnabled) 0.10f else 0.16f)
+            wakeArcs.forEach { wake ->
+                if (wake.startAngle.isNaN() || wake.sweepAngle <= 0.1f) return@forEach
+                drawArc(
+                    color = wakeBandColor,
+                    startAngle = wake.startAngle,
+                    sweepAngle = wake.sweepAngle,
+                    useCenter = false,
+                    topLeft = ringTopLeft,
+                    size = ringSize,
+                    style = Stroke(width = ringStroke, cap = StrokeCap.Butt)
+                )
+            }
         }
 
         if (glassSurfacesEnabled) {
@@ -850,6 +925,144 @@ fun ChronosDial(
         )
         drawCircle(color = colorScheme.primary, radius = 6.dp.toPx(), center = center)
     }
+
+    DialBlockAccessibilityOverlays(
+        blockArcs = renderModel.blockArcs,
+        enableThreeRingMode = enableThreeRingMode,
+        dialRadiusScale = effectiveDialRadiusScale,
+        canvasInset = canvasInset,
+        onBlockSelected = onBlockSelected,
+        modifier = Modifier.fillMaxSize()
+    )
+    } // Box
+}
+
+/**
+ * Wake-hours arcs complement the night band so empty dials keep day/night warmth.
+ * Reuses [DialNightArc] geometry; gated off at draw time under high contrast.
+ */
+internal fun buildDialWakeArcs(
+    nightStartMinute: Int,
+    nightEndMinute: Int,
+    compactMode: Boolean,
+    compactWindowStart: Int
+): List<DialNightArc> {
+    if ((nightStartMinute % 1440) == (nightEndMinute % 1440)) return emptyList()
+    val windowMinutes = if (compactMode) 720 else 1440
+    val wakeStartMinute = nightEndMinute
+    val wakeDuration = circularDuration(wakeStartMinute, nightStartMinute)
+    val visibleSlices = if (compactMode) {
+        visibleWindowSlices(
+            startMinute = wakeStartMinute,
+            durationMinutes = wakeDuration,
+            windowStart = compactWindowStart,
+            windowMinutes = windowMinutes
+        )
+    } else {
+        listOf(VisibleWindowSlice(relativeStart = wakeStartMinute, visibleDuration = wakeDuration))
+    }
+    return visibleSlices.map { visibleSlice ->
+        val start = if (compactMode) visibleSlice.relativeStart else wakeStartMinute
+        val sweep = if (compactMode) {
+            durationToSweepInWindow(visibleSlice.visibleDuration, windowMinutes)
+        } else {
+            durationToSweep(wakeDuration)
+        }
+        val startAngle = if (compactMode) {
+            minuteToAngleInWindow(start, 0, windowMinutes)
+        } else {
+            minuteToAngle(start)
+        }
+        DialNightArc(startAngle = startAngle, sweepAngle = sweep)
+    }
+}
+
+internal fun buildDialSelectedBlockCustomActions(
+    selectedBlock: TimeBlockUiModel?,
+    geometry: DialGeometry,
+    onComplete: (String) -> Unit,
+    onMoved: (String, Int) -> Unit,
+    onMoveCommitted: (String, Int) -> Unit,
+    onResize: (String, Int, Int) -> Unit,
+    onResizeCommitted: (String, Int, Int) -> Unit
+): List<CustomAccessibilityAction> {
+    val block = selectedBlock ?: return emptyList()
+    fun commitMove(deltaMinutes: Int): Boolean {
+        val snapped = geometry.snap(block.startMinuteOfDay + deltaMinutes, DIAL_A11Y_STEP_MINUTES)
+        onMoved(block.id, snapped)
+        onMoveCommitted(block.id, snapped)
+        return true
+    }
+    fun commitResize(deltaMinutes: Int): Boolean {
+        val newDuration = (block.durationMinutes + deltaMinutes).coerceIn(10, 240)
+        onResize(block.id, block.startMinuteOfDay, newDuration)
+        onResizeCommitted(block.id, block.startMinuteOfDay, newDuration)
+        return true
+    }
+    return listOf(
+        CustomAccessibilityAction(DialA11yActionLabels.COMPLETE) {
+            onComplete(block.id)
+            true
+        },
+        CustomAccessibilityAction(DialA11yActionLabels.MOVE_EARLIER) {
+            commitMove(-DIAL_A11Y_STEP_MINUTES)
+        },
+        CustomAccessibilityAction(DialA11yActionLabels.MOVE_LATER) {
+            commitMove(DIAL_A11Y_STEP_MINUTES)
+        },
+        CustomAccessibilityAction(DialA11yActionLabels.RESIZE_SHORTER) {
+            commitResize(-DIAL_A11Y_STEP_MINUTES)
+        },
+        CustomAccessibilityAction(DialA11yActionLabels.RESIZE_LONGER) {
+            commitResize(DIAL_A11Y_STEP_MINUTES)
+        }
+    )
+}
+
+@Composable
+private fun DialBlockAccessibilityOverlays(
+    blockArcs: List<DialBlockArc>,
+    enableThreeRingMode: Boolean,
+    dialRadiusScale: Float,
+    canvasInset: Dp,
+    onBlockSelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (blockArcs.isEmpty()) return
+    BoxWithConstraints(modifier = modifier.padding(canvasInset)) {
+        val density = LocalDensity.current
+        val canvasPx = with(density) { minOf(maxWidth, maxHeight).toPx() }
+        val outerDiameter = scaledDialOuterDiameter(canvasPx, dialRadiusScale)
+        val maxRadius = outerDiameter / 2f
+        val centerX = with(density) { maxWidth.toPx() / 2f }
+        val centerY = with(density) { maxHeight.toPx() / 2f }
+        val targetHalf = with(density) { ChronosSpacing.Hero.toPx() / 2f }
+        blockArcs.forEach { arc ->
+            if (arc.startAngle.isNaN() || arc.sweepAngle <= 0.1f) return@forEach
+            val midAngle = arc.startAngle + arc.sweepAngle / 2f
+            val radius = if (enableThreeRingMode) {
+                ringRadius(maxRadius, arc.ring)
+            } else {
+                maxRadius
+            }
+            val rad = Math.toRadians(midAngle.toDouble())
+            val x = centerX + cos(rad).toFloat() * radius - targetHalf
+            val y = centerY + sin(rad).toFloat() * radius - targetHalf
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(x.roundToInt(), y.roundToInt()) }
+                    .size(ChronosSpacing.Hero)
+                    .focusable()
+                    .semantics {
+                        contentDescription = arc.contentDescription
+                        onClick(label = "Select ${arc.contentDescription}") {
+                            onBlockSelected(arc.blockId)
+                            true
+                        }
+                    }
+            )
+        }
+    }
 }
 
 private fun deviceMinuteWithSeconds(): Float {
@@ -1063,7 +1276,7 @@ private fun circularMinuteDelta(fromMinute: Int, toMinute: Int): Int {
     return delta
 }
 
-private fun circularDuration(startMinute: Int, endMinute: Int): Int {
+internal fun circularDuration(startMinute: Int, endMinute: Int): Int {
     return ((endMinute - startMinute + 1440) % 1440).let { if (it == 0) 1440 else it }
 }
 
@@ -1108,7 +1321,7 @@ internal val TimeBlockUiModel.isInnerRingActionBlock: Boolean
         category.equals("ROUTINE", ignoreCase = true) ||
         category.equals("MEDICATION", ignoreCase = true)
 
-private fun ringRadius(maxRadius: Float, ring: DialRing): Float {
+internal fun ringRadius(maxRadius: Float, ring: DialRing): Float {
     return when (ring) {
         DialRing.OUTER -> maxRadius * OUTER_RING_RADIUS_FRACTION
         DialRing.MIDDLE -> maxRadius * MIDDLE_RING_RADIUS_FRACTION

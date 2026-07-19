@@ -53,7 +53,7 @@ internal fun resolveDailyAction(
         title = "Open time",
         subtitle = "No upcoming blocks on the dial.",
         primaryLabel = "Add block",
-        secondaryLabel = "Fill gaps",
+        secondaryLabel = "Fill gap",
         kind = DailyActionKind.OPEN_TIME
     )
 }

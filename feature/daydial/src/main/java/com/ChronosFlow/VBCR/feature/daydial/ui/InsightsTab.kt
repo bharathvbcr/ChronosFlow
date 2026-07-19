@@ -1,5 +1,6 @@
 package com.ChronosFlow.VBCR.feature.daydial.ui
 
+import com.ChronosFlow.VBCR.core.ui.components.ChronosButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosOutlinedButton
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFilledTonalButton
 
@@ -43,6 +44,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -205,7 +208,8 @@ internal fun InsightsTab(
                         text = "Execution score",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.semantics { heading() }
                     )
                     Text(
                         text = formatCompletionText(completion, isPlanSet),
@@ -269,21 +273,27 @@ internal fun InsightsTab(
         } // end EXECUTION section
 
         if (insightsSectionVisible(InsightsSection.CATEGORIES, selectedSections)) {
-        ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-            Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
-                Text(
-                    text = "Category breakdown",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                if (categoryRows.isEmpty()) {
+        if (categoryRows.isEmpty()) {
+            ChronosEmptyState(
+                title = "No blocks tracked yet",
+                message = "Plan and complete focus blocks to see where your time goes.",
+                modifier = Modifier.fillMaxWidth(),
+                action = {
+                    ChronosButton(onClick = onCreatePlan) {
+                        Text("Create plan", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            )
+        } else {
+            ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
                     Text(
-                        "No blocks tracked yet",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "Category breakdown",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.semantics { heading() }
                     )
-                } else {
                     val topRow = categoryRows.first()
                     Text(
                         text = "★ ${topRow.category} leads at ${percentText(topRow.share)} · " +
@@ -348,7 +358,12 @@ internal fun InsightsTab(
             ChronosEmptyState(
                 title = "No review insights yet",
                 message = "Complete your day and run the end-of-day review to get automatically generated findings.",
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                action = {
+                    ChronosButton(onClick = onOpenFullReview) {
+                        Text("Open review", fontWeight = FontWeight.SemiBold)
+                    }
+                }
             )
         }
 
@@ -415,15 +430,27 @@ internal fun InsightsTab(
                 )
             }
         }
-        ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-            Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
-                if (recommendations.isEmpty()) {
-                    Text(
-                        text = "Refresh to generate schedule recommendations from your review data.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
+        if (recommendations.isEmpty()) {
+            ChronosEmptyState(
+                title = "No recommendations yet",
+                message = "Refresh to generate schedule recommendations from your review data.",
+                modifier = Modifier.fillMaxWidth(),
+                action = {
+                    ChronosButton(
+                        onClick = onRefreshRecommendations,
+                        enabled = !isRefreshing,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (isRefreshing) "Refreshing…" else "Refresh",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            )
+        } else {
+            ChronosListCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)) {
                     recommendations.forEach { recommendation ->
                         RecommendationRow(
                             text = recommendation.text,

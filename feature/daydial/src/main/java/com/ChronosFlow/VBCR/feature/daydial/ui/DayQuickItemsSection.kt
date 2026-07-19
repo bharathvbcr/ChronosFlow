@@ -37,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -49,6 +50,7 @@ import com.ChronosFlow.VBCR.core.notifications.launchTaskContextCommand
 import com.ChronosFlow.VBCR.core.ui.components.ChronosAssistChip
 import com.ChronosFlow.VBCR.core.ui.components.ChronosListCard
 import com.ChronosFlow.VBCR.core.ui.components.ChronosSectionTitle
+import com.ChronosFlow.VBCR.core.ui.motion.rememberChronosCompletionCelebration
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
 import com.ChronosFlow.VBCR.feature.daydial.model.DayQuickContextActionUiModel
 import com.ChronosFlow.VBCR.feature.daydial.model.DayQuickItemKind
@@ -293,6 +295,7 @@ private fun DayQuickItemRow(
     onContextActionFailed: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val celebration = rememberChronosCompletionCelebration()
     Column(
         verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small),
         modifier = Modifier.fillMaxWidth()
@@ -350,11 +353,22 @@ private fun DayQuickItemRow(
             verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
         ) {
             ChronosButton(
-                onClick = onPrimary,
-                enabled = !item.isDone,
-                modifier = Modifier.semantics {
-                    contentDescription = dayQuickPrimaryActionLabel(item)
+                onClick = {
+                    if (!item.isDone) {
+                        celebration.celebrate(withHaptic = false)
+                    }
+                    onPrimary()
                 },
+                enabled = !item.isDone,
+                modifier = Modifier
+                    .graphicsLayer {
+                        val scale = celebration.scale
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                    .semantics {
+                        contentDescription = dayQuickPrimaryActionLabel(item)
+                    },
                 shape = MaterialTheme.shapes.small
             ) {
                 Text(if (item.kind == DayQuickItemKind.MEDICATION) "Taken" else "Done")

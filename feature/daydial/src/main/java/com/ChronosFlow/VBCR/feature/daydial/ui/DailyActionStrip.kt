@@ -8,14 +8,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
 import com.ChronosFlow.VBCR.feature.daydial.model.DailyActionKind
 import com.ChronosFlow.VBCR.feature.daydial.model.DailyActionUiModel
@@ -32,14 +32,15 @@ internal fun DailyActionStrip(
     // button is what marks this as the CTA, so the container no longer needs to look different.
     ChronosListCard(modifier = modifier.fillMaxWidth()) {
         Column(
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Micro)) {
                 Text(
                     text = action.title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.semantics { heading() }
                 )
                 Text(
                     text = action.subtitle,
@@ -49,12 +50,12 @@ internal fun DailyActionStrip(
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(ChronosSpacing.Small)
             ) {
                 ChronosButton(
                     onClick = onPrimary,
                     modifier = Modifier.weight(1.2f),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = MaterialTheme.shapes.large,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
@@ -67,7 +68,7 @@ internal fun DailyActionStrip(
                         onClick = { onSecondary?.invoke() },
                         enabled = onSecondary != null,
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = MaterialTheme.shapes.large,
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = MaterialTheme.colorScheme.primary
                         )

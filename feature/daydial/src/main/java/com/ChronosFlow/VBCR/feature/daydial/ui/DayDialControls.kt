@@ -2,7 +2,12 @@ package com.ChronosFlow.VBCR.feature.daydial.ui
 
 import com.ChronosFlow.VBCR.core.ui.components.ChronosFilledTonalButton
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
+import com.ChronosFlow.VBCR.core.ui.motion.ChronosValueAnimationFactory
 import com.ChronosFlow.VBCR.core.ui.motion.chronosHapticClick
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,6 +52,8 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosSectionTitle
 import com.ChronosFlow.VBCR.core.ui.components.ChronosSettingsRow
 import com.ChronosFlow.VBCR.core.ui.components.formatDurationLabel
 import com.ChronosFlow.VBCR.core.ui.components.formatLastSyncedLabel
+import com.ChronosFlow.VBCR.core.ui.settings.rememberChronosUiSettings
+import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
 import com.ChronosFlow.VBCR.feature.daydial.DailyReview
 import kotlinx.coroutines.launch
 
@@ -173,6 +180,9 @@ internal fun CheckboxSetting(label: String, checked: Boolean, onCheckedChange: (
     )
 }
 
+internal fun isEmptyDayReview(review: DailyReview): Boolean =
+    review.plannedMinutes == 0 && review.actualMinutes == 0 && review.missedMinutes == 0
+
 @Composable
 internal fun DailyReviewHeader(
     review: DailyReview,
@@ -180,60 +190,84 @@ internal fun DailyReviewHeader(
     onActualClick: () -> Unit = {},
     onMissedClick: () -> Unit = {},
     onOpenReview: () -> Unit = {},
+    onPlanDay: (() -> Unit)? = null,
     showReviewAction: Boolean = true
 ) {
-    val completionPercent = if (review.plannedMinutes > 0) {
+    val emptyDay = isEmptyDayReview(review)
+    val completionPercent = if (!emptyDay && review.plannedMinutes > 0) {
         ((review.actualMinutes.toFloat() / review.plannedMinutes) * 100).toInt().coerceIn(0, 100)
     } else {
         null
     }
     ChronosListCard(modifier = Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            completionPercent?.let { percent ->
+        Column(verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Compact)) {
+            if (emptyDay) {
                 Text(
-                    text = "$percent% of planned time completed",
-                    style = MaterialTheme.typography.bodySmall,
+                    text = "Nothing planned yet — add a few blocks to shape the day.",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                ReviewItem(
-                    label = "Planned",
-                    value = formatReviewMinutes(review.plannedMinutes),
-                    color = MaterialTheme.colorScheme.primary,
-                    onClick = onPlannedClick
-                )
-                VerticalDivider(modifier = Modifier.height(28.dp), color = MaterialTheme.colorScheme.outline)
-                ReviewItem(
-                    label = "Actual",
-                    value = formatReviewMinutes(review.actualMinutes),
-                    color = MaterialTheme.colorScheme.secondary,
-                    onClick = onActualClick
-                )
-                VerticalDivider(modifier = Modifier.height(28.dp), color = MaterialTheme.colorScheme.outline)
-                ReviewItem(
-                    label = "Missed",
-                    value = formatReviewMinutes(review.missedMinutes),
-                    color = if (review.missedMinutes > 0) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    onClick = onMissedClick
-                )
-            }
-            if (showReviewAction) {
-                ChronosFilledTonalButton(
-                    onClick = onOpenReview,
-                    modifier = Modifier.fillMaxWidth()
+                onPlanDay?.let { planDay ->
+                    ChronosFilledTonalButton(
+                        onClick = planDay,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Plan your day")
+                    }
+                }
+            } else {
+                completionPercent?.let { percent ->
+                    Text(
+                        text = "$percent% of planned time completed",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Assessment, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Review")
+                    ReviewItem(
+                        label = "Planned",
+                        value = formatReviewMinutes(review.plannedMinutes),
+                        color = MaterialTheme.colorScheme.primary,
+                        onClick = onPlannedClick
+                    )
+                    VerticalDivider(
+                        modifier = Modifier.height(ChronosSpacing.Large - ChronosSpacing.Micro),
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    ReviewItem(
+                        label = "Actual",
+                        value = formatReviewMinutes(review.actualMinutes),
+                        color = MaterialTheme.colorScheme.secondary,
+                        onClick = onActualClick
+                    )
+                    VerticalDivider(
+                        modifier = Modifier.height(ChronosSpacing.Large - ChronosSpacing.Micro),
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    ReviewItem(
+                        label = "Missed",
+                        value = formatReviewMinutes(review.missedMinutes),
+                        color = if (review.missedMinutes > 0) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        onClick = onMissedClick
+                    )
+                }
+                if (showReviewAction) {
+                    ChronosFilledTonalButton(
+                        onClick = onOpenReview,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Assessment, contentDescription = null)
+                        Spacer(modifier = Modifier.width(ChronosSpacing.Small))
+                        Text("Review")
+                    }
                 }
             }
         }
@@ -242,11 +276,12 @@ internal fun DailyReviewHeader(
 
 @Composable
 private fun ReviewItem(
-    label: String, 
-    value: String, 
-    color: androidx.compose.ui.graphics.Color, 
+    label: String,
+    value: String,
+    color: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit
 ) {
+    val reduceMotion = rememberChronosUiSettings().reduceMotionEnabled
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -255,20 +290,29 @@ private fun ReviewItem(
                 onClickLabel = reviewMetricActionLabel(label),
                 role = Role.Button
             )
-            .padding(vertical = 4.dp, horizontal = 12.dp)
+            .padding(vertical = ChronosSpacing.Micro, horizontal = ChronosSpacing.Compact)
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = color
-        )
+        Spacer(modifier = Modifier.height(ChronosSpacing.Micro / 2))
+        AnimatedContent(
+            targetState = value,
+            transitionSpec = {
+                val spec = ChronosValueAnimationFactory.stateChange<Float>(reduceMotion)
+                fadeIn(animationSpec = spec) togetherWith fadeOut(animationSpec = spec)
+            },
+            label = "reviewMetricValue"
+        ) { animatedValue ->
+            Text(
+                text = animatedValue,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = color
+            )
+        }
     }
 }
 

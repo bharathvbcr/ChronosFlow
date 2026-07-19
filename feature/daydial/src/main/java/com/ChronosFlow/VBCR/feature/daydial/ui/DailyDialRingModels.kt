@@ -5,39 +5,57 @@ import com.ChronosFlow.VBCR.core.ui.components.ChronosTextButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.ChronosFlow.VBCR.core.domain.planner.DialRing
 import com.ChronosFlow.VBCR.core.ui.components.ChronosListCard
 import com.ChronosFlow.VBCR.core.ui.components.formatDurationLabel
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosColors
+import com.ChronosFlow.VBCR.core.ui.theme.ChronosGlassTokens
 import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
+import com.ChronosFlow.VBCR.core.ui.theme.LocalFocusAwareColorState
 import com.ChronosFlow.VBCR.core.ui.theme.categoryColor
 import com.ChronosFlow.VBCR.feature.daydial.DailyReview
 import com.ChronosFlow.VBCR.feature.daydial.TimeRangeUi
 import com.ChronosFlow.VBCR.feature.daydial.model.TimeBlockUiModel
 import java.util.Locale
+
+/** Cap hub width to the dial's inner clear zone (~55% of diameter). */
+internal fun dailyDialHubMaxWidth(dialDiameter: Dp): Dp = dialDiameter * 0.55f
+
+/**
+ * When vertical space or font scale is tight, demote category pill and progress before
+ * truncating essential status (which always keeps two lines).
+ */
+internal fun dailyDialHubShowsSecondaryLines(fontScale: Float, availableHeight: Dp): Boolean =
+    fontScale < 1.3f && availableHeight >= 88.dp
+
+internal fun dailyDialHubShowsCategoryPill(fontScale: Float, availableHeight: Dp): Boolean =
+    fontScale < 1.3f && availableHeight >= 72.dp
 
 private const val DAY_IN_MINUTES = 1440
 private const val RING_GUIDE_DESCRIPTION =
@@ -183,86 +201,119 @@ internal fun dailyDialLegendItems(): List<DailyDialLegendItem> {
 @Composable
 internal fun DailyDialCenterOverlay(
     state: DailyDialCenterState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    dialDiameter: Dp = 300.dp
 ) {
-    // Kept deliberately compact: the dial's inner rings are only ~120dp across on the
-    // phone layout, so the center hub shows just what's happening *now* (category, title,
-    // time, status) and the idle day-progress. The "Next: …" line and tap hints live in the
-    // "Now & next" card below and on the ring arcs themselves, so repeating them here only
-    // crowded the hub and hid the ring blocks behind it.
+    // Kept deliberately compact: width tracks the dial's inner clear zone so large fonts and
+    // small heroes stay readable. Status is essential (2 lines, no ellipsis); category pill and
+    // progress demote first when vertical space is tight.
+    val isHighContrast = LocalFocusAwareColorState.current.isHighContrast
+    val fontScale = LocalDensity.current.fontScale
+    val maxHubWidth = dailyDialHubMaxWidth(dialDiameter)
+    val hubSurface = if (isHighContrast) {
+        MaterialTheme.colorScheme.surface
+    } else {
+        MaterialTheme.colorScheme.surface.copy(alpha = ChronosGlassTokens.BaseOpacity)
+    }
+    val liveAnnouncement = buildString {
+        append(state.title)
+        if (state.status.isNotBlank()) {
+            append(". ")
+            append(state.status)
+        }
+    }
     Surface(
-        modifier = modifier.widthIn(max = 150.dp),
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        tonalElevation = 4.dp,
-        shadowElevation = 6.dp
+        modifier = modifier
+            .widthIn(max = maxHubWidth)
+            .semantics(mergeDescendants = true) {
+                liveRegion = LiveRegionMode.Polite
+                contentDescription = liveAnnouncement
+            },
+        shape = MaterialTheme.shapes.large,
+        color = hubSurface,
+        tonalElevation = ChronosSpacing.Micro,
+        shadowElevation = ChronosSpacing.Small
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            // The category pill names a block's lane (Work, Meeting, …). Open time has no
-            // category, so it leaves this blank and the pill is skipped — otherwise it just
-            // echoed the "Open time" title below it.
-            if (state.categoryLabel.isNotBlank()) {
-                Box(
-                    modifier = Modifier
-                        .background(
-                            color = state.accentColor.copy(alpha = 0.16f),
-                            shape = CircleShape
+        BoxWithConstraints {
+            val showCategory = state.categoryLabel.isNotBlank() &&
+                dailyDialHubShowsCategoryPill(fontScale, maxHeight)
+            val showProgress = state.progressLine != null &&
+                dailyDialHubShowsSecondaryLines(fontScale, maxHeight)
+            Column(
+                modifier = Modifier
+                    .heightIn(max = dialDiameter * 0.5f)
+                    .padding(
+                        horizontal = ChronosSpacing.Compact,
+                        vertical = ChronosSpacing.Small
+                    ),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(ChronosSpacing.Micro)
+            ) {
+                // The category pill names a block's lane (Work, Meeting, …). Open time has no
+                // category, so it leaves this blank and the pill is skipped — otherwise it just
+                // echoed the "Open time" title below it.
+                if (showCategory) {
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = state.accentColor.copy(alpha = 0.16f),
+                                shape = CircleShape
+                            )
+                            .padding(
+                                horizontal = ChronosSpacing.Small,
+                                vertical = ChronosSpacing.Micro / 2
+                            )
+                    ) {
+                        Text(
+                            text = state.categoryLabel,
+                            color = state.accentColor,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                ) {
+                    }
+                }
+                Text(
+                    text = state.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (state.timeWindow.isNotBlank()) {
                     Text(
-                        text = state.categoryLabel,
-                        color = state.accentColor,
+                        text = state.timeWindow,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+                Text(
+                    text = state.status,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Clip,
+                    lineHeight = MaterialTheme.typography.labelLarge.lineHeight
+                )
+                // Idle day-progress is the one extra line worth keeping — it isn't shown anywhere
+                // else on the hub and reads at a glance. Demoted under large font / short hub.
+                if (showProgress) {
+                    Text(
+                        text = state.progressLine.orEmpty(),
                         style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        lineHeight = MaterialTheme.typography.labelSmall.lineHeight,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-            }
-            Text(
-                text = state.title,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (state.timeWindow.isNotBlank()) {
-                Text(
-                    text = state.timeWindow,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
-            }
-            Text(
-                text = state.status,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            // Idle day-progress is the one extra line worth keeping — it isn't shown anywhere
-            // else on the hub and reads at a glance. When a block is focused it's null, so the
-            // hub collapses to four tight lines instead of six.
-            state.progressLine?.let { progress ->
-                Text(
-                    text = progress,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
         }
     }

@@ -22,7 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.unit.dp
+import com.ChronosFlow.VBCR.core.ui.theme.ChronosSpacing
 import com.ChronosFlow.VBCR.feature.daydial.model.DayDialTab
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -43,7 +43,7 @@ internal fun DayDialNavigationRail(
                 positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
                 tooltip = { PlainTooltip { Text("Quick create") } },
                 state = rememberTooltipState(),
-                modifier = Modifier.padding(vertical = 8.dp)
+                modifier = Modifier.padding(vertical = ChronosSpacing.Small)
             ) {
                 // The outer combinedClickable handles the gestures (it carries the long-press),
                 // so the tap/long-press haptics live here — matching the shell's quick-add cues.
