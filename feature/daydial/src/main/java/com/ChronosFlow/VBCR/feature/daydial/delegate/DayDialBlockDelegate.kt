@@ -13,6 +13,7 @@ import com.ChronosFlow.VBCR.core.domain.planner.FreeTimeCalculator
 import com.ChronosFlow.VBCR.core.domain.planner.MoveTimeBlockCommand
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerCommand
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerCommandHistory
+import com.ChronosFlow.VBCR.core.domain.planner.PlannerDataUnavailableException
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerOperationResult
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerService
 import com.ChronosFlow.VBCR.core.domain.planner.ResolveConflictsCommand
@@ -463,7 +464,15 @@ class DayDialBlockDelegate @Inject constructor(
             // Unlike rebalanceDay (which refuses to run while sleep is on), conflict repair AVOIDS the
             // active sleep window — pass it through so relocations never land inside it.
             val sleepSchedule = currentSleepSchedule().takeIf { it.isActive }
-            val resolution = plannerService.resolveConflicts(date, fromMinute ?: 0, sleepSchedule)
+            // resolveConflicts throws PlannerDataUnavailableException when the day's blocks cannot be
+            // loaded; report that as a rejection rather than letting the coroutine die — a fabricated
+            // ConflictResolutionResult(hadConflicts=false) would falsely claim the day is clean.
+            val resolution = try {
+                plannerService.resolveConflicts(date, fromMinute ?: 0, sleepSchedule)
+            } catch (e: PlannerDataUnavailableException) {
+                onResult(PlannerOperationResult.Rejected("Couldn't load your schedule — try again", date.toString()), false)
+                return@launch
+            }
             if (resolution.moves.isNotEmpty()) {
                 commandHistory.push(
                     ResolveConflictsCommand(

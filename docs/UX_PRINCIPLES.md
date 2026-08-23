@@ -134,6 +134,9 @@ Don't reinvent these. If a pattern below is built ad-hoc in a screen, replace it
 | A metric / stat | `ChronosMetricTile` | hand-rolled card |
 | A primary tappable action card | `ChronosActionTile` | raw row |
 | An empty state | `ChronosEmptyState` (with a next-action button) | a lone "nothing here" `Text` |
+| A first-paint loading placeholder | `ChronosSkeleton` | spinners / blank frames |
+| Undo for a destructive list action | `ChronosUndoSnackbar` | silent deletes / an extra confirm dialog |
+| Completion feedback on save/check-off | `ChronosCompletionCelebration` (spring pulse + `Confirm` haptic) | ad-hoc scale/haptic code |
 | A warning / overlap banner | `ChronosWarningBanner` | custom tinted box |
 | A bottom sheet | `ChronosModalBottomSheet` (and `ChronosFormBottomSheet` for forms) | raw `ModalBottomSheet` |
 | A destructive confirm | `ChronosConfirmBottomSheet` | `AlertDialog` |

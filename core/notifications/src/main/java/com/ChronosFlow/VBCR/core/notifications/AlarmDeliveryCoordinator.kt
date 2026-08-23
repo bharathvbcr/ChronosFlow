@@ -39,7 +39,8 @@ class AlarmDeliveryCoordinator @Inject constructor(
     private val habitRepository: HabitRepository,
     private val alarmScheduler: AlarmScheduler,
     private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator,
-    private val foldedReminderResolver: FoldedReminderResolver
+    private val foldedReminderResolver: FoldedReminderResolver,
+    private val stableNotificationCodes: StableNotificationCodes
 ) {
     suspend fun deliverFromAlarmIntent(intent: Intent, receiverClass: Class<*>) {
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "ChronosFlow Reminder"
@@ -83,7 +84,14 @@ class AlarmDeliveryCoordinator @Inject constructor(
         val habitId = blockId?.takeIf { it.startsWith("habit-") }?.removePrefix("habit-")
             ?: blockId?.takeIf { habitRepository.getHabitById(it) != null }
 
-        if (currentBlockNotificationCoordinator.isFoldRemindersEnabled()) {
+        // Fold the reminder into the live "now" surface when folding is on AND that surface is
+        // actually visible. While a focus session runs, the now notification is suppressed —
+        // refreshing it is a no-op that cancels — so folding here would swallow the reminder
+        // entirely (marked DELIVERED, alarm cancelled, surfaced nowhere). In that state the
+        // reminder falls through to its own normal notification instead.
+        if (currentBlockNotificationCoordinator.isFoldRemindersEnabled() &&
+            !currentBlockNotificationCoordinator.isSuppressedByFocus()
+        ) {
             val folded = foldedReminderResolver.resolve(
                 LocalDateTime.now(),
                 ZoneId.systemDefault(),
@@ -106,14 +114,21 @@ class AlarmDeliveryCoordinator @Inject constructor(
         }
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // Defensive channel creation before posting: if the user deleted the reminders channel in
+        // system settings, notifications posted into a missing channel are dropped by the OS.
+        ReminderNotificationChannels.ensureCreated(context)
 
         val habitLaunchTarget = if (task == null) loadHabitLaunchTargetForRequest(requestId) else null
+        // Stable, collision-free codes: hashCode()-derived request codes collide across entities,
+        // and PendingIntent equality ignores extras — a collision would route "Mark Done" for one
+        // entity to a different one. Keys are scoped per purpose so content/action intents of the
+        // same reminder never share a code.
         val contentIntent = habitLaunchTarget
             ?.let { target ->
                 buildAppLaunchPendingIntent(
                     context = context,
                     target = target,
-                    requestCode = (requestId?.hashCode() ?: target.value.hashCode()) and Int.MAX_VALUE
+                    requestCode = stableNotificationCodes.codeFor("launch:habit:${requestId ?: target.value}")
                 )
             }
             ?: buildTaskNotificationContentIntent(
@@ -123,7 +138,8 @@ class AlarmDeliveryCoordinator @Inject constructor(
                 receiverClass = receiverClass
             )
 
-        val notificationId = (requestId?.hashCode() ?: System.currentTimeMillis().toInt()) and Int.MAX_VALUE
+        val notificationId = requestId?.let { stableNotificationCodes.codeFor("notif:$it") }
+            ?: (System.currentTimeMillis().toInt() and Int.MAX_VALUE)
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_chronosflow_notification)
             .setContentTitle(title)
@@ -317,7 +333,7 @@ class AlarmDeliveryCoordinator @Inject constructor(
         val channelId = ReminderNotificationChannels.CRITICAL_CHANNEL_ID
         ReminderNotificationChannels.ensureCreated(context)
 
-        val notificationId = plan.id.hashCode().and(Int.MAX_VALUE) + 200
+        val notificationId = stableNotificationCodes.codeFor("supply:${plan.id}") + LOW_SUPPLY_NOTIFICATION_OFFSET
         val message = "Only $remaining ${plan.unit}(s) left of ${plan.name}. Please request a refill soon."
         val builtNotification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_chronosflow_notification)
@@ -413,7 +429,7 @@ class AlarmDeliveryCoordinator @Inject constructor(
             buildTaskContextCommandPendingIntent(
                 context = context,
                 command = singleCommand,
-                requestCode = requestId?.hashCode() ?: task.id.hashCode()
+                requestCode = stableNotificationCodes.codeFor("content:${requestId ?: task.id}")
             )?.let { return it }
         }
         return buildNotificationContentIntent(
@@ -423,7 +439,7 @@ class AlarmDeliveryCoordinator @Inject constructor(
                 taskId = task.id,
                 target = TASK_LAUNCH_TARGET_CONTEXT
             ),
-            requestCode = requestId?.hashCode() ?: task.id.hashCode()
+            requestCode = stableNotificationCodes.codeFor("content:${requestId ?: task.id}")
         )
     }
 
@@ -436,7 +452,8 @@ class AlarmDeliveryCoordinator @Inject constructor(
         return buildAppLaunchPendingIntent(
             context = context,
             target = target,
-            requestCode = (requestId?.hashCode() ?: target.value.hashCode()) + HABIT_APP_ACTION_REQUEST_OFFSET
+            requestCode = stableNotificationCodes.codeFor("habitapp:${requestId ?: target.value}") +
+                HABIT_APP_ACTION_REQUEST_OFFSET
         )
     }
 
@@ -477,3 +494,4 @@ class AlarmDeliveryCoordinator @Inject constructor(
 }
 
 private const val HABIT_APP_ACTION_REQUEST_OFFSET = 47
+private const val LOW_SUPPLY_NOTIFICATION_OFFSET = 200

@@ -246,6 +246,9 @@ class DayDialViewModelTest {
             focusPhaseAdvanceBus = com.ChronosFlow.VBCR.core.data.focus.FocusPhaseAdvanceBus()
         )
         viewModel.dataExportDispatcher = testDispatcher
+        // Keep the foreground calendar sync on the test scheduler: the default Dispatchers.IO hop
+        // escapes virtual time, so runCurrent() races the sync call and the throttle test flakes.
+        viewModel.calendarSyncDispatcher = testDispatcher
         viewModel.cancelMinuteTickerForTest()
     }
 

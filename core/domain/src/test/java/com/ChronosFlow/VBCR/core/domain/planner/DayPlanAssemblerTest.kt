@@ -50,6 +50,17 @@ class DayPlanAssemblerTest {
     }
 
     @Test
+    fun `review built for another day does not mark this day completed`() {
+        val yesterdayReview = PlannerTestFixtures.dailyReviewSummary().copy(date = date.minusDays(1))
+        every { conflictDetectionEngine.detect(emptyList()) } returns emptyList()
+
+        val plan = assembler.assemble(date, zone, emptyList(), review = yesterdayReview)
+
+        assertEquals(DayPlanStatus.DRAFT, plan.status)
+        assertEquals(null, plan.review)
+    }
+
+    @Test
     fun `filters blocks by date and sorts by time`() {
         val block1 = timeBlock(id = "1", startMinute = 600)
         val block2 = timeBlock(id = "2", startMinute = 400)

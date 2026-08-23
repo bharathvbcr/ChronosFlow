@@ -107,8 +107,10 @@ internal fun appendFoldedRemindersToBody(
     return "$base · $chip"
 }
 
-internal fun foldedReminderActionRequestCode(reminder: FoldedReminder): Int =
-    (FOLDED_ACTION_REQUEST_BASE + reminder.kind.ordinal + reminder.entityId.hashCode()) and Int.MAX_VALUE
+internal fun foldedReminderActionRequestCode(
+    reminder: FoldedReminder,
+    codes: StableNotificationCodes
+): Int = codes.codeFor("folded:${reminder.kind.name}:${reminder.entityId}")
 
 /** Up to [maxFoldedActions] actionable chips; extras beyond that stay text-only in the body. */
 internal data class FoldedActionSlots(
@@ -123,7 +125,8 @@ internal data class FoldedActionSlots(
 internal fun buildFoldedActionSlots(
     context: Context,
     folded: List<FoldedReminder>,
-    maxFoldedActions: Int
+    maxFoldedActions: Int,
+    codes: StableNotificationCodes
 ): FoldedActionSlots {
     if (folded.isEmpty() || maxFoldedActions <= 0) {
         return FoldedActionSlots(null, null, null, null, null, null)
@@ -134,7 +137,7 @@ internal fun buildFoldedActionSlots(
         primaryIntent = buildFoldedReminderActionPendingIntent(
             context,
             primary,
-            foldedReminderActionRequestCode(primary)
+            foldedReminderActionRequestCode(primary, codes)
         ),
         primaryLabel = foldedReminderActionLabel(context, primary),
         primaryIcon = foldedReminderActionIcon(primary),
@@ -142,12 +145,10 @@ internal fun buildFoldedActionSlots(
             buildFoldedReminderActionPendingIntent(
                 context,
                 it,
-                foldedReminderActionRequestCode(it)
+                foldedReminderActionRequestCode(it, codes)
             )
         },
         secondaryLabel = secondary?.let { foldedReminderActionLabel(context, it) },
         secondaryIcon = secondary?.let { foldedReminderActionIcon(it) }
     )
 }
-
-private const val FOLDED_ACTION_REQUEST_BASE = 43_000

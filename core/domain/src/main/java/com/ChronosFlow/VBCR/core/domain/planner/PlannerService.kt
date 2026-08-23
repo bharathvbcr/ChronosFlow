@@ -14,6 +14,14 @@ import java.time.Instant
 import java.util.UUID
 import javax.inject.Inject
 
+/**
+ * Thrown when the day's blocks could not be loaded (e.g. a wedged Room query timed out).
+ * Callers MUST NOT treat this as "the day is empty": scheduling against a phantom-empty day
+ * approves overlapping writes. Mutators inside [PlannerService] convert this to
+ * [PlannerOperationResult.Rejected] so the UI degrades gracefully instead of writing bad data.
+ */
+class PlannerDataUnavailableException(message: String, cause: Throwable) : Exception(message, cause)
+
 class PlannerService @Inject constructor(
     private val repository: TimeBlockRepository,
     private val conflictDetectionEngine: ConflictDetectionEngine = ConflictDetectionEngine()
@@ -28,15 +36,17 @@ class PlannerService @Inject constructor(
         return try {
             withTimeout(5_000L) { repository.getTimeBlocksByDate(date).first() }
         } catch (e: TimeoutCancellationException) {
-            android.util.Log.w("PlannerService", "getBlocksForDate timed out for $date")
-            emptyList()
+            // Domain stays Android-free (no android.util.Log); failure is signalled to callers
+            // via the typed exception and surfaced as a rejected operation at the mutation boundary.
+            throw PlannerDataUnavailableException("Timed out loading blocks for $date", e)
         }
     }
 
     suspend fun createBlock(block: TimeBlock): PlannerOperationResult {
-        return if (block.isLocked) {
-            PlannerOperationResult.Rejected("Cannot create locked block", block.id)
-        } else {
+        return guarded(block.id) {
+            if (block.isLocked) {
+                PlannerOperationResult.Rejected("Cannot create locked block", block.id)
+            } else {
             val result = validatePlacement(
                 date = block.date,
                 blockId = block.id,
@@ -52,129 +62,138 @@ class PlannerService @Inject constructor(
                 }
                 else -> result
             }
+            }
         }
     }
 
-    suspend fun moveBlock(blockId: String, targetStartMinute: Int): PlannerOperationResult {
-        val target = getLatestBlock(blockId) ?: return PlannerOperationResult.Rejected("Block not found", blockId)
-        if (target.isLocked || target.flexibility == BlockFlexibility.FIXED) {
-            return PlannerOperationResult.Locked("Block is locked or fixed", blockId)
-        }
-        val snappedMinute = snapToGrid(targetStartMinute, 15)
-        val validation = validatePlacement(
-            date = target.date,
-            blockId = target.id,
-            startMinute = snappedMinute,
-            duration = target.durationMinutes,
-            flexibility = target.flexibility
-        )
-        if (validation !is PlannerOperationResult.Applied) return validation
-        repository.saveTimeBlock(target.withUpdatedStart(snappedMinute))
-        invalidateDragCache()
-        return PlannerOperationResult.Applied(
-            "Block moved",
-            target.id,
-            snappedMinute,
-            listOf(target.id)
-        )
-    }
-
-    suspend fun previewMove(blockId: String, targetStartMinute: Int): PlannerOperationResult {
-        val target = getLatestBlock(blockId) ?: return PlannerOperationResult.Rejected("Block not found", blockId)
-        if (target.isLocked || target.flexibility == BlockFlexibility.FIXED) {
-            return PlannerOperationResult.Locked("Block is locked or fixed", blockId)
-        }
-        val snappedMinute = snapToGrid(targetStartMinute, 15)
-        val validation = validatePlacement(
-            date = target.date,
-            blockId = target.id,
-            startMinute = snappedMinute,
-            duration = target.durationMinutes,
-            flexibility = target.flexibility
-        )
-        return when (validation) {
-            is PlannerOperationResult.Applied -> PlannerOperationResult.Applied(
-                message = "Placement preview valid",
+    suspend fun moveBlock(blockId: String, targetStartMinute: Int): PlannerOperationResult =
+        guarded(blockId) {
+            val target = getLatestBlock(blockId) ?: return@guarded PlannerOperationResult.Rejected("Block not found", blockId)
+            if (target.isLocked || target.flexibility == BlockFlexibility.FIXED) {
+                return@guarded PlannerOperationResult.Locked("Block is locked or fixed", blockId)
+            }
+            val snappedMinute = snapToGrid(targetStartMinute, 15)
+            val validation = validatePlacement(
+                date = target.date,
                 blockId = target.id,
-                snappedToMinute = snappedMinute,
-                affectedBlockIds = listOf(target.id)
+                startMinute = snappedMinute,
+                duration = target.durationMinutes,
+                flexibility = target.flexibility
             )
-            else -> validation
+            if (validation !is PlannerOperationResult.Applied) return@guarded validation
+            repository.saveTimeBlock(target.withUpdatedStart(snappedMinute))
+            invalidateDragCache()
+            PlannerOperationResult.Applied(
+                "Block moved",
+                target.id,
+                snappedMinute,
+                listOf(target.id)
+            )
         }
-    }
+
+    suspend fun previewMove(blockId: String, targetStartMinute: Int): PlannerOperationResult =
+        guarded(blockId) {
+            val target = getLatestBlock(blockId) ?: return@guarded PlannerOperationResult.Rejected("Block not found", blockId)
+            if (target.isLocked || target.flexibility == BlockFlexibility.FIXED) {
+                return@guarded PlannerOperationResult.Locked("Block is locked or fixed", blockId)
+            }
+            val snappedMinute = snapToGrid(targetStartMinute, 15)
+            val validation = validatePlacement(
+                date = target.date,
+                blockId = target.id,
+                startMinute = snappedMinute,
+                duration = target.durationMinutes,
+                flexibility = target.flexibility
+            )
+            when (validation) {
+                is PlannerOperationResult.Applied -> PlannerOperationResult.Applied(
+                    message = "Placement preview valid",
+                    blockId = target.id,
+                    snappedToMinute = snappedMinute,
+                    affectedBlockIds = listOf(target.id)
+                )
+                else -> validation
+            }
+        }
 
     suspend fun resizeBlock(blockId: String, durationMinutes: Int): PlannerOperationResult {
         val target = getLatestBlock(blockId) ?: return PlannerOperationResult.Rejected("Block not found", blockId)
         return resizeBlockWindow(blockId, target.startMinuteOfDay, durationMinutes)
     }
 
-    suspend fun resizeBlockWindow(blockId: String, startMinute: Int, durationMinutes: Int): PlannerOperationResult {
-        val target = getLatestBlock(blockId) ?: return PlannerOperationResult.Rejected("Block not found", blockId)
-        if (target.isLocked || target.flexibility == BlockFlexibility.FIXED) {
-            return PlannerOperationResult.Locked("Block is locked or fixed", blockId)
-        }
-        if (target.flexibility == BlockFlexibility.MOVABLE) {
-            return PlannerOperationResult.Rejected("Block is movable only", blockId)
-        }
-        val clamped = durationMinutes.coerceIn(1, 1440)
-        val validation = validatePlacement(
-            date = target.date,
-            blockId = target.id,
-            startMinute = startMinute,
-            duration = clamped,
-            flexibility = target.flexibility
-        )
-        if (validation !is PlannerOperationResult.Applied) return validation
-        repository.saveTimeBlock(
-            target.copy(
-                startMinuteOfDay = normalizeMinute(startMinute),
-                durationMinutes = clamped,
-                updatedAt = Instant.now()
+    suspend fun resizeBlockWindow(blockId: String, startMinute: Int, durationMinutes: Int): PlannerOperationResult =
+        guarded(blockId) {
+            val target = getLatestBlock(blockId) ?: return@guarded PlannerOperationResult.Rejected("Block not found", blockId)
+            if (target.isLocked || target.flexibility == BlockFlexibility.FIXED) {
+                return@guarded PlannerOperationResult.Locked("Block is locked or fixed", blockId)
+            }
+            if (target.flexibility == BlockFlexibility.MOVABLE) {
+                return@guarded PlannerOperationResult.Rejected("Block is movable only", blockId)
+            }
+            val clamped = durationMinutes.coerceIn(1, 1440)
+            val validation = validatePlacement(
+                date = target.date,
+                blockId = target.id,
+                startMinute = startMinute,
+                duration = clamped,
+                flexibility = target.flexibility
             )
-        )
-        invalidateDragCache()
-        return PlannerOperationResult.Applied(
-            "Block resized",
-            blockId,
-            normalizeMinute(startMinute),
-            listOf(blockId)
-        )
-    }
+            if (validation !is PlannerOperationResult.Applied) return@guarded validation
+            repository.saveTimeBlock(
+                target.copy(
+                    startMinuteOfDay = normalizeMinute(startMinute),
+                    durationMinutes = clamped,
+                    updatedAt = Instant.now()
+                )
+            )
+            invalidateDragCache()
+            PlannerOperationResult.Applied(
+                "Block resized",
+                blockId,
+                normalizeMinute(startMinute),
+                listOf(blockId)
+            )
+        }
 
     suspend fun previewResize(blockId: String, durationMinutes: Int): PlannerOperationResult {
         val target = getLatestBlock(blockId) ?: return PlannerOperationResult.Rejected("Block not found", blockId)
         return previewResizeWindow(blockId, target.startMinuteOfDay, durationMinutes)
     }
 
-    suspend fun previewResizeWindow(blockId: String, startMinute: Int, durationMinutes: Int): PlannerOperationResult {
-        val target = getLatestBlock(blockId) ?: return PlannerOperationResult.Rejected("Block not found", blockId)
-        if (target.isLocked || target.flexibility == BlockFlexibility.FIXED) {
-            return PlannerOperationResult.Locked("Block is locked or fixed", blockId)
-        }
-        if (target.flexibility == BlockFlexibility.MOVABLE) {
-            return PlannerOperationResult.Rejected("Block is movable only", blockId)
-        }
-        val clamped = durationMinutes.coerceIn(1, 1440)
-        val validation = validatePlacement(
-            date = target.date,
-            blockId = target.id,
-            startMinute = startMinute,
-            duration = clamped,
-            flexibility = target.flexibility
-        )
-        return when (validation) {
-            is PlannerOperationResult.Applied -> PlannerOperationResult.Applied(
-                message = "Resize preview valid",
+    suspend fun previewResizeWindow(blockId: String, startMinute: Int, durationMinutes: Int): PlannerOperationResult =
+        guarded(blockId) {
+            val target = getLatestBlock(blockId) ?: return@guarded PlannerOperationResult.Rejected("Block not found", blockId)
+            if (target.isLocked || target.flexibility == BlockFlexibility.FIXED) {
+                return@guarded PlannerOperationResult.Locked("Block is locked or fixed", blockId)
+            }
+            if (target.flexibility == BlockFlexibility.MOVABLE) {
+                return@guarded PlannerOperationResult.Rejected("Block is movable only", blockId)
+            }
+            val clamped = durationMinutes.coerceIn(1, 1440)
+            val validation = validatePlacement(
+                date = target.date,
                 blockId = target.id,
-                snappedToMinute = normalizeMinute(startMinute),
-                affectedBlockIds = listOf(target.id)
+                startMinute = startMinute,
+                duration = clamped,
+                flexibility = target.flexibility
             )
-            else -> validation
+            when (validation) {
+                is PlannerOperationResult.Applied -> PlannerOperationResult.Applied(
+                    message = "Resize preview valid",
+                    blockId = target.id,
+                    snappedToMinute = normalizeMinute(startMinute),
+                    affectedBlockIds = listOf(target.id)
+                )
+                else -> validation
+            }
         }
-    }
 
     suspend fun deleteBlock(block: TimeBlock): PlannerOperationResult {
         repository.deleteTimeBlock(block)
+        // The drag-session cache must drop the deleted block like every other write path,
+        // or the next previewMove/validatePlacement still sees it and reports phantom conflicts
+        // against a slot the user just freed.
+        invalidateDragCache()
         return PlannerOperationResult.Applied("Block deleted", block.id, null, emptyList())
     }
 
@@ -200,7 +219,13 @@ class PlannerService @Inject constructor(
         fromMinute: Int? = null
     ): PlannerOperationResult {
         val floor = (fromMinute ?: 0).coerceIn(0, 1440)
-        val allBlocks = getBlocksForDate(date)
+        // Fail closed: a timed-out day load must never read as "no flexible blocks" — that would
+        // report success on data the service never actually saw.
+        val allBlocks = try {
+            getBlocksForDate(date)
+        } catch (e: PlannerDataUnavailableException) {
+            return PlannerOperationResult.Rejected(SCHEDULE_UNAVAILABLE_MESSAGE, "")
+        }
 
         fun TimeBlock.isUnderway(): Boolean =
             actualStartMinuteOfDay != null ||
@@ -483,7 +508,26 @@ class PlannerService @Inject constructor(
     }
 
     private fun snapToGrid(minute: Int, increment: Int): Int {
-        return ((minute + increment / 2) / increment) * increment % 1440
+        // Round to nearest grid point, then normalize into [0, 1440). Kotlin's % keeps the
+        // dividend sign, so without normalization a negative minute (-90 → -75) would be echoed
+        // back to callers as the snapped position while the block itself persists normalized.
+        return normalizeMinute(((minute + increment / 2) / increment) * increment)
+    }
+
+    /**
+     * Runs a placement mutation, degrading a schedule load failure ([PlannerDataUnavailableException])
+     * to [PlannerOperationResult.Rejected] instead of crashing the caller's coroutine — or worse,
+     * approving the write against an empty phantom day.
+     */
+    private suspend fun guarded(
+        blockId: String,
+        mutation: suspend () -> PlannerOperationResult
+    ): PlannerOperationResult {
+        return try {
+            mutation()
+        } catch (e: PlannerDataUnavailableException) {
+            PlannerOperationResult.Rejected(SCHEDULE_UNAVAILABLE_MESSAGE, blockId)
+        }
     }
 
     private fun TimeBlock.overlaps(startMinute: Int, duration: Int): Boolean {
@@ -503,6 +547,8 @@ class PlannerService @Inject constructor(
         }
     }
 }
+
+private const val SCHEDULE_UNAVAILABLE_MESSAGE = "Couldn't load your schedule — try again"
 
 internal fun rebalanceSummaryMessage(movedBlocks: List<TimeBlock>): String {
     val moves = movedBlocks.take(3).joinToString(", ") { block ->

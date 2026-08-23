@@ -75,6 +75,10 @@ extensions.configure<ApplicationExtension> {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    packaging {
+        jniLibs.keepDebugSymbols += "**/libandroidx.graphics.path.so"
+    }
+
     buildFeatures {
         compose = true
     }

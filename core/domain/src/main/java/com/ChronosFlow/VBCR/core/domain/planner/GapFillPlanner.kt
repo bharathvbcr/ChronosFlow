@@ -61,8 +61,11 @@ class GapFillPlanner @Inject constructor(
 
         val scheduledTaskIds = blocks.mapNotNull(TimeBlock::taskId).toSet()
         val scheduledHabitIds = blocks.mapNotNull(TimeBlock::habitId).toSet()
+        // distinctBy keeps duplicate-id inputs (e.g. a task appearing twice in the source query)
+        // from producing two identical proposals for the same entity.
         val taskQueue = tasks
             .filter { !it.isCompleted && it.id !in scheduledTaskIds }
+            .distinctBy { it.id }
             .sortedWith(
                 compareBy<Task> { it.dueDate ?: Instant.MAX }
                     .thenByDescending(Task::priority)
@@ -71,6 +74,7 @@ class GapFillPlanner @Inject constructor(
             .toMutableList()
         val habitQueue = habitCandidates
             .filter { it.habitId !in scheduledHabitIds }
+            .distinctBy { it.habitId }
             .sortedBy(GapFillHabitCandidate::windowStartMinute)
             .toMutableList()
 
@@ -80,29 +84,45 @@ class GapFillPlanner @Inject constructor(
             var placedMinutes = 0
             while (gap.endMinute - cursor >= MIN_PLACEMENT_MINUTES) {
                 val available = gap.endMinute - cursor
-                val habit = habitQueue.firstOrNull { candidate ->
-                    cursor < candidate.windowEndMinute && gap.endMinute > candidate.windowStartMinute
-                }
+
                 val block: GapFillBlock? = run {
-                    if (habit != null) {
-                        val b = habitBlockFor(habit, cursor, gap.endMinute)
-                        if (b != null) {
-                            habitQueue.remove(habit)
+                    // 1. A habit whose window is already open at the cursor goes first.
+                    val openHabit = habitQueue.firstOrNull { candidate ->
+                        candidate.windowStartMinute <= cursor &&
+                            cursor < candidate.windowEndMinute &&
+                            gap.endMinute > candidate.windowStartMinute
+                    }
+                    if (openHabit != null) {
+                        habitBlockFor(openHabit, cursor, gap.endMinute)?.let { b ->
+                            habitQueue.remove(openHabit)
                             return@run b
                         }
-                        // habit can't fit at this cursor — fall through to task placement
+                        // The open-window habit can't fit at this cursor — fall through to tasks.
                     }
+
+                    // 2. Otherwise fill forward with the next pending task, so time before a
+                    // habit's future window stays usable instead of sitting idle.
                     if (taskQueue.isNotEmpty()) {
                         val task = taskQueue.removeAt(0)
-                        GapFillBlock(
+                        return@run GapFillBlock(
                             title = task.title,
                             startMinute = cursor,
                             durationMinutes = taskDurationFor(task).coerceAtMost(available),
                             category = "TASK",
                             taskId = task.id
                         )
-                    } else null
+                    }
+
+                    // 3. No tasks left: jump ahead to the earliest habit whose window opens inside
+                    // this remaining stretch of the gap.
+                    val futureHabit = habitQueue.firstOrNull { candidate ->
+                        candidate.windowStartMinute >= cursor && candidate.windowStartMinute < gap.endMinute
+                    }
+                    futureHabit?.let { habit ->
+                        habitBlockFor(habit, cursor, gap.endMinute)?.also { habitQueue.remove(habit) }
+                    }
                 }
+
                 if (block == null) {
                     if (
                         addBreaksAutomatically &&

@@ -17,12 +17,18 @@ class DailyReviewCalculator @Inject constructor() {
         date: LocalDate,
         plannedBlocks: List<TimeBlock>,
         actualSegments: List<ActualTimeSegment>,
-        timezone: ZoneId = ZoneId.systemDefault()
+        timezone: ZoneId = ZoneId.systemDefault(),
+        /**
+         * Clock used to close still-open actual-time segments. Defaults to the current instant;
+         * callers that need reproducible reviews (tests, batch recomputation) inject a fixed value
+         * so two calls with identical inputs always produce an identical summary.
+         */
+        now: Instant = Instant.now()
     ): DailyReviewSummary {
         val blocksForDate = plannedBlocks.filter { it.date == date }
         val segmentsForDate = actualSegments.filter { it.date == date }
         val plannedMinutes = blocksForDate.sumOf { it.durationMinutes }
-        val actualMinutes = segmentsForDate.sumOf { it.durationMinutes() }
+        val actualMinutes = segmentsForDate.sumOf { it.durationMinutes(now) }
         val completedBlockIds = matchedBlockIds(blocksForDate, segmentsForDate, timezone)
         val completedBlockCount = blocksForDate.count { it.id in completedBlockIds }
         val missedBlocks = blocksForDate.filter { it.id !in completedBlockIds }
@@ -65,8 +71,8 @@ class DailyReviewCalculator @Inject constructor() {
         )
     }
 
-    private fun ActualTimeSegment.durationMinutes(): Int {
-        val end = endInstant ?: Instant.now()
+    private fun ActualTimeSegment.durationMinutes(now: Instant): Int {
+        val end = endInstant ?: now
         return Duration.between(startInstant, end).toMinutes().coerceAtLeast(0).toInt()
     }
 

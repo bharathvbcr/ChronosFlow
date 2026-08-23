@@ -133,4 +133,87 @@ class AlarmSchedulerTest {
         assertTrue(result is AlarmScheduleResult.Skipped)
         assertEquals(0, shadowAlarmManager.scheduledAlarms.size)
     }
+
+    /**
+     * Simulates SCHEDULE_EXACT_ALARM being revoked between the permission check and the set call:
+     * AlarmManager.setExactAndAllowWhileIdle throws inside [AlarmScheduler.scheduleExact]'s
+     * try/catch, which reports the failure as a `false` return.
+     */
+    private class RacyAlarmScheduler(context: Context) : AlarmScheduler(context) {
+        var failExactOnce = false
+        var exactCalls = 0
+
+        override fun scheduleExact(
+            time: Instant,
+            id: String,
+            title: String,
+            message: String,
+            receiverClass: Class<out AlarmReceiver>
+        ): Boolean {
+            exactCalls++
+            if (failExactOnce) {
+                failExactOnce = false
+                return false
+            }
+            return super.scheduleExact(time, id, title, message, receiverClass)
+        }
+    }
+
+    @Test
+    fun `exact alarm revoked mid-schedule degrades to inexact instead of dropping the reminder`() {
+        val racy = RacyAlarmScheduler(context)
+        racy.failExactOnce = true
+        val time = Instant.now().plusSeconds(3600)
+
+        val result = racy.scheduleExactAlarm("race-1", time, "T", "M", allowFallback = true)
+
+        // The reminder must still be scheduled (inexactly), not reported as denied-and-dropped.
+        assertEquals(1, racy.exactCalls)
+        assertTrue(result is AlarmScheduleResult.Scheduled)
+        assertEquals(false, (result as AlarmScheduleResult.Scheduled).exact)
+        assertEquals(1, shadowAlarmManager.scheduledAlarms.size)
+
+        // Boot restore reconciles from the persisted record, which must reflect the real outcome.
+        val persisted = context.getSharedPreferences("chronos_alarm_scheduler", Context.MODE_PRIVATE)
+            .getString("alarm_race-1", null)
+        assertTrue("persisted payload must exist: $persisted", persisted != null && "exact=false" in persisted)
+
+        // A later attempt with permission restored schedules exactly again.
+        val retry = racy.scheduleExactAlarm("race-2", time.plusSeconds(60), "T", "M", allowFallback = true)
+        assertEquals(2, racy.exactCalls)
+        assertTrue(retry is AlarmScheduleResult.Scheduled && retry.exact)
+    }
+
+    @Test
+    fun `snooze-style request bypasses fold skip and schedules while fold mode is active`() {
+        context.getSharedPreferences("daydial_ui_settings", Context.MODE_PRIVATE).edit()
+            .putBoolean("notifications.currentBlockLive", true)
+            .putBoolean("notifications.foldReminders", true)
+            .apply()
+        val request = AlarmRequest(
+            id = "med-snooze-plan-9",
+            type = AlarmRequestType.MEDICATION,
+            scheduledFor = Instant.now().plusSeconds(900),
+            title = "Aspirin",
+            message = "Snoozed dose · 1 pill",
+            medicationPlanId = "plan-9",
+            blockId = null,
+            reliability = AlarmReliability.EXACT,
+            deliveryState = AlarmDeliveryState.PENDING,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now()
+        )
+
+        // Default (fold-skip respected) drops it…
+        assertEquals(
+            0,
+            shadowAlarmManager.scheduledAlarms.size
+        )
+        assertTrue(scheduler.scheduleAlarmRequest(request) is AlarmScheduleResult.Skipped)
+
+        // …but an explicit user snooze must schedule regardless of fold mode.
+        val result = scheduler.scheduleAlarmRequest(request, respectFoldSkip = false)
+        assertTrue(result is AlarmScheduleResult.Scheduled)
+        assertEquals(1, shadowAlarmManager.scheduledAlarms.size)
+    }
 }

@@ -13,10 +13,11 @@ import org.robolectric.annotation.Config
 @Config(sdk = [33])
 class FoldedActionSlotsTest {
     private val context = RuntimeEnvironment.getApplication()
+    private val codes = StableNotificationCodes(context)
 
     @Test
     fun `empty folded list yields no action slots`() {
-        val slots = buildFoldedActionSlots(context, emptyList(), maxFoldedActions = 2)
+        val slots = buildFoldedActionSlots(context, emptyList(), maxFoldedActions = 2, codes = codes)
         assertNull(slots.primaryIntent)
         assertNull(slots.primaryLabel)
         assertNull(slots.secondaryIntent)
@@ -24,7 +25,7 @@ class FoldedActionSlotsTest {
 
     @Test
     fun `maxFoldedActions zero yields no slots even with candidates`() {
-        val slots = buildFoldedActionSlots(context, listOf(reminder("med-1")), maxFoldedActions = 0)
+        val slots = buildFoldedActionSlots(context, listOf(reminder("med-1")), maxFoldedActions = 0, codes = codes)
         assertNull(slots.primaryIntent)
         assertNull(slots.secondaryIntent)
     }
@@ -35,7 +36,7 @@ class FoldedActionSlotsTest {
             reminder("med-1", FoldedReminderKind.MEDICATION),
             reminder("task-1", FoldedReminderKind.TASK)
         )
-        val slots = buildFoldedActionSlots(context, folded, maxFoldedActions = 1)
+        val slots = buildFoldedActionSlots(context, folded, maxFoldedActions = 1, codes = codes)
         assertNotNull(slots.primaryIntent)
         assertEquals(context.getString(R.string.folded_reminder_action_take), slots.primaryLabel)
         assertNull(slots.secondaryIntent)
@@ -49,7 +50,7 @@ class FoldedActionSlotsTest {
             reminder("task-1", FoldedReminderKind.TASK),
             reminder("habit-1", FoldedReminderKind.HABIT)
         )
-        val slots = buildFoldedActionSlots(context, folded, maxFoldedActions = 2)
+        val slots = buildFoldedActionSlots(context, folded, maxFoldedActions = 2, codes = codes)
         assertNotNull(slots.primaryIntent)
         assertNotNull(slots.secondaryIntent)
         assertEquals(context.getString(R.string.folded_reminder_action_complete), slots.secondaryLabel)
@@ -60,11 +61,11 @@ class FoldedActionSlotsTest {
         val medA = reminder("med-a", FoldedReminderKind.MEDICATION)
         val medB = reminder("med-b", FoldedReminderKind.MEDICATION)
         assertEquals(
-            foldedReminderActionRequestCode(medA),
-            foldedReminderActionRequestCode(medA)
+            foldedReminderActionRequestCode(medA, codes),
+            foldedReminderActionRequestCode(medA, codes)
         )
         assert(
-            foldedReminderActionRequestCode(medA) != foldedReminderActionRequestCode(medB)
+            foldedReminderActionRequestCode(medA, codes) != foldedReminderActionRequestCode(medB, codes)
         )
     }
 

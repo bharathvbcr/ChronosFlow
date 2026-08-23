@@ -35,7 +35,8 @@ The product direction is intentionally narrow: Today, Plan, Focus, and a global 
 ### Day Planning
 
 - Planner service with command-pattern mutations, undo/redo history, and deterministic conflict detection before save (`core/domain/planner/`).
-- Free-time calculation, gap-fill planning, and conflict repair UI.
+- Fail-closed schedule access: if the day's blocks cannot be loaded (e.g. a wedged query times out), mutations are rejected with a retry message instead of being approved against a phantom-empty day (`PlannerDataUnavailableException`).
+- Free-time calculation, gap-fill planning (open habit windows first, then pending tasks, then future habit windows), and conflict repair UI.
 - Task-to-time-block scheduling with recurrence rules, reminder rules, checklists, attachments, and task-to-task connections.
 - Locked blocks for commitments that planning must work around.
 
@@ -43,15 +44,17 @@ The product direction is intentionally narrow: Today, Plan, Focus, and a global 
 
 - Focus sessions start from a scheduled block and run in a special-use foreground service (`feature/focus/FocusService.kt`) that owns its notification and survives process death.
 - Pause, resume, extend, stop, and complete actions drive a persisted session state machine (`core/domain/planner/FocusSessionReducer.kt`); completion writes actual-time evidence exactly once.
+- The reducer is idempotent under stray or duplicated events: a duplicate start, a stale archive, or a resume with rolled-back wall clock cannot clobber or shorten a live session; a command that finds no live session stands the foreground service down cleanly (`feature/focus/FocusService.kt`).
 - Android 16 Live Update / promoted progress notifications with a renderer fallback for devices without Live Update support (`core/notifications/LiveUpdateRenderer.kt`).
 - Focus timer ring UI, mood-accented theming, distraction notes, and focus history.
 
 ### Tasks, Habits, And Medication
 
-- Unified form/sheet layout built on a reusable `CardEditorScaffold` with custom quick-bar editors (`EditorQuickBar`), integrated mood/energy check-in cards, and category-aware themed presentation.
+- Unified form/sheet layout built on a reusable `CardEditorScaffold` with custom quick-bar editors (`EditorQuickBar`), an optional secondary confirm ("Add & new") for rapid consecutive capture, integrated mood/energy check-in cards, and category-aware themed presentation.
+- Shared motion/loading primitives: undo-delete snackbars and skeleton first-paint placeholders (`ChronosUndoSnackbar`, `ChronosSkeleton`) across Tasks/Habits/Medication/Goals, and a shared completion-celebration pulse with Confirm haptics (`ChronosCompletionCelebration`).
 - Tasks with priorities, due dates, subtasks/checklists, recurrence, contact connections, file attachments, and focus-session launch.
 - Daily and weekly habits with flexible targets, habit windows, streak charts, consistency tracking, and missed-habit repair suggestions.
-- Medication plans with schedules, exact reminders where justified, dose acknowledgement, missed-dose follow-up, refill tracking, adherence charts, and safety-profile notes. ChronosFlow tracks and reminds; it does not provide medical advice.
+- Medication plans with schedules, exact reminders where justified, dose acknowledgement, snooze-from-notification (the folded chip hides until the snoozed reminder fires), missed-dose follow-up, refill tracking, adherence charts, and safety-profile notes. ChronosFlow tracks and reminds; it does not provide medical advice.
 - Mood and energy check-ins feed an energy-correlation engine that informs deep-work suggestions.
 
 ### Review And Insights
@@ -68,7 +71,8 @@ The product direction is intentionally narrow: Today, Plan, Focus, and a global 
 ### AI-Assisted Planning
 
 - Three-tier model strategy: ML Kit GenAI Prompt API running Gemini Nano on AICore, explicit cloud Gemini fallback (Firebase AI Logic) when the user enables it, and local planning heuristics when neither is available.
-- **Semantic Response Cache (`SemanticResponseCache`)**: Caches and reuses prior Gemini Nano and foundation model outputs when prompt inputs are nearly identical, skipping cold inference on repeat plan requests.
+- **Semantic Response Cache (`SemanticResponseCache`)**: Caches and reuses prior Gemini Nano and foundation model outputs when prompt inputs are nearly identical, skipping cold inference on repeat plan requests. Near-duplicate replay is gated on date/time-bearing tokens and prompt shape matching, so "plan tomorrow" can never replay today's answer.
+- Bounded inference: each Gemini Nano attempt is capped by a generous timeout so a hung AICore call cannot block planning indefinitely, caller cancellation propagates through every gateway (Nano, cloud, text tools), and the replay cache is thread-safe for concurrent cloud access.
 - Planning flows include generate-a-day, repair an overloaded plan, deep-work window detection, missed-habit rescheduling, plan explanation, and a conversational assistant.
 - Every suggestion is staged in a review sheet (`feature/daydial/ui/AiReviewSheet.kt`) with per-suggestion Accept/Reject/Modify and bulk Apply All/Dismiss All — no autonomous AI writes.
 - ML Kit text tools (summarization, proofreading, rewriting) back text-assist rows in forms.
@@ -77,8 +81,9 @@ The product direction is intentionally narrow: Today, Plan, Focus, and a global 
 
 ### Notifications And Alarms
 
-- **Folded Reminders (`FoldedReminder`)**: Dynamic grouping of near-simultaneous notification events (like tasks, habits, and medication doses) into a single folded notification slot with custom actionable check-off slots.
-- Inexact scheduling is preferred for soft nudges and habit reminders; `SCHEDULE_EXACT_ALARM` is reserved for user-specified precise reminders, medication, and focus check-ins, with fallback behavior when exact alarms are unavailable (`core/domain/model/ExactAlarmPolicy.kt`).
+- **Folded Reminders (`FoldedReminder`)**: Dynamic grouping of near-simultaneous notification events (like tasks, habits, and medication doses) into a single folded notification slot with custom actionable check-off slots. Folding only happens while the live "now" surface is actually visible — a reminder is never folded onto a surface a focus session has suppressed (which would deliver it nowhere).
+- **Stable Notification Identity (`StableNotificationCodes`)**: Notification ids and PendingIntent request codes come from a persisted, collision-free allocator instead of hash-derived ints, so "Mark Done" can never route one entity's action to another entity across process restarts.
+- Inexact scheduling is preferred for soft nudges and habit reminders; `SCHEDULE_EXACT_ALARM` is reserved for user-specified precise reminders, medication, and focus check-ins. If exact-alarm permission is revoked mid-schedule, the alarm degrades to inexact and the persisted reminder records what actually happened so boot restore reconciles correctly (`core/domain/model/ExactAlarmPolicy.kt`). Alarm delivery failures are contained in the receiver rather than crashing the background process.
 - Boot, timezone-change, time-set, and package-replaced receivers plus a WorkManager reconcile worker keep pending alarms consistent (`core/notifications/PendingAlarmReconciler.kt`, `ReminderReconcileWorker.kt`).
 - Notification action receivers for task completion, habit marking, and dose acknowledgement, with privacy redaction for sensitive content.
 
@@ -187,7 +192,7 @@ sequenceDiagram
 | Persistence | `core/data/ChronosDatabase.kt`, `dao/*`, `model/*Entity.kt`, `datastore/ChronosPreferencesDataSource.kt` | Room schema for plans, blocks, tasks, habits, medication, focus sessions, check-ins, and reviews; DataStore preferences. |
 | AI planning | `core/ai/ChronosAIPlanner.kt`, `genai/MlKitGeminiNanoGateway.kt`, `genai/CloudGeminiGatewayImpl.kt`, `genai/LocalPlanningHeuristics.kt`, `genai/GenAiAssistCoordinator.kt` | Model routing, prompt building, response parsing, and suggestion staging. |
 | Notifications | `core/notifications/AlarmScheduler.kt`, `AlarmDeliveryCoordinator.kt`, `LiveUpdateGateway.kt`, `FocusNotificationManager.kt` | Exact/inexact alarm policy, delivery, Live Updates, and action receivers. |
-| Design system | `core/ui/theme/ChronosTheme.kt`, `theme/ChronosFrostedGlass.kt`, `components/ChronosFormBottomSheet.kt`, `components/CommandPalette.kt` | Material 3 theming, Haze frosted-glass chrome, shared form kit, and the palette. |
+| Design system | `core/ui/theme/ChronosTheme.kt`, `theme/ChronosFrostedGlass.kt`, `components/ChronosFormBottomSheet.kt`, `components/CommandPalette.kt`, `components/ChronosSkeleton.kt`, `components/ChronosUndoSnackbar.kt`, `motion/ChronosCompletionCelebration.kt` | Material 3 theming, Haze frosted-glass chrome, shared form kit, skeleton/undo/celebration primitives, and the palette. |
 | Focus runtime | `feature/focus/FocusService.kt`, `FocusSessionRuntime.kt`, `WearFocusBridge.kt` | Foreground session execution, logging, widget dispatch, and watch mirroring. |
 | System surfaces | `app/.../widget/*`, `app/.../appfunctions/ChronosAppFunctions.kt`, `wear/*` | Glance widgets, agent app-control, Wear tiles and standalone app. |
 | Benchmarks | `benchmark/.../ChronosMacrobenchmark.kt`, `StartupBenchmark.kt`, `BaselineProfileGenerator.kt` | Startup and interaction macrobenchmarks plus baseline profile generation. |

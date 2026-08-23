@@ -8,6 +8,7 @@ import com.ChronosFlow.VBCR.core.domain.model.SleepSchedule
 import com.ChronosFlow.VBCR.core.domain.model.TimeBlock
 import com.ChronosFlow.VBCR.core.domain.model.deriveSleepReadiness
 import com.ChronosFlow.VBCR.core.domain.planner.FreeTimeCalculator
+import com.ChronosFlow.VBCR.core.domain.planner.PlannerDataUnavailableException
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerOperationResult
 import com.ChronosFlow.VBCR.core.domain.planner.PlannerService
 import com.ChronosFlow.VBCR.core.domain.repository.MoodEnergyRepository
@@ -52,7 +53,13 @@ class ScheduleTaskIntoDayUseCase @Inject constructor(
                 ?: task.preferredDurationMinutes
                 ?: durationForPriority(task.priority)
             ).coerceIn(15, 180)
-        val blocks = plannerService.getBlocksForDate(scheduledDate)
+        val blocks = try {
+            plannerService.getBlocksForDate(scheduledDate)
+        } catch (e: PlannerDataUnavailableException) {
+            // A timed-out day load must never read as "the whole day is free" — that would drop
+            // the task into a slot that overlaps existing blocks.
+            return PlannerOperationResult.Rejected("Couldn't load your schedule — try again", taskId)
+        }
         val existingOccurrence = taskSchedule?.let { schedule ->
             blocks.firstOrNull { block ->
                 block.taskId == task.id && block.taskOccurrenceDate == scheduledDate

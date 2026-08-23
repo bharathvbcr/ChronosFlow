@@ -229,6 +229,90 @@ class PlannerServiceTest {
     }
 
     @Test
+    fun `deleteBlock invalidates the drag cache so the freed slot previews clean`() = runTest {
+        val mover = timeBlock(id = "mover", startMinute = 600, durationMinutes = 60)
+        val doomed = timeBlock(id = "doomed", startMinute = 630, durationMinutes = 30)
+        coEvery { repository.getTimeBlockById("mover") } returns mover
+        coEvery { repository.deleteTimeBlock(doomed) } returns Unit
+        // First preview fills the drag cache while both blocks exist; after the delete the next
+        // query must see only the survivor.
+        every { repository.getTimeBlocksByDate(date) } returnsMany listOf(
+            flowOf(listOf(mover, doomed)),
+            flowOf(listOf(mover))
+        )
+        every { conflictDetectionEngine.detect(any()) } answers {
+            val blocks = firstArg<List<com.ChronosFlow.VBCR.core.domain.model.TimeBlock>>()
+            // Mirror real detection: flag overlap between whatever is on the surface.
+            if (blocks.size == 2) {
+                listOf(
+                    com.ChronosFlow.VBCR.core.domain.model.ScheduleConflict(
+                        primaryBlockId = "mover",
+                        conflictingBlockId = "doomed",
+                        overlapStartMinute = 630,
+                        overlapEndMinute = 660,
+                        severity = ScheduleConflictSeverity.WARNING,
+                        reason = "overlap"
+                    )
+                )
+            } else {
+                emptyList()
+            }
+        }
+
+        assertTrue(service.previewMove("mover", 615) is PlannerOperationResult.Conflict)
+        service.deleteBlock(doomed)
+        val after = service.previewMove("mover", 615)
+
+        assertTrue(after is PlannerOperationResult.Applied)
+    }
+
+    @Test
+    fun `timed-out day load rejects create instead of approving a write against an empty day`() = runTest {
+        val block = timeBlock(id = "1")
+        coEvery { repository.getTimeBlockById("1") } returns block
+        every { repository.getTimeBlocksByDate(date) } returns kotlinx.coroutines.flow.flow {
+            kotlinx.coroutines.delay(10_000)
+            emit(listOf(block))
+        }
+        coEvery { repository.saveTimeBlock(any()) } returns Unit
+
+        val result = service.createBlock(block)
+
+        assertTrue(result is PlannerOperationResult.Rejected)
+        assertEquals("Couldn't load your schedule — try again", result.message)
+        coVerify(exactly = 0) { repository.saveTimeBlock(any()) }
+    }
+
+    @Test
+    fun `timed-out day load rejects rebalance instead of reporting an empty day`() = runTest {
+        every { repository.getTimeBlocksByDate(date) } returns kotlinx.coroutines.flow.flow {
+            kotlinx.coroutines.delay(10_000)
+            emit(emptyList())
+        }
+
+        val result = service.rebalanceDay(date)
+
+        assertTrue(result is PlannerOperationResult.Rejected)
+        assertEquals("Couldn't load your schedule — try again", result.message)
+    }
+
+    @Test
+    fun `moveBlock normalizes negative snapped minutes into the day`() = runTest {
+        val block = timeBlock(id = "1", startMinute = 600)
+        coEvery { repository.getTimeBlockById("1") } returns block
+        every { repository.getTimeBlocksByDate(date) } returns flowOf(listOf(block))
+        every { conflictDetectionEngine.detect(any()) } returns emptyList()
+        coEvery { repository.saveTimeBlock(any()) } returns Unit
+
+        val result = service.moveBlock("1", -90)
+
+        assertTrue(result is PlannerOperationResult.Applied)
+        // -90 snaps to -75 raw; the echoed position must match the persisted normalized start.
+        assertEquals(1365, (result as PlannerOperationResult.Applied).snappedToMinute)
+        coVerify { repository.saveTimeBlock(match { it.id == "1" && it.startMinuteOfDay == 1365 }) }
+    }
+
+    @Test
     fun `makeAiSuggestedBlock creates block with correct fields`() = runTest {
         val result = service.makeAiSuggestedBlock(
             date = date,

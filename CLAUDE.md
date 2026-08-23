@@ -43,6 +43,35 @@ This project is indexed by GitNexus as **ChronosFlow** (31710 symbols, 131093 re
 
 <!-- gitnexus:end -->
 
+## DevCouncil Repo Map
+
+Use `.devcouncil/repo_map.json` as the **primary file index** before grepping or guessing paths. Symbol impact still goes through GitNexus above.
+
+- Repo map: `.devcouncil/repo_map.json`
+- Code graph: `.devcouncil/graph/code_graph.json` (query with `dev graph`; SQLite at `.devcouncil/codeintel/index.sqlite` is canonical if the JSON is missing/stubbed)
+- Regenerate after large refactors: `dev map` (or `dev map --if-stale` / `dev map --watch`)
+
+### Always Do (navigation)
+
+1. Open `.devcouncil/repo_map.json` before hunting for files.
+2. Use `files` for module ownership and nearby siblings.
+3. Use `subsystems` for area-level navigation (`entry_points`, `critical_files`, `role_files`, `neighbors`, `handoff_paths`).
+4. Prefer `dev graph query <name>` / `dev graph trace <a> <b>` / `dev graph dead` for callers, paths, and dead-code tiers; `dev graph html` for the visualizer.
+5. Prefer `dev graph dead --confidence extracted` + file greps for dead code. Treat `inferred` as unconfirmed. Prefer `unwired_candidates` / `dead_symbol_candidates` over `unreachable_files`. If `entry_roots` are empty or `liveness_unreachable_unreliable` is true, ignore `unreachable_files` and mass inferred dead.
+6. Check `unwired_candidates` / `dead_symbol_candidates` before creating new modules — wire what you create into a real caller.
+7. If the map and source disagree, trust the source and regenerate the map.
+
+### Important surfaces
+
+1. `app/` — MainActivityTest, AppLockViewModel
+2. `benchmark/` — BaselineProfileGenerator, ChronosMacrobenchmark
+3. `core/` — AssistNarrative, CaptureIntentClassifier
+4. `feature/` — AiReviewSheetTest, CalendarAutoSync
+5. `scripts/` — android-studio-mcp, generate_play_store_graphics
+6. `wear/` — ChronosComplications, ChronosHabitsComplicationService
+
+Local Claude skills (gitignored): `.claude/skills/devcouncil/SKILL.md` and related DevCouncil skills via `dev skills scaffold`.
+
 ## Karpathy Coding Guardrails
 
 Adapted from https://github.com/multica-ai/andrej-karpathy-skills/blob/main/CLAUDE.md and merged with the ChronosFlow-specific rules above.

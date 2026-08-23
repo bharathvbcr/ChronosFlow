@@ -37,7 +37,8 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
     private val timeBlockRepository: TimeBlockRepository,
     private val liveUpdateGateway: LiveUpdateGateway,
     private val foldedReminderResolver: FoldedReminderResolver,
-    private val wearDaySummaryPublisher: WearDaySummaryPublisher
+    private val wearDaySummaryPublisher: WearDaySummaryPublisher,
+    private val stableNotificationCodes: StableNotificationCodes
 ) {
     private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
     private val uiPrefs by lazy {
@@ -75,6 +76,13 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
     // (now default-on) "now" notification could stay hidden forever.
     private fun isFocusActive(): Boolean =
         prefs.getLong(KEY_FOCUS_SUPPRESSED_UNTIL, 0L) > System.currentTimeMillis()
+
+    /**
+     * True while a focus session owns the live surface (the "now" notification is suppressed).
+     * The alarm delivery path checks this before folding a reminder into the now surface: a
+     * reminder folded onto a suppressed surface would be delivered nowhere at all.
+     */
+    fun isSuppressedByFocus(): Boolean = isFocusActive()
 
     /**
      * Whether sensitive titles must be hidden, mirroring [PrivacyPreferences.redactSensitiveNotifications]
@@ -217,7 +225,8 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
         val foldedActions = buildFoldedActionSlots(
             context = context,
             folded = folded,
-            maxFoldedActions = if (blockSupportsFocus(active.category)) 1 else 2
+            maxFoldedActions = if (blockSupportsFocus(active.category)) 1 else 2,
+            codes = stableNotificationCodes
         )
         val decision = liveUpdateGateway.decide(
             title = title,
@@ -301,7 +310,7 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
         val following = selectUpcomingGlances(blocks, nextStartMinute)
         val body = upNextNotificationText(nextStartMinute, following, redact)
         val text = appendFoldedRemindersToBody(body, folded, redact)
-        val foldedActions = buildFoldedActionSlots(context, folded, maxFoldedActions = 2)
+        val foldedActions = buildFoldedActionSlots(context, folded, maxFoldedActions = 2, codes = stableNotificationCodes)
         val decision = liveUpdateGateway.decide(
             title = if (redact) genericTitle else next.title.ifBlank { genericTitle },
             text = text,
@@ -341,7 +350,7 @@ class CurrentBlockNotificationCoordinator @Inject constructor(
         ReminderNotificationChannels.ensureCreated(context)
         val redact = redactSensitiveTitles()
         val primary = folded.first()
-        val foldedActions = buildFoldedActionSlots(context, folded, maxFoldedActions = 2)
+        val foldedActions = buildFoldedActionSlots(context, folded, maxFoldedActions = 2, codes = stableNotificationCodes)
         val refreshSeconds = PROGRESS_REFRESH_INTERVAL_MINUTES * 60
         val decision = liveUpdateGateway.decide(
             title = foldedReminderTitle(context, folded, redact),

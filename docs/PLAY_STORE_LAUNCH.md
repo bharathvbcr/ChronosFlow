@@ -120,6 +120,12 @@ in release"). Do not enable it in the same release you submit for the first time
 2. Install the release build on a device and smoke-test the recently-fixed/unverified areas:
    - Focus start → background → notification progress → pause/resume/extend → complete.
    - Plan timeline: create / delete / duplicate / undo a block (latency fix).
+   - Medication snooze from the notification: a snoozed dose's folded chip stays hidden until
+     the 15-minute snoozed reminder fires, then reappears.
+   - Reminders during an active focus session: with fold-reminders on, a task/habit/dose alarm
+     must surface as its own notification (never be swallowed by the suppressed now-surface).
+   - Exact-alarm degradation: revoke `SCHEDULE_EXACT_ALARM` after scheduling a precise
+     reminder → it still delivers as an inexact alarm and boot restore reconciles it.
    - App lock on a device **with no screen lock** (medication fail-open fix).
    - Wear sync on app open; widget body tap opens the app.
    - Predictive back gesture across sections.

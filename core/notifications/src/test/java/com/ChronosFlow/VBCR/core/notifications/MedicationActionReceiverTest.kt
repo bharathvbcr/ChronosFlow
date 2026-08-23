@@ -11,7 +11,9 @@ import com.ChronosFlow.VBCR.core.domain.model.MedicationDoseEvent
 import com.ChronosFlow.VBCR.core.domain.model.MedicationDoseEventType
 import com.ChronosFlow.VBCR.core.domain.model.MedicationPlan
 import com.ChronosFlow.VBCR.core.domain.model.MedicationSafetyProfile
+import com.ChronosFlow.VBCR.core.domain.repository.AlarmRequestRepository
 import com.ChronosFlow.VBCR.core.domain.repository.MedicationRepository
+import io.mockk.every
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -34,12 +36,14 @@ import org.robolectric.annotation.Config
 class MedicationActionReceiverTest {
 
     private val medicationRepository: MedicationRepository = mockk(relaxed = true)
+    private val alarmRequestRepository: AlarmRequestRepository = mockk(relaxed = true)
     private val alarmScheduler: AlarmScheduler = mockk(relaxed = true)
     private val alarmDeliveryCoordinator: AlarmDeliveryCoordinator = mockk(relaxed = true)
     private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator = mockk(relaxed = true)
 
     private val receiver = MedicationActionReceiver().apply {
         this.medicationRepository = this@MedicationActionReceiverTest.medicationRepository
+        this.alarmRequestRepository = this@MedicationActionReceiverTest.alarmRequestRepository
         this.alarmScheduler = this@MedicationActionReceiverTest.alarmScheduler
         this.alarmDeliveryCoordinator = this@MedicationActionReceiverTest.alarmDeliveryCoordinator
         this.currentBlockNotificationCoordinator = this@MedicationActionReceiverTest.currentBlockNotificationCoordinator
@@ -150,6 +154,9 @@ class MedicationActionReceiverTest {
         )
 
         coEvery { medicationRepository.getMedicationPlanById(planId) } returns plan
+        // Stub BEFORE onReceive fires: the receiver reads this outcome to persist truthfulness.
+        every { alarmScheduler.scheduleAlarmRequest(any(), any()) } returns
+            AlarmScheduleResult.Scheduled("med-snooze-scheduled", exact = true)
 
         val intent = Intent(context, MedicationActionReceiver::class.java).apply {
             action = MedicationActionReceiver.ACTION_SNOOZE
@@ -177,14 +184,21 @@ class MedicationActionReceiverTest {
         assertEquals(MedicationDoseEventType.SNOOZED, doseSlot.captured.type)
         assertNull(doseSlot.captured.doseAmount)
 
-        // Verify new alarm request is scheduled
+        // Verify the snoozed reminder bypasses fold-skip so it actually wakes at +15m
         val requestSlot = slot<AlarmRequest>()
         coVerify(timeout = 2000) {
-            alarmScheduler.scheduleAlarmRequest(capture(requestSlot))
+            alarmScheduler.scheduleAlarmRequest(capture(requestSlot), false)
         }
         assertEquals(AlarmRequestType.MEDICATION, requestSlot.captured.type)
-        assertEquals(AlarmReliability.EXACT, requestSlot.captured.reliability)
         assertEquals(planId, requestSlot.captured.medicationPlanId)
+
+        // The snooze row is persisted before scheduling and updated with the truthful outcome.
+        val persistedSlot = mutableListOf<AlarmRequest>()
+        coVerify(timeout = 2000, exactly = 2) {
+            alarmRequestRepository.saveAlarmRequest(capture(persistedSlot))
+        }
+        assertEquals(AlarmReliability.EXACT, persistedSlot.last().reliability)
+        assertNull(persistedSlot.last().failureReason)
 
         verify(timeout = 2000) {
             alarmScheduler.cancelAlarm(requestId)

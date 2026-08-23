@@ -68,14 +68,33 @@ class DailyReviewCalculatorTest {
         assertEquals(60, review.missedMinutes)
     }
 
+    @Test
+    fun `open segment is closed against the injected now so repeated calls agree`() {
+        val block = timeBlock("block-1", startMinute = 9 * 60, durationMinutes = 60)
+        val openSegment = actualSegment(
+            id = "segment-1",
+            blockId = "block-1",
+            startMinute = 9 * 60,
+            endMinute = null
+        )
+        val fixedNow = date.atStartOfDay(zone).plusMinutes(10 * 60).toInstant()
+
+        val first = calculator.calculate(date, listOf(block), listOf(openSegment), zone, now = fixedNow)
+        val second = calculator.calculate(date, listOf(block), listOf(openSegment), zone, now = fixedNow)
+
+        // Idempotent for identical inputs — the review must not depend on wall-clock time of invocation.
+        assertEquals(first, second)
+        assertEquals(60, first.actualMinutes)
+    }
+
     private fun actualSegment(
         id: String,
         blockId: String?,
         startMinute: Int,
-        endMinute: Int
+        endMinute: Int?
     ): ActualTimeSegment {
         val start = date.atStartOfDay(zone).plusMinutes(startMinute.toLong()).toInstant()
-        val end = date.atStartOfDay(zone).plusMinutes(endMinute.toLong()).toInstant()
+        val end = endMinute?.let { date.atStartOfDay(zone).plusMinutes(it.toLong()).toInstant() }
         return ActualTimeSegment(
             id = id,
             blockId = blockId,

@@ -90,7 +90,7 @@ internal fun buildExactAlarmSettingsIntentSpecs(
 }
 
 @Singleton
-class AlarmScheduler @Inject constructor(
+open class AlarmScheduler @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
     private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -138,6 +138,16 @@ class AlarmScheduler @Inject constructor(
             AlarmSchedulePath.EXACT -> {
                 if (scheduleExact(time, id, title, message)) {
                     AlarmScheduleResult.Scheduled(id, exact = true)
+                } else if (allowFallback &&
+                    canPostReminders() &&
+                    time.toEpochMilli() > System.currentTimeMillis() &&
+                    scheduleInexact(time, id, title, message)
+                ) {
+                    // The permission check passed but setExactAndAllowWhileIdle still threw
+                    // SecurityException — the user (or system) revoked SCHEDULE_EXACT_ALARM in
+                    // between. With fallback allowed, degrade to an inexact alarm instead of
+                    // silently dropping a reminder the caller asked to schedule.
+                    AlarmScheduleResult.Scheduled(id, exact = false)
                 } else {
                     AlarmScheduleResult.ExactDenied(id)
                 }
@@ -154,7 +164,11 @@ class AlarmScheduler @Inject constructor(
         pending[id] = result
         when (result) {
             is AlarmScheduleResult.Scheduled -> {
-                persistReminder(PersistedReminder(id, time.toEpochMilli(), title, message, canUseExact))
+                // Persist what actually happened, not what the pre-flight check predicted: a
+                // mid-schedule revocation degrades this reminder to inexact and boot-restore
+                // must reconcile it as such.
+                val scheduledExact = result.exact
+                persistReminder(PersistedReminder(id, time.toEpochMilli(), title, message, scheduledExact))
                 setBootReceiverEnabled(true)
             }
 
@@ -202,8 +216,21 @@ class AlarmScheduler @Inject constructor(
         return result
     }
 
-    fun scheduleAlarmRequest(request: AlarmRequest): AlarmScheduleResult {
-        skipIfFoldedIntoLiveActivity(request.id, request)?.let { return it }
+    /**
+     * Schedules a reminder for a persisted [AlarmRequest].
+     *
+     * @param respectFoldSkip when true (default), foldable reminder types are skipped while folded
+     *   into the live "now" surface — the normal dedup for imminent reminders. Explicit
+     *   user-requested future wakes (a medication snooze) must pass false: skipping would silently
+     *   drop an alarm the user just asked for, leaving nothing to fire at the snooze target time.
+     */
+    fun scheduleAlarmRequest(
+        request: AlarmRequest,
+        respectFoldSkip: Boolean = true
+    ): AlarmScheduleResult {
+        if (respectFoldSkip) {
+            skipIfFoldedIntoLiveActivity(request.id, request)?.let { return it }
+        }
         return scheduleAlarm(
             id = request.id,
             time = request.scheduledFor,
@@ -240,6 +267,15 @@ class AlarmScheduler @Inject constructor(
             AlarmSchedulePath.EXACT -> {
                 if (scheduleExact(time, id, title, message, receiverClass)) {
                     AlarmScheduleResult.Scheduled(id, exact = true)
+                } else if (
+                    allowFallback &&
+                    canPostReminders() &&
+                    time.toEpochMilli() > System.currentTimeMillis() &&
+                    scheduleInexact(time, id, title, message, receiverClass)
+                ) {
+                    // Exact permission was revoked between the check above and the set call;
+                    // degrade to inexact instead of dropping a schedulable reminder.
+                    AlarmScheduleResult.Scheduled(id, exact = false)
                 } else {
                     AlarmScheduleResult.ExactDenied(id)
                 }
@@ -256,7 +292,10 @@ class AlarmScheduler @Inject constructor(
         pending[id] = result
         when (result) {
             is AlarmScheduleResult.Scheduled -> {
-                persistReminder(PersistedReminder(id, time.toEpochMilli(), title, message, canUseExact))
+                // Persist what actually happened, not what the pre-flight check predicted.
+                persistReminder(
+                    PersistedReminder(id, time.toEpochMilli(), title, message, result.exact)
+                )
                 setBootReceiverEnabled(true)
             }
 
@@ -412,7 +451,8 @@ class AlarmScheduler @Inject constructor(
         Log.w("AlarmScheduler", "No activity handles exact-alarm settings intents")
     }
 
-    private fun scheduleExact(
+    // internal+open (not private) so tests can simulate the check-vs-set permission race.
+    internal open fun scheduleExact(
         time: Instant,
         id: String,
         title: String,
@@ -431,7 +471,7 @@ class AlarmScheduler @Inject constructor(
         }
     }
 
-    private fun scheduleInexact(
+    internal open fun scheduleInexact(
         time: Instant,
         id: String,
         title: String,

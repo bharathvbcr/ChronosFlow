@@ -59,7 +59,8 @@ class AlarmDeliveryCoordinatorTest {
             habitRepository,
             alarmScheduler,
             currentBlockNotificationCoordinator,
-            foldedReminderResolver
+            foldedReminderResolver,
+            StableNotificationCodes(context)
         )
         notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         shadowNotificationManager = shadowOf(notificationManager)
@@ -256,6 +257,55 @@ class AlarmDeliveryCoordinatorTest {
         )
         coVerify(exactly = 1) { currentBlockNotificationCoordinator.refresh(now = any(), alert = false) }
         coVerify { alarmScheduler.cancelAlarm(requestId) }
+    }
+
+    @Test
+    fun `fold suppression is skipped while focus owns the live surface so the dose still surfaces`() = runTest {
+        every { currentBlockNotificationCoordinator.isFoldRemindersEnabled() } returns true
+        // Focus session active: the now surface is suppressed, so folding would deliver nowhere.
+        every { currentBlockNotificationCoordinator.isSuppressedByFocus() } returns true
+        val requestId = "med-focus-1"
+        val planId = "plan-focus"
+        val intent = Intent().apply {
+            putExtra(AlarmDeliveryCoordinator.EXTRA_ID, requestId)
+            putExtra(AlarmDeliveryCoordinator.EXTRA_TITLE, "Time for Aspirin")
+            putExtra(AlarmDeliveryCoordinator.EXTRA_MESSAGE, "Mark it taken once you've had your dose.")
+        }
+        coEvery { alarmRequestRepository.getAlarmRequest(requestId) } returns AlarmRequest(
+            id = requestId,
+            type = AlarmRequestType.MEDICATION,
+            scheduledFor = Instant.now(),
+            title = "Time for Aspirin",
+            message = "Mark it taken once you've had your dose.",
+            medicationPlanId = planId,
+            blockId = null,
+            reliability = AlarmReliability.EXACT,
+            deliveryState = AlarmDeliveryState.PENDING,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now()
+        )
+        coEvery {
+            foldedReminderResolver.resolve(any(), any(), any())
+        } returns listOf(
+            FoldedReminder(
+                kind = FoldedReminderKind.MEDICATION,
+                entityId = planId,
+                title = "Aspirin",
+                detail = "Due 9:00 AM",
+                dueMinute = 9 * 60,
+                isOverdue = false
+            )
+        )
+
+        coordinator.deliverFromAlarmIntent(intent, MedicationAlarmReceiver::class.java)
+
+        // The reminder falls through to its own critical-channel banner instead of vanishing.
+        assertTrue(
+            "Expected the medication banner to post during focus",
+            shadowNotificationManager.allNotifications.isNotEmpty()
+        )
+        coVerify(exactly = 0) { currentBlockNotificationCoordinator.refresh(now = any(), alert = any()) }
+        coVerify(exactly = 1) { alarmScheduler.cancelAlarm(requestId) }
     }
 
     private fun reviewIntent(requestId: String): Intent = Intent().apply {

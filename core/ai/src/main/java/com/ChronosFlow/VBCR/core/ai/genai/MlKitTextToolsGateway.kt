@@ -152,6 +152,11 @@ class MlKitTextToolsGateway @Inject constructor(
             }
             result
         }.onSuccess { cache.put(cacheKey, it, nowMs()) }
+            .onFailure { throwable ->
+                // Caller cancellation must propagate, not masquerade as a failed generation:
+                // swallowing it would keep cancelled work (and its fallbacks) running.
+                if (throwable is kotlinx.coroutines.CancellationException) throw throwable
+            }
     }
 
     private companion object {

@@ -11,6 +11,7 @@ import com.ChronosFlow.VBCR.core.domain.model.AlarmRequest
 import com.ChronosFlow.VBCR.core.domain.model.AlarmRequestType
 import com.ChronosFlow.VBCR.core.domain.model.MedicationDoseEvent
 import com.ChronosFlow.VBCR.core.domain.model.MedicationDoseEventType
+import com.ChronosFlow.VBCR.core.domain.repository.AlarmRequestRepository
 import com.ChronosFlow.VBCR.core.domain.repository.MedicationRepository
 import dagger.hilt.android.AndroidEntryPoint
 import java.time.Instant
@@ -31,6 +32,9 @@ class MedicationActionReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var medicationRepository: MedicationRepository
+
+    @Inject
+    lateinit var alarmRequestRepository: AlarmRequestRepository
 
     @Inject
     lateinit var alarmScheduler: AlarmScheduler
@@ -82,9 +86,9 @@ class MedicationActionReceiver : BroadcastReceiver() {
                         }
                         ACTION_SNOOZE -> {
                             val now = Instant.now()
-                            val snoozedFor = now.plusSeconds(15 * 60L) // Snooze for 15 minutes
+                            val snoozedFor = now.plusSeconds(MEDICATION_SNOOZE_MINUTES * 60)
                             val request = AlarmRequest(
-                                id = UUID.randomUUID().toString(),
+                                id = "med-snooze-${plan.id}-${now.toEpochMilli()}",
                                 type = AlarmRequestType.MEDICATION,
                                 scheduledFor = snoozedFor,
                                 title = plan.name,
@@ -96,7 +100,34 @@ class MedicationActionReceiver : BroadcastReceiver() {
                                 createdAt = now,
                                 updatedAt = now
                             )
-                            alarmScheduler.scheduleAlarmRequest(request)
+                            // Persist the row BEFORE scheduling so boot restore can reconcile this
+                            // reminder even if the process dies between the two steps; then update
+                            // it with the schedule outcome. respectFoldSkip=false: folding dedupes
+                            // imminent reminders against the live chip — a snooze the user just
+                            // requested is an explicit future wake and must never be skipped.
+                            alarmRequestRepository.saveAlarmRequest(request)
+                            val result = alarmScheduler.scheduleAlarmRequest(request, respectFoldSkip = false)
+                            val (reliability, failureReason) = when (result) {
+                                is AlarmScheduleResult.Scheduled ->
+                                    if (result.exact) {
+                                        AlarmReliability.EXACT to null
+                                    } else {
+                                        AlarmReliability.DEGRADED_WINDOW to "Exact alarms unavailable"
+                                    }
+                                is AlarmScheduleResult.ExactDenied ->
+                                    AlarmReliability.BLOCKED to "Exact alarm permission denied"
+                                is AlarmScheduleResult.PermissionDenied ->
+                                    AlarmReliability.BLOCKED to "Notification permission denied"
+                                is AlarmScheduleResult.Skipped ->
+                                    AlarmReliability.INEXACT to result.reason
+                            }
+                            alarmRequestRepository.saveAlarmRequest(
+                                request.copy(
+                                    reliability = reliability,
+                                    failureReason = failureReason,
+                                    updatedAt = Instant.now()
+                                )
+                            )
                             medicationRepository.addMedicationDoseEvent(
                                 MedicationDoseEvent(
                                     id = UUID.randomUUID().toString(),
@@ -105,7 +136,7 @@ class MedicationActionReceiver : BroadcastReceiver() {
                                     eventDate = LocalDate.now(),
                                     recordedAt = Instant.now(),
                                     scheduledMinuteOfDay = plan.reminderMinuteOfDay,
-                                    reason = "Snoozed by 15 minutes from notification",
+                                    reason = "Snoozed by $MEDICATION_SNOOZE_MINUTES minutes from notification",
                                     doseAmount = null
                                 )
                             )

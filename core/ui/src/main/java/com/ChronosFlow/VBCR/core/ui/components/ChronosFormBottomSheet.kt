@@ -47,6 +47,8 @@ fun ChronosFormBottomSheet(
     archiveLabel: String = "Archive",
     onDuplicate: (() -> Unit)? = null,
     duplicateLabel: String = "Duplicate",
+    onSecondaryConfirm: (() -> Unit)? = null,
+    secondaryConfirmLabel: String = "Add & new",
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
@@ -131,6 +133,16 @@ fun ChronosFormBottomSheet(
                 }
                 if (onDuplicate != null || onArchive != null) {
                     Spacer(modifier = Modifier.height(4.dp))
+                }
+                if (onSecondaryConfirm != null) {
+                    ChronosFilledTonalButton(
+                        onClick = onSecondaryConfirm,
+                        enabled = enabled,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(secondaryConfirmLabel, fontWeight = FontWeight.SemiBold)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
                 Row(
                     modifier = Modifier

@@ -102,3 +102,6 @@ node_modules/
 .mypy_cache/
 .ruff_cache/
 Thumbs.db
+
+# Local AI coding agents
+.grok/

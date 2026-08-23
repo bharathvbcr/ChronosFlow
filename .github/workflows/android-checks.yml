@@ -31,7 +31,7 @@ jobs:
       - name: Enforce DAY_DIAL constants ownership
         shell: pwsh
         run: |
-          $matches = rg -n --glob "*.kt" --glob "!**/build/**" --glob "!**/.gradle/**" "const val\s+DAY_DIAL_" .\app .\core .\feature .\base .\scripts 2>$null
+          $matches = rg -n --glob "*.kt" --glob "!**/build/**" --glob "!**/.gradle/**" "const val\s+DAY_DIAL_" .\app .\core .\feature .\wear .\scripts 2>$null
           $violations = $matches | Where-Object { $_ -notlike "*DayDialMotion.kt*" }
           if ($violations) {
             Write-Host "DAY_DIAL_* constants must be defined only in DayDialMotion.kt"

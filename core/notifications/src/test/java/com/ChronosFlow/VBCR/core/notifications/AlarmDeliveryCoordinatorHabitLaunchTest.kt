@@ -16,6 +16,7 @@ import com.ChronosFlow.VBCR.core.domain.repository.HabitRepository
 import com.ChronosFlow.VBCR.core.domain.repository.TaskRepository
 import com.ChronosFlow.VBCR.core.domain.repository.TimeBlockRepository
 import io.mockk.coEvery
+import io.mockk.every
 import io.mockk.mockk
 import java.time.Instant
 import java.time.LocalDate
@@ -38,6 +39,11 @@ class AlarmDeliveryCoordinatorHabitLaunchTest {
     private val currentBlockNotificationCoordinator: CurrentBlockNotificationCoordinator = mockk(relaxed = true)
     private val foldedReminderResolver: FoldedReminderResolver = mockk(relaxed = true)
 
+    private val codeCounter = java.util.concurrent.atomic.AtomicInteger(1)
+    private val stableNotificationCodes: StableNotificationCodes = mockk(relaxed = true) {
+        every { codeFor(any()) } answers { codeCounter.incrementAndGet() }
+    }
+
     private val coordinator = AlarmDeliveryCoordinator(
         context = context,
         alarmRequestRepository = alarmRequestRepository,
@@ -46,7 +52,8 @@ class AlarmDeliveryCoordinatorHabitLaunchTest {
         habitRepository = habitRepository,
         alarmScheduler = alarmScheduler,
         currentBlockNotificationCoordinator = currentBlockNotificationCoordinator,
-        foldedReminderResolver = foldedReminderResolver
+        foldedReminderResolver = foldedReminderResolver,
+        stableNotificationCodes = stableNotificationCodes
     )
 
     @Test

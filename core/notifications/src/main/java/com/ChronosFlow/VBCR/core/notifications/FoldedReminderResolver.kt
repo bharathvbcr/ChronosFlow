@@ -2,10 +2,12 @@ package com.ChronosFlow.VBCR.core.notifications
 
 import android.content.Context
 import android.util.Log
+import com.ChronosFlow.VBCR.core.domain.model.MedicationDoseEventType
 import com.ChronosFlow.VBCR.core.domain.repository.HabitRepository
 import com.ChronosFlow.VBCR.core.domain.repository.MedicationRepository
 import com.ChronosFlow.VBCR.core.domain.repository.TaskRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import javax.inject.Inject
@@ -68,7 +70,14 @@ class FoldedReminderResolver @Inject constructor(
         val nowMinute = now.hour * 60 + now.minute
         val candidates = buildList {
             if (enabled.medication) {
-                addAll(buildMedicationFoldedReminders(loadMedicationPlans(), today, nowMinute))
+                addAll(
+                    buildMedicationFoldedReminders(
+                        plans = loadMedicationPlans(),
+                        today = today,
+                        nowMinute = nowMinute,
+                        snoozedBackMinuteByPlanId = snoozedBackMinutes(today, zoneId)
+                    )
+                )
             }
             if (enabled.task) {
                 addAll(buildTaskFoldedReminders(loadTasks(), today, nowMinute, zoneId))
@@ -79,6 +88,27 @@ class FoldedReminderResolver @Inject constructor(
         }
         return rankFoldedReminders(candidates)
     }
+
+    /**
+     * planId → minute-of-day the folded chip may reappear at, derived from today's newest SNOOZED
+     * dose event per plan. While the snooze window is open the chip stays hidden; it returns when
+     * the snoozed reminder fires and refreshes this surface. Values may exceed 1440 for snoozes
+     * that run past midnight.
+     */
+    private suspend fun snoozedBackMinutes(today: LocalDate, zoneId: ZoneId): Map<String, Int> =
+        try {
+            medicationRepository.observeDoseEventsBetween(today, today).first()
+                .filter { it.type == MedicationDoseEventType.SNOOZED }
+                .groupBy { it.medicationPlanId }
+                .mapValues { (_, events) ->
+                    val newest = events.maxBy { it.recordedAt }
+                    val zoned = newest.recordedAt.atZone(zoneId)
+                    zoned.hour * 60 + zoned.minute + MEDICATION_SNOOZE_MINUTES.toInt()
+                }
+        } catch (ex: Exception) {
+            Log.w(TAG, "Failed to load snoozed doses for folded reminders", ex)
+            emptyMap()
+        }
 
     private suspend fun loadMedicationPlans() = try {
         medicationRepository.observeMedicationPlans().first()

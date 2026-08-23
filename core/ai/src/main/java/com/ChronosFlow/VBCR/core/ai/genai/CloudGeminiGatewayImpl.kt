@@ -6,6 +6,7 @@ import com.google.firebase.ai.type.GenerativeBackend
 import com.google.firebase.ai.type.generationConfig
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
@@ -62,6 +63,10 @@ class CloudGeminiGatewayImpl @Inject constructor(
                 Result.success(text)
             } catch (e: TimeoutCancellationException) {
                 Result.failure(e)
+            } catch (e: CancellationException) {
+                // Caller cancellation must unwind, not surface as a failed generation that then
+                // triggers heuristic fallback planning after the user already left.
+                throw e
             } catch (e: Exception) {
                 Result.failure(e)
             }

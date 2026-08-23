@@ -40,6 +40,12 @@ internal class SemanticResponseCache(
         /** L2-normalised term-frequency vector of the entry's semantic text. */
         val vector: Map<String, Float>,
         val tokenCount: Int,
+        /**
+         * Tokens whose change signals a genuinely different request (dates, times, durations,
+         * month/weekday names). A near-duplicate hit is accepted only when this set matches the
+         * query's exactly, so "plan tomorrow" can never replay today's answer.
+         */
+        val salientTokens: Set<String>,
         val value: String,
         val storedAtMs: Long
     )
@@ -76,6 +82,7 @@ internal class SemanticResponseCache(
             if (tokens.size < minTokensForSemantic) return null
             val queryVector = normalize(termFrequency(tokens))
             if (queryVector.isEmpty()) return null
+            val querySalient = salientTokens(tokens)
 
             var bestKey: String? = null
             var bestScore = -1f
@@ -104,6 +111,17 @@ internal class SemanticResponseCache(
             // Ambiguity gate: a clear runner-up means we cannot safely pick a single answer.
             if (secondScore >= 0f && bestScore - secondScore < similarityMargin) return null
 
+            // Staleness gates: cosine over term frequencies cannot tell a word reordering from a
+            // changed date or an added task. Before replaying a near-duplicate, require that the
+            // date/time-bearing tokens are identical and the overall shape (token count) is within
+            // a few percent — cosmetic edits pass both; a different day or task list does not.
+            val winnerCandidate = entries[key] ?: return null
+            if (winnerCandidate.salientTokens != querySalient) return null
+            val tokenDelta = kotlin.math.abs(winnerCandidate.tokenCount - tokens.size)
+            if (tokenDelta > maxOf(MIN_TOKEN_COUNT_TOLERANCE, (winnerCandidate.tokenCount * TOKEN_COUNT_TOLERANCE_RATIO).toInt())) {
+                return null
+            }
+
             // Re-fetch through get() so access-order LRU marks the winner as most-recently used.
             val winner = entries[key] ?: return null
             if (isExpired(winner, nowMs)) {
@@ -120,6 +138,7 @@ internal class SemanticResponseCache(
                 namespace = namespace,
                 vector = normalize(termFrequency(tokens)),
                 tokenCount = tokens.size,
+                salientTokens = salientTokens(tokens),
                 value = value,
                 storedAtMs = nowMs
             )
@@ -133,6 +152,15 @@ internal class SemanticResponseCache(
         text.lowercase()
             .split(TOKEN_DELIMITER)
             .filter { it.length > 1 }
+
+    /**
+     * The tokens that identify *what* a request is about rather than how it is phrased: anything
+     * containing a digit (dates like 2026-08-22, clock times, minute durations) plus month and
+     * weekday names. Two prompts whose salient tokens differ describe different data even when
+     * their cosine similarity is high.
+     */
+    private fun salientTokens(tokens: List<String>): Set<String> =
+        tokens.filterTo(HashSet()) { token -> token.any(Char::isDigit) || token in DATE_TIME_WORDS }
 
     private fun termFrequency(tokens: List<String>): Map<String, Float> {
         if (tokens.isEmpty()) return emptyMap()
@@ -182,6 +210,19 @@ internal class SemanticResponseCache(
          * prompts fall back to exact-only matching.
          */
         const val DEFAULT_MIN_TOKENS_FOR_SEMANTIC = 3
+
+        /** Absolute token-count slack before shapes are considered different (protects tiny prompts). */
+        private const val MIN_TOKEN_COUNT_TOLERANCE = 3
+
+        /** Relative token-count slack (~one added task line on a full planning prompt). */
+        private const val TOKEN_COUNT_TOLERANCE_RATIO = 0.05f
+
+        /** Month and weekday names participate in the salient-token gate alongside digit tokens. */
+        private val DATE_TIME_WORDS = setOf(
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december",
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
+        )
 
         private val TOKEN_DELIMITER = Regex("[^\\p{L}\\p{N}]+")
     }

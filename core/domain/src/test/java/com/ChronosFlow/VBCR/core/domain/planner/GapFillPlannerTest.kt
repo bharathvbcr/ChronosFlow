@@ -247,4 +247,135 @@ class GapFillPlannerTest {
         assertEquals(0, proposal.gapCount)
         assertTrue(proposal.proposedBlocks.isEmpty())
     }
+
+    @Test
+    fun `time before a habit's future window is filled with pending tasks`() {
+        // One wide free gap 08:00–17:00; the only habit opens at 14:00.
+        val blocks = listOf(
+            timeBlock(id = "wall", startMinute = 0, durationMinutes = 8 * 60)
+        )
+
+        val proposal = planner.propose(
+            blocks = blocks,
+            tasks = listOf(task("task", preferredDurationMinutes = 30)),
+            habitCandidates = listOf(
+                GapFillHabitCandidate(
+                    habitId = "stretch",
+                    title = "Stretch",
+                    windowStartMinute = 14 * 60,
+                    windowEndMinute = 15 * 60
+                )
+            ),
+            sleepSchedule = noSleep,
+            nowMinuteOfDay = null,
+            addBreaksAutomatically = false
+        )
+
+        // The task fills the morning head of the gap instead of leaving it idle…
+        val first = proposal.proposedBlocks.first()
+        assertEquals("TASK", first.category)
+        assertEquals(8 * 60, first.startMinute)
+        // …and the habit still lands inside its own window.
+        val habitBlock = proposal.proposedBlocks.first { it.habitId == "stretch" }
+        assertEquals(14 * 60, habitBlock.startMinute)
+    }
+
+    @Test
+    fun `a future-window habit is placed even when no tasks remain`() {
+        val blocks = listOf(
+            timeBlock(id = "wall", startMinute = 0, durationMinutes = 8 * 60)
+        )
+        val proposal = planner.propose(
+            blocks = blocks,
+            tasks = emptyList(),
+            habitCandidates = listOf(
+                GapFillHabitCandidate(
+                    habitId = "read",
+                    title = "Read",
+                    windowStartMinute = 10 * 60,
+                    windowEndMinute = 11 * 60
+                )
+            ),
+            sleepSchedule = noSleep,
+            nowMinuteOfDay = null,
+            addBreaksAutomatically = false
+        )
+
+        val habitBlock = proposal.proposedBlocks.single { it.habitId == "read" }
+        assertEquals(10 * 60, habitBlock.startMinute)
+        assertEquals(60, habitBlock.durationMinutes)
+    }
+
+    @Test
+    fun `duplicate input ids do not produce duplicate proposals`() {
+        val blocks = listOf(
+            timeBlock(id = "wall", startMinute = 0, durationMinutes = 8 * 60)
+        )
+        val duplicateTasks = listOf(task("dup"), task("dup"))
+        val duplicateHabits = listOf(
+            GapFillHabitCandidate("meditate", "Meditate", 9 * 60, 10 * 60),
+            GapFillHabitCandidate("meditate", "Meditate", 9 * 60, 10 * 60)
+        )
+
+        val proposal = planner.propose(
+            blocks = blocks,
+            tasks = duplicateTasks,
+            habitCandidates = duplicateHabits,
+            sleepSchedule = noSleep,
+            nowMinuteOfDay = null,
+            addBreaksAutomatically = false
+        )
+
+        assertEquals(1, proposal.proposedBlocks.count { it.taskId == "dup" })
+        assertEquals(1, proposal.proposedBlocks.count { it.habitId == "meditate" })
+    }
+
+    @Test
+    fun `adversarial inputs never crash or produce out-of-bounds proposals`() {
+        // Empty everything.
+        val empty = planner.propose(
+            blocks = emptyList(),
+            tasks = emptyList(),
+            habitCandidates = emptyList(),
+            sleepSchedule = noSleep,
+            nowMinuteOfDay = null,
+            addBreaksAutomatically = false
+        )
+        assertTrue(empty.proposedBlocks.isEmpty())
+
+        // Habit windows entirely outside the day and inverted windows.
+        val weirdHabits = listOf(
+            GapFillHabitCandidate("h1", "H1", 25 * 60, 26 * 60),
+            GapFillHabitCandidate("h2", "H2", 10 * 60, 9 * 60),
+            GapFillHabitCandidate("h3", "H3", 0, 0)
+        )
+        val blocks = listOf(
+            timeBlock(id = "wall", startMinute = 0, durationMinutes = 4 * 60)
+        )
+        val proposal = planner.propose(
+            blocks = blocks,
+            tasks = emptyList(),
+            habitCandidates = weirdHabits,
+            sleepSchedule = noSleep,
+            nowMinuteOfDay = 0,
+            addBreaksAutomatically = true
+        )
+        proposal.proposedBlocks.forEach { block ->
+            assertTrue(block.startMinute >= 0)
+            assertTrue(block.startMinute + block.durationMinutes <= 24 * 60)
+            assertTrue(block.durationMinutes >= 15)
+        }
+
+        // nowMinuteOfDay past the end of every gap clips them all away.
+        val clipped = planner.propose(
+            blocks = blocks,
+            tasks = listOf(task("t")),
+            habitCandidates = emptyList(),
+            sleepSchedule = noSleep,
+            nowMinuteOfDay = 24 * 60,
+            addBreaksAutomatically = false
+        )
+        assertEquals(0, clipped.gapCount)
+        assertTrue(clipped.proposedBlocks.isEmpty())
+    }
 }

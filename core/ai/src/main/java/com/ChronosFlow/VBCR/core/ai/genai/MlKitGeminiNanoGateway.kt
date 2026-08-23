@@ -16,7 +16,9 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 @Singleton
 class MlKitGeminiNanoGateway @Inject constructor(
@@ -202,10 +204,15 @@ class MlKitGeminiNanoGateway @Inject constructor(
         var lastError: Throwable? = null
         while (attempt < MAX_ATTEMPTS) {
             attempt++
-            val inference = runCatching { client.generateText(prompt, profile) }
+            val inference = runCatching {
+                withTimeoutOrNull(INFERENCE_TIMEOUT_MS) { client.generateText(prompt, profile) }
+            }
+            inference.exceptionOrNull()
+                ?.takeIf { it is kotlinx.coroutines.CancellationException && it !is TimeoutCancellationException }
+                ?.let { throw it }
             if (inference.isSuccess) {
                 val text = inference.getOrThrow()
-                if (text.isNotBlank()) {
+                if (text != null && text.isNotBlank()) {
                     responseCache.put(inFlightKey(profile, prompt), plainNamespace(profile), prompt, text, nowMs())
                     return Result.success(text)
                 }
@@ -286,10 +293,15 @@ class MlKitGeminiNanoGateway @Inject constructor(
         var lastError: Throwable? = null
         while (attempt < MAX_ATTEMPTS) {
             attempt++
-            val inference = runCatching { client.generateTextWithPrefix(prefix, suffix, profile) }
+            val inference = runCatching {
+                withTimeoutOrNull(INFERENCE_TIMEOUT_MS) { client.generateTextWithPrefix(prefix, suffix, profile) }
+            }
+            inference.exceptionOrNull()
+                ?.takeIf { it is kotlinx.coroutines.CancellationException && it !is TimeoutCancellationException }
+                ?.let { throw it }
             if (inference.isSuccess) {
                 val text = inference.getOrThrow()
-                if (text.isNotBlank()) {
+                if (text != null && text.isNotBlank()) {
                     responseCache.put(inFlightKey(profile, prefix + suffix), suffixNamespace(profile), suffix, text, nowMs())
                     return Result.success(text)
                 }
@@ -365,6 +377,14 @@ class MlKitGeminiNanoGateway @Inject constructor(
         const val INITIAL_BACKOFF_MS = 400L
         const val MAX_BACKOFF_MS = 2_000L
         const val DOWNLOAD_TIMEOUT_MS = 120_000L
+
+        /**
+         * Upper bound on a single Gemini Nano inference attempt. On-device generation normally
+         * finishes in seconds; without this bound a hung AICore call would block the planning
+         * coroutine indefinitely (and, before cancellation rethrow was added, even past caller
+         * cancellation). Generous enough that slow-but-healthy devices never hit it.
+         */
+        const val INFERENCE_TIMEOUT_MS = 30_000L
 
         /** How long to suppress download re-attempts after one fails, so requests fail fast meanwhile. */
         const val DOWNLOAD_COOLDOWN_MS = 60_000L

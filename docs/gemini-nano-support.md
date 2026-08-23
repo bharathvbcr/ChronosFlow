@@ -53,6 +53,15 @@ Expected fallback behavior:
 - `Gemini Nano` only -> fall back to heuristics
 - `Disabled` -> return no AI-generated planning suggestion
 
+### Reliability bounds
+
+GenAI runtime behavior is bounded so a degraded model cannot wedge the app:
+
+- Every Gemini Nano inference attempt is time-capped (`MlKitGeminiNanoGateway.INFERENCE_TIMEOUT_MS`, 30s). A hung AICore call exhausts the bounded retry loop and falls back instead of blocking the planning coroutine indefinitely.
+- Caller cancellation propagates through every gateway (`MlKitGeminiNanoGateway`, `CloudGeminiGatewayImpl`, `MlKitTextToolsGateway`). Leaving a surface cancels its generation; cancellation is never surfaced as a failed generation that would trigger heuristic fallback planning.
+- The replay cache (`GenAiResponseCache`) is lock-guarded: the cloud gateway can be entered from several features concurrently, unlike the effectively serial on-device paths.
+- Semantic near-duplicate replay (`SemanticResponseCache`) accepts a hit only when the prompt's *salient tokens* — anything containing a digit, plus month/weekday names — match exactly and the token-count shape stays within tolerance. High cosine similarity alone can never replay a different day's plan.
+
 ## UX expectations
 
 User-facing copy should clearly distinguish these cases:

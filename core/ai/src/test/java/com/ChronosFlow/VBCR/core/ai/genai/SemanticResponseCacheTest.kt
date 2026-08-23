@@ -32,6 +32,52 @@ class SemanticResponseCacheTest {
     }
 
     @Test
+    fun `changed date in an otherwise near-identical prompt misses instead of replaying stale data`() {
+        val cache = cache()
+        cache.put(
+            "k1", "BALANCED",
+            "plan august 22 with timezone america chicago and these tasks write report 45 minutes review budget 30 minutes",
+            "TODAY_PLAN",
+            nowMs = 0
+        )
+        // Same shape and wording except the date moved one day — the old plan must NOT replay
+        // even though cosine similarity stays far above the threshold.
+        val hit = cache.lookup(
+            "k2", "BALANCED",
+            "plan august 23 with timezone america chicago and these tasks write report 45 minutes review budget 30 minutes",
+            nowMs = 50
+        )
+        assertNull(hit)
+    }
+
+    @Test
+    fun `an added task changes the prompt shape enough to miss the cache`() {
+        val cache = cache()
+        val base =
+            "plan august 22 with tasks write report 45 minutes review budget 30 minutes draft memo 20 minutes " +
+                "prepare slides 60 minutes call client 15 minutes file expenses 25 minutes"
+        cache.put("k1", "BALANCED", base, "OLD_PLAN", nowMs = 0)
+        // One extra task line (~10% more tokens) — must miss so fresh inference sees the new task.
+        val hit = cache.lookup(
+            "k2", "BALANCED",
+            base + " book dentist appointment 15 minutes",
+            nowMs = 50
+        )
+        assertNull(hit)
+    }
+
+    @Test
+    fun `cosmetic edits that keep dates and shape still hit the cache`() {
+        val cache = cache()
+        val base =
+            "plan august 22 with tasks write report 45 minutes review budget 30 minutes draft memo 20 minutes " +
+                "prepare slides 60 minutes"
+        cache.put("k1", "BALANCED", base, "PLAN", nowMs = 0)
+        val edited = base.replace("write report 45 minutes", "45 minutes write report")
+        assertEquals("PLAN", cache.lookup("k2", "BALANCED", edited, nowMs = 50))
+    }
+
+    @Test
     fun `different namespace never shares an answer`() {
         val cache = cache()
         cache.put("k1", "BALANCED", "summarize my open tasks for the week", "SUMMARY", nowMs = 0)

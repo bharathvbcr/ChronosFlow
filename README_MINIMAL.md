@@ -68,4 +68,5 @@ Data integrity:
 
 - Process death recovery restores active focus/session state where applicable.
 - Persisted planner changes are deterministic and test-covered in domain/data layers.
+- A planner write against schedule data that failed to load is rejected, never approved.
 - Advanced surfaces stay parked unless reachable through an explicit command, drawer, or promoted workflow.

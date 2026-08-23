@@ -37,6 +37,8 @@ ChronosFlow makes time the organizing primitive. Tasks, routines, focus sessions
 - AI and assistant flows suggest; the user applies.
 - Sensitive data surfaces respect app-lock and privacy-mode gates.
 - All planner/focus writes must preserve data integrity across process death.
+- Planner mutations fail closed: if the day's schedule cannot be loaded, the write is rejected — never approved against a phantom-empty day.
+- Every reminder is delivered on exactly one surface: folding must never swallow a reminder whose live surface is suppressed, and notification/PendingIntent identities stay stable and collision-free across process death.
 - Exact alarms are reserved for user-critical timing; soft nudges must tolerate inexact scheduling.
 
 ## Major Flow Acceptance Criteria

@@ -114,13 +114,22 @@ class FocusService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .build()
-        ServiceCompat.startForeground(
-            this,
-            com.ChronosFlow.VBCR.core.notifications.FocusNotificationManager.FOCUS_NOTIFICATION_ID,
-            placeholder,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
-        )
+        try {
+            ServiceCompat.startForeground(
+                this,
+                com.ChronosFlow.VBCR.core.notifications.FocusNotificationManager.FOCUS_NOTIFICATION_ID,
+                placeholder,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+            )
+        } catch (e: Exception) {
+            // A background start that Android disallows (ForegroundServiceStartNotAllowedException)
+            // reaches here before the coroutine's catch exists. Stop cleanly instead of crashing
+            // the process that a widget/wear/agent command woke up.
+            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+            stopSelf()
+            return START_NOT_STICKY
+        }
         serviceScope.launch {
             commandMutex.withLock {
                 try {
@@ -161,7 +170,10 @@ class FocusService : Service() {
 
         when (intent?.action) {
             ACTION_PAUSE -> {
-                if (!runtime.snapshot().isRunning) return
+                if (!runtime.snapshot().isRunning) {
+                    stopIfIdle()
+                    return
+                }
                 val snapshot = runtime.pause()
                 sessionStartElapsedRealtime = 0L
                 persistSession(snapshot.state)
@@ -169,7 +181,10 @@ class FocusService : Service() {
             }
 
             ACTION_RESUME -> {
-                if (!runtime.snapshot().isPaused) return
+                if (!runtime.snapshot().isPaused) {
+                    stopIfIdle()
+                    return
+                }
                 val snapshot = runtime.resume()
                 sessionStartElapsedRealtime = android.os.SystemClock.elapsedRealtime()
                 sessionStartTimeLeftSeconds = snapshot.timeLeftSeconds
@@ -180,7 +195,10 @@ class FocusService : Service() {
 
             ACTION_SYNC -> {
                 val snapshot = runtime.snapshot()
-                if (!snapshot.isRunning && !snapshot.isPaused) return
+                if (!snapshot.isRunning && !snapshot.isPaused) {
+                    stopIfIdle()
+                    return
+                }
                 persistSession(snapshot.state)
                 updateForegroundNotification(snapshot)
                 if (snapshot.isRunning) {
@@ -196,7 +214,10 @@ class FocusService : Service() {
             }
 
             ACTION_EXTEND -> {
-                if (!runtime.snapshot().isRunning && !runtime.snapshot().isPaused) return
+                if (!runtime.snapshot().isRunning && !runtime.snapshot().isPaused) {
+                    stopIfIdle()
+                    return
+                }
                 val adjustSeconds = intent.getIntExtra(EXTRA_ADJUST_SECONDS, EXTEND_SECONDS)
                 val snapshot = runtime.adjustSeconds(adjustSeconds)
                 if (snapshot.isRunning) {
@@ -262,6 +283,20 @@ class FocusService : Service() {
                 updateForegroundNotification(snapshot)
                 startTicker()
             }
+        }
+    }
+
+    /**
+     * A command that found nothing to act on (a stray PAUSE/SYNC racing a stop, delivered by a
+     * widget or watch) must not leave the service sitting in the foreground with its placeholder
+     * notification. When no session is live, stand down cleanly.
+     */
+    private fun stopIfIdle() {
+        val snapshot = runtime.snapshot()
+        if (!snapshot.isRunning && !snapshot.isPaused) {
+            stopTicker()
+            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+            stopSelf()
         }
     }
 

@@ -18,8 +18,11 @@ class DayPlanAssembler @Inject constructor(
         review: DailyReviewSummary? = null
     ): DayPlan {
         val dayBlocks = blocks.filter { it.date == date }.sortedBy { it.startMinuteOfDay }
+        // A review only marks THIS day completed — a summary built for a different date must not
+        // flip this plan's status, so mismatched reviews are ignored here.
+        val reviewForDate = review?.takeIf { it.date == date }
         val status = when {
-            review != null -> DayPlanStatus.COMPLETED
+            reviewForDate != null -> DayPlanStatus.COMPLETED
             dayBlocks.isEmpty() -> DayPlanStatus.DRAFT
             else -> DayPlanStatus.PLANNED
         }
@@ -29,7 +32,7 @@ class DayPlanAssembler @Inject constructor(
             status = status,
             blocks = dayBlocks,
             conflicts = conflictDetectionEngine.detect(dayBlocks),
-            review = review
+            review = reviewForDate
         )
     }
 }

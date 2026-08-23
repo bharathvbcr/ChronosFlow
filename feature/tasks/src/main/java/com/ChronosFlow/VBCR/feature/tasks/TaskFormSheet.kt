@@ -406,8 +406,6 @@ internal fun TaskFormSheet(
     // Title that the offline smart-fill banner was last dismissed for, so it stays hidden
     // until the user types something with new scheduling tokens.
     var smartFillDismissedTitle by rememberSaveable(taskKey) { mutableStateOf("") }
-    // Intentionally NOT keyed by taskKey: it must persist as "add another" re-opens fresh sheets.
-    var addAnother by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(taskKey) {
         onClearRewrite?.invoke()
     }
@@ -966,12 +964,11 @@ internal fun TaskFormSheet(
 
     // Hoisted so both the sheet's confirm button and the title field's keyboard "Done" action
     // can submit — letting a lite user type a title and press enter to add a quick task.
-    val keepAddingAfterConfirm = target is TaskSheetTarget.Add && addAnother && onAddAnother != null
-    val submitTask: () -> Unit = {
+    val submitTask: (keepOpen: Boolean) -> Unit = { keepOpen ->
         coroutineScope.launch {
             val dueDate = if (isUrgent && alarmEnabled) resolvedDueInstant else null
             val resolvedAttachments = resolveTaskAttachmentDrafts(context, normalizedAttachmentDrafts)
-            val confirmCallback = if (keepAddingAfterConfirm) onAddAnother!! else onConfirm
+            val confirmCallback = if (keepOpen && onAddAnother != null) onAddAnother else onConfirm
             confirmCallback(
                 taskTitle,
                 description,
@@ -998,10 +995,10 @@ internal fun TaskFormSheet(
         visible = true,
         title = title,
         subtitle = subtitle,
-        confirmLabel = if (keepAddingAfterConfirm) "Add & new" else actionLabels.confirm,
+        confirmLabel = actionLabels.confirm,
         validationHint = validationHint,
         onDismiss = onDismiss,
-        onConfirm = submitTask,
+        onConfirm = { submitTask(false) },
         enabled = isValid,
         onDuplicate = if (initialTask != null && onDuplicate != null) {
             { onDuplicate(initialTask) }
@@ -1014,7 +1011,13 @@ internal fun TaskFormSheet(
         } else {
             null
         },
-        archiveLabel = actionLabels.archive
+        archiveLabel = actionLabels.archive,
+        onSecondaryConfirm = if (target is TaskSheetTarget.Add && onAddAnother != null) {
+            { submitTask(true) }
+        } else {
+            null
+        },
+        secondaryConfirmLabel = "Add & new"
     ) {
         CardEditorScaffold(
             kind = "task",
@@ -1817,7 +1820,7 @@ internal fun TaskFormSheet(
                         capitalization = KeyboardCapitalization.Sentences,
                         imeAction = ImeAction.Done
                     ),
-                    keyboardActions = KeyboardActions(onDone = { if (isValid) submitTask() }),
+                    keyboardActions = KeyboardActions(onDone = { if (isValid) submitTask(false) }),
                     isError = titleEverFilled && taskTitle.isBlank(),
                     supportingText = if (taskTitle.isBlank()) {
                         { Text("Required") }
@@ -2131,16 +2134,6 @@ internal fun TaskFormSheet(
                 }
             }
         }
-
-        if (target is TaskSheetTarget.Add && onAddAnother != null) {
-            ChronosFormSwitchRow(
-                title = "Keep adding after this",
-                subtitle = "Stay here and reset the form so you can add several tasks in a row.",
-                checked = addAnother,
-                onCheckedChange = { addAnother = it }
-            )
-        }
-
 
         ChronosFormSection(
             title = "Connect",

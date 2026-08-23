@@ -41,6 +41,9 @@ data class FoldedReminder(
  */
 internal const val OVERDUE_THRESHOLD_MINUTES = 15
 
+/** How long a medication dose stays snoozed — shared by the snooze action and the folded-chip builder. */
+internal const val MEDICATION_SNOOZE_MINUTES = 15L
+
 /** How many folded reminders the live surface carries at once before collapsing the rest into "＋N more". */
 internal const val MAX_FOLDED_REMINDERS = 3
 
@@ -123,12 +126,18 @@ internal fun MedicationPlan.isDoseTaken(date: LocalDate, minute: Int): Boolean =
 internal fun buildMedicationFoldedReminders(
     plans: List<MedicationPlan>,
     today: LocalDate,
-    nowMinute: Int
+    nowMinute: Int,
+    /** planId → earliest minute-of-day its chip may reappear after a snooze. */
+    snoozedBackMinuteByPlanId: Map<String, Int> = emptyMap()
 ): List<FoldedReminder> = plans.flatMap { plan ->
     if (!plan.isActive || plan.isPaused(today)) return@flatMap emptyList()
     val due = medicationReminderMinutes(plan).filter { it <= nowMinute }.maxOrNull()
         ?: return@flatMap emptyList()
     if (plan.isDoseTaken(today, due)) return@flatMap emptyList()
+    // A dose the user just snoozed must not keep showing as due — it returns when the
+    // snoozed alarm fires (and refreshes the surface) at the end of the snooze window.
+    val backAt = snoozedBackMinuteByPlanId[plan.id]
+    if (backAt != null && nowMinute < backAt) return@flatMap emptyList()
     val dose = "${plan.dosage} ${plan.unit}".trim()
     val detail = if (dose.isBlank()) {
         "Due ${formatCurrentBlockMinute(due)}"

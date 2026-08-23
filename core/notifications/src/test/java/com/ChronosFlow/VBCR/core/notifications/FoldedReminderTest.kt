@@ -113,6 +113,55 @@ class FoldedReminderTest {
         assertFalse(plan.isDoseTaken(today, 14 * 60))
     }
 
+    private val foldDay = LocalDate.of(2026, 7, 3)
+
+    private fun duePlan(id: String) = medicationPlan(
+        id = id,
+        schedule = MedicationSchedule(
+            id = "sched-$id",
+            medicationPlanId = id,
+            recurrence = PlannerRecurrence(
+                type = PlannerRecurrenceType.MULTIPLE_TIMES_DAILY,
+                timesOfDayMinutes = listOf(8 * 60)
+            )
+        )
+    )
+
+    @Test
+    fun `a dose inside its snooze window is hidden from the fold`() {
+        // Snoozed at 8:10 → chip may return at 8:25; at 8:20 it must stay hidden.
+        val folded = buildMedicationFoldedReminders(
+            plans = listOf(duePlan("med-s")),
+            today = foldDay,
+            nowMinute = 8 * 60 + 20,
+            snoozedBackMinuteByPlanId = mapOf("med-s" to 8 * 60 + 25)
+        )
+        assertTrue(folded.isEmpty())
+    }
+
+    @Test
+    fun `a snoozed dose returns to the fold once the window elapses`() {
+        val folded = buildMedicationFoldedReminders(
+            plans = listOf(duePlan("med-s")),
+            today = foldDay,
+            nowMinute = 8 * 60 + 30,
+            snoozedBackMinuteByPlanId = mapOf("med-s" to 8 * 60 + 25)
+        )
+        assertEquals(1, folded.size)
+        assertEquals(8 * 60, folded.first().dueMinute)
+    }
+
+    @Test
+    fun `snooze suppression is scoped to the snoozed plan only`() {
+        val folded = buildMedicationFoldedReminders(
+            plans = listOf(duePlan("med-a"), duePlan("med-b")),
+            today = foldDay,
+            nowMinute = 8 * 60 + 10,
+            snoozedBackMinuteByPlanId = mapOf("med-a" to 8 * 60 + 25)
+        )
+        assertEquals(listOf("med-b"), folded.map { it.entityId })
+    }
+
     @Test
     fun `shouldSuppressFoldedReminderBanner matches folded medication entity`() {
         val folded = setOf(FoldedEntityKey(FoldedReminderKind.MEDICATION, "med-1"))
