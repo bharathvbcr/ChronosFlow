@@ -1,5 +1,7 @@
 # ChronosFlow
 
+[![Website](https://img.shields.io/badge/website-chronosflow.vbcr.dev-B91C1C?style=flat&logo=safari&logoColor=white)](https://chronosflow.vbcr.dev/)
+
 <p align="center">
   <img src="docs/images/chronos-dial-today.png" alt="ChronosFlow Chronos Dial — Today screen" width="320">
 </p>
