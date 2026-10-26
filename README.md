@@ -306,3 +306,10 @@ swift test
 - UNUserNotificationCenter, WatchConnectivity
 - HealthKit (`.sleepAnalysis` integration), Swift Charts
 - LocalAuthentication (biometric app-lock)
+
+## License & Acknowledgements
+
+Released under the [MIT License](LICENSE).
+
+- **[Haze (`chrisbanes/haze`)](https://github.com/chrisbanes/haze)** (`Chris Banes`, Apache-2.0) — Glassmorphic blur rendering on Jetpack Compose.
+- **[Andrej Karpathy Skills (`multica-ai/andrej-karpathy-skills`)](https://github.com/multica-ai/andrej-karpathy-skills)** (`Multica AI`) — Inspired the engineering discipline guidelines in `CLAUDE.md` and `AGENTS.md`.
